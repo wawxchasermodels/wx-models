@@ -1,0 +1,155 @@
+name: model pipeline
+
+on:
+  workflow_call:
+    inputs:
+      model:
+        required: true
+        type: string
+      init:
+        required: false
+        type: string
+        default: ""
+      hours:
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      has_work: ${{ steps.plan.outputs.has_work }}
+      seal_only: ${{ steps.plan.outputs.seal_only }}
+      include: ${{ steps.plan.outputs.include }}
+      init: ${{ steps.plan.outputs.init }}
+      source: ${{ steps.plan.outputs.source }}
+      chunk_ids: ${{ steps.plan.outputs.chunk_ids }}
+      model: ${{ steps.plan.outputs.model }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - id: plan
+        env:
+          WX_INIT: ${{ inputs.init }}
+          WX_HOURS: ${{ inputs.hours }}
+          ECMWF_LONG_MAX_HOUR: ${{ vars.ECMWF_LONG_MAX_HOUR }}
+          ECMWF_SHORT_MAX_HOUR: ${{ vars.ECMWF_SHORT_MAX_HOUR }}
+          AIFS_MAX_HOUR: ${{ vars.AIFS_MAX_HOUR }}
+          HRRR_SHORT_HOUR: ${{ vars.HRRR_SHORT_HOUR }}
+          HRRR_EXTENDED_HOUR: ${{ vars.HRRR_EXTENDED_HOUR }}
+          GFS_MAX_HOUR: ${{ vars.GFS_MAX_HOUR }}
+          HOURS_PER_CHUNK: ${{ vars.HOURS_PER_CHUNK }}
+          ECMWF_SOURCES: ${{ vars.ECMWF_SOURCES }}
+          WX_ENABLE_ECMWF: ${{ vars.WX_ENABLE_ECMWF }}
+          WX_ENABLE_HRRR: ${{ vars.WX_ENABLE_HRRR }}
+          WX_ENABLE_AIFS: ${{ vars.WX_ENABLE_AIFS }}
+          WX_ENABLE_GFS: ${{ vars.WX_ENABLE_GFS }}
+        run: python -m wxmaps plan --model ${{ inputs.model }}
+
+  render:
+    needs: plan
+    if: needs.plan.outputs.has_work == 'true' && needs.plan.outputs.seal_only != 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      matrix:
+        include: ${{ fromJson(needs.plan.outputs.include) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Render chunk
+        env:
+          MPLCONFIGDIR: ${{ runner.temp }}/mpl
+          ECMWF_SOURCES: ${{ vars.ECMWF_SOURCES }}
+        run: >
+          python -m wxmaps render
+          --model ${{ matrix.model }}
+          --init ${{ matrix.init }}
+          --hours ${{ matrix.hours }}
+          --source ${{ matrix.source }}
+          --chunk ${{ matrix.chunk }}
+          --out frames
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frames-${{ matrix.model }}-${{ matrix.init }}-c${{ matrix.chunk }}
+          path: frames
+          retention-days: 2
+          if-no-files-found: error
+
+  seal:
+    needs: [plan, render]
+    if: >-
+      always() &&
+      needs.plan.outputs.has_work == 'true' &&
+      (needs.render.result == 'success' || needs.plan.outputs.seal_only == 'true')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Write seal
+        run: >
+          python -m wxmaps seal
+          --model ${{ needs.plan.outputs.model }}
+          --init ${{ needs.plan.outputs.init }}
+          --chunks '${{ needs.plan.outputs.chunk_ids }}'
+          --out seal/seal.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: seal-${{ needs.plan.outputs.model }}-${{ needs.plan.outputs.init }}
+          path: seal/seal.json
+          retention-days: 5
+
+  deploy:
+    needs: [plan, seal]
+    if: needs.seal.result == 'success'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: wx-pages-deploy
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Require Cloudflare secrets
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "Add the GitHub secrets CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID. The README has the clicks."
+            exit 1
+          fi
+      - name: Collect rendered frames
+        run: python -m wxmaps collect --dest store --keep 2
+      - name: Assemble the site
+        run: python -m wxmaps assemble --store store --dest dist --keep 2
+      - name: Read the Pages project name
+        id: brand
+        run: python -c 'import json, pathlib; print("project=" + json.loads(pathlib.Path("brand.json").read_text())["pagesProject"])' >> "$GITHUB_OUTPUT"
+      - name: Publish to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy dist --project-name=${{ steps.brand.outputs.project }} --commit-dirty=true

@@ -1,0 +1,24 @@
+name: HRRR
+
+on:
+  schedule:
+    - cron: "12 * * * *"
+  workflow_dispatch:
+    inputs:
+      init:
+        description: Cycle YYYYMMDDHH. Leave blank for the newest complete hour.
+        required: false
+        default: ""
+      hours:
+        description: Comma-separated forecast hours. Leave blank for the full schedule.
+        required: false
+        default: ""
+
+jobs:
+  pipeline:
+    uses: ./.github/workflows/pipeline.yml
+    with:
+      model: hrrr
+      init: ${{ inputs.init }}
+      hours: ${{ inputs.hours }}
+    secrets: inherit
