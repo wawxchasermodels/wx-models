@@ -40,6 +40,25 @@ def cities(region: str) -> tuple[tuple[str, float, float], ...]:
     return tuple((str(row["name"]), float(row["lon"]), float(row["lat"])) for row in rows)
 
 
+def has_lines(name: str) -> bool:
+    series, _boxes = lines(name)
+    return bool(series)
+
+
+@lru_cache(maxsize=4)
+def polygons(name: str) -> tuple[np.ndarray, ...]:
+    path = ROOT / "basemap" / f"{name}.json"
+    if not path.exists():
+        return ()
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    rings = []
+    for ring in raw.get("polygons") or []:
+        arr = np.asarray(ring, dtype=np.float64)
+        if arr.ndim == 2 and len(arr) >= 3:
+            rings.append(arr)
+    return tuple(rings)
+
+
 def visible(name: str, west: float, east: float, south: float, north: float) -> list[np.ndarray]:
     series, boxes = lines(name)
     kept = []

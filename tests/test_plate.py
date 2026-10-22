@@ -61,6 +61,10 @@ def test_synthetic_plate_writes_a_webp_with_basemap_and_credit(tmp_path: Path):
     colored = [px for px in pixels if max(abs(px[i] - frame[i]) for i in range(3)) > 18]
     assert len(colored) > 8
     assert len({px for px in colored}) > 4
+    # Image rows start at the top. The map slot runs from the header to the footer and reaches the side.
+    mid = (0.132 + (1.0 - 0.138)) / 2.0
+    edge = image.getpixel((4, int(mid * height)))
+    assert max(abs(edge[i] - frame[i]) for i in range(3)) > 18
 
 
 def test_assemble_stamps_the_footer(tmp_path: Path):

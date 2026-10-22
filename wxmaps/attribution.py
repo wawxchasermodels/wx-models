@@ -52,14 +52,17 @@ def footer_blocks(year: int) -> list[tuple[str, str]]:
         ),
         (
             "Basemap",
-            "Coast, state, and county lines are U.S. Census Bureau TIGER/Line cartographic boundaries and Natural Earth coastline, both public domain. City names are Natural Earth populated places, public domain.",
+            "Coast, state, and county lines are U.S. Census Bureau TIGER/Line cartographic boundaries and Natural Earth coastline, both public domain. "
+            "Washington charts use the Census 1:500,000 boundaries and a Natural Earth 10 m land mask. "
+            "City names are Natural Earth populated places, public domain.",
         ),
         (
             "What was changed",
             "Charts are modified for display. Temperatures may be converted to °F, wind to mph, and precipitation to inches. "
             "Snowfall marked 10:1 is snow-water equivalent multiplied by ten. "
             "Absolute vorticity is plotted at 500 mb, computed from relative vorticity plus the Coriolis parameter when the file does not already contain it. "
-            "HRRR wind barbs are rotated from grid-relative components to east and north.",
+            "HRRR wind barbs are rotated from grid-relative components to east and north. "
+            "Washington charts resample every model onto one Lambert conformal projection centered at 120.5°W.",
         ),
     ]
 

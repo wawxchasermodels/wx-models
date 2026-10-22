@@ -14,7 +14,7 @@ import matplotlib.colors
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib import patheffects
-from matplotlib.collections import LineCollection
+from matplotlib.collections import LineCollection, PolyCollection
 from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
 from PIL import Image
@@ -22,9 +22,18 @@ from PIL import Image
 from wxmaps.attribution import ecmwf_plate_credit, noaa_plate_credit
 from wxmaps.brand import site_name
 from wxmaps.derive import Payload
-from wxmaps.geo import cities, visible
+from wxmaps.geo import cities, has_lines, polygons, visible
 from wxmaps.models import REGIONS
 from wxmaps.palette import PTYPE_COLORS, SCALES
+from wxmaps.project import (
+    WA,
+    sample_index,
+    sample_index_nearest,
+    sample_regular,
+    sample_regular_nearest,
+    view_lonlat,
+    wa_view,
+)
 
 PACIFIC = ZoneInfo("America/Los_Angeles")
 DAYS = "Mon Tue Wed Thu Fri Sat Sun".split()
@@ -34,6 +43,7 @@ INK = "#241c16"
 BRASS = "#9a6232"
 VERMILION = "#d24b2e"
 WATER = "#a7bfc6"
+LAND = "#aea492"
 HALO = "#f6f3ec"
 
 _FONTS: dict[str, matplotlib.font_manager.FontProperties] | None = None
@@ -311,39 +321,50 @@ def render_plate(
     header = 0.132 if wide else 0.172
     footer = 0.138 if wide else 0.100
     target = (1.0 * fig_w) / ((1.0 - header - footer) * fig_h)
-    lambert = (not payload.regular) and payload.lov is not None and payload.latin1 is not None
-    north_bias = region == "wa" and not wide
-    if lambert:
-        c0, c1, r0, r1 = _index_window(payload.lats, payload.lons, focus, target, north_bias=north_bias)
+    washington = region == "wa"
+    if washington:
+        xmin, xmax, ymin, ymax = wa_view(target)
+        mx, my, mw, mh = 0.0, footer, 1.0, 1.0 - header - footer
+        dpi = 150
         plate = payload
-        index_aspect = (c1 - c0) / max(r1 - r0, 1)
-        # Stretch a little to stay full-bleed. A much taller reel (Washington on
-        # HRRR, which runs out of grid over southern BC) keeps its true shape.
-        if 0.82 <= index_aspect / target <= 1.22:
-            mx, my, mw, mh = 0.0, footer, 1.0, 1.0 - header - footer
-        else:
-            mx, my, mw, mh = _axes_rect(index_aspect, target, fig_w, fig_h, header, footer)
+        lambert = False
     else:
-        west, east, south, north = fit_window(focus, target, _coverage(payload), north_bias=north_bias)
-        try:
-            plate = payload.clip(west - 0.4, east + 0.4, south - 0.4, north + 0.4)
-        except ValueError:
-            plate = payload.clip(west, east, south, north)
-        view_aspect = _geo_aspect(west, east, south, north)
-        mx, my, mw, mh = _axes_rect(view_aspect, target, fig_w, fig_h, header, footer)
-    dpi = 100
-    if lambert:
-        dpi = max(
-            100,
-            int(np.ceil((c1 - c0) / max(mw * fig_w, 0.1))),
-            int(np.ceil((r1 - r0) / max(mh * fig_h, 0.1))),
-        )
-        dpi = min(dpi, 170)
+        lambert = (not payload.regular) and payload.lov is not None and payload.latin1 is not None
+        if lambert:
+            c0, c1, r0, r1 = _index_window(payload.lats, payload.lons, focus, target)
+            plate = payload
+            index_aspect = (c1 - c0) / max(r1 - r0, 1)
+            # Stretch a little to stay full-bleed. A much taller frame keeps its true shape.
+            if 0.82 <= index_aspect / target <= 1.22:
+                mx, my, mw, mh = 0.0, footer, 1.0, 1.0 - header - footer
+            else:
+                mx, my, mw, mh = _axes_rect(index_aspect, target, fig_w, fig_h, header, footer)
+        else:
+            west, east, south, north = fit_window(focus, target, _coverage(payload))
+            try:
+                plate = payload.clip(west - 0.4, east + 0.4, south - 0.4, north + 0.4)
+            except ValueError:
+                plate = payload.clip(west, east, south, north)
+            view_aspect = _geo_aspect(west, east, south, north)
+            mx, my, mw, mh = _axes_rect(view_aspect, target, fig_w, fig_h, header, footer)
+    if not washington:
+        dpi = 100
+        if lambert:
+            dpi = max(
+                100,
+                int(np.ceil((c1 - c0) / max(mw * fig_w, 0.1))),
+                int(np.ceil((r1 - r0) / max(mh * fig_h, 0.1))),
+            )
+            dpi = min(dpi, 170)
     fig = plt.figure(figsize=(fig_w, fig_h), dpi=dpi, facecolor=FRAME)
     ax = fig.add_axes((mx, my, mw, mh), facecolor=WATER)
     ax.set_axis_off()
     ax.patch.set_visible(True)
-    if lambert:
+    if washington:
+        out_w = max(32, int(round(mw * fig_w * dpi)))
+        out_h = max(32, int(round(mh * fig_h * dpi)))
+        _paint_washington(ax, plate, wide, xmin, xmax, ymin, ymax, out_w, out_h)
+    elif lambert:
         out_w = int(round(mw * fig_w * dpi))
         out_h = int(round(mh * fig_h * dpi))
         _paint_lambert(ax, plate, region, wide, c0, c1, r0, r1, out_w, out_h)
@@ -717,6 +738,190 @@ def _paint_lambert(ax, plate: Payload, region: str, wide: bool, c0: int, c1: int
     ax.set_xlim(c0, c1)
     ax.set_ylim(r0, r1)
     _label_cities(ax, region, wide, west, east, south, north, lambda lon, lat: to_rc(lon, lat))
+
+
+def _sample_on(plate: Payload, values: np.ndarray, lon, lat, nearest: bool = False) -> np.ndarray:
+    if plate.regular:
+        if nearest:
+            return sample_regular_nearest(values, plate.lats, plate.lons, lat, lon)
+        return sample_regular(values, plate.lats, plate.lons, lat, lon)
+    col, row = _lambert_indexer(plate)(lon, lat)
+    if nearest:
+        return sample_index_nearest(values, row, col)
+    return sample_index(values, row, col)
+
+
+def _rgba_field(field: np.ndarray, cmap, norm) -> np.ndarray:
+    scaled = norm(field)
+    mask = np.ma.getmaskarray(scaled) | ~np.isfinite(np.asarray(field, dtype=np.float64))
+    rgba = cmap(np.ma.filled(np.ma.asarray(scaled), 0.0))
+    rgba = np.array(rgba, copy=True)
+    rgba[..., 3] = np.where(mask, 0.0, 1.0)
+    return rgba
+
+
+def _project_lines(picked) -> list[np.ndarray]:
+    segs = []
+    for line in picked:
+        x, y = WA.forward(line[:, 0], line[:, 1])
+        segs.append(np.column_stack([x, y]))
+    return segs
+
+
+def _stroke_wa(ax, name: str, west, east, south, north, color: str, lw: float, zorder: int) -> None:
+    picked = visible(name, west, east, south, north)
+    if not picked:
+        return
+    collection = LineCollection(
+        _project_lines(picked),
+        colors=color,
+        linewidths=lw,
+        zorder=zorder,
+        capstyle="round",
+        joinstyle="round",
+    )
+    ax.add_collection(collection)
+    for path in collection.get_paths():
+        path.should_simplify = False
+
+
+def _paint_washington(ax, plate: Payload, wide: bool, xmin, xmax, ymin, ymax, out_w: int, out_h: int) -> None:
+    """Shared Lambert frame. Scalar fields are bilinear on the output grid."""
+    west, east, south, north = view_lonlat(xmin, xmax, ymin, ymax, pad=0.15)
+    # Axis-off skips the axes patch, so the ocean has to be a real artist or the page shows through.
+    ax.add_patch(
+        Rectangle(
+            (xmin, ymin),
+            xmax - xmin,
+            ymax - ymin,
+            facecolor=WATER,
+            edgecolor="none",
+            linewidth=0,
+            zorder=0,
+        )
+    )
+    xs = np.linspace(xmin, xmax, out_w, endpoint=False) + (xmax - xmin) / out_w / 2.0
+    ys = np.linspace(ymin, ymax, out_h, endpoint=False) + (ymax - ymin) / out_h / 2.0
+    xx, yy = np.meshgrid(xs, ys)
+    lon, lat = WA.inverse(xx, yy)
+
+    land = polygons("wa_land")
+    if land:
+        polys = []
+        for ring in land:
+            px, py = WA.forward(ring[:, 0], ring[:, 1])
+            polys.append(np.column_stack([px, py]))
+        ax.add_collection(PolyCollection(polys, facecolors=LAND, edgecolors="none", closed=True, zorder=1))
+
+    def show(field: np.ndarray, cmap, norm) -> None:
+        ax.imshow(
+            _rgba_field(field, cmap, norm),
+            origin="lower",
+            extent=(xmin, xmax, ymin, ymax),
+            interpolation="nearest",
+            aspect="auto",
+            zorder=2,
+        )
+
+    if plate.categories is not None:
+        cat = _sample_on(plate, plate.categories, lon, lat, nearest=True)
+        cat = np.ma.masked_where(~np.isfinite(cat) | (cat < 1), cat)
+        cmap = matplotlib.colors.ListedColormap([PTYPE_COLORS[1], PTYPE_COLORS[2], PTYPE_COLORS[3], PTYPE_COLORS[4]])
+        norm = matplotlib.colors.BoundaryNorm([0.5, 1.5, 2.5, 3.5, 4.5], cmap.N)
+        show(cat, cmap, norm)
+
+    values = None
+    if plate.values is not None and plate.scale:
+        values = _sample_on(plate, plate.values, lon, lat)
+        if plate.mask_below is not None:
+            values = np.where(values < plate.mask_below, np.nan, values)
+        scale = SCALES[plate.scale]
+        show(values, scale.colormap(), scale.norm())
+
+    county_name = "wa_counties" if has_lines("wa_counties") else "counties"
+    coast_name = "wa_coast" if has_lines("wa_coast") else "coast"
+    state_name = "wa_states" if has_lines("wa_states") else "states"
+    _stroke_wa(ax, county_name, west, east, south, north, HALO, 0.9, 5)
+    _stroke_wa(ax, county_name, west, east, south, north, "#3d362e", 0.35, 6)
+    _stroke_wa(ax, coast_name, west, east, south, north, HALO, 1.45, 6)
+    _stroke_wa(ax, coast_name, west, east, south, north, "#101820", 0.7, 7)
+    _stroke_wa(ax, state_name, west, east, south, north, HALO, 1.6, 8)
+    _stroke_wa(ax, state_name, west, east, south, north, "#140f0c", 0.8, 9)
+
+    def draw_contour(field: np.ndarray, levels, color, lw, zorder, labels=None, fmt="%d"):
+        if levels is None or np.size(levels) == 0 or np.isfinite(field).sum() < 20:
+            return None
+        cs = ax.contour(xs, ys, np.ma.masked_invalid(field), levels=levels, colors=color, linewidths=lw, zorder=zorder)
+        if labels is not None:
+            ax.clabel(cs, labels, fmt=fmt, fontsize=7, colors=color)
+        elif fmt != "%d":
+            ax.clabel(cs, fmt=fmt, fontsize=7, colors=color)
+        return cs
+
+    if plate.contours is not None and plate.contour_kind == "mslp":
+        field = _sample_on(plate, plate.contours, lon, lat)
+        levels = _span_levels(field, 4)
+        draw_contour(field, levels, "#3d2b22", 0.7, 6, labels=levels[::2] if levels.size else None)
+    if plate.contours is not None and plate.contour_kind == "height":
+        field = _sample_on(plate, plate.contours, lon, lat)
+        levels = _span_levels(field, 60)
+        if levels.size:
+            cs = ax.contour(xs, ys, np.ma.masked_invalid(field), levels=levels, colors="#2c261f", linewidths=0.55, zorder=6)
+            ax.clabel(cs, fmt=lambda v: f"{int(round(v / 10.0))}", fontsize=7)
+        finite = field[np.isfinite(field)]
+        if finite.size and float(np.min(finite)) <= 5400 <= float(np.max(finite)):
+            mark = ax.contour(xs, ys, np.ma.masked_invalid(field), levels=[5400], colors=VERMILION, linewidths=1.2, zorder=7)
+            ax.clabel(mark, fmt=lambda v: "540", fontsize=8)
+    if plate.scale == "temp_f" and values is not None:
+        finite = values[np.isfinite(values)]
+        if finite.size and float(np.min(finite)) <= 32 <= float(np.max(finite)):
+            freeze = ax.contour(xs, ys, np.ma.masked_invalid(values), levels=[32], colors="#10233f", linewidths=1.05, zorder=7)
+            ax.clabel(freeze, fmt=lambda v: "32°", fontsize=8)
+    if plate.u is not None and plate.v is not None:
+        _barbs_wa(ax, plate, xmin, xmax, ymin, ymax)
+    ax.set_xlim(xmin, xmax)
+    ax.set_ylim(ymin, ymax)
+
+    def to_xy(city_lon, city_lat):
+        x, y = WA.forward(city_lon, city_lat)
+        return float(np.asarray(x)), float(np.asarray(y))
+
+    _label_cities(ax, "wa", wide, west, east, south, north, to_xy)
+
+
+def _barbs_wa(ax, plate: Payload, xmin, xmax, ymin, ymax) -> None:
+    cols = 14
+    rows = 18 if (ymax - ymin) > (xmax - xmin) else 9
+    xs = np.linspace(xmin, xmax, cols + 2)[1:-1]
+    ys = np.linspace(ymin, ymax, rows + 2)[1:-1]
+    xx, yy = np.meshgrid(xs, ys)
+    lon, lat = WA.inverse(xx, yy)
+    u = _sample_on(plate, plate.u, lon, lat)
+    v = _sample_on(plate, plate.v, lon, lat)
+    step = 0.04
+    x0, y0 = WA.forward(lon, lat)
+    xe, ye = WA.forward(lon + step, lat)
+    xn, yn = WA.forward(lon, lat + step)
+    el = np.hypot(xe - x0, ye - y0)
+    nl = np.hypot(xn - x0, yn - y0)
+    el = np.where(el == 0, 1.0, el)
+    nl = np.where(nl == 0, 1.0, nl)
+    ex, ey = (xe - x0) / el, (ye - y0) / el
+    nx, ny = (xn - x0) / nl, (yn - y0) / nl
+    um = u * ex + v * nx
+    vm = u * ey + v * ny
+    speed = np.hypot(u, v)
+    ax.barbs(
+        xx,
+        yy,
+        np.where(speed < 1, np.nan, um),
+        np.where(speed < 1, np.nan, vm),
+        length=5.0,
+        linewidth=0.35,
+        color=INK,
+        zorder=8,
+        sizes={"emptybarb": 0.1, "spacing": 0.16, "height": 0.36, "width": 0.2},
+    )
 
 
 def _shade(ax, plate: Payload, data, cmap, norm) -> None:

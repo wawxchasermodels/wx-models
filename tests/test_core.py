@@ -209,20 +209,47 @@ def test_lambert_index_window_fills_a_tall_frame_and_keeps_a_small_region():
     assert 2.4 / 1.2 <= aspect <= 2.4 * 1.2
 
 
-def test_wa_reel_steps_north_into_british_columbia():
-    from wxmaps.models import REGIONS
-    from wxmaps.plot import fit_window
+def test_wa_frames_share_a_lambert_and_center_the_state():
+    from wxmaps.project import WA, state_extent, view_lonlat, wa_view
 
-    box = REGIONS["wa"]
-    focus = (box["west"], box["east"], box["south"], box["north"])
-    target = 9.0 / ((1.0 - 0.172 - 0.100) * 16.0)
-    window = fit_window(focus, target, (-152.0, -42.0, 4.0, 76.0), north_bias=True)
-    assert window[2] >= 44.9
-    assert window[2] <= focus[2]
-    assert window[3] >= 51.5
-    assert window[3] - focus[3] > focus[2] - window[2]
-    assert window[0] <= focus[0] + 0.05
-    assert window[1] >= focus[1] - 0.05
+    x0, x1, y0, y1 = state_extent()
+    wide_target = 16.0 / ((1.0 - 0.132 - 0.138) * 9.0)
+    reel_target = 9.0 / ((1.0 - 0.172 - 0.100) * 16.0)
+    wide = wa_view(wide_target)
+    reel = wa_view(reel_target)
+    for target, view in ((wide_target, wide), (reel_target, reel)):
+        assert abs(((view[0] + view[1]) / 2.0) - ((x0 + x1) / 2.0)) < 1.0
+        assert abs(((view[2] + view[3]) / 2.0) - ((y0 + y1) / 2.0)) < 1.0
+        assert abs((view[1] - view[0]) / (view[3] - view[2]) - target) < 1e-6
+        assert view[0] <= x0 and view[1] >= x1 and view[2] <= y0 and view[3] >= y1
+        for lon in (-124.9, -116.8):
+            x, y = WA.forward(lon, 47.3)
+            assert view[0] < float(x) < view[1]
+            assert view[2] < float(y) < view[3]
+    # The tall frame has room above and below the state. The state stays centered.
+    assert reel[3] - reel[2] > wide[3] - wide[2]
+    south_room = y0 - reel[2]
+    north_room = reel[3] - y1
+    assert abs(south_room - north_room) < 1.0
+    _west, _east, south, north = view_lonlat(*reel, pad=0.0)
+    assert south < 45.4
+    assert north > 49.2
+
+
+def test_lambert_roundtrip_and_bilinear_sample():
+    import numpy as np
+
+    from wxmaps.project import WA, sample_regular
+
+    lon, lat = WA.inverse(*WA.forward(-122.33, 47.61))
+    assert abs(float(lon) + 122.33) < 1e-8
+    assert abs(float(lat) - 47.61) < 1e-8
+    lats = np.array([45.0, 46.0, 47.0])
+    lons = np.array([-123.0, -122.0, -121.0])
+    descending = lats[::-1]
+    values = np.broadcast_to(descending[:, None], (3, 3)).copy()
+    sampled = sample_regular(values, descending, lons, np.array([[45.5]]), np.array([[-122.25]]))
+    assert abs(float(sampled[0, 0]) - 45.5) < 1e-6
 
 
 def test_city_list_uses_the_requested_places():

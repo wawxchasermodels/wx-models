@@ -108,8 +108,8 @@ Do not crop that line off. NOAA images say the model data is public domain. The 
 | --- | --- | --- |
 | ECMWF | IFS 0.1° open data and AIFS Single 0.25° open data | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Copyright European Centre for Medium-Range Weather Forecasts. |
 | NOAA | HRRR and GFS GRIB2 from the AWS open-data buckets | Public domain, United States government work. |
-| U.S. Census Bureau | TIGER/Line 2023 cartographic state and county boundaries, 1:5,000,000, simplified into `basemap/states.json` and `basemap/counties.json` | Public domain. |
-| Natural Earth | 10 m coastline, simplified into `basemap/coast.json`, and 10 m populated places in `basemap/cities.json` | Public domain. |
+| U.S. Census Bureau | TIGER/Line 2023 cartographic state and county boundaries. National plates use 1:5,000,000 (`basemap/states.json`, `basemap/counties.json`). Washington plates use 1:500,000 (`basemap/wa_states.json`, `basemap/wa_counties.json`). | Public domain. |
+| Natural Earth | 10 m coastline (`basemap/coast.json` and the Washington extract `basemap/wa_coast.json`), 10 m land (`basemap/wa_land.json`), and 10 m populated places (`basemap/cities.json`) | Public domain. |
 
 ### Fonts
 
@@ -138,11 +138,11 @@ The renderer does not use pygrib, CDO, NCO, Cartopy, GEOS, or any map-tile SDK.
 
 ### What was changed from the model files
 
-Temperatures may be converted to °F, wind speed to mph, and precipitation to inches. Wind barbs are drawn in knots. Snowfall marked 10:1 is snow-water equivalent multiplied by ten. Absolute vorticity at 500 mb is the model’s relative vorticity plus the Coriolis parameter when the file does not already contain absolute vorticity. HRRR wind components are rotated from the Lambert grid to east and north. Coast, state, and county lines are drawn on top from the public-domain files above.
+Temperatures may be converted to °F, wind speed to mph, and precipitation to inches. Wind barbs are drawn in knots. Snowfall marked 10:1 is snow-water equivalent multiplied by ten. Absolute vorticity at 500 mb is the model’s relative vorticity plus the Coriolis parameter when the file does not already contain absolute vorticity. HRRR wind components are rotated from the Lambert grid to east and north. Washington plates resample every model onto one Lambert conformal projection centered at 120.5°W, standard parallels 45°N and 49°N. Coast, state, and county lines are drawn on top from the public-domain files above.
 
 ## Rebuild the basemap lines
 
-Only needed if you replace the linework. Download the Census 2023 5m state and county shapefiles and Natural Earth `ne_10m_coastline` into `/tmp/basemap-src/{state,county,coast}/`, then:
+Only needed if you replace the linework. Download the Census 2023 5m state and county shapefiles and Natural Earth `ne_10m_coastline` into `/tmp/basemap-src/{state,county,coast}/`. Washington plates also use Census 2023 500k state and county shapefiles in `{state500k,county500k}/` and Natural Earth `ne_10m_land` in `land/`. Then:
 
 ```bash
 pip install -r requirements-dev.txt
