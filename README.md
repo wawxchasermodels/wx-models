@@ -109,7 +109,7 @@ Do not crop that line off. NOAA images say the model data is public domain. The 
 | ECMWF | IFS 0.1° open data and AIFS Single 0.25° open data | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Copyright European Centre for Medium-Range Weather Forecasts. |
 | NOAA | HRRR and GFS GRIB2 from the AWS open-data buckets | Public domain, United States government work. |
 | U.S. Census Bureau | TIGER/Line 2023 cartographic state and county boundaries, 1:5,000,000, simplified into `basemap/states.json` and `basemap/counties.json` | Public domain. |
-| Natural Earth | 10 m coastline, simplified into `basemap/coast.json` | Public domain. |
+| Natural Earth | 10 m coastline, simplified into `basemap/coast.json`, and 10 m populated places in `basemap/cities.json` | Public domain. |
 
 ### Fonts
 

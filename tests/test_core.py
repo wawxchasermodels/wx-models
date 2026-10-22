@@ -209,6 +209,30 @@ def test_lambert_index_window_fills_a_tall_frame_and_keeps_a_small_region():
     assert 2.4 / 1.2 <= aspect <= 2.4 * 1.2
 
 
+def test_wa_reel_steps_north_into_british_columbia():
+    from wxmaps.models import REGIONS
+    from wxmaps.plot import fit_window
+
+    box = REGIONS["wa"]
+    focus = (box["west"], box["east"], box["south"], box["north"])
+    target = 9.0 / ((1.0 - 0.172 - 0.100) * 16.0)
+    window = fit_window(focus, target, (-152.0, -42.0, 4.0, 76.0), north_bias=True)
+    assert window[2] >= 44.9
+    assert window[2] <= focus[2]
+    assert window[3] >= 51.5
+    assert window[3] - focus[3] > focus[2] - window[2]
+    assert window[0] <= focus[0] + 0.05
+    assert window[1] >= focus[1] - 0.05
+
+
+def test_city_list_uses_the_requested_places():
+    from wxmaps.geo import cities
+
+    wa = {name for name, _lon, _lat in cities("wa")}
+    assert {"Seattle", "Spokane", "Tri-Cities", "Yakima", "Bellingham", "Olympia", "Vancouver", "Wenatchee"} <= wa
+    assert 15 <= len(cities("us")) <= 24
+
+
 def test_wide_frame_extends_past_the_coasts_without_dropping_the_country():
     from wxmaps.plot import fit_window
 

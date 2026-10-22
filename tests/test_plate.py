@@ -50,6 +50,17 @@ def test_synthetic_plate_writes_a_webp_with_basemap_and_credit(tmp_path: Path):
     assert b"WEBP" in blob[:16]
     assert dest.stat().st_size > 5000
     assert "CC BY 4.0" in ecmwf_map_credit(2026)
+    from PIL import Image
+
+    image = Image.open(dest).convert("RGB")
+    width, height = image.size
+    # The colored strip sits in the footer, above the tick baseline.
+    row = height - int(0.075 * height)
+    pixels = [image.getpixel((x, row)) for x in range(int(width * 0.15), int(width * 0.85), 12)]
+    frame = (201, 187, 166)
+    colored = [px for px in pixels if max(abs(px[i] - frame[i]) for i in range(3)) > 18]
+    assert len(colored) > 8
+    assert len({px for px in colored}) > 4
 
 
 def test_assemble_stamps_the_footer(tmp_path: Path):

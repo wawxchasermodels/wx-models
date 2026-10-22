@@ -15,10 +15,10 @@ REGIONS = {
     },
     "wa": {
         "label": "Washington",
-        "west": -125.35,
-        "east": -116.55,
-        "south": 45.35,
-        "north": 49.15,
+        "west": -124.9,
+        "east": -116.8,
+        "south": 45.4,
+        "north": 49.2,
     },
 }
 

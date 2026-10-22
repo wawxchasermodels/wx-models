@@ -13,6 +13,7 @@ matplotlib.use("Agg")
 import matplotlib.colors
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib import patheffects
 from matplotlib.collections import LineCollection
 from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
@@ -21,7 +22,7 @@ from PIL import Image
 from wxmaps.attribution import ecmwf_plate_credit, noaa_plate_credit
 from wxmaps.brand import site_name
 from wxmaps.derive import Payload
-from wxmaps.geo import visible
+from wxmaps.geo import cities, visible
 from wxmaps.models import REGIONS
 from wxmaps.palette import PTYPE_COLORS, SCALES
 
@@ -111,12 +112,13 @@ def fit_window(
     focus: tuple[float, float, float, float],
     target: float,
     limit: tuple[float, float, float, float],
+    north_bias: bool = False,
 ) -> tuple[float, float, float, float]:
     """Match the frame by extending past the region, then trimming the long side.
 
-    A grid that still cannot reach the frame (HRRR on the tall reel, or a wide
-    frame a little short of 16:9) is narrowed until the leftover mismatch is
-    small enough to stretch away. The view stays centered on the region.
+    A grid that still cannot reach the frame is narrowed until the leftover
+    mismatch is small enough to stretch away. `north_bias` puts almost all of
+    the extra latitude north of the focus and only a slight step south.
     """
     west, east, south, north = focus
     for _ in range(8):
@@ -129,9 +131,15 @@ def fit_window(
             east += pad
         elif aspect > target * 1.01:
             need = (east - west) * cos / target
-            pad = (need - (north - south)) / 2.0
-            south -= pad
-            north += pad
+            extra = need - (north - south)
+            if north_bias:
+                south_extra = min(0.40, max(0.2, extra * 0.12))
+                south -= south_extra
+                north += extra - south_extra
+            else:
+                pad = extra / 2.0
+                south -= pad
+                north += pad
         else:
             break
     lw, le, ls, ln = limit
@@ -176,16 +184,28 @@ def _axes_rect(view_aspect: float, target: float, fig_w: float, fig_h: float, he
 
 
 def _colorbar(fig, rect, scale_name: str) -> None:
-    """Bar, tick labels, and the freezing callout stay inside the footer band."""
+    """Colored strip between the unit/32° row and the tick labels.
+
+    The strip is a figure artist above the footer band. An axes here sits under
+    that band, which is why a patch drawn inside the axes never showed.
+    """
     scale = SCALES[scale_name]
     x0, y0, width, height = rect
-    ax = fig.add_axes(rect)
-    ax.set_axis_off()
     n = len(scale.colors)
-    ax.set_xlim(0, n)
-    ax.set_ylim(0, 1)
+    swatch = width / max(n, 1)
     for i, color in enumerate(scale.colors):
-        ax.add_patch(Rectangle((i, 0), 1, 1, facecolor=color, edgecolor="none", linewidth=0))
+        fig.add_artist(
+            Rectangle(
+                (x0 + i * swatch, y0),
+                swatch,
+                height,
+                transform=fig.transFigure,
+                facecolor=color,
+                edgecolor="none",
+                linewidth=0,
+                zorder=7,
+            )
+        )
     slot = (width * fig.get_figwidth() * fig.dpi) / max(n, 1)
     stride = max(1, int(np.ceil(40.0 / max(slot, 1.0))))
     call = None
@@ -201,11 +221,51 @@ def _colorbar(fig, rect, scale_name: str) -> None:
         cx = x0 + (i / n) * width
         if i == call:
             mark = f"{_tick(edge)}°" if scale.unit == "°F" else _tick(edge)
-            ax.plot([i, i], [0, 1], color="#10233f", lw=1.15, solid_capstyle="butt", zorder=3)
-            fig.text(cx, y0 + height + 0.006, mark, ha="center", va="bottom", fontsize=9, color="#10233f", fontproperties=fonts()["display"], zorder=8)
+            fig.add_artist(
+                Line2D(
+                    [cx, cx],
+                    [y0, y0 + height],
+                    transform=fig.transFigure,
+                    color="#10233f",
+                    lw=1.15,
+                    solid_capstyle="butt",
+                    zorder=7.2,
+                )
+            )
+            fig.text(
+                cx,
+                y0 + height + 0.006,
+                mark,
+                ha="center",
+                va="bottom",
+                fontsize=9,
+                color="#10233f",
+                fontproperties=fonts()["display"],
+                zorder=8,
+            )
             continue
-        fig.text(cx, y0 - 0.008, _tick(edge), ha="center", va="top", fontsize=7.5, color=INK, fontproperties=fonts()["mono"], zorder=8)
-    fig.text(x0 + width, y0 + height + 0.006, scale.unit, ha="right", va="bottom", fontsize=8, color=INK, fontproperties=fonts()["ui"], zorder=8)
+        fig.text(
+            cx,
+            y0 - 0.008,
+            _tick(edge),
+            ha="center",
+            va="top",
+            fontsize=7.5,
+            color=INK,
+            fontproperties=fonts()["mono"],
+            zorder=8,
+        )
+    fig.text(
+        x0 + width,
+        y0 + height + 0.006,
+        scale.unit,
+        ha="right",
+        va="bottom",
+        fontsize=8,
+        color=INK,
+        fontproperties=fonts()["ui"],
+        zorder=8,
+    )
 
 
 def _tick(value: float) -> str:
@@ -252,24 +312,41 @@ def render_plate(
     footer = 0.138 if wide else 0.100
     target = (1.0 * fig_w) / ((1.0 - header - footer) * fig_h)
     lambert = (not payload.regular) and payload.lov is not None and payload.latin1 is not None
+    north_bias = region == "wa" and not wide
     if lambert:
-        c0, c1, r0, r1 = _index_window(payload.lats, payload.lons, focus, target)
+        c0, c1, r0, r1 = _index_window(payload.lats, payload.lons, focus, target, north_bias=north_bias)
         plate = payload
-        mx, my, mw, mh = 0.0, footer, 1.0, 1.0 - header - footer
+        index_aspect = (c1 - c0) / max(r1 - r0, 1)
+        # Stretch a little to stay full-bleed. A much taller reel (Washington on
+        # HRRR, which runs out of grid over southern BC) keeps its true shape.
+        if 0.82 <= index_aspect / target <= 1.22:
+            mx, my, mw, mh = 0.0, footer, 1.0, 1.0 - header - footer
+        else:
+            mx, my, mw, mh = _axes_rect(index_aspect, target, fig_w, fig_h, header, footer)
     else:
-        west, east, south, north = fit_window(focus, target, _coverage(payload))
+        west, east, south, north = fit_window(focus, target, _coverage(payload), north_bias=north_bias)
         try:
             plate = payload.clip(west - 0.4, east + 0.4, south - 0.4, north + 0.4)
         except ValueError:
             plate = payload.clip(west, east, south, north)
         view_aspect = _geo_aspect(west, east, south, north)
         mx, my, mw, mh = _axes_rect(view_aspect, target, fig_w, fig_h, header, footer)
-    fig = plt.figure(figsize=(fig_w, fig_h), dpi=100, facecolor=FRAME)
+    dpi = 100
+    if lambert:
+        dpi = max(
+            100,
+            int(np.ceil((c1 - c0) / max(mw * fig_w, 0.1))),
+            int(np.ceil((r1 - r0) / max(mh * fig_h, 0.1))),
+        )
+        dpi = min(dpi, 170)
+    fig = plt.figure(figsize=(fig_w, fig_h), dpi=dpi, facecolor=FRAME)
     ax = fig.add_axes((mx, my, mw, mh), facecolor=WATER)
     ax.set_axis_off()
     ax.patch.set_visible(True)
     if lambert:
-        _paint_lambert(ax, plate, region, c0, c1, r0, r1)
+        out_w = int(round(mw * fig_w * dpi))
+        out_h = int(round(mh * fig_h * dpi))
+        _paint_lambert(ax, plate, region, wide, c0, c1, r0, r1, out_w, out_h)
     else:
         ax.set_xlim(west, east)
         ax.set_ylim(south, north)
@@ -333,6 +410,7 @@ def render_plate(
             _barbs(ax, plate)
         ax.set_xlim(west, east)
         ax.set_ylim(south, north)
+        _label_cities(ax, region, wide, west, east, south, north, lambda lon, lat: (lon, lat))
 
     _chrome(fig, header, footer)
     _masthead(fig, wide, model_label, plate, init, hour, region, header)
@@ -360,11 +438,12 @@ def render_plate(
 
     dest.parent.mkdir(parents=True, exist_ok=True)
     buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=100)
+    fig.savefig(buf, format="png", dpi=dpi)
+    quality = 78 if dpi > 110 else 82
     plt.close(fig)
     buf.seek(0)
     image = Image.open(buf).convert("RGB")
-    image.save(dest, "WEBP", quality=82, method=4)
+    image.save(dest, "WEBP", quality=quality, method=4)
 
 
 def _index_window(
@@ -373,17 +452,23 @@ def _index_window(
     focus: tuple[float, float, float, float],
     target: float,
     stretch: float = 1.18,
+    north_bias: bool = False,
 ) -> tuple[int, int, int, int]:
     """Column/row window on an equal-dx Lambert grid, matched to the frame.
 
     Cells are square in the projection, so the frame aspect is columns/rows.
     The window keeps the focus when it fits, then trims the long side.
+    `north_bias` spends extra rows on the north side and only a slight step south.
     """
     nj, ni = lats.shape
     west, east, south, north = focus
     hit = (lats >= south) & (lats <= north) & (lons >= west) & (lons <= east)
-    rows = np.where(hit.any(axis=1))[0]
     cols = np.where(hit.any(axis=0))[0]
+    if north_bias and len(cols) >= 2:
+        sample = lats[:, int(cols[len(cols) // 2])]
+        rows = np.where((sample >= south - 0.05) & (sample <= north + 0.15))[0]
+    else:
+        rows = np.where(hit.any(axis=1))[0]
     if len(rows) < 2 or len(cols) < 2:
         return 0, ni, 0, nj
     r0, r1 = int(rows[0]), int(rows[-1]) + 1
@@ -411,6 +496,7 @@ def _index_window(
             r1 = nj
         return max(0, r0), r1
 
+    grew_south = False
     for _ in range(4):
         aspect = (c1 - c0) / max(r1 - r0, 1)
         if aspect < target * 0.99 and (c1 - c0) < ni:
@@ -419,12 +505,26 @@ def _index_window(
             c0, c1 = _clamp_cols(mid - need / 2.0, c1, need)
         elif aspect > target * 1.01 and (r1 - r0) < nj:
             need = min(nj, int(np.ceil((c1 - c0) / target)))
-            mid = (r0 + r1) / 2.0
-            r0, r1 = _clamp_rows(mid - need / 2.0, r1, need)
+            if north_bias:
+                extra = max(0, need - (r1 - r0))
+                span = max(int(rows[-1]) - int(rows[0]), 1)
+                deg_per_row = max(north - south, 0.2) / span
+                south_rows = 0 if grew_south else min(extra, max(4, int(round(0.30 / deg_per_row))))
+                grew_south = True
+                new_r0 = max(0, r0 - south_rows)
+                new_r1 = min(nj, r1 + extra - south_rows)
+                r0, r1 = new_r0, new_r1
+                if r1 >= nj:
+                    break
+            else:
+                mid = (r0 + r1) / 2.0
+                r0, r1 = _clamp_rows(mid - need / 2.0, r1, need)
         else:
             break
     aspect = (c1 - c0) / max(r1 - r0, 1)
-    if aspect > target * stretch:
+    # A north-biased reel keeps the state's width even if the grid runs out of
+    # British Columbia before the frame is perfectly tall.
+    if aspect > target * stretch and not north_bias:
         need = max(2, int(round((r1 - r0) * target * stretch)))
         need = min(need, c1 - c0)
         mid = (int(cols[0]) + int(cols[-1]) + 1) / 2.0
@@ -473,7 +573,58 @@ def _lambert_indexer(plate: Payload):
     return to_rc
 
 
-def _paint_lambert(ax, plate: Payload, region: str, c0: int, c1: int, r0: int, r1: int) -> None:
+def _upsample(values: np.ndarray, out_h: int, out_w: int) -> np.ndarray:
+    """Bilinear in data space, then the discrete colormap. No grid points are dropped."""
+    src_h, src_w = values.shape
+    out_h = max(out_h, src_h)
+    out_w = max(out_w, src_w)
+    if (src_h, src_w) == (out_h, out_w):
+        return values
+    finite = np.isfinite(values)
+    filled = np.where(finite, values, 0.0).astype(np.float32)
+    field = np.asarray(
+        Image.fromarray(filled, mode="F").resize((out_w, out_h), Image.Resampling.BILINEAR),
+        dtype=np.float32,
+    )
+    mask = np.asarray(
+        Image.fromarray((finite.astype(np.uint8) * 255), mode="L").resize((out_w, out_h), Image.Resampling.NEAREST)
+    )
+    return np.where(mask > 127, field, np.nan)
+
+
+def _label_cities(ax, region: str, wide: bool, west, east, south, north, to_xy) -> None:
+    """A short public-domain city list. Labels nudge apart when metros sit close together."""
+    face = fonts()["ui"]
+    halo = [patheffects.withStroke(linewidth=2.6, foreground=HALO)]
+    placed: list[tuple[float, float]] = []
+    size = 6.5 if wide else 7.5
+    for name, lon, lat in cities(region):
+        if lon < west or lon > east or lat < south or lat > north:
+            continue
+        x, y = to_xy(lon, lat)
+        px, py = ax.transData.transform((float(x), float(y)))
+        for _ in range(4):
+            if not any(abs(px - ox) < 58 and abs(py - oy) < 15 for ox, oy in placed):
+                break
+            py += 15
+        placed.append((px, py))
+        x, y = ax.transData.inverted().transform((px, py))
+        ax.text(
+            x,
+            y,
+            name,
+            ha="center",
+            va="center",
+            fontsize=size,
+            color=INK,
+            fontproperties=face,
+            path_effects=halo,
+            zorder=9,
+            clip_on=True,
+        )
+
+
+def _paint_lambert(ax, plate: Payload, region: str, wide: bool, c0: int, c1: int, r0: int, r1: int, out_w: int, out_h: int) -> None:
     """Draw a Lambert grid in its own square cells so the mesh fills the axes."""
     sl = np.s_[r0:r1, c0:c1]
     view_lons = plate.lons[sl]
@@ -506,8 +657,9 @@ def _paint_lambert(ax, plate: Payload, region: str, c0: int, c1: int, r0: int, r
         ax.imshow(cat, origin="lower", extent=extent, cmap=cmap, norm=norm, interpolation="nearest", aspect="auto", zorder=2)
     if values is not None and plate.scale:
         scale = SCALES[plate.scale]
+        shown = _upsample(values, out_h, out_w)
         ax.imshow(
-            np.ma.masked_invalid(values),
+            np.ma.masked_invalid(shown),
             origin="lower",
             extent=extent,
             cmap=scale.colormap(),
@@ -564,6 +716,7 @@ def _paint_lambert(ax, plate: Payload, region: str, c0: int, c1: int, r0: int, r
         )
     ax.set_xlim(c0, c1)
     ax.set_ylim(r0, r1)
+    _label_cities(ax, region, wide, west, east, south, north, lambda lon, lat: to_rc(lon, lat))
 
 
 def _shade(ax, plate: Payload, data, cmap, norm) -> None:

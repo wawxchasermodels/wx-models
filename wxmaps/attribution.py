@@ -52,7 +52,7 @@ def footer_blocks(year: int) -> list[tuple[str, str]]:
         ),
         (
             "Basemap",
-            "Coast, state, and county lines are U.S. Census Bureau TIGER/Line cartographic boundaries and Natural Earth coastline, both public domain.",
+            "Coast, state, and county lines are U.S. Census Bureau TIGER/Line cartographic boundaries and Natural Earth coastline, both public domain. City names are Natural Earth populated places, public domain.",
         ),
         (
             "What was changed",

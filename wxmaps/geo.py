@@ -30,6 +30,16 @@ def lines(name: str) -> tuple[list[np.ndarray], list[tuple[float, float, float, 
     return series, boxes
 
 
+@lru_cache(maxsize=1)
+def cities(region: str) -> tuple[tuple[str, float, float], ...]:
+    path = ROOT / "basemap" / "cities.json"
+    if not path.exists():
+        return ()
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    rows = raw.get(region) or []
+    return tuple((str(row["name"]), float(row["lon"]), float(row["lat"])) for row in rows)
+
+
 def visible(name: str, west: float, east: float, south: float, north: float) -> list[np.ndarray]:
     series, boxes = lines(name)
     kept = []
