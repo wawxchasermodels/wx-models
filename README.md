@@ -96,13 +96,11 @@ GitHub stores the rendered frames as Actions artifacts for two days so the deplo
 
 You may use these maps commercially. Every data source, font, and library below allows commercial use. Nothing in the site is GPL, AGPL, or a non-commercial (NC) license. The maps do not use proprietary map tiles.
 
-ECMWF’s licence is Creative Commons Attribution 4.0. Commercial use is allowed. The condition is attribution, and a note that the charts were modified. Both are printed on every ECMWF map and in the page footer. Do not crop that credit off if you republish a chart.
+ECMWF’s licence is Creative Commons Attribution 4.0. Commercial use is allowed. The licence asks for credit, a link to the deed, and a note that the charts were modified, in any reasonable manner. ECMWF also asks for its copyright line, www.ecmwf.int, and its liability statement to be attached to the use of the data. That full notice is in the site footer, which is how these charts are published. Each ECMWF image also carries one line so the credit survives if the picture is saved on its own:
 
-The exact line on every ECMWF map and in the footer starts:
+`Source: ECMWF open data, CC BY 4.0. Modified.`
 
-`Source: ECMWF open data, CC BY 4.0.`
-
-The rest of the ECMWF notice names ECMWF, the year, www.ecmwf.int, the CC BY 4.0 deed, and ECMWF’s liability statement. NOAA maps say the model data and the basemap are public domain.
+Do not crop that line off. NOAA images say the model data is public domain. The footer names the Census and Natural Earth basemap as well.
 
 ### Data
 

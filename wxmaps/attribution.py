@@ -3,7 +3,13 @@
 from __future__ import annotations
 
 
+def ecmwf_plate_credit() -> str:
+    """One line on the image. CC BY 4.0 asks for credit, the licence, and a note of changes."""
+    return "Source: ECMWF open data, CC BY 4.0. Modified."
+
+
 def ecmwf_map_credit(year: int) -> str:
+    """Full ECMWF notice. It travels with the page, not as a second block on the plate."""
     return (
         "Source: ECMWF open data, CC BY 4.0. "
         "Modified from ECMWF open data. "
@@ -12,8 +18,7 @@ def ecmwf_map_credit(year: int) -> str:
         "This data is published under a Creative Commons Attribution 4.0 International "
         "(CC BY 4.0). https://creativecommons.org/licenses/by/4.0/ "
         "ECMWF does not accept any liability whatsoever for any error or omission in the data, "
-        "their availability, or for any loss or damage arising from their use. "
-        "Basemap: U.S. Census Bureau TIGER/Line and Natural Earth, public domain."
+        "their availability, or for any loss or damage arising from their use."
     )
 
 
@@ -22,6 +27,10 @@ def ecmwf_service_credit() -> str:
         "This product is based on data and products of the "
         "European Centre for Medium-Range Weather Forecasts (ECMWF)."
     )
+
+
+def noaa_plate_credit() -> str:
+    return "NOAA model data, public domain."
 
 
 def noaa_map_credit() -> str:

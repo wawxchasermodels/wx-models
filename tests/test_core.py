@@ -132,16 +132,92 @@ def test_payload_builder_keeps_the_field_values():
 
 
 def test_required_ecmwf_credit_is_on_the_map_and_the_page():
-    from wxmaps.attribution import ecmwf_map_credit, footer_html, noaa_map_credit
+    from wxmaps.attribution import ecmwf_map_credit, ecmwf_plate_credit, footer_html, noaa_map_credit, noaa_plate_credit
 
-    credit = ecmwf_map_credit(2026)
-    assert "Source: ECMWF open data, CC BY 4.0" in credit
-    assert "CC BY 4.0" in credit
-    assert "Modified from ECMWF open data" in credit
+    assert ecmwf_plate_credit() == "Source: ECMWF open data, CC BY 4.0. Modified."
+    full = ecmwf_map_credit(2026)
+    assert "Modified from ECMWF open data" in full
+    assert "www.ecmwf.int" in full
+    assert "liability" in full
     page = footer_html(2026)
     assert "Source: ECMWF open data, CC BY 4.0" in page
-    assert "public domain" in noaa_map_credit()
+    assert "www.ecmwf.int" in page
+    assert "TIGER" in page
+    assert noaa_plate_credit() == "NOAA model data, public domain."
     assert "TIGER" in noaa_map_credit()
+
+
+def test_temperature_steps_are_at_most_five_degrees_and_break_at_freezing():
+    gaps = [b - a for a, b in zip(TEMP_F.edges, TEMP_F.edges[1:])]
+    assert max(gaps) <= 5
+    assert 32 in TEMP_F.edges
+    assert TEMP_F.hex_for(32) != TEMP_F.hex_for(36)
+
+
+def test_clock_reads_pacific_with_am_pm():
+    from datetime import datetime, timezone
+
+    from wxmaps.plot import _clock
+
+    assert _clock(datetime(2026, 10, 21, 18, tzinfo=timezone.utc)) == "Wed 11 AM PDT / 18Z"
+
+
+def test_portrait_conus_grid_fills_the_tall_frame():
+    from wxmaps.plot import _axes_rect, _geo_aspect, fit_window
+
+    focus = (-128.0, -65.0, 23.2, 50.6)
+    window = fit_window(focus, 0.72, (-134.0, -61.0, 21.0, 53.0))
+    aspect = _geo_aspect(*window)
+    assert 0.64 <= aspect <= 0.82
+    assert window[0] >= -134.05
+    assert window[1] <= -60.95
+    assert _axes_rect(aspect, 0.72, 9.0, 16.0, 0.172, 0.100)[2] == 1.0
+
+
+def test_wide_conus_grid_fills_without_dropping_the_northern_border():
+    from wxmaps.plot import _axes_rect, _geo_aspect, fit_window
+
+    focus = (-128.0, -65.0, 23.2, 50.6)
+    target = 16.0 / ((1.0 - 0.132 - 0.138) * 9.0)
+    window = fit_window(focus, target, (-134.1, -60.9, 21.1, 52.6))
+    aspect = _geo_aspect(*window)
+    assert window[2] <= 24.6
+    assert window[3] >= 49.4
+    x, y, w, h = _axes_rect(aspect, target, 16.0, 9.0, 0.132, 0.138)
+    assert (x, w) == (0.0, 1.0)
+    assert y == 0.138
+    assert h == 1.0 - 0.132 - 0.138
+
+
+def test_lambert_index_window_fills_a_tall_frame_and_keeps_a_small_region():
+    import numpy as np
+
+    from wxmaps.plot import _index_window
+
+    nj, ni = 300, 600
+    lats = np.linspace(24.0, 52.0, nj)[:, None] + np.zeros((1, ni))
+    lons = np.linspace(-130.0, -60.0, ni)[None, :] + np.zeros((nj, 1))
+    focus = (-128.0, -65.0, 23.2, 50.6)
+    c0, c1, r0, r1 = _index_window(lats, lons, focus, 0.72)
+    aspect = (c1 - c0) / (r1 - r0)
+    assert 0.72 / 1.18 - 0.05 <= aspect <= 0.72 * 1.18 + 0.05
+    # Washington-sized box can grow inside the grid instead of being cropped away.
+    wa = (-125.0, -117.0, 45.5, 49.0)
+    c0, c1, r0, r1 = _index_window(lats, lons, wa, 2.4)
+    assert c1 - c0 > 40 and r1 - r0 > 20
+    aspect = (c1 - c0) / (r1 - r0)
+    assert 2.4 / 1.2 <= aspect <= 2.4 * 1.2
+
+
+def test_wide_frame_extends_past_the_coasts_without_dropping_the_country():
+    from wxmaps.plot import fit_window
+
+    focus = (-128.0, -65.0, 23.2, 50.6)
+    window = fit_window(focus, 2.28, (-152.0, -42.0, 4.0, 76.0))
+    assert window[0] < focus[0] - 2
+    assert window[1] > focus[1] + 2
+    assert window[2] <= focus[2] + 0.2
+    assert window[3] >= focus[3] - 0.2
 
 
 def test_blank_hour_override_keeps_the_default_schedule():

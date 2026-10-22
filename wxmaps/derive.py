@@ -32,6 +32,9 @@ class Payload:
     lats: np.ndarray
     lons: np.ndarray
     regular: bool
+    lov: float | None = None
+    latin1: float | None = None
+    latin2: float | None = None
 
     def clip(self, west: float, east: float, south: float, north: float) -> "Payload":
         if self.regular:
@@ -51,10 +54,13 @@ class Payload:
                 self.contour_kind,
                 None if self.categories is None else self.categories[sl],
                 self.mask_below,
-                self.lats[rs:re],
-                self.lons[cs:ce],
-                True,
-            )
+            self.lats[rs:re],
+            self.lons[cs:ce],
+            True,
+            self.lov,
+            self.latin1,
+            self.latin2,
+        )
         row = np.where(np.any((self.lats >= south) & (self.lats <= north), axis=1))[0]
         col = np.where(np.any((self.lons >= west) & (self.lons <= east), axis=0))[0]
         if len(row) < 2 or len(col) < 2:
@@ -74,6 +80,9 @@ class Payload:
             self.lats[sl],
             self.lons[sl],
             False,
+            self.lov,
+            self.latin1,
+            self.latin2,
         )
 
 
@@ -215,7 +224,15 @@ def _base(bag: Bag, **kwargs) -> Payload:
         "values": None,
     }
     defaults.update(kwargs)
-    return Payload(lats=bag.lats, lons=bag.lons, regular=bag.regular, **defaults)
+    return Payload(
+        lats=bag.lats,
+        lons=bag.lons,
+        regular=bag.regular,
+        lov=bag.lov,
+        latin1=bag.latin1,
+        latin2=bag.latin2,
+        **defaults,
+    )
 
 
 def build_payloads(bag: Bag, model_id: str, hour: int) -> list[Payload]:

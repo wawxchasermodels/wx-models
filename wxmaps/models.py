@@ -22,8 +22,8 @@ REGIONS = {
     },
 }
 
-# Window used to clip global grids before plotting. Covers both regions plus a margin.
-WINDOW = {"west": -134.0, "east": -58.0, "south": 16.0, "north": 58.0}
+# Clip global grids once, wide enough for both the landscape and portrait frames.
+WINDOW = {"west": -152.0, "east": -42.0, "south": 4.0, "north": 76.0}
 
 ASPECTS = ("wide", "reel")
 
