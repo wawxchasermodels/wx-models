@@ -1,0 +1,80 @@
+# Backup for the box weather watchers. Runs every 5 minutes.
+# Sends only when the matching heartbeat variable is missing or older than
+# the limit in alert_relay/constants.py. A fresh heartbeat ends the job
+# after a pass-snapshot refresh at most, so the common case stays short.
+#
+# The 60-day public-repo inactivity rule disables scheduled workflows when
+# the default branch has had no commits. Heartbeat variable updates do not
+# count, and commits on relay-state may not either. The monthly job below
+# commits alert_relay/keepalive.txt on main so the schedule stays enabled.
+name: alert-relay
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+    - cron: "17 9 1 * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Log the webhook bodies that would be sent and do not POST"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  relay:
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '*/5 * * * *'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    concurrency:
+      group: alert-relay
+      cancel-in-progress: false
+    env:
+      ALERT_RELAY_DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run == true && 'true' || 'false' }}
+      ALERT_RELAY_PUBLISH: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run == true && '0' || '1' }}
+      ALERT_RELAY_CACHE_DIR: ${{ github.workspace }}/alert_relay/.cache
+      ALERT_RELAY_HB_URGENT: ${{ vars.ALERT_RELAY_HB_URGENT }}
+      ALERT_RELAY_HB_QUIET: ${{ vars.ALERT_RELAY_HB_QUIET }}
+      URGENT_WEBHOOK_URL: ${{ secrets.URGENT_WEBHOOK_URL }}
+      URGENT_WEBHOOK_AUTH: ${{ secrets.URGENT_WEBHOOK_AUTH }}
+      QUIET_WEBHOOK_URL: ${{ secrets.QUIET_WEBHOOK_URL }}
+      QUIET_WEBHOOK_AUTH: ${{ secrets.QUIET_WEBHOOK_AUTH }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore relay cache
+        uses: actions/cache/restore@v4
+        with:
+          path: alert_relay/.cache
+          key: alert-relay-${{ github.run_id }}
+          restore-keys: alert-relay-
+
+      - name: Run alert relay
+        run: python3 alert_relay/relay.py
+
+      - name: Save relay cache
+        if: success() && env.ALERT_RELAY_DRY_RUN != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: alert_relay/.cache
+          key: alert-relay-${{ github.run_id }}
+
+  keepalive:
+    if: github.event_name == 'schedule' && github.event.schedule == '17 9 1 * *'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Commit monthly keepalive on main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          date -u +%Y-%m-%dT%H:%M:%SZ > alert_relay/keepalive.txt
+          git add alert_relay/keepalive.txt
+          git diff --cached --quiet && exit 0
+          git commit -m "alert-relay: monthly keepalive"
+          git push origin HEAD:main
