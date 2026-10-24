@@ -1,0 +1,27 @@
+name: ECMWF IFS 9 km
+
+on:
+  schedule:
+    # 0.1° open data arrives about two hours after the 0.25° files. These
+    # checks wait, and the planner skips the cycle until the 0.1° index exists.
+    - cron: "25 2,8,14,20 * * *"
+    - cron: "55 3,9,15,21 * * *"
+  workflow_dispatch:
+    inputs:
+      init:
+        description: Cycle YYYYMMDDHH. Leave blank for the newest complete 0.1° run.
+        required: false
+        default: ""
+      hours:
+        description: Comma-separated forecast hours. Leave blank for the full schedule.
+        required: false
+        default: ""
+
+jobs:
+  pipeline:
+    uses: ./.github/workflows/pipeline.yml
+    with:
+      model: ecmwf
+      init: ${{ inputs.init }}
+      hours: ${{ inputs.hours }}
+    secrets: inherit

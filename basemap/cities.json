@@ -1,0 +1,35 @@
+{
+  "source": "Natural Earth 1:10m populated places, public domain. Tri-Cities is labeled at the Kennewick–Richland pair.",
+  "us": [
+    {"name": "Seattle", "lon": -122.3153, "lat": 47.6004},
+    {"name": "Portland", "lon": -122.6819, "lat": 45.522},
+    {"name": "San Francisco", "lon": -122.3996, "lat": 37.7843},
+    {"name": "Los Angeles", "lon": -118.232, "lat": 34.0492},
+    {"name": "San Diego", "lon": -117.1509, "lat": 32.7189},
+    {"name": "Phoenix", "lon": -112.0674, "lat": 33.4483},
+    {"name": "Las Vegas", "lon": -115.1514, "lat": 36.1648},
+    {"name": "Salt Lake City", "lon": -111.932, "lat": 40.777},
+    {"name": "Denver", "lon": -104.986, "lat": 39.7411},
+    {"name": "Dallas", "lon": -96.7947, "lat": 32.772},
+    {"name": "Houston", "lon": -95.3484, "lat": 29.7413},
+    {"name": "Minneapolis", "lon": -93.2537, "lat": 44.9819},
+    {"name": "Chicago", "lon": -87.6352, "lat": 41.848},
+    {"name": "Detroit", "lon": -83.0513, "lat": 42.3336},
+    {"name": "Atlanta", "lon": -84.3676, "lat": 33.7395},
+    {"name": "Miami", "lon": -80.2261, "lat": 25.7896},
+    {"name": "D.C.", "lon": -77.0114, "lat": 38.9015},
+    {"name": "Philadelphia", "lon": -75.1798, "lat": 39.9459},
+    {"name": "New York", "lon": -73.9957, "lat": 40.7216},
+    {"name": "Boston", "lon": -71.072, "lat": 42.3319}
+  ],
+  "wa": [
+    {"name": "Bellingham", "lon": -122.4869, "lat": 48.7601},
+    {"name": "Seattle", "lon": -122.3153, "lat": 47.6004},
+    {"name": "Olympia", "lon": -122.8994, "lat": 47.038},
+    {"name": "Vancouver", "lon": -122.64, "lat": 45.6303},
+    {"name": "Wenatchee", "lon": -120.309, "lat": 47.4236},
+    {"name": "Yakima", "lon": -120.5047, "lat": 46.6022},
+    {"name": "Tri-Cities", "lon": -119.2136, "lat": 46.2516},
+    {"name": "Spokane", "lon": -117.4199, "lat": 47.67}
+  ]
+}

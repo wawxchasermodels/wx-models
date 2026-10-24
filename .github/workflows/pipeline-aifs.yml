@@ -1,0 +1,25 @@
+name: ECMWF AIFS
+
+on:
+  schedule:
+    - cron: "40 5,11,17,23 * * *"
+    - cron: "20 7,13,19,1 * * *"
+  workflow_dispatch:
+    inputs:
+      init:
+        description: Cycle YYYYMMDDHH. Leave blank for the newest complete AIFS run.
+        required: false
+        default: ""
+      hours:
+        description: Comma-separated forecast hours. Leave blank for the full schedule.
+        required: false
+        default: ""
+
+jobs:
+  pipeline:
+    uses: ./.github/workflows/pipeline.yml
+    with:
+      model: aifs
+      init: ${{ inputs.init }}
+      hours: ${{ inputs.hours }}
+    secrets: inherit

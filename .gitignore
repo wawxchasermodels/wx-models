@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+dist/
+frames/
+store/
+tmp/
+work/
+*.grib
+*.grib2
+*.idx
+*.index
+.cartopy/
+.mplconfig/
+*.webp
+!web/fonts/**

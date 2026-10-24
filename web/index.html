@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>__SITE_NAME__</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23f3eee4'/%3E%3Crect width='4' height='32' fill='%23c8422a'/%3E%3Cpath d='M8 22c4-8 8-8 12 0' fill='none' stroke='%239a6232' stroke-width='2'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="mast">
+    <div class="brand">
+      <p class="word">__SITE_NAME__</p>
+      <p class="tag">__TAGLINE__</p>
+    </div>
+    <p class="stamp" id="stamp">Awaiting a run</p>
+  </header>
+
+  <section class="desk" aria-label="Chart controls">
+    <label>Model
+      <select id="model"></select>
+    </label>
+    <label>Region
+      <select id="region"></select>
+    </label>
+    <label>Field
+      <select id="field"></select>
+    </label>
+    <label>Run
+      <select id="init"></select>
+    </label>
+    <label>View
+      <select id="view">
+        <option value="both">Wide and reel</option>
+        <option value="wide">Wide only</option>
+        <option value="reel">Reel only</option>
+      </select>
+    </label>
+  </section>
+
+  <section class="transport" aria-label="Forecast hour">
+    <button type="button" id="prev" aria-label="Previous hour">Prev</button>
+    <button type="button" id="play" aria-label="Play">Play</button>
+    <button type="button" id="next" aria-label="Next hour">Next</button>
+    <input id="slider" type="range" min="0" max="0" value="0" aria-label="Forecast hour">
+    <p class="hour" id="hour-label">f000</p>
+  </section>
+
+  <p class="live-credit" id="live-credit"></p>
+
+  <main class="stage-row" id="stage-row">
+    <figure class="plate" data-view="wide">
+      <figcaption>
+        <span>Landscape plate</span>
+        <span>16:9</span>
+      </figcaption>
+      <div class="viewport" id="wide-port" tabindex="0" aria-label="Landscape map. Drag to pan, scroll to zoom.">
+        <img id="wide-img" alt="" draggable="false">
+        <p class="empty" hidden>No frame for this hour.</p>
+      </div>
+    </figure>
+    <figure class="plate" data-view="reel">
+      <figcaption>
+        <span>Vertical reel</span>
+        <span>9:16</span>
+      </figcaption>
+      <div class="viewport reel" id="reel-port" tabindex="0" aria-label="Vertical map. Drag to pan, scroll to zoom.">
+        <img id="reel-img" alt="" draggable="false">
+        <p class="empty" hidden>No frame for this hour.</p>
+      </div>
+    </figure>
+  </main>
+
+  <footer class="colophon">
+    __FOOTER__
+    <p><strong>Fonts.</strong> Outfit, Fraunces, and IBM Plex Mono are used under the SIL Open Font License 1.1. The license text ships with the font files.</p>
+    <p><strong>Code.</strong> The site code is MIT. Chart images are derived works of the data sources named above and may be used commercially when those terms, including ECMWF attribution, stay with the image.</p>
+  </footer>
+  <script src="app.js"></script>
+</body>
+</html>
