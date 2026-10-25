@@ -1,5 +1,5 @@
 # Forecast maps + meteograms site (Washington forecast maps, AIFS upper air, ECMWF EPS / HRRR / RRFS town meteograms).
-# ON (10-25-26): full build twice a day on the schedule below, plus manual runs (Actions > Forecast site > Run workflow).
+# ON (10-25-26): full build once a day at 2:10 AM PDT on the schedule below, plus manual runs (Actions > Forecast site > Run workflow).
 # To switch off, see web/forecast/README.md ("Turning it on").
 #
 # Job layout (every job stays well under the 6 h GitHub limit; timeouts are 300 min = 5 h):
@@ -33,22 +33,22 @@ on:
     inputs:
       products:
         description: "Comma list: wa,aifs,gfs,temps,mslp,menu,ens,eps,hrrr,rrfs (eps/hrrr/rrfs = meteograms)"
-        default: "aifs"
+        default: "wa,aifs,gfs,temps,mslp,menu,ens,eps,hrrr,rrfs"
       wa_tabs:
         description: "WA map tabs (rain,bcrain,snow,gusts,waves,lows,highs)"
-        default: "rain"
+        default: "rain,snow,gusts,lows,highs,waves,bcrain"
       wa_periods:
         description: "WA map periods (step,6h,12h,24h,48h,total,max6h,max12h,max24h,daily or all)"
-        default: "6h,24h"
+        default: "all"
       wa_views:
         description: "WA map views (full,west,east,... or all)"
-        default: "full"
+        default: "all"
       wa_hours:
         description: "WA map horizon in hours"
-        default: "48"
+        default: "240"
       wa_models:
         description: "WA map models (ecmwf,nbm,eps,eps90,hrrr, 'default' = ECMWF, NBM for temps, or 'all'); hrrr = Rain 1h"
-        default: "default"
+        default: "all"
       menu_models:
         description: "Menu-map models (ifs,aifs,hrrr,rrfs)"
         default: "ifs,aifs,hrrr,rrfs"
@@ -61,14 +61,15 @@ on:
       menu_opts:
         description: "Run switches: incremental=on|off (skip menu models already published), chunk_min=20 (0 = one job per tier), waves=on|off (publish in 4 priority waves; off = one deploy at the end)"
         default: "incremental=on,chunk_min=20,waves=on"
-  # Full build twice a day (Benjamin, 10-25-26 11:51 AM PT). Cron is UTC: 09:10 and 21:10 UTC = 2:10 AM / 2:10 PM PDT
-  # (1:10 AM / 1:10 PM PST in winter). By then the 00Z / 12Z ECMWF run is out to 240 h (the plan job picks 00Z from 09 UTC,
-  # 12Z from 21 UTC), GFS 00Z/12Z is complete and the 06Z/18Z HRRR 48 h run is done. Scheduled runs use the full-build
-  # fallbacks below (all products, all WA tabs/periods/views/models, 240 h, waves on): 4 main + 1 meteogram deploy per run
-  # = 10/day, about 310/month (< 500 Pages limit). The concurrency group below keeps a new run from starting while one is
-  # still going (it waits; at most one waits). To stop: comment out this block or disable the workflow in the Actions tab.
+  # Full build once a day (Benjamin, 10-25-26 11:55 AM PT; was twice a day): cron is UTC, 09:10 UTC = 2:10 AM PDT
+  # (1:10 AM PST in winter). By then the 00Z ECMWF run is out to 240 h (the plan job picks 00Z from 09 UTC), GFS 00Z is
+  # complete and the 06Z HRRR 48 h run is done. The afternoon (12Z) build runs only when Benjamin asks: Actions > Forecast site
+  # > Run workflow on main with the default inputs (= the same full build; start it after 21:10 UTC = 2:10 PM PDT so the
+  # plan job picks the 12Z ECMWF run). Scheduled runs use the full-build fallbacks below, waves on: 5 deploys per run,
+  # about 155/month (+5 per manual run; < 500 Pages limit). The concurrency group below keeps runs from overlapping.
+  # To stop: comment out this block or disable the workflow in the Actions tab.
   schedule:
-    - cron: "10 9,21 * * *"
+    - cron: "10 9 * * *"
 
 concurrency:   # one run at a time: a new (scheduled or manual) run waits until the running one finishes, never cancels it
   group: forecast-site
