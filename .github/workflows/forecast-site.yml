@@ -1,6 +1,6 @@
 # Forecast maps + meteograms site (Washington forecast maps, AIFS upper air, ECMWF EPS / HRRR / RRFS town meteograms).
-# DISABLED: rendering is paused. Only manual runs (Actions > Forecast site > Run workflow) are possible,
-# and the schedule below is commented out. To switch on, see web/forecast/README.md ("Turning it on").
+# ON (10-25-26): full build twice a day on the schedule below, plus manual runs (Actions > Forecast site > Run workflow).
+# To switch off, see web/forecast/README.md ("Turning it on").
 #
 # Job layout (every job stays well under the 6 h GitHub limit; timeouts are 300 min = 5 h):
 #   plan            picks the ECMWF cycle once, splits the WA map list into shards (auto: about 45 min of work each, max 20)
@@ -61,10 +61,16 @@ on:
       menu_opts:
         description: "Run switches: incremental=on|off (skip menu models already published), chunk_min=20 (0 = one job per tier), waves=on|off (publish in 4 priority waves; off = one deploy at the end)"
         default: "incremental=on,chunk_min=20,waves=on"
-#  schedule:
-#    - cron: "40 */2 * * *"   # one combined deploy every 2 h = 360 deploys/month (< 500 Cloudflare limit)
+  # Full build twice a day (Benjamin, 10-25-26 11:51 AM PT). Cron is UTC: 09:10 and 21:10 UTC = 2:10 AM / 2:10 PM PDT
+  # (1:10 AM / 1:10 PM PST in winter). By then the 00Z / 12Z ECMWF run is out to 240 h (the plan job picks 00Z from 09 UTC,
+  # 12Z from 21 UTC), GFS 00Z/12Z is complete and the 06Z/18Z HRRR 48 h run is done. Scheduled runs use the full-build
+  # fallbacks below (all products, all WA tabs/periods/views/models, 240 h, waves on): 4 main + 1 meteogram deploy per run
+  # = 10/day, about 310/month (< 500 Pages limit). The concurrency group below keeps a new run from starting while one is
+  # still going (it waits; at most one waits). To stop: comment out this block or disable the workflow in the Actions tab.
+  schedule:
+    - cron: "10 9,21 * * *"
 
-concurrency:
+concurrency:   # one run at a time: a new (scheduled or manual) run waits until the running one finishes, never cancels it
   group: forecast-site
   cancel-in-progress: false
 
@@ -72,12 +78,12 @@ permissions:
   contents: read
 
 env:
-  PRODUCTS: ${{ github.event.inputs.products || 'aifs,eps,hrrr,rrfs' }}
-  WA_TABS: ${{ github.event.inputs.wa_tabs || 'rain' }}
-  WA_PERIODS: ${{ github.event.inputs.wa_periods || '6h,24h' }}
-  WA_VIEWS: ${{ github.event.inputs.wa_views || 'full' }}
-  WA_HOURS: ${{ github.event.inputs.wa_hours || '48' }}
-  WA_MODELS: ${{ github.event.inputs.wa_models || 'default' }}
+  PRODUCTS: ${{ github.event.inputs.products || 'wa,aifs,gfs,temps,mslp,menu,ens,eps,hrrr,rrfs' }}
+  WA_TABS: ${{ github.event.inputs.wa_tabs || 'rain,snow,gusts,lows,highs,waves,bcrain' }}
+  WA_PERIODS: ${{ github.event.inputs.wa_periods || 'all' }}
+  WA_VIEWS: ${{ github.event.inputs.wa_views || 'all' }}
+  WA_HOURS: ${{ github.event.inputs.wa_hours || '240' }}
+  WA_MODELS: ${{ github.event.inputs.wa_models || 'all' }}
   WA_PARALLEL: "4"          # renders at once inside one 4-core runner (speed-v1: 3 -> 4, each render is single-threaded, ~1-2 GB)
   WA_SEC_PER_MAP: "22"      # measured draw + fetch per map with the speed-v1 caches (10-25-26); used only to size the shards
   WA_HOURS_PER_JOB: "0.75"  # target work per shard (speed-v1: 4 h -> 45 min, so the full WA list fills up to 20 shards)
@@ -182,7 +188,7 @@ jobs:
 
   wa-maps:
     needs: [plan, start-w2]
-    if: contains(github.event.inputs.products || 'aifs,eps,hrrr,rrfs', 'wa')
+    if: contains(github.event.inputs.products || 'wa,aifs,gfs,temps,mslp,menu,ens,eps,hrrr,rrfs', 'wa')
     runs-on: ubuntu-latest
     timeout-minutes: 300
     strategy:
@@ -222,7 +228,7 @@ jobs:
 
   aifs:
     needs: [plan, start-w2]
-    if: contains(github.event.inputs.products || 'aifs,eps,hrrr,rrfs', 'aifs')
+    if: contains(github.event.inputs.products || 'wa,aifs,gfs,temps,mslp,menu,ens,eps,hrrr,rrfs', 'aifs')
     runs-on: ubuntu-latest
     timeout-minutes: 300
     env:
@@ -262,7 +268,7 @@ jobs:
 
   gfs:
     needs: plan
-    if: contains(github.event.inputs.products || 'aifs,eps,hrrr,rrfs', 'gfs')
+    if: contains(github.event.inputs.products || 'wa,aifs,gfs,temps,mslp,menu,ens,eps,hrrr,rrfs', 'gfs')
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
@@ -302,7 +308,7 @@ jobs:
 
   mslp:
     needs: plan
-    if: contains(github.event.inputs.products || 'aifs,eps,hrrr,rrfs', 'mslp')
+    if: contains(github.event.inputs.products || 'wa,aifs,gfs,temps,mslp,menu,ens,eps,hrrr,rrfs', 'mslp')
     runs-on: ubuntu-latest
     timeout-minutes: 300
     env:
@@ -331,7 +337,7 @@ jobs:
 
   temps:
     needs: [plan, start-w2]
-    if: contains(github.event.inputs.products || 'aifs,eps,hrrr,rrfs', 'temps')
+    if: contains(github.event.inputs.products || 'wa,aifs,gfs,temps,mslp,menu,ens,eps,hrrr,rrfs', 'temps')
     runs-on: ubuntu-latest
     timeout-minutes: 300
     env:
@@ -382,7 +388,7 @@ jobs:
     needs: plan
     # a NOAA bucket outage must not block the ECMWF deploy
     continue-on-error: true
-    if: contains(github.event.inputs.products || 'aifs,eps,hrrr,rrfs', 'hrrr')
+    if: contains(github.event.inputs.products || 'wa,aifs,gfs,temps,mslp,menu,ens,eps,hrrr,rrfs', 'hrrr')
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
@@ -413,7 +419,7 @@ jobs:
     needs: [plan, start-w2]
     # a NOAA bucket outage must not block the ECMWF deploy
     continue-on-error: true
-    if: contains(github.event.inputs.products || 'aifs,eps,hrrr,rrfs', 'rrfs')
+    if: contains(github.event.inputs.products || 'wa,aifs,gfs,temps,mslp,menu,ens,eps,hrrr,rrfs', 'rrfs')
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
@@ -445,7 +451,7 @@ jobs:
     needs: [plan, start-w3]
     # speed_build_v1: one job per model / tier / forecast-hour chunk (menu_plan.py), up to 20 at once (public repo limit);
     # each chunk draws on all 4 cores while the next hours download in the background (menu_maps.py run loop).
-    if: contains(github.event.inputs.products || 'aifs,eps,hrrr,rrfs', 'menu') && needs.plan.outputs.menu_w3_any == 'true'
+    if: contains(github.event.inputs.products || 'wa,aifs,gfs,temps,mslp,menu,ens,eps,hrrr,rrfs', 'menu') && needs.plan.outputs.menu_w3_any == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     strategy:
@@ -517,7 +523,7 @@ jobs:
     needs: [plan, start-w4]
     # speed_build_v1: one job per model / tier / forecast-hour chunk (menu_plan.py), up to 20 at once (public repo limit);
     # each chunk draws on all 4 cores while the next hours download in the background (menu_maps.py run loop).
-    if: contains(github.event.inputs.products || 'aifs,eps,hrrr,rrfs', 'menu') && needs.plan.outputs.menu_w4_any == 'true'
+    if: contains(github.event.inputs.products || 'wa,aifs,gfs,temps,mslp,menu,ens,eps,hrrr,rrfs', 'menu') && needs.plan.outputs.menu_w4_any == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     strategy:
@@ -609,7 +615,7 @@ jobs:
   menu-reuse:
     # incremental: models whose newest cycle is already published are not redrawn; their saved maps go back into the deploy
     needs: [plan, start-w3]
-    if: contains(github.event.inputs.products || 'aifs,eps,hrrr,rrfs', 'menu') && needs.plan.outputs.menu_reuse_any == 'true'
+    if: contains(github.event.inputs.products || 'wa,aifs,gfs,temps,mslp,menu,ens,eps,hrrr,rrfs', 'menu') && needs.plan.outputs.menu_reuse_any == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -631,7 +637,7 @@ jobs:
 
   ens:
     needs: [plan, start-w3]
-    if: contains(github.event.inputs.products || 'aifs,eps,hrrr,rrfs', 'ens')
+    if: contains(github.event.inputs.products || 'wa,aifs,gfs,temps,mslp,menu,ens,eps,hrrr,rrfs', 'ens')
     runs-on: ubuntu-latest
     timeout-minutes: 300
     strategy:
@@ -665,7 +671,7 @@ jobs:
 
   meteograms:
     needs: [plan, start-w3]
-    if: contains(github.event.inputs.products || 'aifs,eps,hrrr,rrfs', 'eps') || contains(github.event.inputs.products || 'aifs,eps,hrrr,rrfs', 'hrrr') || contains(github.event.inputs.products || 'aifs,eps,hrrr,rrfs', 'rrfs')
+    if: contains(github.event.inputs.products || 'wa,aifs,gfs,temps,mslp,menu,ens,eps,hrrr,rrfs', 'eps') || contains(github.event.inputs.products || 'wa,aifs,gfs,temps,mslp,menu,ens,eps,hrrr,rrfs', 'hrrr') || contains(github.event.inputs.products || 'wa,aifs,gfs,temps,mslp,menu,ens,eps,hrrr,rrfs', 'rrfs')
     runs-on: ubuntu-latest
     timeout-minutes: 300
     env:

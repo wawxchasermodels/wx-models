@@ -14,11 +14,12 @@ Images never enter this repository.
 Both projects sit behind Cloudflare Access.
 
 ## Turning it on
-Rendering is manual only: Actions > Forecast site > Run workflow, with the `products` input
-(for example `aifs`, `hrrr`, `ens`, `menu`, `wa,temps,mslp`, `eps`).
+The full build runs on a timer twice a day (cron `10 9,21 * * *` UTC = 2:10 AM / 2:10 PM PDT, 1:10 AM / 1:10 PM PST),
+publishing in 4 priority waves (about 310 Pages deploys a month). Manual runs: Actions > Forecast site > Run workflow,
+with the `products` input (for example `aifs`, `hrrr`, `ens`, `menu`, `wa,temps,mslp`, `eps`).
 
-To run on a timer, uncomment the `schedule:` block in `.github/workflows/forecast-site.yml`
-(every 2 h by default). To stop, comment it out again or disable the workflow in the Actions tab.
+To stop the timer, comment out the `schedule:` block in `.github/workflows/forecast-site.yml` or disable the
+workflow in the Actions tab.
 
 Needs repo secrets `CF_PAGES_KEY` and `CLOUDFLARE_ACCOUNT_ID`, and optionally the repo variables
 `METEO_SPLIT` and `METEO_PROJECT`.
