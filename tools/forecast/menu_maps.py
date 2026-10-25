@@ -1029,6 +1029,9 @@ class Loader:
         self.readers.pop(s, None); self.ahead.release()
 
 
+CHILD_MAX = float(os.environ.get("MENU_CHILD_MAX", "600"))   # seconds one map may take in a worker
+
+
 class Pool:
     """Up to N forked workers; each draws one (product, view) of one step from the parent's data (copy-on-write, no pickling)."""
     def __init__(self, n):
@@ -1051,6 +1054,9 @@ class Pool:
     def reap(self, block=False):
         while True:
             for pr in list(self.run):
+                if pr.is_alive() and time.perf_counter() - self.run[pr][1] > CHILD_MAX:   # a stuck worker never blocks the job
+                    print(f"worker for step {self.run[pr][0]} still running after {CHILD_MAX:.0f} s, stopped", flush=True); pr.kill()
+                    pr.join(); self.run.pop(pr); self.fail += 1; block = False; continue
                 if not pr.is_alive():
                     pr.join(); s, t0 = self.run.pop(pr); self.stepcpu.setdefault(s, [0.0, 0])
                     self.stepcpu[s][0] += time.perf_counter() - t0; self.stepcpu[s][1] += 1
@@ -1124,6 +1130,11 @@ def run_steps(m, c, steps, render, prods, views, ctx):
         if need:
             try: accumulate(m, c, s, R, ctx, need)
             except KeyError as e: print(f"{m} step {s}: accumulation field {e} missing, skipped", flush=True)
+        if "wa" in views and (m, c) not in TM._OROG and any(p in ("feels", "td2m") for p in prods):
+            # pass height correction terrain: fetch it here once (cached in TM._OROG, inherited by the workers), never in a
+            # forked worker (a download there can deadlock on a lock the downloader thread held at fork time)
+            try: pass_corr(m, c, (L.get(s, next(p for p in prods if p in ("feels", "td2m"))) if L else R), ["wa"], 0.0)
+            except Exception as e: print(f"{m} step {s}: terrain for pass correction not loaded ({e})", flush=True)
         for p in prods:
             if not wanted(p, s, render): continue
             if L: R = L.get(s, p)

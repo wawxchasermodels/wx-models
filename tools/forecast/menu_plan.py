@@ -12,10 +12,11 @@ import argparse, datetime as dt, json, math, os, sys, urllib.request
 
 # Wall minutes per model/tier at the old one-core speed (go-live run 40177466747, 10-25-26). ifs A was still running
 # past 4 h 40 m; 330 is an estimate. Used only to size the chunks.
-OLD_MIN = {("ifs", "A"): 125, ("ifs", "B"): 200, ("ifs", "C"): 287, ("aifs", "A"): 8, ("aifs", "B"): 35, ("aifs", "C"): 87,
-           ("hrrr", "A"): 92, ("hrrr", "B"): 79, ("hrrr", "C"): 116, ("rrfs", "A"): 125, ("rrfs", "B"): 84, ("rrfs", "C"): 53}
+OLD_MIN = {("ifs", "A"): 79, ("ifs", "B"): 348, ("ifs", "C"): 184, ("aifs", "A"): 7, ("aifs", "B"): 51, ("aifs", "C"): 72,
+           ("hrrr", "A"): 54, ("hrrr", "B"): 146, ("hrrr", "C"): 87, ("rrfs", "A"): 33, ("rrfs", "B"): 195, ("rrfs", "C"): 33}
 # 10-25-26 priority tiers: A = precip/snow/ice/p-type, B = gust/feels/dewpoint/temps aloft, C = heavy extras (IVT, upper
-# winds, PW, thickness, cloud, IR, vis, fog). Minutes re-split from the run above by map count (IVT/w850/w250 weighted x4).
+# winds, PW, thickness, cloud, IR, vis, fog). Minutes re-split per product from the old tiers of the run above (map count,
+# IVT/w850/w250 weighted x4).
 HRRR = "https://noaa-hrrr-bdp-pds.s3.amazonaws.com/hrrr.{d}/conus/hrrr.t{h:02d}z.wrfsfcf{s:02d}.grib2"
 RRFS = "https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{d}/{h:02d}/rrfs.t{h:02d}z.2dfld.3km.f{s:03d}.conus.grib2"
 LONG = {"hrrr": (HRRR, 48), "rrfs": (RRFS, 84)}

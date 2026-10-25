@@ -152,7 +152,7 @@ jobs:
           C=$(grep '^cycle=' "$GITHUB_OUTPUT" | tail -1 | cut -d= -f2)
           gh cache list --repo "$GITHUB_REPOSITORY" --key menu-out- --limit 200 --json key -q '.[].key' > .menu_have || : > .menu_have
           python tools/forecast/menu_plan.py --models "${MENU_MODELS:-ifs,aifs,hrrr,rrfs}" --tiers "${MENU_TIERS:-A,B,C}" \
-            --global-cycle "$C" --state .menu_state/menu_state.json --have-caches .menu_have --speedup 6 >> "$GITHUB_OUTPUT"
+            --global-cycle "$C" --state .menu_state/menu_state.json --have-caches .menu_have --speedup 5 >> "$GITHUB_OUTPUT"
           grep -E '^menu_(cycles|reuse)=' "$GITHUB_OUTPUT" >> "$GITHUB_STEP_SUMMARY"
 
   start-w2:
@@ -438,6 +438,7 @@ jobs:
           if-no-files-found: warn
 
   menu-w3:
+    name: menu-w3 (${{ matrix.model }} ${{ matrix.tier }} ${{ matrix.chunk }} F${{ matrix.first }}-${{ matrix.last }})
     needs: [plan, start-w3]
     # speed_build_v1: one job per model / tier / forecast-hour chunk (menu_plan.py), up to 20 at once (public repo limit);
     # each chunk draws on all 4 cores while the next hours download in the background (menu_maps.py run loop).
@@ -509,6 +510,7 @@ jobs:
           if-no-files-found: warn
 
   menu-w4:
+    name: menu-w4 (${{ matrix.model }} ${{ matrix.tier }} ${{ matrix.chunk }} F${{ matrix.first }}-${{ matrix.last }})
     needs: [plan, start-w4]
     # speed_build_v1: one job per model / tier / forecast-hour chunk (menu_plan.py), up to 20 at once (public repo limit);
     # each chunk draws on all 4 cores while the next hours download in the background (menu_maps.py run loop).
