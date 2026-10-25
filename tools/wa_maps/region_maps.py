@@ -76,6 +76,9 @@ def _vin(inside, B):
     if v is not None: return np.asarray(v(np.asarray(B, float)), bool)
     return np.array([inside(tuple(b)) for b in B], bool)
 
+import os as _os
+_FASTLAY = _os.environ.get("WA_FASTLAYOUT", "1") != "0"  # speed-v1 switch (0 = old per-call rebuild)
+
 def relax(lay, real_px, keep, inside, step=2):
     ""\
 \
@@ -143,8 +146,9 @@ def relax_push(lay, real_px, keep, inside, step=3, rounds=3, maxd=None):
         GX, GY, _dd, o = _grid(R, step); GX, GY = GX[o], GY[o]
         X0 = rx + GX - c["tw"] / 2 - px0; Y0 = ry + GY - c["th"] / 2 - py0
         return np.stack([X0, Y0, X0 + bw, Y0 + bh], 1)
+    LB = np.array([lay[m]["bb"] for m in names], float).reshape(-1, 4)  # speed-v1: kept in step with setbb (same values)
     def hits(B, ex):
-        L = np.array([lay[m]["bb"] for m in names], float)
+        L = LB if _FASTLAY else np.array([lay[m]["bb"] for m in names], float)
         h = np.zeros((len(B), len(L)), bool); nr = np.nonzero(_near(B, L))[0]; Ln = L[nr]
         h[:, nr] = ~((B[:, None, 2] < Ln[None, :, 0]) | (B[:, None, 0] > Ln[None, :, 2]) | (B[:, None, 3] < Ln[None, :, 1]) | (B[:, None, 1] > Ln[None, :, 3]))
         for e in ex: h[:, idx[e]] = False
@@ -154,6 +158,7 @@ def relax_push(lay, real_px, keep, inside, step=3, rounds=3, maxd=None):
         return h, k.any(1)
     def setbb(n, bb):
         c = lay[n]; dx, dy = bb[0] - c["bb"][0], bb[1] - c["bb"][1]; c["tx"] += dx; c["ty"] += dy; c["bb"] = tuple(float(v) for v in bb)
+        LB[idx[n]] = c["bb"]
     for _ in range(rounds):
         moved = 0
         for a in sorted(names, key=lambda n: -d2(n, lay[n]["bb"])):
@@ -187,11 +192,29 @@ def relax_push(lay, real_px, keep, inside, step=3, rounds=3, maxd=None):
                 setbb(a, old)
             if done: moved += 1
         relax(lay, real_px, keep, inside)
+        LB[:] = np.array([lay[m]["bb"] for m in names], float).reshape(-1, 4)  # relax() moves boxes directly
         if not moved: break
     for n in names:
         c = lay[n]; c["off"] = (c["tx"] + c["tw"] / 2 - c["x"], c["ty"] + c["th"] / 2 - c["y"])
 
 def wa_allowed(R, P, W, H, wa, water_km=5.6):
+    """Disk-cached wrapper (speed-v1): the allowed-label mask depends only on the view frame, image
+    size and the WA outline, so it is computed once per view and reused by every later map.
+    WA_STATIC_CACHE=0 turns the cache off (recomputes every time, the old behaviour)."""
+    import os, hashlib, numpy as np
+    if os.environ.get("WA_STATIC_CACHE", "1") == "0": return _wa_allowed(R, P, W, H, wa, water_km)
+    key = repr((round(P.x0, 9), round(P.y0, 9), round(P.k, 12), W, H, water_km, bool(os.environ.get("WA_WATER_STRICT")),
+                tuple(round(v, 9) for v in wa.bounds), round(wa.area, 12), R.BM))
+    d = os.path.join(R.CACHE, "wa_allowed"); f = os.path.join(d, hashlib.sha1(key.encode()).hexdigest()[:20] + ".npy")
+    try: return np.load(f)
+    except Exception: pass
+    m = _wa_allowed(R, P, W, H, wa, water_km)
+    try:
+        os.makedirs(d, exist_ok=True); t = f + ".%d.tmp" % os.getpid(); np.save(open(t, "wb"), m); os.replace(t, f)
+    except Exception: pass
+    return m
+
+def _wa_allowed(R, P, W, H, wa, water_km=5.6):
     ""\
 \
 

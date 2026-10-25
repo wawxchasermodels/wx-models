@@ -12,7 +12,7 @@ NOT scheduled; run by hand:
   --count: print how many map files the run would write (no downloads, no renders).
 Writes $SITE_BATCH/<cycle>/<product>-<model>/step/<view>/<valid>/final.jpg + site_frame.json.
 """
-import sys, argparse, datetime as dt, json, os
+import sys, argparse, datetime as dt, json, os, threading, time, traceback, warnings
 import numpy as np, eccodes as ec
 import matplotlib
 matplotlib.use("Agg")
@@ -55,12 +55,24 @@ class Reader:
     Winds come back earth-relative. Raises KeyError when the model does not carry the field."""
     def __init__(self, m, c, s):
         self.m, self.c, self.s, self.cache, self.bytes, self.idxs = m, c, s, {}, 0, {}
+        self._locks, self._lk = {}, threading.Lock()   # one lock per field, so prefetch threads never fetch a field twice
         if MODELS[m]["kind"] == "ecmwf": self.st = TM.Step(m, c, s)
         else:
             self.url = MODELS[m]["url"].format(d=f"{c:%Y%m%d}", h=c.hour, s=s)
             self.prs = MODELS[m]["prs"].format(d=f"{c:%Y%m%d}", h=c.hour, s=s) if "prs" in MODELS[m] else self.url
 
+    def _locked(self, name, fn, *a):
+        if getattr(self, "rec", None) is not None and name not in self.rec: self.rec.append(name)
+        if name in self.cache: return self.cache[name]
+        with self._lk: lk = self._locks.setdefault(name, threading.Lock())
+        with lk:
+            if name in self.cache: return self.cache[name]
+            return fn(*a)
+
     def f(self, name):
+        return self._locked(name, self._f, name)
+
+    def _f(self, name):
         if name in self.cache: return self.cache[name]
         M = MODELS[self.m]
         if M["kind"] == "ecmwf":
@@ -93,17 +105,21 @@ class Reader:
     def acc0(self, key):
         """NOAA run-total accumulation 'VAR:level' from 0 h to this step (0 at step 0)."""
         n = f"acc0:{key}"
-        if n not in self.cache: self.cache[n] = self._idx(key, self.url, ("0-%d hour acc fcst" % self.s, "0-%d day acc fcst" % (self.s // 24)))
-        return self.cache[n]
+        def go():
+            self.cache[n] = self._idx(key, self.url, ("0-%d hour acc fcst" % self.s, "0-%d day acc fcst" % (self.s // 24))); return self.cache[n]
+        return self._locked(n, go)
 
     def ave(self, key):
         """NOAA bucket-average record (e.g. CSNOW over the last output interval)."""
         n = f"ave:{key}"
-        if n not in self.cache: self.cache[n] = self._idx(key, self.url, "ave")
-        return self.cache[n]
+        def go():
+            self.cache[n] = self._idx(key, self.url, "ave"); return self.cache[n]
+        return self._locked(n, go)
 
     def _idx(self, key, url, mode=None):
-        if url not in self.idxs: self.idxs[url] = get(url + ".idx").decode().splitlines()
+        with self._lk: lk = self._locks.setdefault("idx:" + url, threading.Lock())
+        with lk:
+            if url not in self.idxs: self.idxs[url] = get(url + ".idx").decode().splitlines()
         idx = self.idxs[url]
         for k, l in enumerate(idx):
             p = l.split(":")
@@ -160,12 +176,105 @@ def views_for(m, wanted, allowed_global, allowed_hires):
     return [v for v in wanted if v in allowed_global]
 
 
+# ---- speed_build_v1 switches (each can be turned off on its own; all on by default)
+#   MENU_FASTCONTOUR=0  contour in lon/lat and let Cartopy project every polygon (old, slow)
+#   MENU_FASTVEC=0      barbs/arrows thinned by Cartopy's full-grid griddata (old, about 30 s per call on 0.1 deg grids)
+FAST_CONTOUR = os.environ.get("MENU_FASTCONTOUR", "1") != "0"
+FAST_VEC = os.environ.get("MENU_FASTVEC", "1") != "0"
+_XY = {}
+
+
+def proj_xy(ax, LO, LA):
+    proj = getattr(ax, "projection", ax)
+    """Grid points in the map's own projection, cached per (projection, grid), so contouring happens in map space
+    (Cartopy's transform_first idea) and the grid is projected once per view instead of every polygon every frame."""
+    LO, LA = np.asarray(LO), np.asarray(LA)
+    k = (id(proj), LO.shape, LA.shape, float(LO.flat[0]), float(LO.flat[-1]), float(LA.flat[0]), float(LA.flat[-1]))
+    if k not in _XY:
+        lo2, la2 = (LO, LA) if LO.ndim == 2 else np.meshgrid(LO, LA)
+        P = proj.transform_points(ccrs.PlateCarree(), lo2.astype(float), la2.astype(float))
+        X, Y = P[..., 0], P[..., 1]
+        bad = ~np.isfinite(X) | ~np.isfinite(Y)
+        if bad.any(): X, Y = np.where(bad, np.nanmax(X), X), np.where(bad, np.nanmax(Y), Y)
+        _XY[k] = (X, Y)
+    return _XY[k]
+
+
+def pc_contour(ax, kind, LO, LA, F, **kw):
+    """ax.contour / ax.contourf for lon/lat data: fast path in projected space, or the old Cartopy path."""
+    f = ax.contourf if kind == "f" else ax.contour
+    if FAST_CONTOUR:
+        X, Y = proj_xy(ax, LO, LA); return f(X, Y, F, transform=ax.projection, **kw)
+    return f(LO, LA, F, transform=ccrs.PlateCarree(), **kw)
+
+
+def thin_vectors(ax, LO, LA, U, V, nx, ny):
+    """Same answer as Cartopy's regrid_shape=(nx, ny) (vectors rotated into the map projection, then linear Delaunay
+    interpolation onto an nx x ny grid over the map extent), but each target point is interpolated from a small patch
+    of the source grid around it instead of triangulating the whole grid (about 1.7 M points on the NA view) every call.
+    Returns map-space X, Y, U, V for ax.barbs / ax.quiver with transform=ax.projection."""
+    from scipy.spatial import Delaunay, cKDTree
+    proj, pc = ax.projection, ccrs.PlateCarree(); x0, x1, y0, y1 = ax.get_extent(proj); xr, yr = x1 - x0, y1 - y0
+    gx, gy = np.meshgrid(np.linspace(0, 1, nx), np.linspace(0, 1, ny)); XT, YT = gx * xr + x0, gy * yr + y0
+    LO, LA = np.asarray(LO, float), np.asarray(LA, float)
+    ll = pc.transform_points(proj, XT, YT); tlo, tla = ll[..., 0].ravel(), ll[..., 1].ravel()
+    if LO.ndim == 1:   # regular lon/lat grid (lon may run 0-360 or past it): nearest row/column by search
+        lon_ref = tlo % 360 if LO.max() > 180 else tlo
+        jc = np.clip(np.searchsorted(LO, lon_ref), 0, LO.size - 1); ic = np.abs(LA[None, :] - tla[:, None]).argmin(1)
+        get_patch = lambda i, j, r=3: np.meshgrid(np.arange(max(0, i - r), min(LA.size, i + r + 1)), np.arange(max(0, j - r), min(LO.size, j + r + 1)), indexing="ij")
+        lo_of = lambda ii, jj: LO[jj]; la_of = lambda ii, jj: LA[ii]
+    else:              # 2-D (Lambert 3 km) grid: nearest point by a KD-tree built once per grid
+        kk = ("kd", LO.shape, float(LO.flat[0]), float(LA.flat[0]))
+        if kk not in _XY: _XY[kk] = cKDTree(np.column_stack([LO.ravel(), LA.ravel()]))
+        _, n = _XY[kk].query(np.column_stack([tlo, tla])); ic, jc = np.unravel_index(n, LO.shape)
+        get_patch = lambda i, j, r=3: np.meshgrid(np.arange(max(0, i - r), min(LO.shape[0], i + r + 1)), np.arange(max(0, j - r), min(LO.shape[1], j + r + 1)), indexing="ij")
+        lo_of = lambda ii, jj: LO[ii, jj]; la_of = lambda ii, jj: LA[ii, jj]
+    uo = np.full(tlo.size, np.nan); vo = np.full(tlo.size, np.nan)
+    for t in range(tlo.size):
+        if not (np.isfinite(tlo[t]) and np.isfinite(tla[t])): continue
+        ii, jj = get_patch(ic[t], jc[t]); ii, jj = ii.ravel(), jj.ravel()
+        plo, pla = lo_of(ii, jj), la_of(ii, jj); pu, pv = np.asarray(U)[ii, jj], np.asarray(V)[ii, jj]
+        P = proj.transform_points(pc, plo, pla); ok = np.isfinite(P[:, 0]) & np.isfinite(P[:, 1])
+        if ok.sum() < 3: continue
+        P = P[ok]; pu, pv, plo, pla = pu[ok], pv[ok], plo[ok], pla[ok]
+        fin = np.isfinite(pu) & np.isfinite(pv)
+        uu, vv = np.full(pu.shape, np.nan), np.full(pv.shape, np.nan)
+        if fin.any(): uu[fin], vv[fin] = proj.transform_vectors(pc, plo[fin], pla[fin], pu[fin], pv[fin])
+        pts = np.column_stack([(P[:, 0] - x0) / xr, (P[:, 1] - y0) / yr]); q = np.array([[gx.ravel()[t], gy.ravel()[t]]])
+        try: tri = Delaunay(pts)
+        except Exception: continue
+        sx = int(tri.find_simplex(q)[0])
+        if sx < 0: continue
+        Tm = tri.transform[sx]; b = Tm[:2] @ (q[0] - Tm[2]); w = np.r_[b, 1 - b.sum()]; vx = tri.simplices[sx]
+        uo[t], vo[t] = w @ uu[vx], w @ vv[vx]   # any NaN corner gives NaN, like griddata
+    return XT, YT, uo.reshape(XT.shape), vo.reshape(XT.shape)
+
+
+RASTER_FILL = os.environ.get("MENU_RASTERFILL", "0") == "1"   # part-two prototype (raster_fill.py); off by default
+
+
 def fill(ax, LO, LA, F, L, cm, ext="both", z=1):
-    return ax.contourf(LO, LA, F, levels=L, cmap=cm, norm=BoundaryNorm(L, cm.N), extend=ext, transform=ccrs.PlateCarree(), zorder=z)
+    if RASTER_FILL:
+        import raster_fill as RF
+        return RF.fill(ax, LO, LA, F, L, cm, ext, z, proj_xy(ax, LO, LA) if np.ndim(LO) == 2 else None)
+    return pc_contour(ax, "f", LO, LA, F, levels=L, cmap=cm, norm=BoundaryNorm(L, cm.N), extend=ext, zorder=z)
+
+
+def freeze_line(ax, LO, LA, F, level):
+    cs = pc_contour(ax, "l", LO, LA, F, levels=[level], colors=HS.FREEZE_COLOR, linewidths=HS.FREEZE_LW, linestyles="dashed", zorder=4)
+    cs.set(path_effects=HS.halo("white", 3.0))
+
+
+LINE_STRIDE = int(os.environ.get("MENU_LINE_STRIDE", "1"))   # part-two test: contour smoothed height/pressure lines on every k-th point
 
 
 def labelled(ax, LO, LA, Z, L, lw=None, color=None):
-    hc = ax.contour(LO, LA, Z, levels=L, colors=color or HS.ISOBAR_COLOR, linewidths=lw or HS.ISOBAR_LW, transform=ccrs.PlateCarree(), zorder=4)
+    k = LINE_STRIDE
+    if k > 1 and np.ndim(LO) == 1 and np.size(LO) > 600: LO, LA, Z = LO[::k], LA[::k], Z[::k, ::k]
+    if FAST_CONTOUR and np.isfinite(Z).any():   # only the levels inside the data range (e.g. 4-7 of the 433 height levels): same lines
+        lo_, hi_ = np.nanmin(Z), np.nanmax(Z); Lk = [l for l in L if lo_ <= l <= hi_]
+        if Lk: L = Lk
+    hc = pc_contour(ax, "l", LO, LA, Z, levels=L, colors=color or HS.ISOBAR_COLOR, linewidths=lw or HS.ISOBAR_LW, zorder=4)
     hc.set(path_effects=HS.halo("white", HS.ISOBAR_HALO))
     lab = ax.clabel(hc, fmt="%d", inline=True, inline_spacing=6)
     for t in lab: t.set_fontproperties(HS.font(700, 10)); t.set_path_effects(HS.halo("white", 3.2))
@@ -174,8 +283,10 @@ def labelled(ax, LO, LA, Z, L, lw=None, color=None):
 
 def barbs(fig, ax, LO, LA, U, V, vid):
     fw, fh = fig.get_size_inches() * ax.get_position().size; nx = HS.BARBS_ACROSS.get(vid, 20); ny = max(4, round(nx * fh / fw))
-    ax.barbs(LO, LA, U * KT, V * KT, transform=ccrs.PlateCarree(), regrid_shape=(nx, ny), length=HS.BARB_LENGTH, color=HS.BARB_COLOR,
-             linewidth=HS.BARB_LW, zorder=5)
+    st = dict(length=HS.BARB_LENGTH, color=HS.BARB_COLOR, linewidth=HS.BARB_LW, zorder=5)
+    if FAST_VEC:
+        X, Y, u, v = thin_vectors(ax, LO, LA, U * KT, V * KT, nx, ny); ax.barbs(X, Y, u, v, transform=ax.projection, **st)
+    else: ax.barbs(LO, LA, U * KT, V * KT, transform=ccrs.PlateCarree(), regrid_shape=(nx, ny), **st)
 
 
 def isobars_hl(fig, ax, LA, LO, P, vid):
@@ -281,7 +392,7 @@ def prod_feels(m, c, step, R, vids, ctx):
         LA, LO, (F,) = TM.cut(la, lo, [FL], v)
         if TM.SMOOTH.get(v): F = gaussian_filter(F, TM.SMOOTH[v])
         fig, ax, ky = TM.frame(v); cm = HS.temp_cmap(); f = fill(ax, LO, LA, F, HS.TEMP_LEVELS, cm)
-        HS.outlines(ax, cf, res="10m" if v == "wa" else "50m"); TM.freeze_line(ax, LO, LA, F, 32)
+        HS.outlines(ax, cf, res="10m" if v == "wa" else "50m"); freeze_line(ax, LO, LA, F, 32)
         HS.hbar(fig, f, HS.TEMP_TICKS, "Feels like (\u00b0F)", ky)
         lo_, hi_ = np.nanpercentile(F, [0.5, 99.5])
         finish(fig, ax, m, c, step, v, outdir(c, "feels", m, v, step), "feels", "Feels-Like Temperature",
@@ -304,11 +415,11 @@ def prod_aloft(lev):
             C, Zs, U, Vw = (np.where(under, np.nan, a) for a in (C, Zs, U, Vw))
             fig, ax, ky = TM.frame(v)
             if under.any():
-                ax.contourf(LO, LA, binary_dilation(under, iterations=2 if hires else 1).astype(float), levels=[0.5, 1.5], colors=[TM.BELOW_GROUND],
-                            transform=ccrs.PlateCarree(), zorder=0.5)
+                pc_contour(ax, "f", LO, LA, binary_dilation(under, iterations=2 if hires else 1).astype(float), levels=[0.5, 1.5], colors=[TM.BELOW_GROUND],
+                           zorder=0.5)
             f = fill(ax, LO, LA, C, L, cm)
             HS.outlines(ax, cf, res="10m" if v == "wa" else "50m")
-            if lo_ <= 0 <= hi_: TM.freeze_line(ax, LO, LA, C, 0)
+            if lo_ <= 0 <= hi_: freeze_line(ax, LO, LA, C, 0)
             labelled(ax, LO, LA, Zs, np.arange(0, 1300, dz)); barbs(fig, ax, LO, LA, U, Vw, v)
             HS.hbar(fig, f, list(range(lo_, hi_ + 1, 5)), "Temp (\u00b0C)", ky, signed=True)
             finish(fig, ax, m, c, step, v, outdir(c, f"t{lev}", m, v, step), f"t{lev}", f"{lev} mb Temperature + Wind",
@@ -598,7 +709,10 @@ def prod_ivt(m, c, s, R, vids, ctx):
         HS.outlines(ax, cf, res="10m" if v == "wa" else "50m")
         fw, fh = fig.get_size_inches() * ax.get_position().size; nx = 26; ny = max(4, round(nx * fh / fw))
         Um, Vm = np.where(M >= 250, U, np.nan), np.where(M >= 250, V_, np.nan)
-        ax.quiver(LO, LA, Um, Vm, transform=ccrs.PlateCarree(), regrid_shape=(nx, ny), color="#1b1d22", scale=22000, width=0.0022, zorder=5)
+        qs = dict(color="#1b1d22", scale=22000, width=0.0022, zorder=5)
+        if FAST_VEC:
+            X, Y, u, w_ = thin_vectors(ax, LO, LA, Um, Vm, nx, ny); ax.quiver(X, Y, u, w_, transform=ax.projection, **qs)
+        else: ax.quiver(LO, LA, Um, Vm, transform=ccrs.PlateCarree(), regrid_shape=(nx, ny), **qs)
         finish(fig, ax, m, c, s, v, outdir(c, "ivt", m, v, s), "ivt", "Integrated Vapor Transport",
                f"1000-300 mb  \u00b7  arrows where IVT >= 250 (atmospheric-river level)  \u00b7  max {np.nanmax(M):.0f}"); print("ok", m, "ivt", v, s, flush=True)
 
@@ -617,8 +731,8 @@ def prod_wind(lev):
             S, Zs, U, V_ = (np.where(under, np.nan, a) for a in (S, Zs, U, V_))
             fig, ax, ky = TM.frame(v)
             if under.any():
-                ax.contourf(LO, LA, binary_dilation(under, iterations=2 if hires else 1).astype(float), levels=[0.5, 1.5],
-                            colors=[TM.BELOW_GROUND], transform=ccrs.PlateCarree(), zorder=0.5)
+                pc_contour(ax, "f", LO, LA, binary_dilation(under, iterations=2 if hires else 1).astype(float), levels=[0.5, 1.5],
+                           colors=[TM.BELOW_GROUND], zorder=0.5)
             f = fill(ax, LO, LA, np.where(S >= L[0], S, np.nan) if lev == 250 else S, L, cm, "max")
             cb = HS.hbar(fig, f, tk, "Wind (kt)", ky)
             HS.outlines(ax, cf, res="10m" if v == "wa" else "50m")
@@ -639,9 +753,9 @@ def prod_thick(m, c, s, R, vids, ctx):
         HS.hbar(fig, f, list(range(492, 595, 12)), "Thickness (dam)", ky)
         HS.outlines(ax, cf, res="10m" if v == "wa" else "50m")
         pc = ccrs.PlateCarree()
-        th = ax.contour(LO, LA, T, levels=[l for l in range(486, 595, 6) if l != 540], colors=THK_LINE, linewidths=0.9, transform=pc, zorder=3)
+        th = pc_contour(ax, "l", LO, LA, T, levels=[l for l in range(486, 595, 6) if l != 540], colors=THK_LINE, linewidths=0.9, zorder=3)
         for t in ax.clabel(th, fmt="%d", inline=True, inline_spacing=4): t.set_fontproperties(HS.font(600, 9)); t.set_color(THK_LINE)
-        k = ax.contour(LO, LA, T, levels=[540], colors=THK_540, linewidths=3.0, transform=pc, zorder=4)
+        k = pc_contour(ax, "l", LO, LA, T, levels=[540], colors=THK_540, linewidths=3.0, zorder=4)
         k.set(path_effects=HS.halo("white", 5))
         for t in ax.clabel(k, fmt="540", inline=True, inline_spacing=6): t.set_fontproperties(HS.font(900, 13)); t.set_color(THK_540); t.set_path_effects(HS.halo("white", 3.5))
         lab, mk = isobars_hl(fig, ax, LA, LO, P, v); HS.clear_labels_near(fig, lab, mk)
@@ -807,6 +921,225 @@ def latest(m):
     raise SystemExit("no GFS run found")
 
 
+# ---------------------------------------------------------------------------------------------- run loop (speed_build_v1)
+#   MENU_WORKERS=N   frames drawn at once in forked worker processes (default: all cores); 1 = the old one-at-a-time loop
+#   MENU_PREFETCH=0  no background download (each step's data is fetched right before it is drawn, old behavior)
+#   MENU_AHEAD=2     how many steps the downloader may run ahead of the drawing; MENU_DL_THREADS=4 fields fetched at once
+STATEFUL = {"peakgust", "qpf"}   # products whose function also advances a running total (idempotent within a step)
+
+
+def vids_of(m, p, views):
+    fn, _, gv, hv = PRODUCTS[p]; vids = views_for(m, views, gv, hv)
+    if m == "aifs" and p.startswith("t") and p not in ("td2m",): vids = [v for v in vids if v != "wa"]
+    return vids
+
+
+def wanted(p, s, render):
+    return p == "peakgust" or p in ACCUM or s in render
+
+
+def snapshot(ctx):
+    """Shallow copy of the running totals at this step. Totals are always rebound (never changed in place), so a shallow
+    copy of the containers is enough for a worker to draw this step while the main process moves on."""
+    z = dict(ctx)
+    if "acc" in z:
+        A = dict(z["acc"]); A["hist"] = dict(A.get("hist", {})); A["k24"] = list(A.get("k24", [])); A["prev"] = dict(A.get("prev", {})); z["acc"] = A
+    if "tph" in z: z["tph"] = dict(z["tph"])
+    return z
+
+
+def warm(m, c, s, R, p, render, need):
+    """Fetch (download + decode) every field product p needs at step s into R's cache, on a throwaway context.
+    p = None warms the accumulation fields."""
+    dummy = {"render": set(render), "peak": None, "acc": {"s10": 0, "kuch": 0, "frz": 0, "k24": [], "prev": {}, "hist": {}}, "tph": {0: 0.0}}
+    try:
+        if p is None: accumulate(m, c, s, R, dummy, need)
+        else: PRODUCTS[p][0](m, c, s, R, [], dummy)
+    except Exception: pass   # the real call reports missing fields
+
+
+def wait_for_data(R):
+    """MENU_WAIT_MIN=N: if this hour's file is not published yet, check every 30 s for up to N minutes, then go on (a missing
+    hour is skipped like before). Lets a run start on a cycle that is still coming in and draw each hour as it lands."""
+    lim = float(os.environ.get("MENU_WAIT_MIN", "0") or 0)
+    if lim <= 0: return
+    url = R.url + ".idx" if MODELS[R.m]["kind"] != "ecmwf" else \
+        TM.MODELS[R.m]["url"]["sfc"].format(d=f"{R.c:%Y%m%d}", h=R.c.hour, s=R.s) + ".index"
+    end = time.time() + 60 * lim
+    while True:
+        try: TM._get(url, (0, 10)); return
+        except Exception:
+            if time.time() > end: print(f"{R.m} F{R.s}: still not published after {lim:.0f} min, going on", flush=True); return
+            time.sleep(30)
+
+
+class Loader:
+    """Background downloader: walks the steps in order, at most AHEAD steps in front of the drawing, and fetches each
+    product's fields in parallel threads. Drawing of a product starts the moment its own fields are in."""
+    def __init__(self, m, c, steps, render, prods, need):
+        self.m, self.c, self.steps, self.render, self.prods, self.need = m, c, steps, render, prods, need
+        self.ahead = threading.Semaphore(max(1, int(os.environ.get("MENU_AHEAD", "2"))))
+        self.readers, self.ev, self.dl = {}, {}, {}
+        for s in steps:
+            self.ev[s] = {k: threading.Event() for k in [None] + prods}
+        self.nthreads = max(1, int(os.environ.get("MENU_DL_THREADS", "8")))
+        self.names = {}   # field names asked for at the first drawn / first data-only step; later steps fetch them all at once
+        self.t = threading.Thread(target=self.run, daemon=True); self.t.start()
+
+    def run(self):
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(self.nthreads) as ex:
+            for s in self.steps:
+                self.ahead.acquire()
+                R = Reader(self.m, self.c, s); self.readers[s] = R; wait_for_data(R)
+                t0 = time.perf_counter(); d0 = TM.DL["sec"]
+                jobs = ([None] if self.need else []) + [p for p in self.prods if wanted(p, s, self.render)]
+                kind = s in self.render; known = self.names.get(kind)
+                R.rec = [] if known is None else None; tpre = None
+                if known:   # all fields of this step at once (field names repeat from step to step)
+                    def pre(n, R=R):
+                        try:
+                            if n.startswith("acc0:"): R.acc0(n[5:])
+                            elif n.startswith("ave:"): R.ave(n[4:])
+                            else: R.f(n)
+                        except Exception: pass
+                    for f in [ex.submit(pre, n) for n in known]: f.result()
+                tpre = time.perf_counter() - t0
+                def one(p, s=s, R=R):
+                    warm(self.m, self.c, s, R, p, self.render, self.need); self.ev[s][p].set()
+                for f in [ex.submit(one, p) for p in jobs]: f.result()
+                if R.rec is not None: self.names[kind] = list(R.rec); R.rec = None
+                for e in self.ev[s].values(): e.set()
+                tot_ = time.perf_counter() - t0
+                self.dl[s] = (tpre if tpre is not None else min(TM.DL["sec"] - d0, tot_), tot_)   # (download wall s, download+decode+prep wall s)
+
+    def get(self, s, p):
+        self.ev[s][p].wait(); return self.readers[s]
+
+    def done(self, s):
+        self.readers.pop(s, None); self.ahead.release()
+
+
+class Pool:
+    """Up to N forked workers; each draws one (product, view) of one step from the parent's data (copy-on-write, no pickling)."""
+    def __init__(self, n):
+        self.n, self.run, self.fail, self.stepcpu, self.sub = n, {}, 0, {}, {}
+        import multiprocessing as mp; self.mp = mp.get_context("fork")
+
+    def submit(self, s, fn, args):
+        while len(self.run) >= self.n: self.reap(block=True)
+        def child():
+            try: fn(*args)
+            except KeyError as e: print(f"{args[0]} step {s}: no field {e}, skipped", flush=True)
+            except StopIteration as e: print(f"{args[0]} step {s}: {e}, skipped", flush=True)
+            except Exception: traceback.print_exc(); sys.stdout.flush(); sys.stderr.flush(); os._exit(1)
+            sys.stdout.flush(); sys.stderr.flush(); os._exit(0)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)   # fork with the downloader thread alive: workers never download
+            pr = self.mp.Process(target=child); pr.start()
+        self.run[pr] = (s, time.perf_counter()); self.sub[s] = self.sub.get(s, 0) + 1
+
+    def reap(self, block=False):
+        while True:
+            for pr in list(self.run):
+                if not pr.is_alive():
+                    pr.join(); s, t0 = self.run.pop(pr); self.stepcpu.setdefault(s, [0.0, 0])
+                    self.stepcpu[s][0] += time.perf_counter() - t0; self.stepcpu[s][1] += 1
+                    if pr.exitcode: self.fail += 1
+                    block = False
+            if not block: return
+            time.sleep(0.02)
+
+    def wait_all(self):
+        while self.run: self.reap(block=True)
+
+
+def report(m, P, L, dispatched, final=False):
+    """The one-line download vs draw timer, printed once every frame of a step is drawn."""
+    for k in sorted(P.stepcpu):
+        cpu, n = P.stepcpu[k]
+        if k not in dispatched or (n < P.sub.get(k, 0) and not final): continue
+        net, data = L.dl.get(k, (0, 0)) if L else (0, 0)
+        print(f"timer {m} F{k:03d}: download {net:.1f} s (+decode/prep {max(data - net, 0):.1f} s, in the background), draw {cpu:.1f} s "
+              f"in {n} frames ({cpu / max(n, 1):.1f} s each, {P.n} at once)", flush=True); del P.stepcpu[k]
+
+
+def prewarm(m, R, vids):
+    """Fill the per-process caches once in the parent before any worker is forked, so every worker inherits them instead of
+    rebuilding them per frame: fonts, Natural Earth outlines (and land/sea fills) projected for each view, each view's
+    projected grid and KD-tree. Without this a forked worker pays the 'first frame' cost (about 4-5 s) on every frame."""
+    for w in (500, 600, 700, 800, 900): HS.font(w)
+    grid = next((v for v in R.cache.values() if isinstance(v, tuple) and len(v) == 3), None)
+    for v in vids:
+        fig, ax, ky = TM.frame(v); r = "10m" if v == "wa" else "50m"
+        ax.add_feature(cf.NaturalEarthFeature("physical", "ocean", r), facecolor=HS.QPF_SEA, edgecolor="none", zorder=0.6)
+        ax.add_feature(cf.NaturalEarthFeature("physical", "land", r), facecolor=HS.QPF_LAND, edgecolor="none", zorder=0.6)
+        HS.outlines(ax, cf, res=r); TM.towns(ax, v); HS.frame(ax)
+        HS.header(fig, "warm", "warm", "warm", "F+0", "00Z"); HS.credit(fig, "warm")
+        if grid is not None:
+            try:
+                LA, LO, _ = TM.cut(grid[0], grid[1], [], v); proj_xy(ax, LO, LA)
+                if FAST_VEC and np.ndim(LO) == 2: thin_vectors(ax, LO, LA, np.zeros(LO.shape), np.zeros(LO.shape), 4, 4)
+            except Exception: pass
+        fig.canvas.draw(); plt.close(fig)
+
+
+def run_steps(m, c, steps, render, prods, views, ctx):
+    need = (ACCUM - {"qpf"}) & set(prods); tot = 0; t_start = time.perf_counter()
+    workers = int(os.environ.get("MENU_WORKERS", "0") or 0) or (os.cpu_count() or 1)
+    prefetch = os.environ.get("MENU_PREFETCH", "1") != "0"
+    if workers <= 1 and not prefetch:   # the old loop, unchanged apart from the timer line
+        for s in steps:
+            R = Reader(m, c, s); d0 = TM.DL["sec"]; t0 = time.perf_counter()
+            if need:
+                try: accumulate(m, c, s, R, ctx, need)
+                except KeyError as e: print(f"{m} step {s}: accumulation field {e} missing, skipped", flush=True)
+            for p in prods:
+                if p != "peakgust" and p not in ACCUM and s not in render: continue
+                try: PRODUCTS[p][0](m, c, s, R, vids_of(m, p, views), ctx)
+                except KeyError as e: print(f"{m} {p} step {s}: no field {e}, skipped", flush=True)
+                except StopIteration as e: print(f"{m} {p} step {s}: {e}, skipped", flush=True)
+            tot += R.bytes; d = TM.DL["sec"] - d0
+            print(f"timer {m} F{s:03d}: download {d:.1f} s, draw {time.perf_counter() - t0 - d:.1f} s", flush=True)
+        print(f"{MODELS[m]['name']} {c:%Y%m%d%H}Z downloaded {tot/1e6:.1f} MB in {time.perf_counter() - t_start:.0f} s")
+        sys.stdout.flush(); sys.stderr.flush(); os._exit(0)
+    L = Loader(m, c, steps, render, prods, need) if prefetch else None
+    P = Pool(max(1, workers)); waited = {}; warmed = False
+    allv = sorted({v for p in prods for v in vids_of(m, p, views)})
+    for s in steps:
+        w0 = time.perf_counter()
+        R = L.get(s, None) if L else Reader(m, c, s)
+        if not warmed and os.environ.get("MENU_PREWARM", "1") != "0":
+            if L and not R.cache: R = L.get(s, prods[0]) if wanted(prods[0], s, render) else R
+            prewarm(m, R, allv); warmed = True
+        if need:
+            try: accumulate(m, c, s, R, ctx, need)
+            except KeyError as e: print(f"{m} step {s}: accumulation field {e} missing, skipped", flush=True)
+        for p in prods:
+            if not wanted(p, s, render): continue
+            if L: R = L.get(s, p)
+            fn = PRODUCTS[p][0]; vids = vids_of(m, p, views)
+            try:
+                if p in STATEFUL: fn(m, c, s, R, [], ctx)        # advance the running total in the main process
+                elif p not in ACCUM and not L: fn(m, c, s, R, [], {"render": set(render), "peak": None})   # fetch here (no loader)
+            except KeyError as e: print(f"{m} {p} step {s}: no field {e}, skipped", flush=True); continue
+            except StopIteration as e: print(f"{m} {p} step {s}: {e}, skipped", flush=True); continue
+            if p in ACCUM - {"qpf"} and s not in render: continue
+            if p in STATEFUL and s not in render: continue
+            snap = snapshot(ctx)
+            def draw(m_, p_, s_, R_, v_, snap_):
+                R_._lk, R_._locks = threading.Lock(), {}   # fresh locks after fork (the downloader thread may have held one)
+                CTX.clear(); CTX.update(snap_); PRODUCTS[p_][0](m_, c, s_, R_, [v_], CTX)
+            for v in vids: P.submit(s, draw, (m, p, s, R, v, snap))
+        waited[s] = time.perf_counter() - w0
+        tot += R.bytes
+        if L: L.done(s)
+        P.reap(); report(m, P, L, waited)
+    P.wait_all(); report(m, P, L, waited, final=True)
+    print(f"{MODELS[m]['name']} {c:%Y%m%d%H}Z downloaded {tot/1e6:.1f} MB in {time.perf_counter() - t_start:.0f} s, {P.fail} worker failures")
+    sys.stdout.flush(); sys.stderr.flush(); os._exit(1 if P.fail else 0)
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", required=True, choices=list(MODELS)); ap.add_argument("--cycle")
@@ -838,20 +1171,5 @@ if __name__ == "__main__":
                 else: k += 1
             byp[p] = k * len(vids); n += k * len(vids)
         print(f"{m} files {n}", json.dumps(byp)); sys.stdout.flush(); os._exit(0)
-    ctx = CTX; ctx.update({"render": set(render), "peak": None}); tot = 0; need = (ACCUM - {"qpf"}) & set(prods)
-    for s in steps:
-        R = Reader(m, c, s)
-        if need:
-            try: accumulate(m, c, s, R, ctx, need)
-            except KeyError as e: print(f"{m} step {s}: accumulation field {e} missing, skipped", flush=True)
-        for p in prods:
-            fn, _, gv, hv = PRODUCTS[p]
-            if p != "peakgust" and p not in ACCUM and s not in render: continue
-            vids = views_for(m, a.views.split(","), gv, hv)
-            if m == "aifs" and p.startswith("t") and p not in ("td2m",): vids = [v for v in vids if v != "wa"]
-            try: fn(m, c, s, R, vids, ctx)
-            except KeyError as e: print(f"{m} {p} step {s}: no field {e}, skipped", flush=True)
-            except StopIteration as e: print(f"{m} {p} step {s}: {e}, skipped", flush=True)
-        tot += R.bytes
-    print(f"{MODELS[m]['name']} {c:%Y%m%d%H}Z downloaded {tot/1e6:.1f} MB")
-    sys.stdout.flush(); sys.stderr.flush(); os._exit(0)
+    ctx = CTX; ctx.update({"render": set(render), "peak": None})
+    run_steps(m, c, steps, render, prods, a.views.split(","), ctx)
