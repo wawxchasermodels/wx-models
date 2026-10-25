@@ -143,3 +143,8 @@ These rules apply to every model product: AIFS, GFS, GEFS, ECMWF/EPS, HRRR, RRFS
   visibility 1 decimal under 3 mi, whole miles to 7, "7+" at 7 mi and more (blank on the map).
 - A number that would overlap a name, another number or the frame moves under its name; if still blocked it is dropped (logged).
   Isobar labels that touch a number are removed. TOWN_NUMBERS=0 turns every number off.
+- Mountain passes (added 10-24-26 10:22 PM request): on the same Washington-view maps that carry town numbers, 12 passes from
+  temp_maps.WA_PASSES (Snow tab table + WSDOT pass-watcher points; Stampede not in either list). Small plum (#3b2a5c) triangle,
+  8 pt italic name without "Pass" (except Washington Pass), bold 9.5 pt value. Placed after towns: right, left, above, below;
+  label dropped (triangle kept, logged) if it cannot clear every town label/number/dot. Value = model at the pass point, no
+  terrain correction. PASS_LABELS=0 turns passes off.

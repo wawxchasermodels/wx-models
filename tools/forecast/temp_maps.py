@@ -19,6 +19,7 @@ import numpy as np, eccodes as ec
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import matplotlib.transforms
 from matplotlib.colors import BoundaryNorm
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import house_style as HS
@@ -226,6 +227,22 @@ TOWN_PIN = {"Seattle": (47.4447, -122.3144), "Port Angeles": (48.1220, -123.5066
             "Aberdeen": (46.9712, -123.9366), "Tacoma": (47.2675, -122.5761)}
 TOWN_NUM_COLOR, TOWN_NUM_SIZE, TOWN_NUM_HALO = "#0d0f13", 10.5, 3.0   # bold dark number on a white halo (reads on any fill)
 
+# Mountain passes on the Washington view (Benjamin 10-24-26 10:22 PM: "main mountain pass locations on the Washington view").
+# Coordinates are NOT new: the first 8 are the Washington Snow tab table (tools/wa_maps/snow_map.py PASSES, same in gust_map,
+# nbm_map, precip_map); Cayuse, Satus, Wauconda and Disautel are the WSDOT MountainPass API points the pass watcher follows
+# (wsdot.com/Travel/Real-time/Service/api/MountainPass, read 10-24-26). Elevation (ft) = WSDOT's summit elevation, kept to
+# report how far the model's smoothed terrain sits below the real pass. Stampede Pass is in neither list, so it is not shown.
+# name: (label, lat, lon, elev_ft), in placement priority order (main I-90 / US 2 / US 12 crossings first)
+WA_PASSES = {
+    "Snoqualmie Pass": ("Snoqualmie", 47.4245, -121.4136, 3022), "Stevens Pass": ("Stevens", 47.7465, -121.0854, 4061),
+    "White Pass": ("White", 46.6383, -121.3911, 4500), "Chinook Pass": ("Chinook", 46.8714, -121.5156, 5430),
+    "Blewett Pass": ("Blewett", 47.3348, -120.5786, 4102), "Washington Pass": ("Washington Pass", 48.5253, -120.6545, 5477),
+    "Loup Loup Pass": ("Loup Loup", 48.3926, -119.9026, 4020), "Sherman Pass": ("Sherman", 48.6055, -118.4636, 5575),
+    "Cayuse Pass": ("Cayuse", 46.8656, -121.5361, 4675), "Satus Pass": ("Satus", 45.9847, -120.6536, 3107),
+    "Wauconda Pass": ("Wauconda", 48.7262, -118.9595, 4310), "Disautel Pass": ("Disautel", 48.2818, -119.1434, 3252),
+}
+PASS_COLOR, PASS_NAME_SIZE, PASS_NUM_SIZE = "#3b2a5c", 8.0, 9.5   # deep plum, small italic name: reads as "not a town"
+
 
 def town_values(LA, LO, F, pts):
     """Model value at each (lat, lon) point. Regular lat/lon grids (ECMWF): bilinear. 2-D Lambert grids (HRRR/RRFS 3 km):
@@ -308,6 +325,46 @@ def towns(ax, vid, field=None, fmt=fmt_int):
             if _hits(bb, others) or not (axbb.contains(bb.x0, bb.y0) and axbb.contains(bb.x1, bb.y1)):
                 print(f"town number dropped (no room): {WA_TOWNS[k][0]} {n.get_text()}", flush=True); n.remove(); nums[k] = None; continue
         arts.append(n)
+    if os.environ.get("PASS_LABELS", "1") != "0":
+        arts += pass_labels(ax, field, fmt, nb + [n.get_window_extent(r) for n in nums if n is not None], r, pt, axbb)
+    return arts
+
+
+def pass_labels(ax, field, fmt, taken, r, pt, axbb):
+    """Small plum triangle + italic name + bold value at each mountain pass (Washington view, maps with town numbers only).
+    Value = model at the pass point, NOT corrected to the real summit height (3 km / 9 km terrain is lower and smoother).
+    Tries right, left, above, below the triangle; a pass that cannot clear every town label, number and other pass is dropped (logged)."""
+    pc = ccrs.PlateCarree(); tr = pc._as_mpl_transform(ax); arts = []
+    vals = town_values(*field, [(la, lo) for _, la, lo, _ in WA_PASSES.values()])
+    ax.pass_values = {k: float(v) for k, v in zip(WA_PASSES, vals)}
+    taken = list(taken)
+    for (name, la, lo, side), _ in zip(WA_TOWNS, range(len(WA_TOWNS))):   # town dots are off limits too
+        x, y = tr.transform((lo, la)); taken.append(matplotlib.transforms.Bbox([[x - 4, y - 4], [x + 4, y + 4]]))
+    for (key, (lab, la, lo, el)), v in zip(WA_PASSES.items(), vals):
+        x, y = tr.transform((lo, la))
+        if not axbb.contains(x, y): continue
+        mk = ax.plot(lo, la, "^", ms=4.6, mfc=PASS_COLOR, mec="white", mew=0.9, transform=pc, zorder=7.2)[0]
+        taken.append(matplotlib.transforms.Bbox([[x - 4, y - 4], [x + 4, y + 4]]))
+        s_ = fmt(v)
+        tn = ax.annotate(lab, (lo, la), xycoords=tr, xytext=(0, 0), textcoords="offset points", ha="left", va="center",
+                         color=PASS_COLOR, fontproperties=HS.font(600, PASS_NAME_SIZE), style="italic",
+                         path_effects=HS.halo("white", 2.4), zorder=7.2)
+        tv = None if s_ is None else ax.annotate(s_, (lo, la), xycoords=tr, xytext=(0, 0), textcoords="offset points", ha="left",
+                                                 va="center", color=TOWN_NUM_COLOR, fontproperties=HS.font(800, PASS_NUM_SIZE),
+                                                 path_effects=HS.halo("white", TOWN_NUM_HALO), zorder=7.4)
+        nw = tn.get_window_extent(r).width * pt; vw = 0 if tv is None else tv.get_window_extent(r).width * pt + 3
+        ok = False
+        for gx, gy in ((6, 0), (-6 - nw - vw, 0), (-(nw + vw) / 2, 9), (-(nw + vw) / 2, -9)):
+            tn.xyann = (gx, gy)
+            if tv is not None: tv.xyann = (gx + nw + 3, gy)
+            bbs = [tn.get_window_extent(r)] + ([tv.get_window_extent(r)] if tv is not None else [])
+            if not any(_hits(b, taken) for b in bbs) and all(axbb.contains(b.x0, b.y0) and axbb.contains(b.x1, b.y1) for b in bbs):
+                ok = True; break
+        if not ok:   # keep the triangle (location still shown), drop the label
+            print(f"pass label dropped (no room): {key} {s_}", flush=True); tn.remove()
+            if tv is not None: tv.remove()
+            continue
+        taken += bbs; arts += [tn] + ([tv] if tv is not None else [])
     return arts
 
 
