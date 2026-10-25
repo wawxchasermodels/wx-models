@@ -331,6 +331,8 @@ jobs:
           test -f /usr/share/fonts/truetype/msttcorefonts/Impact.ttf
       - name: ECMWF 9 km MSLP + precip (3 h to 72 h, then 6 h to 240 h)
         run: python tools/forecast/ecmwf_mslp_precip.py --cycle "${{ needs.plan.outputs.cycle }}" --plan
+      - name: ECMWF 9 km sea-level pressure with H/L centers (Sea-level pressure tab, every 6 h to 240 h)
+        run: python tools/forecast/gfs_maps.py --model ifs --cycle "${{ needs.plan.outputs.cycle }}" --hours 240 --every 6
       - uses: actions/upload-artifact@v4
         with:
           name: mslp-maps
@@ -470,7 +472,7 @@ jobs:
       # C = heavy extras: IVT, upper winds, PW, thickness, cloud, IR, vis, fog (wave 4, last)
       TIER_A: qpf,snowkuch,snow10,snowk24,snowrate,frzr,mslpptype
       TIER_B: gust10,peakgust,feels,td2m,t925,t700,t500,t300
-      TIER_C: ivt,w850,w250,pwanom,pw,thick,tcc,ir,vis,fog
+      TIER_C: ivt,w850,w500,w250,pwanom,pw,thick,tcc,ir,vis,fog
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -542,7 +544,7 @@ jobs:
       # C = heavy extras: IVT, upper winds, PW, thickness, cloud, IR, vis, fog (wave 4, last)
       TIER_A: qpf,snowkuch,snow10,snowk24,snowrate,frzr,mslpptype
       TIER_B: gust10,peakgust,feels,td2m,t925,t700,t500,t300
-      TIER_C: ivt,w850,w250,pwanom,pw,thick,tcc,ir,vis,fog
+      TIER_C: ivt,w850,w500,w250,pwanom,pw,thick,tcc,ir,vis,fog
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

@@ -45,7 +45,9 @@ VIEWS = {
 NO_PNWT = ("z500",)   # AIFS 500 mb anomaly stays na/pnw (Benjamin 10-24-26: tight view on SLP + SLP/wind only)
 # Who drew the map: header name, sidecar model, credit line. "gfs" is used by gfs_maps.py (NOAA, public domain).
 SRC = {"aifs": dict(name="ECMWF AIFS", site="AIFS", data="AIFS: ECMWF open data, CC BY 4.0. Modified. \u00a9 ECMWF, www.ecmwf.int."),
-       "gfs": dict(name="NOAA GFS 0.25\u00b0", site="GFS", data="Data: NOAA GFS (public domain).")}
+       "gfs": dict(name="NOAA GFS 0.25\u00b0", site="GFS", data="Data: NOAA GFS (public domain)."),
+       # 10-25-26: plain ECMWF 9 km MSLP on the Sea-level pressure tab (before, ECMWF pressure was only on the combo tabs)
+       "ifs": dict(name="ECMWF IFS 0.1\u00b0", site="ECMWF 9 km", data="IFS: ECMWF open data, CC BY 4.0. Modified. \u00a9 ECMWF, www.ecmwf.int.")}
 
 
 def get(url, rng=None):
