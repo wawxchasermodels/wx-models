@@ -241,6 +241,35 @@ WA_PASSES = {
     "Cayuse Pass": ("Cayuse", 46.8656, -121.5361, 4675), "Satus Pass": ("Satus", 45.9847, -120.6536, 3107),
     "Wauconda Pass": ("Wauconda", 48.7262, -118.9595, 4310), "Disautel Pass": ("Disautel", 48.2818, -119.1434, 3252),
 }
+# Pass height correction (Benjamin 10-24-26 10:32 PM): value + rate * (model ground at the pass - real summit), ft.
+# Temperature and feels-like 3.5 F per 1000 ft (between the 5.4 F dry and ~3 F moist rates); dewpoint 1 F per 1000 ft (dewpoint
+# falls much more slowly with height than temperature). Gusts, precip, snow and visibility are never corrected; towns never.
+# Summit elevations: WSDOT MountainPass feed, checked 10-24-26 against USGS 3DEP (epqs.nationalmap.gov) within 60 ft at the
+# table points, except Sherman: the Snow-tab point sits ~1.2 km east of the summit (3DEP 5,233 ft there; 5,612 ft at WSDOT's
+# point), so the correction still targets the 5,575 ft summit. PASS_HEIGHT_CORR=0 turns it off.
+LAPSE_T_F_PER_FT, LAPSE_TD_F_PER_FT = 3.5 / 1000.0, 1.0 / 1000.0
+_OROG = {}
+
+
+def model_orog(key, loader):
+    """Model terrain height (ft) as (lat, lon, z), cached per (model, cycle); loader() returns (lat, lon, metres)."""
+    if key not in _OROG:
+        la, lo, z = loader(); _OROG[key] = (la, lo, np.asarray(z, float) * 3.28084)
+    return _OROG[key]
+
+
+def hires_orog(st):
+    """HRRR / RRFS surface height from the same step file (HGT:surface)."""
+    return model_orog((st.m, st.c), lambda: st.field("HGT", "surface"))
+
+
+def ecmwf_orog(m, c):
+    """ECMWF IFS / AIFS surface geopotential (step-0 file only) -> height."""
+    def ld():
+        la, lo, z = Step(m, c, 0).field("z"); return la, lo, z / 9.80665
+    return model_orog((m, c), ld)
+
+
 PASS_COLOR, PASS_NAME_SIZE, PASS_NUM_SIZE = "#3b2a5c", 8.0, 9.5   # deep plum, small italic name: reads as "not a town"
 
 
@@ -260,7 +289,7 @@ def town_values(LA, LO, F, pts):
     from scipy.interpolate import RegularGridInterpolator
     la, lo = np.asarray(LA, float), np.asarray(LO, float) % 360
     if la[0] > la[-1]: la, F = la[::-1], F[::-1]
-    if lo[0] > lo[-1]: lo, F = lo[::-1], F[:, ::-1]
+    o = np.argsort(lo, kind="stable"); lo, F = lo[o], F[:, o]   # full-globe grids wrap at 0/360: sort
     it = RegularGridInterpolator((la, lo), F, bounds_error=False, fill_value=np.nan)
     return it(np.array([[pla, plo % 360] for pla, plo in pts]))
 
@@ -280,7 +309,7 @@ def _hits(bb, others, pad=1.5):
     return any(bb.x0 - pad < o.x1 and o.x0 < bb.x1 + pad and bb.y0 - pad < o.y1 and o.y0 < bb.y1 + pad for o in others)
 
 
-def towns(ax, vid, field=None, fmt=fmt_int):
+def towns(ax, vid, field=None, fmt=fmt_int, pass_corr=None):
     """Town dots and names on the Washington view only (dark text on a white halo, like the contour labels).
     field = (LA, LO, F) in the map's units adds the model value after each name ("Seattle 54"), read at the town's official
     station pin (bilinear on lat/lon grids, nearest point on 3 km grids). Numbers never overlap a name, another number or the
@@ -326,16 +355,23 @@ def towns(ax, vid, field=None, fmt=fmt_int):
                 print(f"town number dropped (no room): {WA_TOWNS[k][0]} {n.get_text()}", flush=True); n.remove(); nums[k] = None; continue
         arts.append(n)
     if os.environ.get("PASS_LABELS", "1") != "0":
-        arts += pass_labels(ax, field, fmt, nb + [n.get_window_extent(r) for n in nums if n is not None], r, pt, axbb)
+        arts += pass_labels(ax, field, fmt, nb + [n.get_window_extent(r) for n in nums if n is not None], r, pt, axbb, pass_corr)
     return arts
 
 
-def pass_labels(ax, field, fmt, taken, r, pt, axbb):
+def pass_labels(ax, field, fmt, taken, r, pt, axbb, pass_corr=None):
+    """pass_corr = (rate F/ft, (lat, lon, model ground ft)) height-corrects the values to the real summit (temps / dewpoint only)."""
     """Small plum triangle + italic name + bold value at each mountain pass (Washington view, maps with town numbers only).
     Value = model at the pass point, NOT corrected to the real summit height (3 km / 9 km terrain is lower and smoother).
     Tries right, left, above, below the triangle; a pass that cannot clear every town label, number and other pass is dropped (logged)."""
     pc = ccrs.PlateCarree(); tr = pc._as_mpl_transform(ax); arts = []
     vals = town_values(*field, [(la, lo) for _, la, lo, _ in WA_PASSES.values()])
+    ax.pass_raw = {k: float(v) for k, v in zip(WA_PASSES, vals)}
+    if pass_corr is not None and os.environ.get("PASS_HEIGHT_CORR", "1") != "0":
+        rate, oro = pass_corr
+        zm = town_values(*oro, [(la, lo) for _, la, lo, _ in WA_PASSES.values()])
+        ax.pass_model_ft = {k: float(z) for k, z in zip(WA_PASSES, zm)}
+        vals = np.array([v + rate * (z - el) if np.isfinite(z) else v for v, z, (_, _, _, el) in zip(vals, zm, WA_PASSES.values())])
     ax.pass_values = {k: float(v) for k, v in zip(WA_PASSES, vals)}
     taken = list(taken)
     for (name, la, lo, side), _ in zip(WA_TOWNS, range(len(WA_TOWNS))):   # town dots are off limits too
@@ -406,7 +442,7 @@ def header(fig, m, c, step, vid, title, extra):
     return vl
 
 
-def render_t2m(m, c, step, lat, lon, t2k, vid, out):
+def render_t2m(m, c, step, lat, lon, t2k, vid, out, orog=None):
     LA, LO, (T,) = cut(lat, lon, [t2k], vid)
     F = (T - 273.15) * 1.8 + 32
     if SMOOTH[vid]: F = gaussian_filter(F, SMOOTH[vid])
@@ -414,7 +450,7 @@ def render_t2m(m, c, step, lat, lon, t2k, vid, out):
     fill = ax.contourf(LO, LA, F, levels=HS.TEMP_LEVELS, cmap=cm, norm=BoundaryNorm(HS.TEMP_LEVELS, cm.N), extend="both", transform=pc)
     HS.outlines(ax, cf, res="10m" if vid == "wa" else "50m")
     freeze_line(ax, LO, LA, F, 32)
-    towns(ax, vid, (LA, LO, F))   # town numbers: 2 m temp, F
+    towns(ax, vid, (LA, LO, F), pass_corr=(LAPSE_T_F_PER_FT, orog) if orog is not None else None)   # town + pass numbers, F
     HS.frame(ax)
     lo, hi = np.nanpercentile(F, [0.5, 99.5])
     vl = header(fig, m, c, step, vid, "2 m Temperature", f"32\u00b0F line dashed  \u00b7  {lo:.0f} to {hi:.0f}\u00b0F in view")
@@ -498,8 +534,10 @@ if __name__ == "__main__":
             try:
                 if "t2m" in a.products.split(","):
                     lat, lon, t2 = st.field("TMP", "2 m above ground")
+                    try: oro = hires_orog(st) if "wa" in views else None
+                    except StopIteration: oro = None
                     for v in views:
-                        out = f"{ROOT}/{c:%Y%m%d%H}/t2m-{a.model}/step/{v}/{vt}"; render_t2m(a.model, c, s, lat, lon, t2, v, out); print("ok", out, flush=True)
+                        out = f"{ROOT}/{c:%Y%m%d%H}/t2m-{a.model}/step/{v}/{vt}"; render_t2m(a.model, c, s, lat, lon, t2, v, out, oro); print("ok", out, flush=True)
                 if "t850" in a.products and "t850" in HIRES[a.model]["products"]:
                     lat, lon, t = st.field("TMP", "850 mb"); _, _, z = st.field("HGT", "850 mb")
                     _, _, u = st.field("UGRD", "850 mb"); _, _, w = st.field("VGRD", "850 mb"); u, w = earth_relative(u, w, lon, a.model)
@@ -523,8 +561,10 @@ if __name__ == "__main__":
                     out = f"{ROOT}/{c:%Y%m%d%H}/t2manom-{a.model}/step/{v}/{vt}"; render_t2manom(a.model, c, s, lat, lon, t2, zorog, v, out); print("ok", out, flush=True)
             if "t2m" in a.products.split(","):
                 lat, lon, t2 = st.field("2t")
+                try: oro = ecmwf_orog(a.model, c) if "wa" in a.views.split(",") else None
+                except StopIteration: oro = None
                 for v in a.views.split(","):
-                    out = f"{ROOT}/{c:%Y%m%d%H}/t2m-{a.model}/step/{v}/{vt}"; render_t2m(a.model, c, s, lat, lon, t2, v, out); print("ok", out, flush=True)
+                    out = f"{ROOT}/{c:%Y%m%d%H}/t2m-{a.model}/step/{v}/{vt}"; render_t2m(a.model, c, s, lat, lon, t2, v, out, oro); print("ok", out, flush=True)
             if "t850" in a.products:
                 lat, lon, t = st.field("t", 850, "pl"); _, _, z = st.field("gh", 850, "pl")
                 _, _, u = st.field("u", 850, "pl"); _, _, w = st.field("v", 850, "pl"); _, _, sp = st.field("sp")

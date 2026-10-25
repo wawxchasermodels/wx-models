@@ -168,6 +168,7 @@ ORDER = _HEAD + list(PASSES) + ["Oak Harbor"] + _REQ + [t for t in ORDER if t no
 DBG = {}
 FLIP = set()
 NO_CORNER = False
+SOURCE = "nbm"
 def render(TF, LA, LO, kind, title, subtitle, out_path):
     from PIL import Image, ImageDraw, ImageFilter
     import render_core as R
@@ -392,6 +393,8 @@ def render(TF, LA, LO, kind, title, subtitle, out_path):
             vlo, vla = pts[name] if name in PASSES else TP.value_point(name, pts[name])
 
             val = float(VALUE_OVR[name]) if VALUE_OVR is not None and name in VALUE_OVR else float(sample(np.array(vlo), np.array(vla)))
+            if name in PASSES and not (VALUE_OVR is not None and name in VALUE_OVR):   # pass height correction (pass_terrain.py)
+                import pass_terrain as PTC; val = PTC.corrected(SOURCE, name, val, vlo, vla)
             if not (30 < x < W - 30 and 30 < y < H - 30): skipped.append(name + " (off map)"); continue
             mk = (x - 1, y - 1, x + 1, y + 1)
             tr = TP.tier(name, name in PASSES)[0]
@@ -736,6 +739,7 @@ def main(argv=None, defaults=None):
     ap.add_argument("--fill-neighbors", action="store_true", help="also draw the data over Oregon/Idaho/BC land (default off on the full-state map, on with --region)")
     ap.add_argument("--no-fill-neighbors", action="store_true", help="--region maps: leave neighbor land blank")
     a = ap.parse_args(argv)
+    global SOURCE; SOURCE = a.source   # pass height correction picks the terrain file by source
     global FILL_NEIGHBORS, NEIGHBOR_TOWNS, VSCALE
     VSCALE = bool(a.region) and not a.top_scale
     NEIGHBOR_TOWNS = not a.no_neighbor_towns

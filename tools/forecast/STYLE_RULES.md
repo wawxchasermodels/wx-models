@@ -148,3 +148,9 @@ These rules apply to every model product: AIFS, GFS, GEFS, ECMWF/EPS, HRRR, RRFS
   8 pt italic name without "Pass" (except Washington Pass), bold 9.5 pt value. Placed after towns: right, left, above, below;
   label dropped (triangle kept, logged) if it cannot clear every town label/number/dot. Value = model at the pass point, no
   terrain correction. PASS_LABELS=0 turns passes off.
+- Pass height correction (Benjamin 10-24-26 10:32 PM): pass values on temperature and feels-like maps = model value + 3.5 F per
+  1000 ft x (model ground at the pass - real summit); dewpoint uses 1 F per 1000 ft (dewpoint drops far more slowly with height).
+  Model ground = the model's own terrain (ECMWF step-0 geopotential, HRRR/RRFS HGT:surface), cached once per run. Summits =
+  WSDOT elevations (checked vs USGS 3DEP). Never applied to gusts, precip, snow, ice or visibility, and never to towns.
+  PASS_HEIGHT_CORR=0 turns it off. Washington tab maps: same rule in tools/wa_maps/pass_terrain.py (nbm_map.py lows/highs only;
+  NBM terrain = URMA 2.5 km HGT, EPS terrain = ECMWF 0.25 deg z, static files in tools/wa_maps/assets/terrain_*.npz).
