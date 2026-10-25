@@ -146,6 +146,7 @@ jobs:
         with:
           name: wa-maps-${{ matrix.shard }}
           path: .site_batch
+          include-hidden-files: true   # the batch folders start with a dot
           retention-days: 1
           if-no-files-found: warn
 
@@ -185,6 +186,7 @@ jobs:
         with:
           name: aifs-maps
           path: .site_batch
+          include-hidden-files: true   # the batch folders start with a dot
           retention-days: 1
           if-no-files-found: warn
 
@@ -213,6 +215,7 @@ jobs:
         with:
           name: mslp-maps
           path: .site_batch
+          include-hidden-files: true   # the batch folders start with a dot
           retention-days: 1
           if-no-files-found: warn
 
@@ -261,6 +264,7 @@ jobs:
         with:
           name: temp-maps
           path: .site_batch
+          include-hidden-files: true   # the batch folders start with a dot
           retention-days: 1
           if-no-files-found: warn
 
@@ -295,6 +299,7 @@ jobs:
         with:
           name: hires-maps
           path: .site_batch
+          include-hidden-files: true   # the batch folders start with a dot
           retention-days: 1
           if-no-files-found: warn
 
@@ -363,6 +368,7 @@ jobs:
         with:
           name: menu-${{ matrix.model }}-${{ matrix.tier }}
           path: .site_batch
+          include-hidden-files: true   # the batch folders start with a dot
           retention-days: 1
           if-no-files-found: warn
 
@@ -395,6 +401,7 @@ jobs:
         with:
           name: ens-${{ matrix.src }}
           path: .site_batch
+          include-hidden-files: true   # the batch folders start with a dot
           retention-days: 1
           if-no-files-found: warn
 
@@ -435,6 +442,7 @@ jobs:
         with:
           name: meteograms
           path: .meteo_site/meteograms
+          include-hidden-files: true   # the batch folders start with a dot
           retention-days: 1
           if-no-files-found: warn
 
