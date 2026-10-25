@@ -14,10 +14,12 @@ Images never enter this repository.
 Both projects sit behind Cloudflare Access.
 
 ## Turning it on
-The full build runs on a timer once a day (cron `10 9 * * *` UTC = 2:10 AM PDT, 1:10 AM PST), publishing in 4 priority
-waves (5 Pages deploys per run, about 155 a month). The afternoon build runs only on request: Actions > Forecast site >
-Run workflow, branch `main`, leave every input at its default (the defaults are the full build), Run workflow. Start it
-after 2:10 PM PDT (1:10 PM PST) so it uses the 12Z ECMWF run. Each manual run adds 5 deploys. Smaller manual runs: change
+The full build runs on a timer once a day from the 12Z model runs: cron `50 21 * * *` UTC = 2:50 PM PDT, 1:50 PM PST
+(from Nov 1). The limit is the ECMWF IFS 0.1 deg run, whose 240 h file lands about 21:34 UTC (HRRR 12Z is done about
+13:50, RRFS 15:30-16:20, GFS 16:40, AIFS 18:55, EPS 19:40). Scheduled runs set `WX_CYCLE_HOUR=12`, so every model uses 12Z.
+It publishes in 4 priority waves (5 Pages deploys per run, about 155 a month). Extra builds run only on request: Actions >
+Forecast site > Run workflow, branch `main`, leave every input at its default (the defaults are the full build), Run
+workflow. A manual run uses the newest cycle of each model (no 12Z pin). Each manual run adds 5 deploys. Smaller manual runs: change
 the `products` input (for example `aifs`, `hrrr`, `ens`, `menu`, `wa,temps,mslp`, `eps`), but note every deploy replaces the
 whole site, so a partial run shows only its own products until the next full run.
 
