@@ -320,8 +320,8 @@ def credit(m):
     return TM.CREDIT.format(name=MODELS[m]["name"])
 
 
-def finish(fig, ax, m, c, step, vid, out, tab, title, extra, valid_start=None, period="step"):
-    TM.towns(ax, vid); HS.frame(ax)
+def finish(fig, ax, m, c, step, vid, out, tab, title, extra, valid_start=None, period="step", town=None, town_fmt=TM.fmt_int, pass_corr=None):
+    TM.towns(ax, vid, town, town_fmt, pass_corr); HS.frame(ax)   # town = (LA, LO, F) in map units adds "Seattle 54" numbers (WA view)
     valid = c + dt.timedelta(hours=step); vl = valid.astimezone(PT); M = MODELS[m]
     when = (f"{valid_start:%a %-I %p} to {vl:%a %-m-%-d %-I %p} PT" if period != "step" and valid_start is not None
             else f"Valid {vl:%a %-m-%-d} \u00b7 {vl:%-I %p} PT")
@@ -337,6 +337,13 @@ def outdir(c, prod, m, vid, step, period="step"):
 
 
 # ---------------------------------------------------------------------------------------------- products
+def pass_corr(m, c, R, vids, rate):
+    """Pass height correction input for the WA view: (rate, model terrain in ft), cached per run; None if no WA view / no terrain."""
+    if "wa" not in vids: return None
+    try: return rate, TM.model_orog((m, c), lambda: R.f("orog"))
+    except (KeyError, StopIteration): return None
+
+
 def gust_fill(m, c, step, R, G, vid, out, tab, title, extra, valid_start=None):
     LA, LO, (F,) = TM.cut(GL[0], GL[1], [G * MPH], vid)
     if TM.SMOOTH.get(vid): F = gaussian_filter(F, TM.SMOOTH[vid])
@@ -344,7 +351,7 @@ def gust_fill(m, c, step, R, G, vid, out, tab, title, extra, valid_start=None):
     HS.outlines(ax, cf, res="10m" if vid == "wa" else "50m")
     lo, hi = np.nanpercentile(F, [1, 99.9])
     HS.hbar(fig, f, HS.WIND_TICKS, "Gust (mph)", ky)
-    finish(fig, ax, m, c, step, vid, out, tab, title, f"{extra}  \u00b7  up to {hi:.0f} mph in view", valid_start)
+    finish(fig, ax, m, c, step, vid, out, tab, title, f"{extra}  \u00b7  up to {hi:.0f} mph in view", valid_start, town=(LA, LO, F))
 
 
 GL = [None, None]
@@ -387,7 +394,7 @@ def feels_like_f(T, Td, W):
 def prod_feels(m, c, step, R, vids, ctx):
     la, lo, t = R.f("t2m"); _, _, d = R.f("td2m"); _, _, u = R.f("u10"); _, _, w = R.f("v10")
     T = (t - 273.15) * 1.8 + 32; Td = (d - 273.15) * 1.8 + 32; W = np.hypot(u, w) * MPH
-    FL = feels_like_f(T, np.minimum(Td, T), W)
+    FL = feels_like_f(T, np.minimum(Td, T), W); pcr = pass_corr(m, c, R, vids, TM.LAPSE_T_F_PER_FT)
     for v in vids:
         LA, LO, (F,) = TM.cut(la, lo, [FL], v)
         if TM.SMOOTH.get(v): F = gaussian_filter(F, TM.SMOOTH[v])
@@ -396,7 +403,7 @@ def prod_feels(m, c, step, R, vids, ctx):
         HS.hbar(fig, f, HS.TEMP_TICKS, "Feels like (\u00b0F)", ky)
         lo_, hi_ = np.nanpercentile(F, [0.5, 99.5])
         finish(fig, ax, m, c, step, v, outdir(c, "feels", m, v, step), "feels", "Feels-Like Temperature",
-               f"NWS wind chill / heat index  \u00b7  {lo_:.0f} to {hi_:.0f}\u00b0F in view"); print("ok", m, "feels", v, step, flush=True)
+               f"NWS wind chill / heat index  \u00b7  {lo_:.0f} to {hi_:.0f}\u00b0F in view", town=(LA, LO, F), pass_corr=pcr); print("ok", m, "feels", v, step, flush=True)
 
 
 def prod_aloft(lev):
@@ -429,7 +436,7 @@ def prod_aloft(lev):
 
 
 def prod_td2m(m, c, step, R, vids, ctx):
-    la, lo, d = R.f("td2m"); cm = ramp(DEW_LEVELS, DEW_ANCH)
+    la, lo, d = R.f("td2m"); cm = ramp(DEW_LEVELS, DEW_ANCH); pcr = pass_corr(m, c, R, vids, TM.LAPSE_TD_F_PER_FT)
     for v in vids:
         LA, LO, (D,) = TM.cut(la, lo, [(d - 273.15) * 1.8 + 32], v)
         if TM.SMOOTH.get(v): D = gaussian_filter(D, TM.SMOOTH[v])
@@ -437,7 +444,7 @@ def prod_td2m(m, c, step, R, vids, ctx):
         HS.outlines(ax, cf, res="10m" if v == "wa" else "50m")
         HS.hbar(fig, f, list(range(-20, 81, 10)), "Dewpoint (\u00b0F)", ky)
         lo_, hi_ = np.nanpercentile(D, [0.5, 99.5])
-        finish(fig, ax, m, c, step, v, outdir(c, "td2m", m, v, step), "td2m", "2 m Dewpoint", f"{lo_:.0f} to {hi_:.0f}\u00b0F in view")
+        finish(fig, ax, m, c, step, v, outdir(c, "td2m", m, v, step), "td2m", "2 m Dewpoint", f"{lo_:.0f} to {hi_:.0f}\u00b0F in view", town=(LA, LO, D), pass_corr=pcr)
         print("ok", m, "td2m", v, step, flush=True)
 
 
@@ -577,7 +584,8 @@ def total_map(m, c, s, vid, prod, F, levels, anch, title, key, extra, start, per
     HS.outlines(ax, cf, res=r)
     cb = HS.hbar(fig, f, [], key, ky); cb.set_ticks(levels); cb.ax.set_xticklabels([f"{v:g}" for v in levels], fontproperties=HS.font(700, 13))
     hi = np.nanmax(G) if np.isfinite(G).any() else 0
-    finish(fig, ax, m, c, s, vid, outdir(c, prod, m, vid, s, per), prod, title, f"{extra}  \u00b7  max {hi:.1f} in in view", valid_start=start, period=per)
+    finish(fig, ax, m, c, s, vid, outdir(c, prod, m, vid, s, per), prod, title, f"{extra}  \u00b7  max {hi:.1f} in in view", valid_start=start, period=per,
+           town=(LA, LO, G), town_fmt=TM.fmt_in2 if prod == "frzr" else TM.fmt_in1)
     print("ok", m, prod, per, vid, s, flush=True)
 
 
@@ -785,7 +793,7 @@ def prod_qpf(m, c, s, R, vids, ctx):
             cb.ax.set_xticklabels([f"{t:g}" for t in tk], fontproperties=HS.font(700, 13)); HS.outlines(ax, cf, res=r)
             st = (c + dt.timedelta(hours=s - back)).astimezone(PT)
             out = f"{ROOT}/{c:%Y%m%d%H}/qpf-{m}/{per}/{v}/{c + dt.timedelta(hours=s):%Y%m%d%H}"
-            TM.towns(ax, v); HS.frame(ax); valid = c + dt.timedelta(hours=s); vl = valid.astimezone(PT); M = MODELS[m]
+            TM.towns(ax, v, (LA, LO, G), TM.fmt_in2); HS.frame(ax); valid = c + dt.timedelta(hours=s); vl = valid.astimezone(PT); M = MODELS[m]
             HS.header(fig, "Precipitation Total" if per == "total" else f"{back} h Precipitation", f"{st:%a %-I %p} to {vl:%a %-m-%-d %-I %p} PT",
                       f"{M['name']} {M['res']} {c:%HZ} run {c.astimezone(PT):%-m-%-d-%y (%-I %p PT)}  \u00b7  {TM.VIEWS[v]['label']}  \u00b7  {per if per != 'total' else 'since the run started'}  \u00b7  liquid equivalent  \u00b7  max {np.nanmax(G):.2f} in",
                       f"F+{s}", f"{valid:%HZ %a}".upper())
@@ -809,10 +817,11 @@ FOG_LEVELS = np.arange(20, 101, 10)
 FOG_ANCH = [(20, "#e6e8eb"), (40, "#b9c4cf"), (60, "#7f95ab"), (80, "#4f6a8a"), (100, "#2c3f5f")]
 
 
-def sky_map(m, c, s, v, prod, title, extra, LA, LO, F, L, cm, key, ticks, ext="neither", fmt="{:g}"):
+def sky_map(m, c, s, v, prod, title, extra, LA, LO, F, L, cm, key, ticks, ext="neither", fmt="{:g}", town_fmt=None):
     fig, ax, ky = TM.frame(v); fill_keyed(fig, ax, LO, LA, F, L, cm, ky, key, ticks, ext, fmt=fmt)
     HS.outlines(ax, cf, res="10m" if v == "wa" else "50m")
-    finish(fig, ax, m, c, s, v, outdir(c, prod, m, v, s), prod, title, extra); print("ok", m, prod, v, s, flush=True)
+    finish(fig, ax, m, c, s, v, outdir(c, prod, m, v, s), prod, title, extra, town=(LA, LO, F) if town_fmt else None,
+           town_fmt=town_fmt or TM.fmt_int); print("ok", m, prod, v, s, flush=True)
 
 
 def prod_tcc(m, c, s, R, vids, ctx):
@@ -839,7 +848,7 @@ def prod_vis(m, c, s, R, vids, ctx):
     for v in vids:
         LA, LO, (F,) = TM.cut(la, lo, [mi], v)
         sky_map(m, c, s, v, "vis", "Surface Visibility", f"model visibility, miles  \u00b7  blank = 7 mi or more  \u00b7  lowest {np.nanmin(F):.1f} mi in view",
-                LA, LO, F, VIS_LEVELS, cm, "Visibility (mi)", VIS_LEVELS, "max")
+                LA, LO, F, VIS_LEVELS, cm, "Visibility (mi)", VIS_LEVELS, "max", town_fmt=TM.fmt_vis)
 
 
 def fog_index(m, R):

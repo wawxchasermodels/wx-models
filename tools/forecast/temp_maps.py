@@ -19,6 +19,7 @@ import numpy as np, eccodes as ec
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import matplotlib.transforms
 from matplotlib.colors import BoundaryNorm
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import house_style as HS
@@ -215,15 +216,192 @@ WA_TOWNS = [
 ]
 
 
-def towns(ax, vid):
-    """Town dots and names on the Washington view only (dark text on a white halo, like the contour labels)."""
-    if vid != "wa": return
-    pc = ccrs.PlateCarree()
+# Where each town's NUMBER is read from the model (the label stays at the town). Same official-station pins as
+# tools/wa_maps/town_pop.py OFFICIAL_PIN (house rule: Seattle = SEA, Tacoma = TIW, Port Angeles = CLM, ...); towns without
+# a pin are read at the town point. Tri-Cities uses Pasco (PSC).
+TOWN_PIN = {"Seattle": (47.4447, -122.3144), "Port Angeles": (48.1220, -123.5066), "Spokane": (47.6216, -117.5280),
+            "Yakima": (46.5682, -120.5441), "Wenatchee": (47.3990, -120.2070), "Olympia": (46.9733, -122.9033),
+            "Bellingham": (48.7927, -122.5375), "Tri-Cities": (46.2647, -119.1190), "Walla Walla": (46.0948, -118.2890),
+            "Moses Lake": (47.2086, -119.3191), "Vancouver": (45.6204, -122.6565), "Everett": (47.9070, -122.2816),
+            "Pullman": (46.7439, -117.1096), "Ellensburg": (47.0330, -120.5307), "Omak": (48.4644, -119.5181),
+            "Aberdeen": (46.9712, -123.9366), "Tacoma": (47.2675, -122.5761)}
+TOWN_NUM_COLOR, TOWN_NUM_SIZE, TOWN_NUM_HALO = "#0d0f13", 10.5, 3.0   # bold dark number on a white halo (reads on any fill)
+
+# Mountain passes on the Washington view (Benjamin 10-24-26 10:22 PM: "main mountain pass locations on the Washington view").
+# Coordinates are NOT new: the first 8 are the Washington Snow tab table (tools/wa_maps/snow_map.py PASSES, same in gust_map,
+# nbm_map, precip_map); Cayuse, Satus, Wauconda and Disautel are the WSDOT MountainPass API points the pass watcher follows
+# (wsdot.com/Travel/Real-time/Service/api/MountainPass, read 10-24-26). Elevation (ft) = WSDOT's summit elevation, kept to
+# report how far the model's smoothed terrain sits below the real pass. Stampede Pass is in neither list, so it is not shown.
+# name: (label, lat, lon, elev_ft), in placement priority order (main I-90 / US 2 / US 12 crossings first)
+WA_PASSES = {
+    "Snoqualmie Pass": ("Snoqualmie", 47.4245, -121.4136, 3022), "Stevens Pass": ("Stevens", 47.7465, -121.0854, 4061),
+    "White Pass": ("White", 46.6383, -121.3911, 4500), "Chinook Pass": ("Chinook", 46.8714, -121.5156, 5430),
+    "Blewett Pass": ("Blewett", 47.3348, -120.5786, 4102), "Washington Pass": ("Washington Pass", 48.5253, -120.6545, 5477),
+    "Loup Loup Pass": ("Loup Loup", 48.3926, -119.9026, 4020), "Sherman Pass": ("Sherman", 48.6055, -118.4636, 5575),
+    "Cayuse Pass": ("Cayuse", 46.8656, -121.5361, 4675), "Satus Pass": ("Satus", 45.9847, -120.6536, 3107),
+    "Wauconda Pass": ("Wauconda", 48.7262, -118.9595, 4310), "Disautel Pass": ("Disautel", 48.2818, -119.1434, 3252),
+}
+# Pass height correction (Benjamin 10-24-26 10:32 PM): value + rate * (model ground at the pass - real summit), ft.
+# Temperature and feels-like 3.5 F per 1000 ft (between the 5.4 F dry and ~3 F moist rates); dewpoint 1 F per 1000 ft (dewpoint
+# falls much more slowly with height than temperature). Gusts, precip, snow and visibility are never corrected; towns never.
+# Summit elevations: WSDOT MountainPass feed, checked 10-24-26 against USGS 3DEP (epqs.nationalmap.gov) within 60 ft at the
+# table points, except Sherman: the Snow-tab point sits ~1.2 km east of the summit (3DEP 5,233 ft there; 5,612 ft at WSDOT's
+# point), so the correction still targets the 5,575 ft summit. PASS_HEIGHT_CORR=0 turns it off.
+LAPSE_T_F_PER_FT, LAPSE_TD_F_PER_FT = 3.5 / 1000.0, 1.0 / 1000.0
+_OROG = {}
+
+
+def model_orog(key, loader):
+    """Model terrain height (ft) as (lat, lon, z), cached per (model, cycle); loader() returns (lat, lon, metres)."""
+    if key not in _OROG:
+        la, lo, z = loader(); _OROG[key] = (la, lo, np.asarray(z, float) * 3.28084)
+    return _OROG[key]
+
+
+def hires_orog(st):
+    """HRRR / RRFS surface height from the same step file (HGT:surface)."""
+    return model_orog((st.m, st.c), lambda: st.field("HGT", "surface"))
+
+
+def ecmwf_orog(m, c):
+    """ECMWF IFS / AIFS surface geopotential (step-0 file only) -> height."""
+    def ld():
+        la, lo, z = Step(m, c, 0).field("z"); return la, lo, z / 9.80665
+    return model_orog((m, c), ld)
+
+
+PASS_COLOR, PASS_NAME_SIZE, PASS_NUM_SIZE = "#3b2a5c", 8.0, 9.5   # deep plum, small italic name: reads as "not a town"
+
+
+def town_values(LA, LO, F, pts):
+    """Model value at each (lat, lon) point. Regular lat/lon grids (ECMWF): bilinear. 2-D Lambert grids (HRRR/RRFS 3 km):
+    nearest grid point. NaN where the point is off the grid or touches a missing value."""
+    F = np.asarray(F, float); out = []
+    if np.ndim(LA) == 2:
+        from scipy.spatial import cKDTree
+        la, lo = np.asarray(LA, float), np.asarray(LO, float)
+        lo = (lo + 180) % 360 - 180; k = np.cos(np.deg2rad(np.nanmean(la)))
+        tree = cKDTree(np.column_stack([la.ravel(), lo.ravel() * k]))
+        for pla, plo in pts:
+            d, i = tree.query([pla, ((plo + 180) % 360 - 180) * k])
+            out.append(F.ravel()[i] if d < 0.06 else np.nan)   # 0.06 deg ~ 6 km: farther means off the 3 km grid
+        return np.array(out)
+    from scipy.interpolate import RegularGridInterpolator
+    la, lo = np.asarray(LA, float), np.asarray(LO, float) % 360
+    if la[0] > la[-1]: la, F = la[::-1], F[::-1]
+    o = np.argsort(lo, kind="stable"); lo, F = lo[o], F[:, o]   # full-globe grids wrap at 0/360: sort
+    it = RegularGridInterpolator((la, lo), F, bounds_error=False, fill_value=np.nan)
+    return it(np.array([[pla, plo % 360] for pla, plo in pts]))
+
+
+# number formats per product: return None to leave a town without a number
+def fmt_int(v): return None if not np.isfinite(v) else str(int(round(v)))
+def fmt_signed(v): return None if not np.isfinite(v) else ("0" if round(v) == 0 else f"{v:+.0f}")
+def fmt_in2(v): return None if not np.isfinite(v) else f"{max(v, 0):.2f}"                          # rain / ice, inches
+def fmt_in1(v): return None if not np.isfinite(v) else ("0" if v < 0.05 else f"{v:.1f}")          # snow, inches
+def fmt_vis(v):                                                                                     # visibility, miles
+    if not np.isfinite(v): return None
+    if v >= 7: return "7+"   # the map leaves 7 mi and more blank
+    return f"{v:.1f}" if v < 3 else f"{v:.0f}"
+
+
+def _hits(bb, others, pad=1.5):
+    return any(bb.x0 - pad < o.x1 and o.x0 < bb.x1 + pad and bb.y0 - pad < o.y1 and o.y0 < bb.y1 + pad for o in others)
+
+
+def towns(ax, vid, field=None, fmt=fmt_int, pass_corr=None):
+    """Town dots and names on the Washington view only (dark text on a white halo, like the contour labels).
+    field = (LA, LO, F) in the map's units adds the model value after each name ("Seattle 54"), read at the town's official
+    station pin (bilinear on lat/lon grids, nearest point on 3 km grids). Numbers never overlap a name, another number or the
+    frame edge: a number that would is moved under its name, and dropped (logged) if it still collides. Returns the text artists
+    (so isobar labels can be cleared around them) and stores the sampled values on ax.town_values for checks."""
+    if vid != "wa": return []
+    pc = ccrs.PlateCarree(); tr = pc._as_mpl_transform(ax); arts, names = [], []
     for name, la, lo, side in WA_TOWNS:
         ax.plot(lo, la, "o", ms=3.6, mfc="#1b1d22", mec="white", mew=1.0, transform=pc, zorder=7)
-        ax.annotate(name, (lo, la), xycoords=pc._as_mpl_transform(ax), xytext=(5 if side == "r" else -5, 0), textcoords="offset points",
-                    ha="left" if side == "r" else "right", va="center", color="#1b1d22", fontproperties=HS.font(600, 9.5),
-                    path_effects=HS.halo("white", 2.6), zorder=7)
+        names.append(ax.annotate(name, (lo, la), xycoords=tr, xytext=(5 if side == "r" else -5, 0), textcoords="offset points",
+                                 ha="left" if side == "r" else "right", va="center", color="#1b1d22", fontproperties=HS.font(600, 9.5),
+                                 path_effects=HS.halo("white", 2.6), zorder=7))
+    arts += names
+    if field is None or os.environ.get("TOWN_NUMBERS", "1") == "0": return arts   # TOWN_NUMBERS=0 turns the numbers off
+    vals = town_values(*field, [TOWN_PIN.get(n, (la, lo)) for n, la, lo, _ in WA_TOWNS])
+    ax.town_values = {t[0]: float(v) for t, v in zip(WA_TOWNS, vals)}
+    fig = ax.figure; r = fig.canvas.get_renderer(); pt = 72.0 / fig.dpi; axbb = ax.get_window_extent(r)
+    nums = [None] * len(WA_TOWNS)
+    for k, ((name, la, lo, side), v) in enumerate(zip(WA_TOWNS, vals)):
+        s = fmt(v)
+        if s is None: continue
+        nums[k] = ax.annotate(s, (lo, la), xycoords=tr, xytext=(0, 0), textcoords="offset points", ha="left", va="center",
+                              color=TOWN_NUM_COLOR, fontproperties=HS.font(800, TOWN_NUM_SIZE),
+                              path_effects=HS.halo("white", TOWN_NUM_HALO), zorder=7.5)
+    # inline first: "Name 54" right of the dot, "Name 54 •" left of it (the name slides left to make room)
+    for k, (name, la, lo, side) in enumerate(WA_TOWNS):
+        n = nums[k]
+        if n is None: continue
+        nw = names[k].get_window_extent(r).width * pt; vw = n.get_window_extent(r).width * pt
+        if side == "r": n.xyann = (5 + nw + 3.5, 0)
+        else: n.xyann = (-5 - vw, 0); names[k].xyann = (-5 - vw - 3.5, 0)
+    nb = [t.get_window_extent(r) for t in names]
+    for k, n in enumerate(nums):
+        if n is None: continue
+        others = [b for j, b in enumerate(nb) if j != k] + [nums[j].get_window_extent(r) for j in range(len(nums)) if j != k and nums[j] is not None]
+        bb = n.get_window_extent(r)
+        ok = not _hits(bb, others) and axbb.contains(bb.x0, bb.y0) and axbb.contains(bb.x1, bb.y1)
+        if not ok:   # fallback: centered under the name, name back next to its dot
+            side = WA_TOWNS[k][3]; names[k].xyann = (5 if side == "r" else -5, 0); nb[k] = names[k].get_window_extent(r)
+            n.set_ha("center"); n.xyann = ((nb[k].x0 + nb[k].x1) / 2 * pt - (tr.transform((WA_TOWNS[k][2], WA_TOWNS[k][1]))[0]) * pt, -11)
+            bb = n.get_window_extent(r)
+            if _hits(bb, others) or not (axbb.contains(bb.x0, bb.y0) and axbb.contains(bb.x1, bb.y1)):
+                print(f"town number dropped (no room): {WA_TOWNS[k][0]} {n.get_text()}", flush=True); n.remove(); nums[k] = None; continue
+        arts.append(n)
+    if os.environ.get("PASS_LABELS", "1") != "0":
+        arts += pass_labels(ax, field, fmt, nb + [n.get_window_extent(r) for n in nums if n is not None], r, pt, axbb, pass_corr)
+    return arts
+
+
+def pass_labels(ax, field, fmt, taken, r, pt, axbb, pass_corr=None):
+    """pass_corr = (rate F/ft, (lat, lon, model ground ft)) height-corrects the values to the real summit (temps / dewpoint only)."""
+    """Small plum triangle + italic name + bold value at each mountain pass (Washington view, maps with town numbers only).
+    Value = model at the pass point, NOT corrected to the real summit height (3 km / 9 km terrain is lower and smoother).
+    Tries right, left, above, below the triangle; a pass that cannot clear every town label, number and other pass is dropped (logged)."""
+    pc = ccrs.PlateCarree(); tr = pc._as_mpl_transform(ax); arts = []
+    vals = town_values(*field, [(la, lo) for _, la, lo, _ in WA_PASSES.values()])
+    ax.pass_raw = {k: float(v) for k, v in zip(WA_PASSES, vals)}
+    if pass_corr is not None and os.environ.get("PASS_HEIGHT_CORR", "1") != "0":
+        rate, oro = pass_corr
+        zm = town_values(*oro, [(la, lo) for _, la, lo, _ in WA_PASSES.values()])
+        ax.pass_model_ft = {k: float(z) for k, z in zip(WA_PASSES, zm)}
+        vals = np.array([v + rate * (z - el) if np.isfinite(z) else v for v, z, (_, _, _, el) in zip(vals, zm, WA_PASSES.values())])
+    ax.pass_values = {k: float(v) for k, v in zip(WA_PASSES, vals)}
+    taken = list(taken)
+    for (name, la, lo, side), _ in zip(WA_TOWNS, range(len(WA_TOWNS))):   # town dots are off limits too
+        x, y = tr.transform((lo, la)); taken.append(matplotlib.transforms.Bbox([[x - 4, y - 4], [x + 4, y + 4]]))
+    for (key, (lab, la, lo, el)), v in zip(WA_PASSES.items(), vals):
+        x, y = tr.transform((lo, la))
+        if not axbb.contains(x, y): continue
+        mk = ax.plot(lo, la, "^", ms=4.6, mfc=PASS_COLOR, mec="white", mew=0.9, transform=pc, zorder=7.2)[0]
+        taken.append(matplotlib.transforms.Bbox([[x - 4, y - 4], [x + 4, y + 4]]))
+        s_ = fmt(v)
+        tn = ax.annotate(lab, (lo, la), xycoords=tr, xytext=(0, 0), textcoords="offset points", ha="left", va="center",
+                         color=PASS_COLOR, fontproperties=HS.font(600, PASS_NAME_SIZE), style="italic",
+                         path_effects=HS.halo("white", 2.4), zorder=7.2)
+        tv = None if s_ is None else ax.annotate(s_, (lo, la), xycoords=tr, xytext=(0, 0), textcoords="offset points", ha="left",
+                                                 va="center", color=TOWN_NUM_COLOR, fontproperties=HS.font(800, PASS_NUM_SIZE),
+                                                 path_effects=HS.halo("white", TOWN_NUM_HALO), zorder=7.4)
+        nw = tn.get_window_extent(r).width * pt; vw = 0 if tv is None else tv.get_window_extent(r).width * pt + 3
+        ok = False
+        for gx, gy in ((6, 0), (-6 - nw - vw, 0), (-(nw + vw) / 2, 9), (-(nw + vw) / 2, -9)):
+            tn.xyann = (gx, gy)
+            if tv is not None: tv.xyann = (gx + nw + 3, gy)
+            bbs = [tn.get_window_extent(r)] + ([tv.get_window_extent(r)] if tv is not None else [])
+            if not any(_hits(b, taken) for b in bbs) and all(axbb.contains(b.x0, b.y0) and axbb.contains(b.x1, b.y1) for b in bbs):
+                ok = True; break
+        if not ok:   # keep the triangle (location still shown), drop the label
+            print(f"pass label dropped (no room): {key} {s_}", flush=True); tn.remove()
+            if tv is not None: tv.remove()
+            continue
+        taken += bbs; arts += [tn] + ([tv] if tv is not None else [])
+    return arts
 
 
 def frame(vid):
@@ -264,7 +442,7 @@ def header(fig, m, c, step, vid, title, extra):
     return vl
 
 
-def render_t2m(m, c, step, lat, lon, t2k, vid, out):
+def render_t2m(m, c, step, lat, lon, t2k, vid, out, orog=None):
     LA, LO, (T,) = cut(lat, lon, [t2k], vid)
     F = (T - 273.15) * 1.8 + 32
     if SMOOTH[vid]: F = gaussian_filter(F, SMOOTH[vid])
@@ -272,7 +450,7 @@ def render_t2m(m, c, step, lat, lon, t2k, vid, out):
     fill = ax.contourf(LO, LA, F, levels=HS.TEMP_LEVELS, cmap=cm, norm=BoundaryNorm(HS.TEMP_LEVELS, cm.N), extend="both", transform=pc)
     HS.outlines(ax, cf, res="10m" if vid == "wa" else "50m")
     freeze_line(ax, LO, LA, F, 32)
-    towns(ax, vid)
+    towns(ax, vid, (LA, LO, F), pass_corr=(LAPSE_T_F_PER_FT, orog) if orog is not None else None)   # town + pass numbers, F
     HS.frame(ax)
     lo, hi = np.nanpercentile(F, [0.5, 99.5])
     vl = header(fig, m, c, step, vid, "2 m Temperature", f"32\u00b0F line dashed  \u00b7  {lo:.0f} to {hi:.0f}\u00b0F in view")
@@ -325,7 +503,7 @@ def render_t2manom(m, c, step, lat, lon, t2k, zm, vid, out):
     fig, ax, key_y = frame(vid); pc = ccrs.PlateCarree(); cm = t2a_cmap()
     fill = ax.contourf(LO, LA, A, levels=T2A_LEVELS, cmap=cm, norm=BoundaryNorm(T2A_LEVELS, cm.N), extend="both", transform=pc)
     HS.outlines(ax, cf, res="10m" if vid == "wa" else "50m")
-    towns(ax, vid)
+    towns(ax, vid, (LA, LO, A), fmt_signed)   # town numbers: anomaly, F (+/-)
     HS.frame(ax)
     lo, hi = np.nanpercentile(A, [0.5, 99.5])
     vl = header(fig, m, c, step, vid, "2 m Temperature Anomaly",
@@ -356,8 +534,10 @@ if __name__ == "__main__":
             try:
                 if "t2m" in a.products.split(","):
                     lat, lon, t2 = st.field("TMP", "2 m above ground")
+                    try: oro = hires_orog(st) if "wa" in views else None
+                    except StopIteration: oro = None
                     for v in views:
-                        out = f"{ROOT}/{c:%Y%m%d%H}/t2m-{a.model}/step/{v}/{vt}"; render_t2m(a.model, c, s, lat, lon, t2, v, out); print("ok", out, flush=True)
+                        out = f"{ROOT}/{c:%Y%m%d%H}/t2m-{a.model}/step/{v}/{vt}"; render_t2m(a.model, c, s, lat, lon, t2, v, out, oro); print("ok", out, flush=True)
                 if "t850" in a.products and "t850" in HIRES[a.model]["products"]:
                     lat, lon, t = st.field("TMP", "850 mb"); _, _, z = st.field("HGT", "850 mb")
                     _, _, u = st.field("UGRD", "850 mb"); _, _, w = st.field("VGRD", "850 mb"); u, w = earth_relative(u, w, lon, a.model)
@@ -381,8 +561,10 @@ if __name__ == "__main__":
                     out = f"{ROOT}/{c:%Y%m%d%H}/t2manom-{a.model}/step/{v}/{vt}"; render_t2manom(a.model, c, s, lat, lon, t2, zorog, v, out); print("ok", out, flush=True)
             if "t2m" in a.products.split(","):
                 lat, lon, t2 = st.field("2t")
+                try: oro = ecmwf_orog(a.model, c) if "wa" in a.views.split(",") else None
+                except StopIteration: oro = None
                 for v in a.views.split(","):
-                    out = f"{ROOT}/{c:%Y%m%d%H}/t2m-{a.model}/step/{v}/{vt}"; render_t2m(a.model, c, s, lat, lon, t2, v, out); print("ok", out, flush=True)
+                    out = f"{ROOT}/{c:%Y%m%d%H}/t2m-{a.model}/step/{v}/{vt}"; render_t2m(a.model, c, s, lat, lon, t2, v, out, oro); print("ok", out, flush=True)
             if "t850" in a.products:
                 lat, lon, t = st.field("t", 850, "pl"); _, _, z = st.field("gh", 850, "pl")
                 _, _, u = st.field("u", 850, "pl"); _, _, w = st.field("v", 850, "pl"); _, _, sp = st.field("sp")

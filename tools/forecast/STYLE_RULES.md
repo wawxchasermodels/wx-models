@@ -133,3 +133,24 @@ These rules apply to every model product: AIFS, GFS, GEFS, ECMWF/EPS, HRRR, RRFS
   GFS pill on those tabs; credit "Data: NOAA GFS (public domain)" plus the NCEP/NCAR climatology on the anomaly). All other GFS
   products and the MSLP + 500 mb Height combo are archived in archive/gfs_products_20261024/.
 - Frames: IFS and AIFS every 6 h to 240 h on every menu map, the temps job and the AIFS maps; HRRR hourly to 48 h, RRFS hourly to 84 h.
+
+## Town numbers on Washington-view maps (prototype 10-24-26, branch citynum-proto, not live)
+- Washington ("wa") view only, the same 20 WA_TOWNS labels; no new towns. Number follows the name: "Seattle 54" (right-side
+  labels) or "Port Angeles 44 •" (left-side labels, the name slides left). Bold 800 weight, 10.5 pt, #0d0f13 on a 3.0 white halo.
+- Value read at the town's official station pin (same table as wa_maps/town_pop.py OFFICIAL_PIN), else the town point:
+  bilinear on ECMWF lat/lon grids, nearest point on HRRR/RRFS 3 km grids. Same units as the map's key.
+- Formats: temps/dewpoint/gusts whole numbers; anomaly signed; rain/ice 2 decimals; snow 1 decimal (0 under 0.05);
+  visibility 1 decimal under 3 mi, whole miles to 7, "7+" at 7 mi and more (blank on the map).
+- A number that would overlap a name, another number or the frame moves under its name; if still blocked it is dropped (logged).
+  Isobar labels that touch a number are removed. TOWN_NUMBERS=0 turns every number off.
+- Mountain passes (added 10-24-26 10:22 PM request): on the same Washington-view maps that carry town numbers, 12 passes from
+  temp_maps.WA_PASSES (Snow tab table + WSDOT pass-watcher points; Stampede not in either list). Small plum (#3b2a5c) triangle,
+  8 pt italic name without "Pass" (except Washington Pass), bold 9.5 pt value. Placed after towns: right, left, above, below;
+  label dropped (triangle kept, logged) if it cannot clear every town label/number/dot. Value = model at the pass point, no
+  terrain correction. PASS_LABELS=0 turns passes off.
+- Pass height correction (Benjamin 10-24-26 10:32 PM): pass values on temperature and feels-like maps = model value + 3.5 F per
+  1000 ft x (model ground at the pass - real summit); dewpoint uses 1 F per 1000 ft (dewpoint drops far more slowly with height).
+  Model ground = the model's own terrain (ECMWF step-0 geopotential, HRRR/RRFS HGT:surface), cached once per run. Summits =
+  WSDOT elevations (checked vs USGS 3DEP). Never applied to gusts, precip, snow, ice or visibility, and never to towns.
+  PASS_HEIGHT_CORR=0 turns it off. Washington tab maps: same rule in tools/wa_maps/pass_terrain.py (nbm_map.py lows/highs only;
+  NBM terrain = URMA 2.5 km HGT, EPS terrain = ECMWF 0.25 deg z, static files in tools/wa_maps/assets/terrain_*.npz).
