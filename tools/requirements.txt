@@ -1,0 +1,14 @@
+# Pinned to the versions the maps were verified with (Python 3.13). All permissive / open licenses.
+numpy==2.5.4
+scipy==1.18.1
+shapely==2.2.0
+Pillow==13.0.0
+pyproj==3.8.0
+eccodes==2.50.0
+eccodeslib==2.50.0.33
+cairosvg==2.9.1
+cairocffi==1.7.1
+requests==2.34.2
+matplotlib==3.11.2
+cartopy==0.26.0
+fonttools==4.65.0
