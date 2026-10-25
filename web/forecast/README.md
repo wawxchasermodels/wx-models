@@ -14,9 +14,12 @@ Images never enter this repository.
 Both projects sit behind Cloudflare Access.
 
 ## Turning it on
-The full build runs on a timer twice a day (cron `10 9,21 * * *` UTC = 2:10 AM / 2:10 PM PDT, 1:10 AM / 1:10 PM PST),
-publishing in 4 priority waves (about 310 Pages deploys a month). Manual runs: Actions > Forecast site > Run workflow,
-with the `products` input (for example `aifs`, `hrrr`, `ens`, `menu`, `wa,temps,mslp`, `eps`).
+The full build runs on a timer once a day (cron `10 9 * * *` UTC = 2:10 AM PDT, 1:10 AM PST), publishing in 4 priority
+waves (5 Pages deploys per run, about 155 a month). The afternoon build runs only on request: Actions > Forecast site >
+Run workflow, branch `main`, leave every input at its default (the defaults are the full build), Run workflow. Start it
+after 2:10 PM PDT (1:10 PM PST) so it uses the 12Z ECMWF run. Each manual run adds 5 deploys. Smaller manual runs: change
+the `products` input (for example `aifs`, `hrrr`, `ens`, `menu`, `wa,temps,mslp`, `eps`), but note every deploy replaces the
+whole site, so a partial run shows only its own products until the next full run.
 
 To stop the timer, comment out the `schedule:` block in `.github/workflows/forecast-site.yml` or disable the
 workflow in the Actions tab.
