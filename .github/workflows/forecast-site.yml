@@ -3,13 +3,18 @@
 # and the schedule below is commented out. To switch on, see web/forecast/README.md ("Turning it on").
 #
 # Job layout (every job stays well under the 6 h GitHub limit; timeouts are 300 min = 5 h):
-#   plan            picks the ECMWF cycle once and splits the WA map list into shards (auto: about 4 h of work each)
+#   plan            picks the ECMWF cycle once, splits the WA map list into shards (auto: about 45 min of work each, max 20)
+#                   and plans the menu chunks + incremental skip list (tools/forecast/menu_plan.py, input menu_opts)
 #   wa-maps (N)     matrix, one job per shard: renders its share of the WA maps -> artifact wa-maps-<k>
 #   aifs            AIFS 500 mb anomaly (NA, PNW), MSLP and MSLP + 10 m wind (NA, PNW, PNW tight), every 6 h -> artifact aifs-maps
 #   gfs             the only GFS maps (10-24-26): 500 mb anomaly + sea-level pressure (NA, PNW, PNW tight), every 6 h -> gfs-maps
 #   mslp            ECMWF 9 km MSLP + precip (NA, PNW, WA), 3 h to 72 h then 6 h to 240 h -> artifact mslp-maps (only when 'mslp' is picked)
 #   temps           2 m temp + anomaly (NA, PNW, PNW tight, WA) and 850 mb (NA, PNW, WA), ECMWF IFS and AIFS, every 6 h -> temp-maps
-#   menu (M x 3)    menu maps (menu_maps.py), one job per model and product tier; IFS/AIFS every 6 h to 240 h, HRRR/RRFS hourly -> menu-<model>-<tier>
+#   menu (chunks)   menu maps (menu_maps.py), one job per model, tier and forecast-hour chunk (about 20 min each, max 20 at once);
+#                   IFS/AIFS every 6 h to 240 h, HRRR/RRFS hourly -> menu-<model>-<tier>-<chunk>. menu_opts chunk_min=0 = old layout
+#   menu-store      saves each freshly drawn model's menu maps to the Actions cache (menu-out-v1-<model>-<cycle>-...)
+#   menu-reuse      models whose latest cycle is already published (incremental=on): restores them from the cache
+#   menu-state      after a good deploy, records which cycle of each model is live (.menu_state cache)
 #   ens (2)         ensemble low centers + 500 mb heights, EPS and AIFS ENS, every 6 h to 240 h (00Z/12Z cycles) -> ens-<src>
 #   meteograms      EPS (6 h steps, 00Z/12Z only) / HRRR / RRFS town meteograms, meteo_suite.py, one job so made.json is
 #                   written once -> artifact meteograms
@@ -46,7 +51,7 @@ on:
         description: "Menu frame tiers (A,B,C; see plan/menu_v2.md)"
         default: "A,B,C"
       wa_shards:
-        description: "WA render jobs: 'auto' (about 4 h of maps per job) or a number 1-20"
+        description: "WA render jobs: 'auto' (about 45 min of maps per job, up to 20) or a number 1-20"
         default: "auto"
       menu_opts:
         description: "Menu speed switches: incremental=on|off (skip models already published), chunk_min=20 (0 = old one job per tier)"
@@ -68,9 +73,9 @@ env:
   WA_VIEWS: ${{ github.event.inputs.wa_views || 'full' }}
   WA_HOURS: ${{ github.event.inputs.wa_hours || '48' }}
   WA_MODELS: ${{ github.event.inputs.wa_models || 'default' }}
-  WA_PARALLEL: "3"          # renders at once inside one 4-core runner
-  WA_SEC_PER_MAP: "25"      # measured draw + fetch per map (10-23-26 speedup); used only to size the shards
-  WA_HOURS_PER_JOB: "4"     # target work per shard, leaves about 1 h spare under the 5 h timeout
+  WA_PARALLEL: "4"          # renders at once inside one 4-core runner (speed-v1: 3 -> 4, each render is single-threaded, ~1-2 GB)
+  WA_SEC_PER_MAP: "22"      # measured draw + fetch per map with the speed-v1 caches (10-25-26); used only to size the shards
+  WA_HOURS_PER_JOB: "0.75"  # target work per shard (speed-v1: 4 h -> 45 min, so the full WA list fills up to 20 shards)
 
 jobs:
   plan:

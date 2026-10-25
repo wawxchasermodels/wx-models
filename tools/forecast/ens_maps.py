@@ -22,6 +22,7 @@ import menu_maps as MM
 import temp_maps as TM
 import house_style as HS
 import cartopy.crs as ccrs, cartopy.feature as cf
+import fastgeo  # noqa: F401  speed_build_v1: faster contour/contourf/barbs/quiver (WX_FASTGEO=0 = off)
 from scipy.ndimage import gaussian_filter
 
 PT, ROOT, get = TM.PT, TM.ROOT, TM.get

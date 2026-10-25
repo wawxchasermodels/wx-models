@@ -18,6 +18,7 @@ from matplotlib.colors import BoundaryNorm, ListedColormap
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import house_style as HS
 import cartopy.crs as ccrs, cartopy.feature as cf
+import fastgeo  # noqa: F401  speed_build_v1: faster contour/contourf/barbs/quiver (WX_FASTGEO=0 = off)
 from scipy.interpolate import RegularGridInterpolator
 
 PT = ZoneInfo("America/Los_Angeles")

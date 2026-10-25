@@ -62,6 +62,7 @@ class Reader:
             self.prs = MODELS[m]["prs"].format(d=f"{c:%Y%m%d}", h=c.hour, s=s) if "prs" in MODELS[m] else self.url
 
     def _locked(self, name, fn, *a):
+        if getattr(self, "rec", None) is not None and name not in self.rec: self.rec.append(name)
         if name in self.cache: return self.cache[name]
         with self._lk: lk = self._locks.setdefault(name, threading.Lock())
         with lk:
@@ -264,7 +265,15 @@ def freeze_line(ax, LO, LA, F, level):
     cs.set(path_effects=HS.halo("white", 3.0))
 
 
+LINE_STRIDE = int(os.environ.get("MENU_LINE_STRIDE", "1"))   # part-two test: contour smoothed height/pressure lines on every k-th point
+
+
 def labelled(ax, LO, LA, Z, L, lw=None, color=None):
+    k = LINE_STRIDE
+    if k > 1 and np.ndim(LO) == 1 and np.size(LO) > 600: LO, LA, Z = LO[::k], LA[::k], Z[::k, ::k]
+    if FAST_CONTOUR and np.isfinite(Z).any():   # only the levels inside the data range (e.g. 4-7 of the 433 height levels): same lines
+        lo_, hi_ = np.nanmin(Z), np.nanmax(Z); Lk = [l for l in L if lo_ <= l <= hi_]
+        if Lk: L = Lk
     hc = pc_contour(ax, "l", LO, LA, Z, levels=L, colors=color or HS.ISOBAR_COLOR, linewidths=lw or HS.ISOBAR_LW, zorder=4)
     hc.set(path_effects=HS.halo("white", HS.ISOBAR_HALO))
     lab = ax.clabel(hc, fmt="%d", inline=True, inline_spacing=6)
@@ -973,7 +982,8 @@ class Loader:
         self.readers, self.ev, self.dl = {}, {}, {}
         for s in steps:
             self.ev[s] = {k: threading.Event() for k in [None] + prods}
-        self.nthreads = max(1, int(os.environ.get("MENU_DL_THREADS", "4")))
+        self.nthreads = max(1, int(os.environ.get("MENU_DL_THREADS", "8")))
+        self.names = {}   # field names asked for at the first drawn / first data-only step; later steps fetch them all at once
         self.t = threading.Thread(target=self.run, daemon=True); self.t.start()
 
     def run(self):
@@ -984,11 +994,24 @@ class Loader:
                 R = Reader(self.m, self.c, s); self.readers[s] = R; wait_for_data(R)
                 t0 = time.perf_counter(); d0 = TM.DL["sec"]
                 jobs = ([None] if self.need else []) + [p for p in self.prods if wanted(p, s, self.render)]
+                kind = s in self.render; known = self.names.get(kind)
+                R.rec = [] if known is None else None; tpre = None
+                if known:   # all fields of this step at once (field names repeat from step to step)
+                    def pre(n, R=R):
+                        try:
+                            if n.startswith("acc0:"): R.acc0(n[5:])
+                            elif n.startswith("ave:"): R.ave(n[4:])
+                            else: R.f(n)
+                        except Exception: pass
+                    for f in [ex.submit(pre, n) for n in known]: f.result()
+                tpre = time.perf_counter() - t0
                 def one(p, s=s, R=R):
                     warm(self.m, self.c, s, R, p, self.render, self.need); self.ev[s][p].set()
                 for f in [ex.submit(one, p) for p in jobs]: f.result()
+                if R.rec is not None: self.names[kind] = list(R.rec); R.rec = None
                 for e in self.ev[s].values(): e.set()
-                self.dl[s] = (TM.DL["sec"] - d0, time.perf_counter() - t0)
+                tot_ = time.perf_counter() - t0
+                self.dl[s] = (tpre if tpre is not None else min(TM.DL["sec"] - d0, tot_), tot_)   # (download wall s, download+decode+prep wall s)
 
     def get(self, s, p):
         self.ev[s][p].wait(); return self.readers[s]
@@ -1037,7 +1060,7 @@ def report(m, P, L, dispatched, final=False):
         cpu, n = P.stepcpu[k]
         if k not in dispatched or (n < P.sub.get(k, 0) and not final): continue
         net, data = L.dl.get(k, (0, 0)) if L else (0, 0)
-        print(f"timer {m} F{k:03d}: download {net:.1f} s (+decode {max(data - net, 0):.1f} s, in the background), draw {cpu:.1f} s "
+        print(f"timer {m} F{k:03d}: download {net:.1f} s (+decode/prep {max(data - net, 0):.1f} s, in the background), draw {cpu:.1f} s "
               f"in {n} frames ({cpu / max(n, 1):.1f} s each, {P.n} at once)", flush=True); del P.stepcpu[k]
 
 
