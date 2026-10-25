@@ -1,0 +1,44 @@
+# menu_maps.py PRODUCTS entries as they were on 10-24-26 (before the GFS trim). Every entry that listed "gfs".
+# To restore a GFS product: put "gfs" back in that product's models tuple in tools/forecast/menu_maps.py PRODUCTS.
+# Global views at the time were ("na","pnw","wa") style tuples; the new pnwt view can be added too.
+    "gust10": (prod_gust10, ("ifs", "gfs", "hrrr", "rrfs"), G_NAPNW, H_PNWWA),
+    "peakgust": (prod_peakgust, ("ifs", "gfs", "hrrr", "rrfs"), G_ALL, H_PNWWA),
+    "feels": (prod_feels, ("ifs", "gfs", "aifs", "hrrr", "rrfs"), G_ALL, H_PNWWA),
+    "t925": (prod_aloft(925), ("ifs", "gfs", "aifs", "hrrr"), G_ALL, H_PNWWA),
+    "t700": (prod_aloft(700), ("ifs", "gfs", "aifs", "hrrr"), G_NAPNW, H_PNW),
+    "t500": (prod_aloft(500), ("ifs", "gfs", "aifs", "hrrr"), G_NAPNW, H_PNW),
+    "t300": (prod_aloft(300), ("ifs", "gfs", "aifs", "hrrr"), G_NAPNW, H_PNW),
+    "td2m": (prod_td2m, ("ifs", "gfs", "hrrr", "rrfs"), G_PNWWA, H_PNWWA),
+    "mslp500": (prod_mslp500, ("ifs", "gfs", "aifs", "hrrr"), G_NAPNW, H_PNW),
+    "mslpptype": (prod_mslpptype, ("ifs", "gfs", "hrrr", "rrfs"), G_PNWWA, ("wa",)),
+    "snowkuch": (prod_snowkuch, ("ifs", "gfs", "hrrr"), ("pnw",), H_PNW),
+    "snow10": (prod_snow10, ("ifs", "gfs", "hrrr", "rrfs"), ("pnw",), H_PNW),
+    "snowk24": (prod_snowk24, ("ifs", "gfs", "hrrr"), G_PNWWA, H_PNWWA),
+    "snowrate": (prod_snowrate, ("gfs", "hrrr", "rrfs"), G_PNWWA, H_PNWWA),
+    "frzr": (prod_frzr, ("ifs", "gfs", "hrrr", "rrfs"), G_PNWWA, H_PNWWA),
+    "ivt": (prod_ivt, ("ifs", "gfs", "aifs", "hrrr"), G_NAPNW, H_PNW),
+    "pw": (prod_pw, ("ifs", "gfs", "aifs", "hrrr", "rrfs"), ("pnw",), H_PNW),
+    "pwanom": (prod_pwanom, ("ifs", "gfs", "aifs", "hrrr"), G_NAPNW, H_PNW),
+    "w850": (prod_wind(850), ("ifs", "gfs", "aifs", "hrrr"), G_NAPNW, H_PNW),
+    "w250": (prod_wind(250), ("ifs", "gfs", "aifs", "hrrr"), G_NAPNW, H_PNW),
+    "thick": (prod_thick, ("ifs", "gfs", "aifs", "hrrr"), ("pnw",), H_PNW),
+    "tcc": (prod_tcc, ("ifs", "gfs", "aifs", "hrrr", "rrfs"), ("pnw",), H_PNW),
+    "vis": (prod_vis, ("gfs", "hrrr", "rrfs"), G_PNWWA, ("wa",)),
+    "fog": (prod_fog, ("ifs", "gfs", "hrrr", "rrfs"), G_PNWWA, ("wa",)),
+    "qpf": (prod_qpf, ("ifs", "gfs", "aifs", "hrrr", "rrfs"), ("pnw",), H_PNW),
+
+# mslp500 (MSLP + 500 mb Height), dropped on ALL models 10-24-26. Function as it was:
+def prod_mslp500(m, c, step, R, vids, ctx):
+    la, lo, p = R.f("msl"); _, _, z = R.f("Z:500"); cm = ramp(H500_LEVELS, H500_ANCH)
+    for v in vids:
+        LA, LO, (P, Z) = TM.cut(la, lo, [p / 100.0, z / 10.0], v)
+        hires = np.ndim(LA) == 2; Zs = gaussian_filter(Z, 6.0 if hires else 1.0)
+        fig, ax, ky = TM.frame(v); f = fill(ax, LO, LA, Zs, H500_LEVELS, cm)
+        HS.outlines(ax, cf, res="10m" if v == "wa" else "50m")
+        lab, mk = isobars_hl(fig, ax, LA, LO, P, v)
+        HS.hbar(fig, f, list(range(486, 607, 12)), "500 mb (dam)", ky)
+        HS.clear_labels_near(fig, lab, mk)
+        finish(fig, ax, m, c, step, v, outdir(c, "mslp500", m, v, step), "mslp500", "MSLP + 500 mb Height",
+               "fill = 500 mb height  \u00b7  isobars every 4 mb"); print("ok", m, "mslp500", v, step, flush=True)
+# PRODUCTS entry was:
+    "mslp500": (prod_mslp500, ("ifs", "gfs", "aifs", "hrrr"), G_NAPNW, H_PNW),

@@ -2,13 +2,14 @@
 """Menu products for the forecast site, one renderer for every model (menu_v2):
   gust10    10 m Wind Gusts            peakgust  Peak Gust So Far (run max)
   feels     Feels-Like Temp            t925/t700/t500/t300  Temp + Barbs at that level
-  td2m      2 m Dewpoint               mslp500   MSLP + 500 mb Height
-  mslpptype MSLP + P-Type (instant)
-Models: ifs (ECMWF 9 km open data), aifs (ECMWF AIFS), gfs (NOAA GFS 0.25), hrrr, rrfs (NOAA 3 km).
+  td2m      2 m Dewpoint               mslpptype MSLP + P-Type (instant)      (+ precip, snow, aloft, sky products below)
+Models: ifs (ECMWF 9 km open data), aifs (ECMWF AIFS), hrrr, rrfs (NOAA 3 km). GFS has no menu products since 10-24-26
+(only gfs_maps.py: 500 mb anomaly + sea-level pressure); the Reader below still serves GFS for gfs_maps.py.
 Methods are standard and written next to each product. NOAA data: public domain. ECMWF: CC BY 4.0.
 NOT scheduled; run by hand:
-  python menu_maps.py --model ifs|aifs|gfs|hrrr|rrfs [--cycle YYYYMMDDHH] [--steps 3,6 | --hours 72 --every 3]
-                      [--products gust10,peakgust,...] [--views na,pnw,wa]
+  python menu_maps.py --model ifs|aifs|hrrr|rrfs [--cycle YYYYMMDDHH] [--steps 3,6 | --hours 72 --every 6]
+                      [--products gust10,peakgust,...] [--views na,pnw,pnwt,wa] [--count]
+  --count: print how many map files the run would write (no downloads, no renders).
 Writes $SITE_BATCH/<cycle>/<product>-<model>/step/<view>/<valid>/final.jpg + site_frame.json.
 """
 import sys, argparse, datetime as dt, json, os
@@ -239,7 +240,7 @@ GL = [None, None]
 
 
 def gust_note(m):
-    if m in ("ifs",): return "max gust in the 3 h (6 h after day 6) ending at the valid time"
+    if m in ("ifs",): return "max gust in the prior 3 h (6 h after day 6)"
     return "gust at the valid time"
 
 
@@ -748,41 +749,45 @@ def prod_fog(m, c, s, R, vids, ctx):
     for v in vids:
         LA, LO, (F,) = TM.cut(la, lo, [F0], v)
         if TM.SMOOTH.get(v): F = gaussian_filter(F, TM.SMOOTH[v])
-        sky_map(m, c, s, v, "fog", "Fog Risk Index", "our index: dewpoint depression + light wind" + (" + model visibility" if vis else "") + ", damped in rain" +
+        sky_map(m, c, s, v, "fog", "Fog Risk Index", "our index: dewpoint spread + light wind" + (" + model visibility" if vis else "") + ", damped in rain" +
                 "  \u00b7  not a model fog forecast", LA, LO, F, FOG_LEVELS, ramp(FOG_LEVELS, FOG_ANCH, under=(0, 0, 0, 0)), "Fog risk",
                 [20, 40, 60, 80, 100], "neither")
 
 
 G_NAPNW, H_PNW, H_PNWWA, G_ALL, G_PNWWA = ("na", "pnw"), ("pnwhr",), ("pnwhr", "wa"), ("na", "pnw", "wa"), ("pnw", "wa")
+# Ground-level products also get the "Pacific NW tight" view (pnwt) on the global models (IFS, AIFS); never on HRRR/RRFS,
+# whose 3 km grids stop short of the tight frame's NW corner (Benjamin 10-24-26).
+G_NAPNWT, G_ALLT, G_PNWTWA, G_PNWT = ("na", "pnw", "pnwt"), ("na", "pnw", "pnwt", "wa"), ("pnw", "pnwt", "wa"), ("pnw", "pnwt")
+# GFS (10-24-26): removed from every menu product; its only maps are the 500 mb anomaly and sea-level pressure (gfs_maps.py).
+# The old GFS entries and the dropped mslp500 product are in archive/gfs_products_20261024/ (README there says how to restore).
 PRODUCTS = {   # name: (function, models, global views, high-res views)
-    "gust10": (prod_gust10, ("ifs", "gfs", "hrrr", "rrfs"), G_NAPNW, H_PNWWA),
-    "peakgust": (prod_peakgust, ("ifs", "gfs", "hrrr", "rrfs"), G_ALL, H_PNWWA),
-    "feels": (prod_feels, ("ifs", "gfs", "aifs", "hrrr", "rrfs"), G_ALL, H_PNWWA),
-    "t925": (prod_aloft(925), ("ifs", "gfs", "aifs", "hrrr"), G_ALL, H_PNWWA),
-    "t700": (prod_aloft(700), ("ifs", "gfs", "aifs", "hrrr"), G_NAPNW, H_PNW),
-    "t500": (prod_aloft(500), ("ifs", "gfs", "aifs", "hrrr"), G_NAPNW, H_PNW),
-    "t300": (prod_aloft(300), ("ifs", "gfs", "aifs", "hrrr"), G_NAPNW, H_PNW),
-    "td2m": (prod_td2m, ("ifs", "gfs", "hrrr", "rrfs"), G_PNWWA, H_PNWWA),
-    "mslp500": (prod_mslp500, ("ifs", "gfs", "aifs", "hrrr"), G_NAPNW, H_PNW),
-    "mslpptype": (prod_mslpptype, ("ifs", "gfs", "hrrr", "rrfs"), G_PNWWA, ("wa",)),
-    "snowkuch": (prod_snowkuch, ("ifs", "gfs", "hrrr"), ("pnw",), H_PNW),
-    "snow10": (prod_snow10, ("ifs", "gfs", "hrrr", "rrfs"), ("pnw",), H_PNW),
-    "snowk24": (prod_snowk24, ("ifs", "gfs", "hrrr"), G_PNWWA, H_PNWWA),
-    "snowrate": (prod_snowrate, ("gfs", "hrrr", "rrfs"), G_PNWWA, H_PNWWA),
-    "frzr": (prod_frzr, ("ifs", "gfs", "hrrr", "rrfs"), G_PNWWA, H_PNWWA),
-    "ivt": (prod_ivt, ("ifs", "gfs", "aifs", "hrrr"), G_NAPNW, H_PNW),
-    "pw": (prod_pw, ("ifs", "gfs", "aifs", "hrrr", "rrfs"), ("pnw",), H_PNW),
-    "pwanom": (prod_pwanom, ("ifs", "gfs", "aifs", "hrrr"), G_NAPNW, H_PNW),
-    "w850": (prod_wind(850), ("ifs", "gfs", "aifs", "hrrr"), G_NAPNW, H_PNW),
-    "w250": (prod_wind(250), ("ifs", "gfs", "aifs", "hrrr"), G_NAPNW, H_PNW),
-    "thick": (prod_thick, ("ifs", "gfs", "aifs", "hrrr"), ("pnw",), H_PNW),
-    "tcc": (prod_tcc, ("ifs", "gfs", "aifs", "hrrr", "rrfs"), ("pnw",), H_PNW),
+    "gust10": (prod_gust10, ("ifs", "hrrr", "rrfs"), G_NAPNWT, H_PNWWA),
+    "peakgust": (prod_peakgust, ("ifs", "hrrr", "rrfs"), G_ALLT, H_PNWWA),
+    "feels": (prod_feels, ("ifs", "aifs", "hrrr", "rrfs"), G_ALLT, H_PNWWA),
+    "t925": (prod_aloft(925), ("ifs", "aifs", "hrrr"), G_ALL, H_PNWWA),
+    "t700": (prod_aloft(700), ("ifs", "aifs", "hrrr"), G_NAPNW, H_PNW),
+    "t500": (prod_aloft(500), ("ifs", "aifs", "hrrr"), G_NAPNW, H_PNW),
+    "t300": (prod_aloft(300), ("ifs", "aifs", "hrrr"), G_NAPNW, H_PNW),
+    "td2m": (prod_td2m, ("ifs", "hrrr", "rrfs"), G_PNWTWA, H_PNWWA),
+    "mslpptype": (prod_mslpptype, ("ifs", "hrrr", "rrfs"), G_PNWWA, ("wa",)),
+    "snowkuch": (prod_snowkuch, ("ifs", "hrrr"), ("pnw",), H_PNW),
+    "snow10": (prod_snow10, ("ifs", "hrrr", "rrfs"), ("pnw",), H_PNW),
+    "snowk24": (prod_snowk24, ("ifs", "hrrr"), G_PNWWA, H_PNWWA),
+    "snowrate": (prod_snowrate, ("hrrr", "rrfs"), G_PNWWA, H_PNWWA),
+    "frzr": (prod_frzr, ("ifs", "hrrr", "rrfs"), G_PNWWA, H_PNWWA),
+    "ivt": (prod_ivt, ("ifs", "aifs", "hrrr"), G_NAPNW, H_PNW),
+    "pw": (prod_pw, ("ifs", "aifs", "hrrr", "rrfs"), ("pnw",), H_PNW),
+    "pwanom": (prod_pwanom, ("ifs", "aifs", "hrrr"), G_NAPNW, H_PNW),
+    "w850": (prod_wind(850), ("ifs", "aifs", "hrrr"), G_NAPNW, H_PNW),
+    "w250": (prod_wind(250), ("ifs", "aifs", "hrrr"), G_NAPNW, H_PNW),
+    "thick": (prod_thick, ("ifs", "aifs", "hrrr"), ("pnw",), H_PNW),
+    "tcc": (prod_tcc, ("ifs", "aifs", "hrrr", "rrfs"), G_PNWT, H_PNW),
     "ir": (prod_ir, ("hrrr", "rrfs"), ("pnw",), H_PNW),
-    "vis": (prod_vis, ("gfs", "hrrr", "rrfs"), G_PNWWA, ("wa",)),
-    "fog": (prod_fog, ("ifs", "gfs", "hrrr", "rrfs"), G_PNWWA, ("wa",)),
-    "qpf": (prod_qpf, ("ifs", "gfs", "aifs", "hrrr", "rrfs"), ("pnw",), H_PNW),
+    "vis": (prod_vis, ("hrrr", "rrfs"), G_PNWWA, ("wa",)),   # no visibility field in ECMWF open data, so 3 km models only now
+    "fog": (prod_fog, ("ifs", "hrrr", "rrfs"), G_PNWTWA, ("wa",)),
+    "qpf": (prod_qpf, ("ifs", "aifs", "hrrr", "rrfs"), ("pnw",), H_PNW),
 }
-# AIFS upper air: no Washington view (already true: t700-t300 / mslp500 have no WA view); t925 drops WA for AIFS below.
+# AIFS upper air: no Washington view (already true: t700-t300 have no WA view); t925 drops WA for AIFS below.
 
 
 def native_steps(m, hours):
@@ -806,16 +811,33 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", required=True, choices=list(MODELS)); ap.add_argument("--cycle")
     ap.add_argument("--steps"); ap.add_argument("--hours", type=int, default=240); ap.add_argument("--every", type=int, default=0)
-    ap.add_argument("--products", default=",".join(PRODUCTS)); ap.add_argument("--views", default="na,pnw,wa")
+    ap.add_argument("--products", default=",".join(PRODUCTS)); ap.add_argument("--views", default="na,pnw,pnwt,wa")
+    ap.add_argument("--count", action="store_true", help="only print the number of map files this run would write")
     a = ap.parse_args(); m = a.model
-    c = dt.datetime.strptime(a.cycle, "%Y%m%d%H").replace(tzinfo=dt.timezone.utc) if a.cycle else latest(m)
+    if a.count:
+        c = dt.datetime(2026, 1, 1, 0, tzinfo=dt.timezone.utc)   # counting needs no real run
+    else:
+        c = dt.datetime.strptime(a.cycle, "%Y%m%d%H").replace(tzinfo=dt.timezone.utc) if a.cycle else latest(m)
     maxh = {"hrrr": 48, "rrfs": 84}.get(m, 240)
     if a.steps: render = [int(x) for x in a.steps.split(",")]
     else:
         nat = native_steps(m, min(a.hours, maxh)); render = [s for s in nat if not a.every or s % a.every == 0]
     prods = [p for p in a.products.split(",") if p in PRODUCTS and m in PRODUCTS[p][1]]
     running = "peakgust" in prods or bool(ACCUM & set(prods))
-    steps = sorted(set(render) | (set(s for s in native_steps(m, max(render)) if s <= max(render)) if running else set()))
+    steps = sorted(set(render) | (set(s for s in native_steps(m, max(render)) if s <= max(render)) if running else set())) if render else []
+    if a.count:   # same step / product / view rules as the render loop below, without touching any data
+        n = 0; byp = {}
+        for p in prods:
+            fn, _, gv, hv = PRODUCTS[p]; vids = views_for(m, a.views.split(","), gv, hv)
+            if m == "aifs" and p.startswith("t") and p not in ("td2m",): vids = [v for v in vids if v != "wa"]
+            k = 0
+            for s in render:
+                if p in ("snowkuch", "snow10", "frzr", "qpf"): k += len(acc_windows(m, s))
+                elif p == "snowk24": k += s >= 24
+                elif p == "snowrate": k += (s - 1 in steps) if m in HIRES else 1   # 1 h rate needs the previous hour
+                else: k += 1
+            byp[p] = k * len(vids); n += k * len(vids)
+        print(f"{m} files {n}", json.dumps(byp)); sys.stdout.flush(); os._exit(0)
     ctx = CTX; ctx.update({"render": set(render), "peak": None}); tot = 0; need = (ACCUM - {"qpf"}) & set(prods)
     for s in steps:
         R = Reader(m, c, s)

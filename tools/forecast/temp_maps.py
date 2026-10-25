@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Menu products: 2 m Temperature and 850 mb Temperature + Wind, for ECMWF IFS (open data 0.1 deg, from native ~9 km)
-and ECMWF AIFS (0.25 deg). Views: North America, Pacific NW, Washington (AIFS 850 mb has no WA view: upper-air rule).
+and ECMWF AIFS (0.25 deg). Views: North America, Pacific NW, Pacific NW tight (2 m maps only), Washington
+(AIFS 850 mb has no WA view: upper-air rule).
 
 Methods (standard): 2 m temperature is the model's 2 m air temperature (K -> F), filled on the shared house_style
 temperature scale with the 32 F line dashed. 850 mb: temperature (K -> C) on the same palette (equal temperatures look
@@ -54,7 +55,11 @@ VIEWS = {   # same NA / PNW frames as the AIFS upper-air maps, plus a Washington
 # High-res Pacific NW frame: the part of the PNW the 3 km CONUS grids cover (their NW corner is near 48N 134W).
 VIEWS["pnwhr"] = dict(label="Pacific NW (high-res)", size=(16, 11.2), proj=ccrs.LambertConformal(central_longitude=-120, central_latitude=45.5,
                       standard_parallels=(42, 49)), ll=(-126.8, -111.0, 40.6, 49.4), box=(-130, -108, 39.5, 51))
-SMOOTH = {"na": 1.2, "pnw": 0.8, "wa": 0.0, "pnwhr": 0.0}
+# "Pacific NW tight" (pnwt): Washington, Vancouver Island and the near Pacific (first built for the ensemble maps, 10-24-26).
+# Global models only (the 3 km grids stop short of its NW corner). Used by the ground-level maps; upper air stays na/pnw.
+VIEWS["pnwt"] = dict(label="Pacific NW tight", size=(16, 10.5), proj=ccrs.Mercator(central_longitude=-126),
+                     ll=(-138.0, -113.5, 40.5, 54.5), box=(-145, -106, 36, 59))
+SMOOTH = {"na": 1.2, "pnw": 0.8, "wa": 0.0, "pnwhr": 0.0, "pnwt": 0.6}
 HIRES_VIEWS = ("pnwhr", "wa")
 HS.BARBS_ACROSS.setdefault("pnwhr", 20)   # same density as the global PNW frame
 BELOW_GROUND = "#8d9096"   # 850 mb maps: flat gray where the ground is above the 850 mb surface (surface pressure < 850 mb)
@@ -318,7 +323,7 @@ if __name__ == "__main__":
     ap.add_argument("--model", default="ifs", choices=list(MODELS)); ap.add_argument("--cycle")
     ap.add_argument("--hours", type=int, default=240); ap.add_argument("--every", type=int, default=12)
     ap.add_argument("--steps", help="explicit comma list of forecast hours (overrides --hours/--every)")
-    ap.add_argument("--views", default="na,pnw,wa"); ap.add_argument("--products", default="t2m,t850")
+    ap.add_argument("--views", default="na,pnw,pnwt,wa"); ap.add_argument("--products", default="t2m,t850")
     a = ap.parse_args()
     c = dt.datetime.strptime(a.cycle, "%Y%m%d%H").replace(tzinfo=dt.timezone.utc) if a.cycle else latest_cycle(a.model)
     tot = 0
@@ -360,7 +365,7 @@ if __name__ == "__main__":
                 lat, lon, t = st.field("t", 850, "pl"); _, _, z = st.field("gh", 850, "pl")
                 _, _, u = st.field("u", 850, "pl"); _, _, w = st.field("v", 850, "pl"); _, _, sp = st.field("sp")
                 for v in a.views.split(","):
-                    if a.model == "aifs" and v == "wa": continue   # no WA view for AIFS upper air
+                    if (a.model == "aifs" and v == "wa") or v == "pnwt": continue   # no WA view for AIFS upper air; no tight view aloft
                     out = f"{ROOT}/{c:%Y%m%d%H}/t850-{a.model}/step/{v}/{vt}"; render_t850(a.model, c, s, lat, lon, t, z, u, w, v, out, sp); print("ok", out, flush=True)
         except StopIteration:
             print(f"step {s}: field missing in this run, skipped", flush=True)

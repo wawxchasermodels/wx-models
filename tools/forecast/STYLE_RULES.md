@@ -90,7 +90,7 @@ These rules apply to every model product: AIFS, GFS, GEFS, ECMWF/EPS, HRRR, RRFS
 ## Sky, fog and visibility maps (menu_maps.py)
 - Total cloud cover: percent, 5 % bins, sky blue (clear) to slate gray (overcast), no white band. PNW view. All five models.
 - Simulated IR: HRRR 10.7 um (GOES imager ch4 field) and RRFS ABI band 13. Warm ground light gray, low/mid cloud darker gray, colors from -32 C down (cyan > blue > green > yellow > orange > red > magenta > white at -90). Missing pixels are filled from neighbors. PNW high-res view.
-- Visibility: miles, fill only under 7 mi, pale yellow > orange > red > magenta > purple for dense fog under 1/4 mi. GFS, HRRR, RRFS. PNW and WA (high-res: WA).
+- Visibility: miles, fill only under 7 mi, pale yellow > orange > red > magenta > purple for dense fog under 1/4 mi. HRRR, RRFS (GFS removed 10-24-26; ECMWF open data has no visibility). High-res: WA.
 - Fog risk index (our own, labeled "not a model fog forecast"): saturation term 1 at 0 F dewpoint depression to 0 at 5 F, times calm term 1 at 3 mph or less to 0 at 15 mph; blended 60/40 with a model-visibility term where the model has visibility; damped to as low as 25 % where rain is falling harder than about 0.08 in/h. Shown from 20 to 100 in pale-to-navy gray-blues.
 
 ## European Ensemble key list (eps_maps.py)
@@ -121,3 +121,15 @@ These rules apply to every model product: AIFS, GFS, GEFS, ECMWF/EPS, HRRR, RRFS
   Thin gray isobars = ensemble mean every 4 mb. Red L = lows of the mean field, with the mean central pressure under it (11 pt black bold).
   Lows over ground above 1000 m are skipped (sea-level reduction artifacts). Detection: closed minimum, at least 4 mb (NA) / 1.5 mb (PNW) below the ring median.
 - 500 mb: tan-to-plum fill = spread (1 std dev, dam, 1-30, 80 % opacity), black = mean every 6 dam, thin blue/red = each member's 552 / 576 dam line.
+
+## Pacific NW tight view on ground-level maps, GFS trim, frame steps (10-24-26, Benjamin 8:44 PM PT)
+- The "Pacific NW tight" frame (pnwt, defined once in temp_maps.VIEWS and aifs_maps.VIEWS, H/L and barb settings in house_style)
+  is used on the ground-level products of the global models only: gusts, peak gust, feels-like, dewpoint, cloud cover, fog risk
+  (IFS; feels-like and cloud cover also AIFS), 2 m temp and 2 m anomaly (IFS, AIFS), AIFS sea-level pressure and MSLP + 10 m wind,
+  and both GFS maps. Never on HRRR/RRFS (their grids stop short of its NW corner) and never on upper-air maps.
+- Color-key titles shrink (13.5 pt down to 9.5 pt) so they always end before the color bar; the run/notes line under the valid time
+  shrinks (12.5 pt down to 9.5 pt) so it never runs under the forecast-hour badge. Keep notes short anyway.
+- GFS: only "500 mb Height Anomaly" and "Sea-Level Pressure" (gfs_maps.py, same renderers and scales as the AIFS maps, shown as a
+  GFS pill on those tabs; credit "Data: NOAA GFS (public domain)" plus the NCEP/NCAR climatology on the anomaly). All other GFS
+  products and the MSLP + 500 mb Height combo are archived in archive/gfs_products_20261024/.
+- Frames: IFS and AIFS every 6 h to 240 h on every menu map, the temps job and the AIFS maps; HRRR hourly to 48 h, RRFS hourly to 84 h.

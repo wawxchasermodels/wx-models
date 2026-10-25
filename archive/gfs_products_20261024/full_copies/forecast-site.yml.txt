@@ -1,0 +1,520 @@
+# Forecast maps + meteograms site (Washington forecast maps, AIFS upper air, ECMWF EPS / HRRR / RRFS town meteograms).
+# DISABLED: rendering is paused. Only manual runs (Actions > Forecast site > Run workflow) are possible,
+# and the schedule below is commented out. To switch on, see web/forecast/README.md ("Turning it on").
+#
+# Job layout (every job stays well under the 6 h GitHub limit; timeouts are 300 min = 5 h):
+#   plan            picks the ECMWF cycle once and splits the WA map list into shards (auto: about 4 h of work each)
+#   wa-maps (N)     matrix, one job per shard: renders its share of the WA maps -> artifact wa-maps-<k>
+#   aifs            AIFS 500 mb anomaly, MSLP, MSLP + 10 m wind -> artifact aifs-maps
+#   mslp            ECMWF 9 km MSLP + precip (NA, PNW, WA), 3 h to 72 h then 6 h to 240 h -> artifact mslp-maps (only when 'mslp' is picked)
+#   temps           2 m temp + 850 mb temp/wind, ECMWF IFS and AIFS (NA, PNW, WA) -> artifact temp-maps (only when 'temps' is picked)
+#   menu (M x 3)    menu maps (menu_maps.py), one job per model and frame tier (A native, B 6 h / 3 h, C 12 h / 6 h) -> menu-<model>-<tier>
+#   ens (2)         ensemble low centers + 500 mb heights, EPS and AIFS ENS, every 6 h to 240 h (00Z/12Z cycles) -> ens-<src>
+#   meteograms      EPS (6 h steps, 00Z/12Z only) / HRRR / RRFS town meteograms, meteo_suite.py, one job so made.json is
+#                   written once -> artifact meteograms
+#   deploy          waits for all of the above, merges the artifacts, builds the manifest and deploys. Meteogram split
+#                   (repo variable METEO_SPLIT=1): charts go to a second Pages project and the main site reaches them
+#                   through its same-origin /m/ function; unset METEO_SPLIT = one site (merged).
+name: Forecast site
+
+on:
+  workflow_dispatch:
+    inputs:
+      products:
+        description: "Comma list: wa,aifs,temps,mslp,menu,ens,eps,hrrr,rrfs (eps/hrrr/rrfs = meteograms)"
+        default: "aifs"
+      wa_tabs:
+        description: "WA map tabs (rain,bcrain,snow,gusts,waves,lows,highs)"
+        default: "rain"
+      wa_periods:
+        description: "WA map periods (step,6h,12h,24h,48h,total,max6h,max12h,max24h,daily or all)"
+        default: "6h,24h"
+      wa_views:
+        description: "WA map views (full,west,east,... or all)"
+        default: "full"
+      wa_hours:
+        description: "WA map horizon in hours"
+        default: "48"
+      wa_models:
+        description: "WA map models (ecmwf,nbm,gfs,eps,eps90,hrrr, 'default' = ECMWF, NBM for temps, or 'all'); hrrr = Rain 1h"
+        default: "default"
+      menu_models:
+        description: "Menu-map models (ifs,gfs,aifs,hrrr,rrfs)"
+        default: "ifs,gfs,aifs,hrrr,rrfs"
+      menu_tiers:
+        description: "Menu frame tiers (A,B,C; see plan/menu_v2.md)"
+        default: "A,B,C"
+      wa_shards:
+        description: "WA render jobs: 'auto' (about 4 h of maps per job) or a number 1-20"
+        default: "auto"
+#  schedule:
+#    - cron: "40 */2 * * *"   # one combined deploy every 2 h = 360 deploys/month (< 500 Cloudflare limit)
+
+concurrency:
+  group: forecast-site
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  PRODUCTS: ${{ github.event.inputs.products || 'aifs,eps,hrrr,rrfs' }}
+  WA_TABS: ${{ github.event.inputs.wa_tabs || 'rain' }}
+  WA_PERIODS: ${{ github.event.inputs.wa_periods || '6h,24h' }}
+  WA_VIEWS: ${{ github.event.inputs.wa_views || 'full' }}
+  WA_HOURS: ${{ github.event.inputs.wa_hours || '48' }}
+  WA_MODELS: ${{ github.event.inputs.wa_models || 'default' }}
+  WA_PARALLEL: "3"          # renders at once inside one 4-core runner
+  WA_SEC_PER_MAP: "25"      # measured draw + fetch per map (10-23-26 speedup); used only to size the shards
+  WA_HOURS_PER_JOB: "4"     # target work per shard, leaves about 1 h spare under the 5 h timeout
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      cycle: ${{ steps.p.outputs.cycle }}
+      shards: ${{ steps.p.outputs.shards }}
+      menu: ${{ steps.p.outputs.menu }}
+      count: ${{ steps.p.outputs.count }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Cycle and WA shard list
+        id: p
+        env:
+          WANT: ${{ github.event.inputs.wa_shards || 'auto' }}
+          MENU_MODELS: ${{ github.event.inputs.menu_models }}
+          MENU_TIERS: ${{ github.event.inputs.menu_tiers }}
+        run: |
+          H=$(date -u +%H); D=$(date -u +%Y%m%d)
+          if [ "$H" -ge 21 ]; then C=${D}12; elif [ "$H" -ge 9 ]; then C=${D}00; else C=$(date -u -d yesterday +%Y%m%d)12; fi
+          N=$(python tools/forecast/render_forecast_batch.py --cycle "$C" --tabs "$WA_TABS" --periods "$WA_PERIODS" \
+                --views "$WA_VIEWS" --hours "$WA_HOURS" --models "$WA_MODELS" --dry-run | sed -nE '1s/.*: ([0-9]+) renders.*/\1/p')
+          python - "$N" "$WANT" >> "$GITHUB_OUTPUT" <<'PY'
+          import json, math, os, sys
+          n, want = int(sys.argv[1]), sys.argv[2]
+          per_job = float(os.environ["WA_HOURS_PER_JOB"]) * 3600 * int(os.environ["WA_PARALLEL"]) / float(os.environ["WA_SEC_PER_MAP"])
+          k = max(1, math.ceil(n / per_job)) if want == "auto" else int(want)
+          k = max(1, min(20, k, max(1, n)))
+          print("count=%d" % n)
+          print("shards=" + json.dumps(list(range(1, k + 1))))
+          PY
+          python - >> "$GITHUB_OUTPUT" <<'PY'
+          import json, os
+          ms = [m for m in (os.environ.get("MENU_MODELS") or "ifs,gfs,aifs,hrrr,rrfs").split(",") if m]
+          ts = [t for t in (os.environ.get("MENU_TIERS") or "A,B,C").split(",") if t]
+          print("menu=" + json.dumps({"include": [{"model": m, "tier": t} for m in ms for t in ts]}))
+          PY
+          echo "cycle=$C" >> "$GITHUB_OUTPUT"
+          echo "Cycle $C, $N WA maps" >> "$GITHUB_STEP_SUMMARY"
+
+  wa-maps:
+    needs: plan
+    if: contains(github.event.inputs.products || 'aifs,eps,hrrr,rrfs', 'wa')
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.plan.outputs.shards) }}
+    env:
+      WX_CACHE: ${{ github.workspace }}/.wx_cache
+      SITE_BATCH: ${{ github.workspace }}/.site_batch
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install Python packages (pinned, permissive licenses)
+        run: pip install -r tools/requirements.txt
+      - name: Title font (Impact from the Microsoft core fonts package; installed on the runner, never committed)
+        run: |
+          echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true" | sudo debconf-set-selections
+          sudo apt-get update -qq && sudo apt-get install -y -qq ttf-mscorefonts-installer libcairo2
+          test -f /usr/share/fonts/truetype/msttcorefonts/Impact.ttf
+      - name: Washington forecast maps, shard ${{ matrix.shard }} of ${{ strategy.job-total }}
+        run: |
+          python tools/forecast/render_forecast_batch.py --cycle "${{ needs.plan.outputs.cycle }}" --tabs "$WA_TABS" \
+            --periods "$WA_PERIODS" --views "$WA_VIEWS" --hours "$WA_HOURS" --models "$WA_MODELS" \
+            --shard "${{ matrix.shard }}/${{ strategy.job-total }}" --jobs "$WA_PARALLEL"
+      - name: Keep only the site files (final.jpg + site_frame.json + render.log)
+        run: find .site_batch -type f ! -name final.jpg ! -name site_frame.json ! -name render.log -delete
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wa-maps-${{ matrix.shard }}
+          path: .site_batch
+          include-hidden-files: true   # the batch folders start with a dot
+          retention-days: 1
+          if-no-files-found: warn
+
+  aifs:
+    needs: plan
+    if: contains(github.event.inputs.products || 'aifs,eps,hrrr,rrfs', 'aifs')
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    env:
+      SITE_BATCH: ${{ github.workspace }}/.site_batch
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install Python packages (pinned, permissive licenses)
+        run: pip install -r tools/requirements.txt
+      - name: Restore climatology cache
+        uses: actions/cache@v4
+        with:
+          path: .clim
+          key: forecast-clim-v1
+      - name: Climatology (NCEP/NCAR Reanalysis 1991-2020 monthly mean, NOAA PSL)
+        run: |
+          mkdir -p .clim .site_batch/clim
+          if [ ! -f .clim/ncep_hgt500_mon_ltm_1991_2020.npz ]; then
+            pip install h5py
+            curl -sSfo /tmp/hgt.nc https://downloads.psl.noaa.gov/Datasets/ncep.reanalysis.derived/pressure/hgt.mon.ltm.1991-2020.nc
+            python tools/forecast/make_clim.py /tmp/hgt.nc .clim/ncep_hgt500_mon_ltm_1991_2020.npz
+          fi
+          cp .clim/ncep_hgt500_mon_ltm_1991_2020.npz .site_batch/clim/
+      - name: AIFS 500 mb anomaly, MSLP, MSLP + 10 m wind
+        run: python tools/forecast/aifs_maps.py --hours 240 --every 12
+      - name: Keep only the site files
+        run: rm -rf .site_batch/clim
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aifs-maps
+          path: .site_batch
+          include-hidden-files: true   # the batch folders start with a dot
+          retention-days: 1
+          if-no-files-found: warn
+
+  mslp:
+    needs: plan
+    if: contains(github.event.inputs.products || 'aifs,eps,hrrr,rrfs', 'mslp')
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    env:
+      SITE_BATCH: ${{ github.workspace }}/.site_batch
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install Python packages (pinned, permissive licenses)
+        run: pip install -r tools/requirements.txt
+      - name: Title font (Impact from the Microsoft core fonts package; installed on the runner, never committed)
+        run: |
+          echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true" | sudo debconf-set-selections
+          sudo apt-get update -qq && sudo apt-get install -y -qq ttf-mscorefonts-installer libcairo2
+          test -f /usr/share/fonts/truetype/msttcorefonts/Impact.ttf
+      - name: ECMWF 9 km MSLP + precip (3 h to 72 h, then 6 h to 240 h)
+        run: python tools/forecast/ecmwf_mslp_precip.py --cycle "${{ needs.plan.outputs.cycle }}" --plan
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mslp-maps
+          path: .site_batch
+          include-hidden-files: true   # the batch folders start with a dot
+          retention-days: 1
+          if-no-files-found: warn
+
+  temps:
+    needs: plan
+    if: contains(github.event.inputs.products || 'aifs,eps,hrrr,rrfs', 'temps')
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    env:
+      SITE_BATCH: ${{ github.workspace }}/.site_batch
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install Python packages (pinned, permissive licenses)
+        run: pip install -r tools/requirements.txt
+      - name: Title font (Impact from the Microsoft core fonts package; installed on the runner, never committed)
+        run: |
+          echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true" | sudo debconf-set-selections
+          sudo apt-get update -qq && sudo apt-get install -y -qq ttf-mscorefonts-installer libcairo2
+          test -f /usr/share/fonts/truetype/msttcorefonts/Impact.ttf
+      - name: Restore 2 m climatology cache
+        uses: actions/cache@v4
+        with:
+          path: .clim
+          key: forecast-clim-t2m-v1
+      - name: 2 m climatology (NCEP/NCAR Reanalysis 1991-2020 6-hourly mean, NOAA PSL)
+        run: |
+          mkdir -p .clim .site_batch/clim
+          if [ ! -f .clim/ncep_t2m_6h_ltm_1991_2020.npz ]; then
+            pip install h5py
+            P=https://downloads.psl.noaa.gov/Datasets/ncep.reanalysis.derived/surface_gauss
+            curl -sSfo /tmp/air2m.nc "$P/air.2m.gauss.4Xday.ltm.1991-2020.nc"
+            curl -sSfo /tmp/hgtsfc.nc "$P/hgt.sfc.gauss.nc"
+            python tools/forecast/make_clim_t2m.py /tmp/air2m.nc /tmp/hgtsfc.nc .clim/ncep_t2m_6h_ltm_1991_2020.npz
+          fi
+          cp .clim/ncep_t2m_6h_ltm_1991_2020.npz .site_batch/clim/
+      - name: ECMWF IFS 2 m temp, 2 m anomaly, 850 mb temp/wind (every 12 h to 240 h)
+        run: python tools/forecast/temp_maps.py --model ifs --cycle "${{ needs.plan.outputs.cycle }}" --hours 240 --every 12 --products t2m,t2manom,t850
+      - name: AIFS 2 m temp, 2 m anomaly, 850 mb temp/wind (every 12 h to 240 h)
+        run: python tools/forecast/temp_maps.py --model aifs --cycle "${{ needs.plan.outputs.cycle }}" --hours 240 --every 12 --products t2m,t2manom,t850
+      - name: Keep only the site files
+        run: rm -rf .site_batch/clim
+      - uses: actions/upload-artifact@v4
+        with:
+          name: temp-maps
+          path: .site_batch
+          include-hidden-files: true   # the batch folders start with a dot
+          retention-days: 1
+          if-no-files-found: warn
+
+  hires:
+    needs: plan
+    # a NOAA bucket outage must not block the ECMWF deploy
+    continue-on-error: true
+    if: contains(github.event.inputs.products || 'aifs,eps,hrrr,rrfs', 'hrrr') || contains(github.event.inputs.products || 'aifs,eps,hrrr,rrfs', 'rrfs')
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    env:
+      SITE_BATCH: ${{ github.workspace }}/.site_batch
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install Python packages (pinned, permissive licenses)
+        run: pip install -r tools/requirements.txt
+      - name: Title font (Impact from the Microsoft core fonts package; installed on the runner, never committed)
+        run: |
+          echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true" | sudo debconf-set-selections
+          sudo apt-get update -qq && sudo apt-get install -y -qq ttf-mscorefonts-installer libcairo2
+          test -f /usr/share/fonts/truetype/msttcorefonts/Impact.ttf
+      - name: HRRR 2 m temp + 850 mb temp/wind (latest full 48 h run, every 3 h)
+        if: contains(github.event.inputs.products || 'aifs,eps,hrrr,rrfs', 'hrrr')
+        run: python tools/forecast/temp_maps.py --model hrrr --hours 48 --every 3
+      - name: RRFS 2 m temp (latest 84 h run, every 3 h)
+        if: contains(github.event.inputs.products || 'aifs,eps,hrrr,rrfs', 'rrfs')
+        run: python tools/forecast/temp_maps.py --model rrfs --hours 84 --every 3
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hires-maps
+          path: .site_batch
+          include-hidden-files: true   # the batch folders start with a dot
+          retention-days: 1
+          if-no-files-found: warn
+
+  menu:
+    needs: plan
+    if: contains(github.event.inputs.products || 'aifs,eps,hrrr,rrfs', 'menu')
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix: ${{ fromJSON(needs.plan.outputs.menu) }}
+    env:
+      SITE_BATCH: ${{ github.workspace }}/.site_batch
+      # products per frame tier (plan/menu_v2.md ranking). 2 m temp / 850 / 2 m anomaly come from the temps job.
+      TIER_A: gust10,peakgust,feels,t925,t700,t500,t300
+      TIER_B: mslp500,qpf,snowkuch,ivt,snow10,pwanom,frzr,w850,w250,mslpptype
+      TIER_C: snowk24,thick,td2m,pw,snowrate,tcc,ir,vis,fog
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install Python packages (pinned, permissive licenses)
+        run: pip install -r tools/requirements.txt
+      - name: Title font (Impact from the Microsoft core fonts package; installed on the runner, never committed)
+        run: |
+          echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true" | sudo debconf-set-selections
+          sudo apt-get update -qq && sudo apt-get install -y -qq ttf-mscorefonts-installer libcairo2
+          test -f /usr/share/fonts/truetype/msttcorefonts/Impact.ttf
+      - name: Restore PW climatology cache
+        if: matrix.tier == 'B'
+        uses: actions/cache@v4
+        with:
+          path: .clim
+          key: forecast-clim-pw-v1
+      - name: PW climatology (NCEP/NCAR Reanalysis 1991-2020 daily mean PW, NOAA PSL) for the PW Anomaly maps
+        if: matrix.tier == 'B'
+        run: |
+          mkdir -p .clim .site_batch/clim
+          if [ ! -f .clim/ncep_pw_day_ltm_1991_2020.npz ]; then
+            pip install h5py
+            P=https://downloads.psl.noaa.gov/Datasets/ncep.reanalysis.derived
+            curl -sSfo /tmp/pw.nc "$P/surface/pr_wtr.eatm.day.ltm.1991-2020.nc"
+            curl -sSfo /tmp/hgtsfc.nc "$P/surface_gauss/hgt.sfc.gauss.nc"
+            python tools/forecast/make_clim_pw.py /tmp/pw.nc /tmp/hgtsfc.nc .clim/ncep_pw_day_ltm_1991_2020.npz
+          fi
+          cp .clim/ncep_pw_day_ltm_1991_2020.npz .site_batch/clim/
+      - name: Menu maps, ${{ matrix.model }} tier ${{ matrix.tier }}
+        run: |
+          case "${{ matrix.tier }}" in
+            A) P="$TIER_A"; E=0 ;;
+            B) P="$TIER_B"; E=6 ;;
+            C) P="$TIER_C"; E=12 ;;
+          esac
+          case "${{ matrix.model }}" in
+            hrrr|rrfs) [ "$E" = 6 ] && E=3; [ "$E" = 12 ] && E=6; CY="" ;;
+            *) CY="--cycle ${{ needs.plan.outputs.cycle }}" ;;
+          esac
+          # GFS picks its own latest 00Z/12Z run; HRRR/RRFS pick their latest long run
+          [ "${{ matrix.model }}" = gfs ] && CY=""
+          python tools/forecast/menu_maps.py --model "${{ matrix.model }}" $CY --hours 240 --every "$E" --products "$P"
+      - name: Keep only the site files
+        run: rm -rf .site_batch/clim
+      - uses: actions/upload-artifact@v4
+        with:
+          name: menu-${{ matrix.model }}-${{ matrix.tier }}
+          path: .site_batch
+          include-hidden-files: true   # the batch folders start with a dot
+          retention-days: 1
+          if-no-files-found: warn
+
+  ens:
+    needs: plan
+    if: contains(github.event.inputs.products || 'aifs,eps,hrrr,rrfs', 'ens')
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        src: [eps, aifsens]
+    env:
+      SITE_BATCH: ${{ github.workspace }}/.site_batch
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install Python packages (pinned, permissive licenses)
+        run: pip install -r tools/requirements.txt
+      - name: Title font (Impact from the Microsoft core fonts package; installed on the runner, never committed)
+        run: |
+          echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true" | sudo debconf-set-selections
+          sudo apt-get update -qq && sudo apt-get install -y -qq ttf-mscorefonts-installer libcairo2
+          test -f /usr/share/fonts/truetype/msttcorefonts/Impact.ttf
+      - name: Ensemble low centers + 500 mb heights, ${{ matrix.src }} (every 6 h to 240 h; about 47 MB EPS / 72 MB AIFS ENS per step)
+        run: python tools/forecast/ens_maps.py "${{ matrix.src }}" --cycle "${{ needs.plan.outputs.cycle }}" --hours 240
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ens-${{ matrix.src }}
+          path: .site_batch
+          include-hidden-files: true   # the batch folders start with a dot
+          retention-days: 1
+          if-no-files-found: warn
+
+  meteograms:
+    needs: plan
+    if: contains(github.event.inputs.products || 'aifs,eps,hrrr,rrfs', 'eps') || contains(github.event.inputs.products || 'aifs,eps,hrrr,rrfs', 'hrrr') || contains(github.event.inputs.products || 'aifs,eps,hrrr,rrfs', 'rrfs')
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    env:
+      METEO_CACHE: ${{ github.workspace }}/.meteo_cache
+      SITE_DIR: ${{ github.workspace }}/.meteo_site
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install Python packages (pinned, permissive licenses)
+        run: pip install -r tools/requirements.txt
+      - name: Restore multi-run point cache (values from earlier runs)
+        uses: actions/cache@v4
+        with:
+          path: .meteo_cache
+          key: forecast-meteo-${{ github.run_id }}
+          restore-keys: forecast-meteo-
+      - name: ECMWF EPS meteograms (6 h steps to 240 h; 00Z/12Z runs only; about 190 MB per step)
+        if: contains(env.PRODUCTS, 'eps')
+        run: |
+          C="${{ needs.plan.outputs.cycle }}"
+          case "${C:8:2}" in 00|12) python tools/forecast/meteo_suite.py eps --cycle "$C" --hours 240 --every 6 ;;
+            *) echo "EPS meteograms are made on 00Z/12Z runs only; cycle $C skipped" ;; esac
+      - name: HRRR meteograms (latest 48 h run, hourly)
+        if: contains(env.PRODUCTS, 'hrrr')
+        run: python tools/forecast/meteo_suite.py hrrr --hours 48
+      - name: RRFS meteograms (latest long run)
+        if: contains(env.PRODUCTS, 'rrfs')
+        run: python tools/forecast/meteo_suite.py rrfs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: meteograms
+          path: .meteo_site/meteograms
+          include-hidden-files: true   # the batch folders start with a dot
+          retention-days: 1
+          if-no-files-found: warn
+
+  deploy:
+    needs: [plan, wa-maps, aifs, mslp, temps, hires, menu, ens, meteograms]
+    # runs when every render job either succeeded or was switched off by the products input; any failure or cancel stops it
+    if: ${{ !cancelled() && needs.plan.result == 'success' && !contains(needs.*.result, 'failure') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      SITE_BATCH: ${{ github.workspace }}/.site_batch
+      SITE_DIR: ${{ github.workspace }}/web/forecast
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install Python packages (pinned, permissive licenses)
+        run: pip install -r tools/requirements.txt
+      - name: Collect map artifacts (WA shards + AIFS + MSLP + temps + HRRR/RRFS)
+        uses: actions/download-artifact@v4
+        continue-on-error: true   # nothing to collect when only meteograms were picked
+        with:
+          pattern: "{wa-maps-*,aifs-maps,mslp-maps,temp-maps,hires-maps,menu-*,ens-*}"
+          path: .site_batch
+          merge-multiple: true
+      - name: Collect meteograms
+        uses: actions/download-artifact@v4
+        continue-on-error: true   # absent when no meteogram product was picked
+        with:
+          name: meteograms
+          path: web/forecast/meteograms
+      - name: Build manifest (METEO_SPLIT=1 -> meteogram links point at the same-origin /m/ function)
+        env:
+          METEO_BASE: ${{ vars.METEO_SPLIT == '1' && 'm/' || '' }}
+        run: |
+          [ -z "$METEO_BASE" ] && unset METEO_BASE
+          python tools/forecast/publish_forecast_maps.py --batch-root .site_batch --no-adhoc
+      - name: Require Cloudflare secrets
+        env:
+          CF_KEY: ${{ secrets.CF_PAGES_KEY }}
+          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: test -n "$CF_KEY" && test -n "$CF_ACCOUNT"
+      - name: Split the meteograms into their own deploy folder (METEO_SPLIT=1 only)
+        if: vars.METEO_SPLIT == '1'
+        run: |
+          mkdir -p .deploy/meteo .deploy/main
+          [ -d web/forecast/meteograms ] && mv web/forecast/meteograms .deploy/meteo/meteograms || mkdir -p .deploy/meteo/meteograms
+          echo '<!doctype html><title>meteograms</title>' > .deploy/meteo/index.html   # never an empty upload
+          cp -r web/forecast .deploy/main/public
+          cp -r web/meteo-proxy/functions .deploy/main/functions
+          echo "files: main $(find .deploy/main/public -type f | wc -l), meteograms $(find .deploy/meteo -type f | wc -l)" >> "$GITHUB_STEP_SUMMARY"
+      - name: Deploy the meteograms to the second Access-locked Pages project (METEO_SPLIT=1 only)
+        if: vars.METEO_SPLIT == '1'
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CF_PAGES_KEY }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: .deploy/meteo
+          command: pages deploy . --project-name=${{ vars.METEO_PROJECT || 'wx-forecast-meteograms' }} --branch=main --commit-dirty=true
+      - name: Deploy the main site with the /m/ function (METEO_SPLIT=1 only)
+        if: vars.METEO_SPLIT == '1'
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CF_PAGES_KEY }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: .deploy/main
+          command: pages deploy public --project-name=wx-forecast-maps --branch=main --commit-dirty=true
+      - name: Deploy to the Access-locked Pages project, one site (images never enter the repo)
+        if: vars.METEO_SPLIT != '1'
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CF_PAGES_KEY }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy web/forecast --project-name=wx-forecast-maps --branch=main --commit-dirty=true

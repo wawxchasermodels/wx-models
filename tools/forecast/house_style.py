@@ -61,8 +61,9 @@ def header(fig, title, valid, sub, badge_top, badge_bottom, top=0.985, h=0.095):
     x = 0.024
     fig.text(x, top - 0.004, title, color=INK, fontproperties=font(800, 25), va="top")
     fig.text(x, top - 0.040 * 12 / H, valid, color=ACCENT, fontproperties=font(700, 18), va="top")
-    fig.text(x, top - 0.068 * 12 / H, sub, color=MUTED, fontproperties=font(500, 12.5), va="top")
     bw, bh = 0.118, h - 0.012
+    # run/notes line: never runs under the forecast-hour badge (narrow or busy frames shrink it, down to 9.5 pt)
+    fig.text(x, top - 0.068 * 12 / H, sub, color=MUTED, fontproperties=_fit(fig, sub, 500, 12.5, 0.988 - bw - 0.012 - x, 9.5), va="top")
     fig.patches.append(FancyBboxPatch((0.988 - bw, top - bh), bw, bh, boxstyle="round,pad=0,rounding_size=0.012",
                                       transform=fig.transFigure, facecolor=BADGE, edgecolor=PANEL_EDGE, lw=1.0, zorder=5,
                                       mutation_aspect=W / H))
@@ -127,8 +128,21 @@ def hbar(fig, mappable, ticks, title, y, x0=0.150, x1=0.976, signed=False):
     cb.outline.set_edgecolor(PANEL_EDGE); cb.outline.set_linewidth(1.0)
     cax.tick_params(colors=INK, length=5, width=1, pad=3)
     cax.set_xticklabels([(f"{t:+d}" if t else "0") if signed else f"{t:d}" for t in ticks], fontproperties=font(700, BAR_LABEL_SIZE))
-    fig.text(0.024, y + h / 2, title, color=INK, fontproperties=font(700, 13.5), ha="left", va="center")
+    # key title: shrink so it always ends before the color bar (long titles like '10 m wind (mph)' used to touch it)
+    fig.text(0.024, y + h / 2, title, color=INK, fontproperties=_fit(fig, title, 700, 13.5, x0 - 0.024 - 0.012, 9.5), ha="left", va="center")
     return cb
+
+
+def _fit(fig, text, weight, size, width_frac, min_size):
+    """Largest font size <= size (step 0.5 pt, not below min_size) whose rendered width fits width_frac of the figure."""
+    from matplotlib.textpath import TextPath
+    W = fig.get_size_inches()[0] * 72.0   # figure width in points
+    s = size
+    while s > min_size:
+        fp = font(weight, s)
+        if TextPath((0, 0), text, prop=fp).get_extents().width <= width_frac * W: break
+        s -= 0.5
+    return font(weight, max(s, min_size))
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -355,6 +369,8 @@ ICE_HATCH, ICE_HATCH_COLOR = "////", "#5a0f1e"
 QPF_LAND, QPF_SEA = "#f1efea", "#dfe7ee"            # basemap tint under the precip fill
 QPF_RAIN_MAX = 4.0                                    # rain key on these maps stops at 4 in (extend arrow above)
 HL_RADIUS_KM.setdefault("wa", 250); HL_PROMINENCE_MB.setdefault("wa", 1.5); HL_EDGE_KM.setdefault("wa", 200)
+# "Pacific NW tight" (pnwt) frame, shared by the ensemble maps, ground-level menu maps, temps, AIFS and GFS maps
+HL_RADIUS_KM.setdefault("pnwt", 300); HL_PROMINENCE_MB.setdefault("pnwt", 1.5); HL_EDGE_KM.setdefault("pnwt", 300); BARBS_ACROSS.setdefault("pnwt", 20)
 
 
 def snow_cmap():

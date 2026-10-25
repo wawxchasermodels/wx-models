@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""ECMWF AIFS (AI model) upper-air/surface products: 500 mb height anomaly + heights, and MSLP isobars with H/L. North America and Pacific NW views.
+"""ECMWF AIFS (AI model) upper-air/surface products: 500 mb height anomaly + heights, and MSLP isobars with H/L. North America,
+Pacific NW and Pacific NW tight (MSLP and MSLP + wind only) views. The same renderers draw the two GFS maps (gfs_maps.py).
 
 AIFS: ECMWF open data aifs-single 0.25 deg (CC BY 4.0). Climatology: NCEP/NCAR Reanalysis 1 monthly long-term
 mean 1991-2020, 500 mb geopotential height (NOAA PSL, public domain), linearly interpolated in time to the valid
 date and bilinearly to 0.25 deg. Basemap: Natural Earth (public domain). NOT scheduled; run by hand:
-  python tools/forecast/aifs_maps.py [--cycle YYYYMMDDHH] [--hours 240] [--every 12]
+  python tools/forecast/aifs_maps.py [--cycle YYYYMMDDHH] [--hours 240] [--every 6] [--views na,pnw,pnwt]
 Writes $SITE_BATCH (default .site_batch)/<cycle>/aifs500/step/<view>/<valid>/final.jpg + site_frame.json.
 """
 import sys, argparse, datetime as dt, json, os, urllib.request
@@ -36,7 +37,14 @@ VIEWS = {
                extent=(-4.67e6, 4.33e6, -3.3e6, 3.4e6), cint=6),
     "pnw": dict(label="Pacific Northwest", size=(16, 10.5), proj=ccrs.Mercator(central_longitude=-130),
                 ll=(-160, -103, 37, 61), cint=3),
+    # Pacific NW tight: same frame as temp_maps / ens_maps (Mercator 138 W-113.5 W, 40.5-54.5 N)
+    "pnwt": dict(label="Pacific NW tight", size=(16, 10.5), proj=ccrs.Mercator(central_longitude=-126),
+                 ll=(-138.0, -113.5, 40.5, 54.5), cint=3),
 }
+NO_PNWT = ("z500",)   # AIFS 500 mb anomaly stays na/pnw (Benjamin 10-24-26: tight view on SLP + SLP/wind only)
+# Who drew the map: header name, sidecar model, credit line. "gfs" is used by gfs_maps.py (NOAA, public domain).
+SRC = {"aifs": dict(name="ECMWF AIFS", site="AIFS", data="AIFS: ECMWF open data, CC BY 4.0. Modified. \u00a9 ECMWF, www.ecmwf.int."),
+       "gfs": dict(name="NOAA GFS 0.25\u00b0", site="GFS", data="Data: NOAA GFS (public domain).")}
 
 
 def get(url, rng=None):
@@ -89,8 +97,8 @@ def clim_at(valid, lat, lon):
     return it(np.stack([LA, LO], -1))
 
 
-def render(c, step, lat, lon, z, anom, vid, out):
-    V = VIEWS[vid]; valid = c + dt.timedelta(hours=step); vl = valid.astimezone(PT)
+def render(c, step, lat, lon, z, anom, vid, out, src="aifs"):
+    V = VIEWS[vid]; SR = SRC[src]; valid = c + dt.timedelta(hours=step); vl = valid.astimezone(PT)
     fig = plt.figure(figsize=V["size"], dpi=150); fig.patch.set_facecolor(HS.BG)
     key_y, top = HS.layout(fig)
     ax = fig.add_axes([0.024, 0.045, 0.952, top - 0.045], projection=V["proj"])
@@ -112,15 +120,15 @@ def render(c, step, lat, lon, z, anom, vid, out):
     HS.frame(ax)
     vis = A[np.isfinite(A)]
     HS.header(fig, "500 mb Height Anomaly", f"Valid {vl:%a %-m-%-d} \u00b7 {vl:%-I %p} PT",
-              f"ECMWF AIFS {c:%HZ} run {c.astimezone(PT):%-m-%-d-%y (%-I %p PT)}  \u00b7  {V['label']}  \u00b7  heights every {ci} dam  \u00b7  anomaly in view {vis.min():+.0f} to {vis.max():+.0f} m",
+              f"{SR['name']} {c:%HZ} run {c.astimezone(PT):%-m-%-d-%y (%-I %p PT)}  \u00b7  {V['label']}  \u00b7  heights every {ci} dam  \u00b7  {vis.min():+.0f} to {vis.max():+.0f} m in view",
               f"F+{step}", f"{valid:%HZ %a}".upper())
     HS.hbar(fig, cs, ANOM_TICKS, "Anomaly (m)", key_y, signed=True)
-    HS.credit(fig, CREDIT)
+    HS.credit(fig, CREDIT if src == "aifs" else SR["data"] + "  Climatology: NCEP/NCAR Reanalysis 1991-2020 mean, NOAA PSL.  Basemap: Natural Earth.")
     os.makedirs(out, exist_ok=True)
     fig.savefig(f"{out}/final.png", facecolor=fig.get_facecolor()); plt.close(fig)
     from PIL import Image
     Image.open(f"{out}/final.png").convert("RGB").save(f"{out}/final.jpg", quality=90); os.remove(f"{out}/final.png")
-    json.dump({"tab": "aifs500", "period": "step", "view": vid, "model": "AIFS", "cycle": f"{c:%Y%m%d%H}",
+    json.dump({"tab": "aifs500", "period": "step", "view": vid, "model": SR["site"], "cycle": f"{c:%Y%m%d%H}",
                "start_pt": vl.isoformat(), "end_pt": vl.isoformat()}, open(f"{out}/site_frame.json", "w"))
 
 
@@ -133,12 +141,12 @@ def frame_ax(V, vid, key=True):
     return fig, ax, key_y
 
 
-def render_mslp(c, step, lat, lon, p, vid, out, wind=None):
+def render_mslp(c, step, lat, lon, p, vid, out, wind=None, src="aifs"):
     """Filled sea-level pressure (house_style scale) with dark labeled isobars and H/L centers with central pressure.
     No thickness lines on this map (see STYLE_RULES.md). With wind=(u10, v10) in m/s on the same grid: the
     'MSLP + 10 m Wind' product instead (10 m wind speed fill in mph, haloed isobars, barbs in kt, same H/L rules)."""
     from scipy.ndimage import maximum_filter, minimum_filter, gaussian_filter, uniform_filter
-    V = VIEWS[vid]; valid = c + dt.timedelta(hours=step); vl = valid.astimezone(PT)
+    V = VIEWS[vid]; SR = SRC[src]; valid = c + dt.timedelta(hours=step); vl = valid.astimezone(PT)
     l360 = lon % 360; o = np.argsort(l360); l360 = l360[o]; p = p[:, o] / 100.0
     sl = (lat > 0) & (lat < 88) if vid == "na" else (lat > 25) & (lat < 72)
     so = (l360 > 120) & (l360 < 355) if vid == "na" else (l360 > 180) & (l360 < 275)
@@ -189,25 +197,25 @@ def render_mslp(c, step, lat, lon, p, vid, out, wind=None):
                                    va="center", path_effects=HS.halo("white", HS.HL_VALUE_HALO), zorder=6))
     HS.frame(ax)
     HS.header(fig, "Sea-Level Pressure" if wind is None else "MSLP + 10 m Wind", f"Valid {vl:%a %-m-%-d} \u00b7 {vl:%-I %p} PT",
-              f"ECMWF AIFS {c:%HZ} run {c.astimezone(PT):%-m-%-d-%y (%-I %p PT)}  \u00b7  {V['label']}  \u00b7  isobars every {ci} mb"
+              f"{SR['name']} {c:%HZ} run {c.astimezone(PT):%-m-%-d-%y (%-I %p PT)}  \u00b7  {V['label']}  \u00b7  isobars every {ci} mb"
               + ("" if wind is None else "  \u00b7  barbs in kt"),
               f"F+{step}", f"{valid:%HZ %a}".upper())
     if wind is None: HS.hbar(fig, fill, MSLP_TICKS, "Pressure (mb)", key_y)
     else: HS.hbar(fig, fill, HS.WIND_TICKS, "10 m wind (mph)", key_y)
-    HS.credit(fig, "AIFS: ECMWF open data, CC BY 4.0. Modified. \u00a9 ECMWF, www.ecmwf.int.  Basemap: Natural Earth.")
+    HS.credit(fig, SR["data"] + "  Basemap: Natural Earth.")
     HS.clear_labels_near(fig, clabels, markers)
     os.makedirs(out, exist_ok=True)
     fig.savefig(f"{out}/final.png", facecolor=fig.get_facecolor()); plt.close(fig)
     from PIL import Image
     Image.open(f"{out}/final.png").convert("RGB").save(f"{out}/final.jpg", quality=90); os.remove(f"{out}/final.png")
-    json.dump({"tab": "aifsmslp" if wind is None else "aifswind", "period": "step", "view": vid, "model": "AIFS", "cycle": f"{c:%Y%m%d%H}",
+    json.dump({"tab": "aifsmslp" if wind is None else "aifswind", "period": "step", "view": vid, "model": SR["site"], "cycle": f"{c:%Y%m%d%H}",
                "start_pt": vl.isoformat(), "end_pt": vl.isoformat()}, open(f"{out}/site_frame.json", "w"))
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--cycle"); ap.add_argument("--hours", type=int, default=240); ap.add_argument("--every", type=int, default=12)
-    ap.add_argument("--views", default="na,pnw")
+    ap.add_argument("--cycle"); ap.add_argument("--hours", type=int, default=240); ap.add_argument("--every", type=int, default=6)
+    ap.add_argument("--views", default="na,pnw,pnwt")
     ap.add_argument("--products", default="z500,mslp,wind")
     a = ap.parse_args()
     c = dt.datetime.strptime(a.cycle, "%Y%m%d%H").replace(tzinfo=dt.timezone.utc) if a.cycle else latest_cycle()
@@ -218,6 +226,7 @@ if __name__ == "__main__":
             lat, lon, z, n = z500(c, s); tot += n
             an = z - clim_at(c + dt.timedelta(hours=s), lat, lon)
             for v in a.views.split(","):
+                if v == "pnwt" and "z500" in NO_PNWT: continue
                 out = f"{ROOT}/{c:%Y%m%d%H}/aifs500/step/{v}/{vt}"
                 render(c, s, lat, lon, z, an, v, out); print("ok", out, flush=True)
         msl = None   # speedup (10-23-26): the MSLP field is fetched once per step and reused by the wind product
