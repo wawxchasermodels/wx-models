@@ -89,7 +89,7 @@ def render(c, step, per, lat, lon, P, Q, frac, ice, vid, out, model="ifs"):
         markers.append(ax.annotate(f"{val:.0f}", (x, y), xycoords=V["proj"]._as_mpl_transform(ax), xytext=(0, HS.HL_VALUE_OFFSET),
                                    textcoords="offset points", color=col, fontproperties=HS.font(800, HS.HL_VALUE_SIZE), ha="center",
                                    va="center", path_effects=HS.halo("white", HS.HL_VALUE_HALO), zorder=6))
-    TM.towns(ax, vid)
+    town_arts = TM.towns(ax, vid, (LA, LO, Q), TM.fmt_in2)   # town numbers: precip in the period, inches (all types)
     HS.frame(ax)
     valid = c + dt.timedelta(hours=step); vl = valid.astimezone(PT); sl = (valid - dt.timedelta(hours=per)).astimezone(PT)
     f = lambda t: f"{t:%a %-I %p}"
@@ -108,7 +108,7 @@ def render(c, step, per, lat, lon, P, Q, frac, ice, vid, out, model="ifs"):
         cax_ = fig.axes[-1] if m is not None else cb.ax
         cax_.text(0.012, 0.5, nm, transform=cax_.transAxes, ha="left", va="center", color="#15171c", fontproperties=HS.font(800, 10), zorder=9)
     HS.credit(fig, f"{M[1]}: ECMWF open data, CC BY 4.0. Modified. \u00a9 ECMWF, www.ecmwf.int.  Basemap: Natural Earth.")
-    HS.clear_labels_near(fig, clabels, markers)
+    HS.clear_labels_near(fig, clabels, markers + town_arts)
     TM.save(fig, out, {"tab": "mslpprecip", "period": "qpf", "view": vid, "model": M[2], "cycle": f"{c:%Y%m%d%H}",
                        "start_pt": sl.isoformat(), "end_pt": vl.isoformat()})
 

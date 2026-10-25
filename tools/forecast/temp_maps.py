@@ -215,15 +215,100 @@ WA_TOWNS = [
 ]
 
 
-def towns(ax, vid):
-    """Town dots and names on the Washington view only (dark text on a white halo, like the contour labels)."""
-    if vid != "wa": return
-    pc = ccrs.PlateCarree()
+# Where each town's NUMBER is read from the model (the label stays at the town). Same official-station pins as
+# tools/wa_maps/town_pop.py OFFICIAL_PIN (house rule: Seattle = SEA, Tacoma = TIW, Port Angeles = CLM, ...); towns without
+# a pin are read at the town point. Tri-Cities uses Pasco (PSC).
+TOWN_PIN = {"Seattle": (47.4447, -122.3144), "Port Angeles": (48.1220, -123.5066), "Spokane": (47.6216, -117.5280),
+            "Yakima": (46.5682, -120.5441), "Wenatchee": (47.3990, -120.2070), "Olympia": (46.9733, -122.9033),
+            "Bellingham": (48.7927, -122.5375), "Tri-Cities": (46.2647, -119.1190), "Walla Walla": (46.0948, -118.2890),
+            "Moses Lake": (47.2086, -119.3191), "Vancouver": (45.6204, -122.6565), "Everett": (47.9070, -122.2816),
+            "Pullman": (46.7439, -117.1096), "Ellensburg": (47.0330, -120.5307), "Omak": (48.4644, -119.5181),
+            "Aberdeen": (46.9712, -123.9366), "Tacoma": (47.2675, -122.5761)}
+TOWN_NUM_COLOR, TOWN_NUM_SIZE, TOWN_NUM_HALO = "#0d0f13", 10.5, 3.0   # bold dark number on a white halo (reads on any fill)
+
+
+def town_values(LA, LO, F, pts):
+    """Model value at each (lat, lon) point. Regular lat/lon grids (ECMWF): bilinear. 2-D Lambert grids (HRRR/RRFS 3 km):
+    nearest grid point. NaN where the point is off the grid or touches a missing value."""
+    F = np.asarray(F, float); out = []
+    if np.ndim(LA) == 2:
+        from scipy.spatial import cKDTree
+        la, lo = np.asarray(LA, float), np.asarray(LO, float)
+        lo = (lo + 180) % 360 - 180; k = np.cos(np.deg2rad(np.nanmean(la)))
+        tree = cKDTree(np.column_stack([la.ravel(), lo.ravel() * k]))
+        for pla, plo in pts:
+            d, i = tree.query([pla, ((plo + 180) % 360 - 180) * k])
+            out.append(F.ravel()[i] if d < 0.06 else np.nan)   # 0.06 deg ~ 6 km: farther means off the 3 km grid
+        return np.array(out)
+    from scipy.interpolate import RegularGridInterpolator
+    la, lo = np.asarray(LA, float), np.asarray(LO, float) % 360
+    if la[0] > la[-1]: la, F = la[::-1], F[::-1]
+    if lo[0] > lo[-1]: lo, F = lo[::-1], F[:, ::-1]
+    it = RegularGridInterpolator((la, lo), F, bounds_error=False, fill_value=np.nan)
+    return it(np.array([[pla, plo % 360] for pla, plo in pts]))
+
+
+# number formats per product: return None to leave a town without a number
+def fmt_int(v): return None if not np.isfinite(v) else str(int(round(v)))
+def fmt_signed(v): return None if not np.isfinite(v) else ("0" if round(v) == 0 else f"{v:+.0f}")
+def fmt_in2(v): return None if not np.isfinite(v) else f"{max(v, 0):.2f}"                          # rain / ice, inches
+def fmt_in1(v): return None if not np.isfinite(v) else ("0" if v < 0.05 else f"{v:.1f}")          # snow, inches
+def fmt_vis(v):                                                                                     # visibility, miles
+    if not np.isfinite(v): return None
+    if v >= 7: return "7+"   # the map leaves 7 mi and more blank
+    return f"{v:.1f}" if v < 3 else f"{v:.0f}"
+
+
+def _hits(bb, others, pad=1.5):
+    return any(bb.x0 - pad < o.x1 and o.x0 < bb.x1 + pad and bb.y0 - pad < o.y1 and o.y0 < bb.y1 + pad for o in others)
+
+
+def towns(ax, vid, field=None, fmt=fmt_int):
+    """Town dots and names on the Washington view only (dark text on a white halo, like the contour labels).
+    field = (LA, LO, F) in the map's units adds the model value after each name ("Seattle 54"), read at the town's official
+    station pin (bilinear on lat/lon grids, nearest point on 3 km grids). Numbers never overlap a name, another number or the
+    frame edge: a number that would is moved under its name, and dropped (logged) if it still collides. Returns the text artists
+    (so isobar labels can be cleared around them) and stores the sampled values on ax.town_values for checks."""
+    if vid != "wa": return []
+    pc = ccrs.PlateCarree(); tr = pc._as_mpl_transform(ax); arts, names = [], []
     for name, la, lo, side in WA_TOWNS:
         ax.plot(lo, la, "o", ms=3.6, mfc="#1b1d22", mec="white", mew=1.0, transform=pc, zorder=7)
-        ax.annotate(name, (lo, la), xycoords=pc._as_mpl_transform(ax), xytext=(5 if side == "r" else -5, 0), textcoords="offset points",
-                    ha="left" if side == "r" else "right", va="center", color="#1b1d22", fontproperties=HS.font(600, 9.5),
-                    path_effects=HS.halo("white", 2.6), zorder=7)
+        names.append(ax.annotate(name, (lo, la), xycoords=tr, xytext=(5 if side == "r" else -5, 0), textcoords="offset points",
+                                 ha="left" if side == "r" else "right", va="center", color="#1b1d22", fontproperties=HS.font(600, 9.5),
+                                 path_effects=HS.halo("white", 2.6), zorder=7))
+    arts += names
+    if field is None or os.environ.get("TOWN_NUMBERS", "1") == "0": return arts   # TOWN_NUMBERS=0 turns the numbers off
+    vals = town_values(*field, [TOWN_PIN.get(n, (la, lo)) for n, la, lo, _ in WA_TOWNS])
+    ax.town_values = {t[0]: float(v) for t, v in zip(WA_TOWNS, vals)}
+    fig = ax.figure; r = fig.canvas.get_renderer(); pt = 72.0 / fig.dpi; axbb = ax.get_window_extent(r)
+    nums = [None] * len(WA_TOWNS)
+    for k, ((name, la, lo, side), v) in enumerate(zip(WA_TOWNS, vals)):
+        s = fmt(v)
+        if s is None: continue
+        nums[k] = ax.annotate(s, (lo, la), xycoords=tr, xytext=(0, 0), textcoords="offset points", ha="left", va="center",
+                              color=TOWN_NUM_COLOR, fontproperties=HS.font(800, TOWN_NUM_SIZE),
+                              path_effects=HS.halo("white", TOWN_NUM_HALO), zorder=7.5)
+    # inline first: "Name 54" right of the dot, "Name 54 •" left of it (the name slides left to make room)
+    for k, (name, la, lo, side) in enumerate(WA_TOWNS):
+        n = nums[k]
+        if n is None: continue
+        nw = names[k].get_window_extent(r).width * pt; vw = n.get_window_extent(r).width * pt
+        if side == "r": n.xyann = (5 + nw + 3.5, 0)
+        else: n.xyann = (-5 - vw, 0); names[k].xyann = (-5 - vw - 3.5, 0)
+    nb = [t.get_window_extent(r) for t in names]
+    for k, n in enumerate(nums):
+        if n is None: continue
+        others = [b for j, b in enumerate(nb) if j != k] + [nums[j].get_window_extent(r) for j in range(len(nums)) if j != k and nums[j] is not None]
+        bb = n.get_window_extent(r)
+        ok = not _hits(bb, others) and axbb.contains(bb.x0, bb.y0) and axbb.contains(bb.x1, bb.y1)
+        if not ok:   # fallback: centered under the name, name back next to its dot
+            side = WA_TOWNS[k][3]; names[k].xyann = (5 if side == "r" else -5, 0); nb[k] = names[k].get_window_extent(r)
+            n.set_ha("center"); n.xyann = ((nb[k].x0 + nb[k].x1) / 2 * pt - (tr.transform((WA_TOWNS[k][2], WA_TOWNS[k][1]))[0]) * pt, -11)
+            bb = n.get_window_extent(r)
+            if _hits(bb, others) or not (axbb.contains(bb.x0, bb.y0) and axbb.contains(bb.x1, bb.y1)):
+                print(f"town number dropped (no room): {WA_TOWNS[k][0]} {n.get_text()}", flush=True); n.remove(); nums[k] = None; continue
+        arts.append(n)
+    return arts
 
 
 def frame(vid):
@@ -272,7 +357,7 @@ def render_t2m(m, c, step, lat, lon, t2k, vid, out):
     fill = ax.contourf(LO, LA, F, levels=HS.TEMP_LEVELS, cmap=cm, norm=BoundaryNorm(HS.TEMP_LEVELS, cm.N), extend="both", transform=pc)
     HS.outlines(ax, cf, res="10m" if vid == "wa" else "50m")
     freeze_line(ax, LO, LA, F, 32)
-    towns(ax, vid)
+    towns(ax, vid, (LA, LO, F))   # town numbers: 2 m temp, F
     HS.frame(ax)
     lo, hi = np.nanpercentile(F, [0.5, 99.5])
     vl = header(fig, m, c, step, vid, "2 m Temperature", f"32\u00b0F line dashed  \u00b7  {lo:.0f} to {hi:.0f}\u00b0F in view")
@@ -325,7 +410,7 @@ def render_t2manom(m, c, step, lat, lon, t2k, zm, vid, out):
     fig, ax, key_y = frame(vid); pc = ccrs.PlateCarree(); cm = t2a_cmap()
     fill = ax.contourf(LO, LA, A, levels=T2A_LEVELS, cmap=cm, norm=BoundaryNorm(T2A_LEVELS, cm.N), extend="both", transform=pc)
     HS.outlines(ax, cf, res="10m" if vid == "wa" else "50m")
-    towns(ax, vid)
+    towns(ax, vid, (LA, LO, A), fmt_signed)   # town numbers: anomaly, F (+/-)
     HS.frame(ax)
     lo, hi = np.nanpercentile(A, [0.5, 99.5])
     vl = header(fig, m, c, step, vid, "2 m Temperature Anomaly",

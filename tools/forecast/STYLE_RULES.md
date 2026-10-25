@@ -133,3 +133,13 @@ These rules apply to every model product: AIFS, GFS, GEFS, ECMWF/EPS, HRRR, RRFS
   GFS pill on those tabs; credit "Data: NOAA GFS (public domain)" plus the NCEP/NCAR climatology on the anomaly). All other GFS
   products and the MSLP + 500 mb Height combo are archived in archive/gfs_products_20261024/.
 - Frames: IFS and AIFS every 6 h to 240 h on every menu map, the temps job and the AIFS maps; HRRR hourly to 48 h, RRFS hourly to 84 h.
+
+## Town numbers on Washington-view maps (prototype 10-24-26, branch citynum-proto, not live)
+- Washington ("wa") view only, the same 20 WA_TOWNS labels; no new towns. Number follows the name: "Seattle 54" (right-side
+  labels) or "Port Angeles 44 •" (left-side labels, the name slides left). Bold 800 weight, 10.5 pt, #0d0f13 on a 3.0 white halo.
+- Value read at the town's official station pin (same table as wa_maps/town_pop.py OFFICIAL_PIN), else the town point:
+  bilinear on ECMWF lat/lon grids, nearest point on HRRR/RRFS 3 km grids. Same units as the map's key.
+- Formats: temps/dewpoint/gusts whole numbers; anomaly signed; rain/ice 2 decimals; snow 1 decimal (0 under 0.05);
+  visibility 1 decimal under 3 mi, whole miles to 7, "7+" at 7 mi and more (blank on the map).
+- A number that would overlap a name, another number or the frame moves under its name; if still blocked it is dropped (logged).
+  Isobar labels that touch a number are removed. TOWN_NUMBERS=0 turns every number off.
