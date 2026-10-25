@@ -145,11 +145,13 @@ jobs:
           MENU_MODELS: ${{ github.event.inputs.menu_models }}
           MENU_TIERS: ${{ github.event.inputs.menu_tiers }}
           MENU_OPTS: ${{ github.event.inputs.menu_opts || 'incremental=on,chunk_min=20,waves=on' }}
+          CYCLE: ${{ steps.p.outputs.cycle }}
         run: |
           WAVES=on
           for kv in ${MENU_OPTS//,/ }; do case "$kv" in incremental=*) export MENU_INCREMENTAL="${kv#*=}" ;; chunk_min=*) export MENU_CHUNK_MIN="${kv#*=}" ;; waves=*) WAVES="${kv#*=}" ;; esac; done
           echo "waves=$WAVES" >> "$GITHUB_OUTPUT"
-          C=$(grep '^cycle=' "$GITHUB_OUTPUT" | tail -1 | cut -d= -f2)
+          C="$CYCLE"   # from the step above (each step has its own GITHUB_OUTPUT file)
+          [ -n "$C" ] || { echo "::error::no ECMWF cycle from the plan step"; exit 1; }
           gh cache list --repo "$GITHUB_REPOSITORY" --key menu-out- --limit 200 --json key -q '.[].key' > .menu_have || : > .menu_have
           python tools/forecast/menu_plan.py --models "${MENU_MODELS:-ifs,aifs,hrrr,rrfs}" --tiers "${MENU_TIERS:-A,B,C}" \
             --global-cycle "$C" --state .menu_state/menu_state.json --have-caches .menu_have --speedup 5 >> "$GITHUB_OUTPUT"
