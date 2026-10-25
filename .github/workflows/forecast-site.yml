@@ -48,6 +48,9 @@ on:
       wa_shards:
         description: "WA render jobs: 'auto' (about 4 h of maps per job) or a number 1-20"
         default: "auto"
+      menu_opts:
+        description: "Menu speed switches: incremental=on|off (skip models already published), chunk_min=20 (0 = old one job per tier)"
+        default: "incremental=on,chunk_min=20"
 #  schedule:
 #    - cron: "40 */2 * * *"   # one combined deploy every 2 h = 360 deploys/month (< 500 Cloudflare limit)
 
@@ -76,13 +79,28 @@ jobs:
     outputs:
       cycle: ${{ steps.p.outputs.cycle }}
       shards: ${{ steps.p.outputs.shards }}
-      menu: ${{ steps.p.outputs.menu }}
+      menu: ${{ steps.mp.outputs.menu }}
+      menu_any: ${{ steps.mp.outputs.menu_any }}
+      menu_reuse: ${{ steps.mp.outputs.menu_reuse }}
+      menu_reuse_any: ${{ steps.mp.outputs.menu_reuse_any }}
+      menu_cycles: ${{ steps.mp.outputs.menu_cycles }}
+      menu_keys: ${{ steps.mp.outputs.menu_keys }}
+      menu_store: ${{ steps.mp.outputs.menu_store }}
       count: ${{ steps.p.outputs.count }}
+    permissions:
+      contents: read
+      actions: read     # list the saved menu-map caches (incremental rendering)
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+      - name: Restore the menu state file (which model cycle was last published)
+        uses: actions/cache/restore@v4
+        with:
+          path: .menu_state
+          key: menu-state-${{ github.run_id }}
+          restore-keys: menu-state-
       - name: Cycle and WA shard list
         id: p
         env:
@@ -103,14 +121,22 @@ jobs:
           print("count=%d" % n)
           print("shards=" + json.dumps(list(range(1, k + 1))))
           PY
-          python - >> "$GITHUB_OUTPUT" <<'PY'
-          import json, os
-          ms = [m for m in (os.environ.get("MENU_MODELS") or "ifs,aifs,hrrr,rrfs").split(",") if m and m != "gfs"]   # GFS: own job (gfs)
-          ts = [t for t in (os.environ.get("MENU_TIERS") or "A,B,C").split(",") if t]
-          print("menu=" + json.dumps({"include": [{"model": m, "tier": t} for m in ms for t in ts]}))
-          PY
           echo "cycle=$C" >> "$GITHUB_OUTPUT"
           echo "Cycle $C, $N WA maps" >> "$GITHUB_STEP_SUMMARY"
+      - name: Menu-map chunks (forecast-hour ranges) and incremental skip list
+        id: mp
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MENU_MODELS: ${{ github.event.inputs.menu_models }}
+          MENU_TIERS: ${{ github.event.inputs.menu_tiers }}
+          MENU_OPTS: ${{ github.event.inputs.menu_opts || 'incremental=on,chunk_min=20' }}
+        run: |
+          for kv in ${MENU_OPTS//,/ }; do case "$kv" in incremental=*) export MENU_INCREMENTAL="${kv#*=}" ;; chunk_min=*) export MENU_CHUNK_MIN="${kv#*=}" ;; esac; done
+          C=$(grep '^cycle=' "$GITHUB_OUTPUT" | tail -1 | cut -d= -f2)
+          gh cache list --repo "$GITHUB_REPOSITORY" --key menu-out- --limit 200 --json key -q '.[].key' > .menu_have || : > .menu_have
+          python tools/forecast/menu_plan.py --models "${MENU_MODELS:-ifs,aifs,hrrr,rrfs}" --tiers "${MENU_TIERS:-A,B,C}" \
+            --global-cycle "$C" --state .menu_state/menu_state.json --have-caches .menu_have --speedup 6 >> "$GITHUB_OUTPUT"
+          grep -E '^menu_(cycles|reuse)=' "$GITHUB_OUTPUT" >> "$GITHUB_STEP_SUMMARY"
 
   wa-maps:
     needs: plan
@@ -346,12 +372,14 @@ jobs:
 
   menu:
     needs: plan
-    if: contains(github.event.inputs.products || 'aifs,eps,hrrr,rrfs', 'menu')
+    # speed_build_v1: one job per model / tier / forecast-hour chunk (menu_plan.py), up to 20 at once (public repo limit);
+    # each chunk draws on all 4 cores while the next hours download in the background (menu_maps.py run loop).
+    if: contains(github.event.inputs.products || 'aifs,eps,hrrr,rrfs', 'menu') && needs.plan.outputs.menu_any == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 300
+    timeout-minutes: 90
     strategy:
       fail-fast: false
-      max-parallel: 8
+      max-parallel: 20
       matrix: ${{ fromJSON(needs.plan.outputs.menu) }}
     env:
       SITE_BATCH: ${{ github.workspace }}/.site_batch
@@ -390,27 +418,71 @@ jobs:
             python tools/forecast/make_clim_pw.py /tmp/pw.nc /tmp/hgtsfc.nc .clim/ncep_pw_day_ltm_1991_2020.npz
           fi
           cp .clim/ncep_pw_day_ltm_1991_2020.npz .site_batch/clim/
-      - name: Menu maps, ${{ matrix.model }} tier ${{ matrix.tier }}
+      - name: Menu maps, ${{ matrix.model }} tier ${{ matrix.tier }}, hours ${{ matrix.first }}-${{ matrix.last }} (chunk ${{ matrix.chunk }})
         run: |
           case "${{ matrix.tier }}" in
             A) P="$TIER_A" ;;
             B) P="$TIER_B" ;;
             C) P="$TIER_C" ;;
           esac
-          case "${{ matrix.model }}" in
-            hrrr|rrfs) E=0; CY="" ;;    # every native hour; HRRR/RRFS pick their latest long run
-            *) E=6; CY="--cycle ${{ needs.plan.outputs.cycle }}" ;;
-          esac
-          python tools/forecast/menu_maps.py --model "${{ matrix.model }}" $CY --hours 240 --every "$E" --views na,pnw,pnwt,wa --products "$P"
+          # the plan job fixed the cycle for every chunk (HRRR/RRFS: newest complete long run), so the chunks always agree.
+          # Running totals (peak gust, snow, ice, precip) read the earlier hours' data without drawing them.
+          python tools/forecast/menu_maps.py --model "${{ matrix.model }}" --cycle "${{ matrix.cycle }}" --steps "${{ matrix.steps }}" \
+            --views na,pnw,pnwt,wa --products "$P"
       - name: Keep only the site files
         run: rm -rf .site_batch/clim
       - uses: actions/upload-artifact@v4
         with:
-          name: menu-${{ matrix.model }}-${{ matrix.tier }}
+          name: menu-${{ matrix.model }}-${{ matrix.tier }}-${{ matrix.chunk }}
           path: .site_batch
           include-hidden-files: true   # the batch folders start with a dot
           retention-days: 1
           if-no-files-found: warn
+
+  menu-store:
+    # incremental (speed_build_v1): keep each freshly rendered model's maps in the Actions cache, so the next run can reuse
+    # them when that model has no newer cycle. Only when every chunk of the run succeeded.
+    needs: [plan, menu]
+    if: ${{ !cancelled() && needs.menu.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        model: ${{ fromJSON(needs.plan.outputs.menu_store) }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: menu-${{ matrix.model }}-*
+          path: .menu_out
+          merge-multiple: true
+      - uses: actions/cache/save@v4
+        with:
+          path: .menu_out
+          key: ${{ fromJSON(needs.plan.outputs.menu_keys)[matrix.model] }}
+
+  menu-reuse:
+    # incremental: models whose newest cycle is already published are not redrawn; their saved maps go back into the deploy
+    needs: plan
+    if: contains(github.event.inputs.products || 'aifs,eps,hrrr,rrfs', 'menu') && needs.plan.outputs.menu_reuse_any == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.menu_reuse) }}
+    steps:
+      - uses: actions/cache/restore@v4
+        with:
+          path: .menu_out
+          key: ${{ matrix.key }}
+          fail-on-cache-miss: true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: menu-reuse-${{ matrix.model }}
+          path: .menu_out
+          include-hidden-files: true
+          retention-days: 1
 
   ens:
     needs: plan
@@ -487,7 +559,7 @@ jobs:
           if-no-files-found: warn
 
   deploy:
-    needs: [plan, wa-maps, aifs, gfs, mslp, temps, hires, menu, ens, meteograms]
+    needs: [plan, wa-maps, aifs, gfs, mslp, temps, hires, menu, menu-reuse, ens, meteograms]
     # runs when every render job either succeeded or was switched off by the products input; any failure or cancel stops it
     if: ${{ !cancelled() && needs.plan.result == 'success' && !contains(needs.*.result, 'failure') }}
     runs-on: ubuntu-latest
@@ -558,3 +630,32 @@ jobs:
           apiToken: ${{ secrets.CF_PAGES_KEY }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: pages deploy web/forecast --project-name=wx-forecast-maps --branch=main --commit-dirty=true
+
+  menu-state:
+    # incremental: after a good deploy, record which cycle of each model is now on the site (small JSON in the Actions cache)
+    needs: [plan, menu, menu-store, menu-reuse, deploy]
+    if: ${{ !cancelled() && needs.deploy.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Write menu_state.json
+        env:
+          CYCLES: ${{ needs.plan.outputs.menu_cycles }}
+          KEYS: ${{ needs.plan.outputs.menu_keys }}
+          REUSED: ${{ needs.plan.outputs.menu_reuse }}
+          STORED: ${{ needs.menu-store.result }}
+        run: |
+          mkdir -p .menu_state
+          python3 - <<'PY'
+          import json, os, datetime as dt
+          cyc, keys = json.loads(os.environ["CYCLES"] or "{}"), json.loads(os.environ["KEYS"] or "{}")
+          reused = {r["model"] for r in json.loads(os.environ["REUSED"] or "[]") if r.get("model") != "none"}
+          ok = os.environ["STORED"] == "success"
+          st = {m: {"cycle": cyc[m], "key": keys[m], "published_utc": dt.datetime.now(dt.timezone.utc).isoformat(timespec="minutes")}
+                for m in cyc if m in reused or ok}
+          json.dump(st, open(".menu_state/menu_state.json", "w"), indent=1); print(json.dumps(st))
+          PY
+      - uses: actions/cache/save@v4
+        with:
+          path: .menu_state
+          key: menu-state-${{ github.run_id }}

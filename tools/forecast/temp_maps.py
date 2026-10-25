@@ -92,7 +92,23 @@ def clim_t2m(valid, LA, LO, zmodel):
     return it(f) - LAPSE * (zmodel - it(zs))
 
 
+DL = {"sec": 0.0, "bytes": 0}   # download timer (speed_build_v1): wall seconds spent inside get(), read by menu_maps' step timer
+GRIB_CACHE = os.environ.get("WX_GRIB_CACHE")   # optional local byte-range cache (tests / benchmarks); unset on the runners
+
+
 def get(url, rng=None):
+    import time as _t, hashlib
+    t0 = _t.perf_counter()
+    try:
+        if not GRIB_CACHE: return _get(url, rng)
+        k = os.path.join(GRIB_CACHE, hashlib.sha1(f"{url}|{rng}".encode()).hexdigest())
+        if os.path.exists(k): return open(k, "rb").read()
+        b = _get(url, rng); os.makedirs(GRIB_CACHE, exist_ok=True); open(k + ".tmp", "wb").write(b); os.replace(k + ".tmp", k); return b
+    finally:
+        DL["sec"] += _t.perf_counter() - t0
+
+
+def _get(url, rng=None):
     h = {"User-Agent": "wx-models (personal, not scheduled)"}
     if rng: h["Range"] = "bytes=%d-%d" % rng
     for k in range(4):   # open data servers drop the odd connection; retry with a short backoff
@@ -227,9 +243,14 @@ def freeze_line(ax, LO, LA, F, level):
 
 def save(fig, out, meta):
     os.makedirs(out, exist_ok=True)
-    fig.savefig(f"{out}/final.png", facecolor=fig.get_facecolor()); plt.close(fig)
     from PIL import Image
-    Image.open(f"{out}/final.png").convert("RGB").save(f"{out}/final.jpg", quality=90); os.remove(f"{out}/final.png")
+    if os.environ.get("MENU_FASTSAVE", "1") != "0":   # speed_build_v1: raw pixels straight to JPEG (same pixels, no PNG round trip)
+        import io
+        b = io.BytesIO(); fig.savefig(b, format="rgba", facecolor=fig.get_facecolor()); w, h = fig.canvas.get_width_height(physical=True)
+        plt.close(fig); Image.frombuffer("RGBA", (w, h), b.getbuffer(), "raw", "RGBA", 0, 1).convert("RGB").save(f"{out}/final.jpg", quality=90)
+    else:
+        fig.savefig(f"{out}/final.png", facecolor=fig.get_facecolor()); plt.close(fig)
+        Image.open(f"{out}/final.png").convert("RGB").save(f"{out}/final.jpg", quality=90); os.remove(f"{out}/final.png")
     json.dump(meta, open(f"{out}/site_frame.json", "w"))
 
 
