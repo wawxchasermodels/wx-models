@@ -19,6 +19,7 @@ import matplotlib.ticker
 from matplotlib.colors import BoundaryNorm, ListedColormap
 import meteograms as MG
 import house_style as HS
+import member_grid as GRID_
 
 PT, TOWNS, OUT, CACHE = MG.PT, MG.TOWNS, MG.OUT, MG.CACHE
 BG, PANEL, GRID, INK, MUTED = MG.BG, MG.PANEL, MG.GRID, MG.INK, MG.MUTED
@@ -167,6 +168,10 @@ def save(fig, src, town, pid):
 # ================================================================================================= ECMWF ENS
 EF = "https://data.ecmwf.int/forecasts/{d}/{h:02d}z/ifs/0p25/enfo/{d}{h:02d}0000-{s}h-enfo-ef"
 EF_MIRROR = "https://ecmwf-forecasts.s3.eu-central-1.amazonaws.com/{d}/{h:02d}z/ifs/0p25/enfo/{d}{h:02d}0000-{s}h-enfo-ef"
+CF_PARAMS = {"10fg", "mx2t3", "mn2t3", "tp"}
+# ECMWF renames some ENS fields by step: 10fg3 (3 h max gust) at 93-144 h, mx2t6/mn2t6 (6 h max/min) after 144 h. Stored
+# under the base name so each series is continuous (before 10-25-26 those steps were simply missing from the charts).
+EPS_ALIAS = {"10fg3": "10fg", "mx2t6": "mx2t3", "mn2t6": "mn2t3"}   # control run also fetched for these (member-grid meteograms)
 EPS_PARAMS = {"2t": None, "tp": None, "sf": None, "mx2t3": None, "mn2t3": None, "tcc": None, "10fg": None, "mucape": None,
               "tcwv": None, "gh": "500", "t": "850"}
 _MIRROR_OK = [True]
@@ -177,12 +182,16 @@ def eps_native(s): return s % 3 == 0 if s <= 144 else s % 6 == 0
 
 def eps_fetch(P, c, s, params):
     """Town values of all 50 members for the wanted params at step s -> P['<param><lev>'|s] = {town: [m1..m50]}."""
-    want = [(p, EPS_PARAMS[p]) for p in params if not P.has(f"{p}{EPS_PARAMS[p] or ''}", s)]
-    if not want: return 0
+    key = lambda p: f"{p}{EPS_PARAMS[p] or ''}"
+    want = [(p, EPS_PARAMS[p]) for p in params if not P.has(key(p), s)]
+    want_cf = [(p, EPS_PARAMS[p]) for p in params if p in CF_PARAMS and not P.has(key(p) + "_cf", s)]   # control run
+    if not want and not want_cf: return 0
     base = EF.format(d=f"{c:%Y%m%d}", h=c.hour, s=s); mirror = EF_MIRROR.format(d=f"{c:%Y%m%d}", h=c.hour, s=s)
     try: idx = [json.loads(l) for l in get(base + ".index").decode().splitlines()]
     except Exception: return 0
-    recs = sorted([r for r in idx if r.get("type") == "pf" and any(r["param"] == p and r.get("levelist") == l for p, l in want)], key=lambda r: r["_offset"])
+    pn = lambda r: EPS_ALIAS.get(r["param"], r["param"])
+    recs = sorted([r for r in idx if (r.get("type") == "pf" and any(pn(r) == p and r.get("levelist") == l for p, l in want))
+                   or (r.get("type") == "cf" and any(pn(r) == p and r.get("levelist") == l for p, l in want_cf))], key=lambda r: r["_offset"])
     groups = []
     for r in recs:
         a, b = r["_offset"], r["_offset"] + r["_length"] - 1
@@ -204,8 +213,9 @@ def eps_fetch(P, c, s, params):
             i = blob.find(b"GRIB", off)
             if i < 0: break
             L = int.from_bytes(blob[i + 8:i + 16], "big"); g = ec.codes_new_from_message(blob[i:i + L])
-            sn = ec.codes_get(g, "shortName"); lev = str(ec.codes_get(g, "level")) if ec.codes_get(g, "typeOfLevel") == "isobaricInhPa" else ""
+            sn = ec.codes_get(g, "shortName"); sn = EPS_ALIAS.get(sn, sn); lev = str(ec.codes_get(g, "level")) if ec.codes_get(g, "typeOfLevel") == "isobaricInhPa" else ""
             num = ec.codes_get(g, "number"); ni = ec.codes_get(g, "Ni")
+            if ec.codes_get(g, "dataType") == "cf": lev += "_cf"   # control run (number 0) kept apart from the 50 members
             la0, lo0 = ec.codes_get(g, "latitudeOfFirstGridPointInDegrees"), ec.codes_get(g, "longitudeOfFirstGridPointInDegrees")
             d = ec.codes_get(g, "iDirectionIncrementInDegrees"); v = ec.codes_get_values(g); ec.codes_release(g)
             for t, (_, la, lo) in TOWNS.items():
@@ -241,7 +251,8 @@ def eps_charts(c, towns, prods, hours, every, runs):
     steps = [s for s in range(0, hours + 1, 3) if eps_native(s) and (s % every == 0 or s == 0)]
     P = Points("eps", c); n = 0
     with ThreadPoolExecutor(2) as ex:
-        for k in ex.map(lambda s: eps_fetch(P, c, s, list(EPS_PARAMS)), steps): n += k
+        want_p = os.environ.get("METEO_EPS_PARAMS", "").split(",") if os.environ.get("METEO_EPS_PARAMS") else list(EPS_PARAMS)   # tests only
+        for k in ex.map(lambda s: eps_fetch(P, c, s, want_p), steps): n += k
     P.save()
     past = []   # earlier runs for multi-run charts: whatever is cached, plus fetch the light fields for missing ones
     if any(p.startswith("eps_mr_") for p in prods):
@@ -304,8 +315,30 @@ def eps_charts(c, towns, prods, hours, every, runs):
             if len(tt) < 3: [ax.scatter(tt, arr[:, m], color=col, s=10, alpha=0.6) for m in range(arr.shape[1])]
             ax.axhline(32, color=COLD, lw=1.2, ls="--"); legend(ax)
             made.setdefault(town, {})[pid] = save(fig, "eps", town, pid)
-        daily_members("eps_tmax_members", "Daily High: Members and Mean", hi_days, hi, WARM)
-        daily_members("eps_tmin_members", "Daily Low: Members and Mean", lo_days, lo, COLD)
+        # member grids (10-25-26): one row per member, control run on its own row, ensemble mean last
+        Sc = lambda k: eps_series(P, k + "_cf", town, steps)[:, :1]
+        def grid(pid, title, unit, note, times, A, Ac, fmt, levels, colors, daily_cols=False):
+            if pid not in prods or not len(times): return
+            hdr = [((f"{t:%a %-m/%-d}", "") if daily_cols else (f"{t.astimezone(PT):%a %-m/%-d}", f"{t.astimezone(PT):%-I %p}")) for t in times]
+            ctrl = None if Ac is None or len(Ac) != len(times) or not np.isfinite(Ac).any() else Ac[:, 0]
+            nm = A.shape[1]
+            sub = run
+            p_ = f"{OUT}/eps/{town}/{pid}.png"; os.makedirs(os.path.dirname(p_), exist_ok=True)
+            mean = GRID_.grid_png(p_, f"{name} {title}", sub, CREDIT["eps"], hdr, ctrl, A.T, fmt, levels, colors, unit,
+                                  note, f"CTRL = control run (member 0, unperturbed)  \u00b7  rows 1-{nm} = perturbed members  \u00b7  "
+                                  f"MEAN = average of {'the control + ' if ctrl is not None else ''}{nm} members"
+                                  + ("" if ctrl is not None else "  \u00b7  control not in this run's ECMWF open-data file"))
+            print("wrote", p_); made.setdefault(town, {})[pid] = p_
+        f0 = lambda v: f"{v:.0f}"; f2 = lambda v: f"{v:.2f}"
+        mxc, mnc = (Sc("mx2t3") - 273.15) * 1.8 + 32, (Sc("mn2t3") - 273.15) * 1.8 + 32
+        hi_c = daily(T[1:], mxc[1:], np.nanmax)[1] if len(hi_days) else None
+        lo_c = daily(T[1:], mnc[1:], np.nanmin)[1] if len(lo_days) else None
+        TL = [-20, 0, 10, 20, 32, 40, 50, 60, 70, 80, 90, 100]
+        TC = ["#7f4fd6", "#5b6ee8", "#4f9be8", "#5fc3e8", "#7fd6c4", "#8fd68f", "#c4de6a", "#f0d45a", "#f0a040", "#e8603c", "#c0304a", "#a01860"]
+        grid("eps_tmax_members", "Daily High Temperature: Each Member + Mean", "\u00b0F", "Highest of the 3 h max temps (6 h after day 6) in each PT day",
+             hi_days, hi, hi_c, f0, TL, TC, daily_cols=True)
+        grid("eps_tmin_members", "Daily Low Temperature: Each Member + Mean", "\u00b0F", "Lowest of the 3 h min temps (6 h after day 6) in each PT day",
+             lo_days, lo, lo_c, f0, TL, TC, daily_cols=True)
         if "eps_spread_maxmin" in prods and len(hi_days):
             fig, ax = frame(f"{name} Spread: Daily High and Low", run, "eps", "\u00b0F")
             bands(ax, [dt.datetime(d.year, d.month, d.day, 12, tzinfo=PT) for d in hi_days], hi, WARM, "High")
@@ -329,18 +362,30 @@ def eps_charts(c, towns, prods, hours, every, runs):
                 ax.axhline(np.nanmean(v), color=MEAN, lw=2.5, label=f"Mean {np.nanmean(v):.2f} {unit}"); floor0(ax)
                 ax.set_xlabel(f"Member (sorted low to high), total to {T[-1].astimezone(PT):%a %-m/%-d %-I %p} PT", color=INK); legend(ax, "upper left")
             return d
-        mk("eps_qpf_members", "Total Precipitation by Member", "inches (liquid)", totals_bar(tp, RAIN, "in"))
+        tpc = Sc("tp") * 1000 / 25.4; tpc[0] = 0
+        QL = [0.01, 0.1, 0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4]
+        QC = ["#2f6f3f", "#3f9f4f", "#5fbf5a", "#9fd65a", "#e0e05a", "#f0b040", "#f07a30", "#e04040", "#c02a70", "#9a2ab0"]
+        i6 = [i for i, s_ in enumerate(steps) if s_ % 6 == 0 and s_]
+        grid("eps_qpf_members", "Total Precipitation: Each Member + Mean", "in", "Run total from the start of the run to each time (liquid)",
+             [T[i] for i in i6], tp[i6], tpc[i6], f2, QL, QC)
         mk("eps_snow_members", "Total Snow by Member (10:1)", "inches of snow", totals_bar(sn, SNOW, "in"))
         q24, s24 = roll(tp, 24), roll(sn, 24)
         def d_roll(A, col):
             def d(ax): members(ax, T, A, col); floor0(ax); legend(ax, "upper left")
             return d
-        mk("eps_qpf24_members", "24-Hour Precipitation: Members and Mean", "inches in prior 24 h", d_roll(q24, RAIN))
+        i24 = [i for i, s_ in enumerate(steps) if s_ % 24 == 0 and s_]
+        q24c = roll(tpc, 24)
+        grid("eps_qpf24_members", "24-Hour Precipitation: Each Member + Mean", "in", "Liquid precipitation in the 24 h ending at each time",
+             [T[i] for i in i24], q24[i24], q24c[i24], f2, QL, QC)
         mk("eps_snow24_members", "24-Hour Snow (10:1): Members and Mean", "inches in prior 24 h", d_roll(s24, SNOW))
         mk("eps_tcc_members", "Cloud Cover: Members and Mean", "%", lambda ax: (members(ax, T, S("tcc") * 100, MUTED), ax.set_ylim(0, 100), legend(ax)))
         g = S("10fg") * MPH; g6 = six(g, np.nanmax)
-        mk("eps_gust_members", "6-Hour Max Gust: Members and Mean", "mph", lambda ax: (members(ax, T6, pick6(g6), WARM), ax.set_ylim(bottom=0),
-                                                                                    ax.axhline(45, color=ICE, lw=1, ls=":"), ax.axhline(58, color=PLUM, lw=1, ls=":"), legend(ax)))
+        gc = Sc("10fg") * MPH; g6c = six(gc, np.nanmax)
+        GL = [10, 20, 30, 40, 45, 50, 58, 70]
+        GC = ["#3f6f9f", "#4f9fbf", "#6fbf8f", "#d6d65a", "#f0b040", "#f07a30", "#e04040", "#b02ab0"]
+        grid("eps_gust_members", "Max Wind Gust: Each Member + Mean", "mph",
+             "Max 10 m gust in the 3 h (6 h after day 6) ending at each time; ECMWF ENS has no hourly output",
+             T6, pick6(g6), pick6(g6c), f0, GL, GC)
         mk("eps_mucape_members", "Most-Unstable CAPE: Members and Mean", "J/kg", lambda ax: (members(ax, T, S("mucape"), PLUM), ax.set_ylim(bottom=0), legend(ax)))
         mk("eps_pwat_members", "Precipitable Water: Members and Mean", "inches", lambda ax: (members(ax, T, S("tcwv") / 25.4, RAIN), ax.set_ylim(bottom=0), legend(ax)))
         mk("eps_spread_qpf", "Spread: Total Precipitation", "inches (liquid)", lambda ax: (bands(ax, T, tp, RAIN, "Total"), ax.set_ylim(bottom=0), legend(ax, "upper left")))

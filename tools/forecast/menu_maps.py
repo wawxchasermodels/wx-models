@@ -643,6 +643,8 @@ PW_ANCH = [(0, "#6b4a2b"), (0.2, "#b08d5e"), (0.4, "#e3d7a8"), (0.6, "#a8d58f"),
 PWA_LEVELS = np.round(np.arange(-1.5, 1.501, 0.05), 2)
 IVT_LEVELS = [100, 150, 250, 300, 400, 500, 600, 700, 800, 1000, 1200, 1500]
 IVT_ANCH = [(100, "#e4e6ea"), (250, "#f7e28a"), (400, "#f3a64c"), (600, "#e0503a"), (800, "#b0245c"), (1200, "#6a2a8f"), (1500, "#c9a7e6")]
+W500_LEVELS = np.arange(20, 151, 5)   # 500 mb wind (10-25-26): mid-level jet scale, kt
+W500_ANCH = [(20, "#dfe5ea"), (40, "#8fc4d6"), (60, "#3e9f93"), (75, "#a6c94a"), (90, "#f1cf45"), (105, "#ef8a3a"), (120, "#d43f5a"), (150, "#8a2a9a")]
 JET_LEVELS = np.arange(50, 201, 5)
 JET_ANCH = [(50, "#dfe5ea"), (70, "#8fc4d6"), (90, "#3e9f93"), (110, "#a6c94a"), (130, "#f1cf45"), (150, "#ef8a3a"), (170, "#d43f5a"), (200, "#8a2a9a")]
 THK_LEVELS = np.arange(486, 595, 3)
@@ -725,12 +727,14 @@ def prod_ivt(m, c, s, R, vids, ctx):
                f"1000-300 mb  \u00b7  arrows where IVT >= 250 (atmospheric-river level)  \u00b7  max {np.nanmax(M):.0f}"); print("ok", m, "ivt", v, s, flush=True)
 
 
-def prod_wind(lev):
+def prod_wind(lev, heights=True):
+    """Wind speed fill + barbs at one level; heights=False (500 mb, Benjamin 10-25-26: "just wind") skips the height lines."""
     def run(m, c, s, R, vids, ctx):
-        la, lo, u = R.f(f"U:{lev}"); w = R.f(f"V:{lev}")[2]; z = R.f(f"Z:{lev}")[2]
+        la, lo, u = R.f(f"U:{lev}"); w = R.f(f"V:{lev}")[2]; z = R.f(f"Z:{lev}")[2] if heights else np.zeros_like(u)
         try: sp = R.f("sp")[2]
         except KeyError: sp = np.full_like(u, 1.0e5)
         if lev == 250: L, cm, tk, dz = JET_LEVELS, ramp(JET_LEVELS, JET_ANCH, under=(0, 0, 0, 0)), list(range(50, 201, 25)), 12
+        elif lev == 500: L, cm, tk, dz = W500_LEVELS, ramp(W500_LEVELS, W500_ANCH, under=(0, 0, 0, 0)), list(range(20, 151, 10)), 6
         else: L, cm, tk, dz = HS.WIND_LEVELS, HS.wind_cmap(), HS.WIND_TICKS, 3
         for v in vids:
             LA, LO, (U, V_, Z, SP) = TM.cut(la, lo, [u, w, z, sp], v); hires = np.ndim(LA) == 2
@@ -741,12 +745,14 @@ def prod_wind(lev):
             if under.any():
                 pc_contour(ax, "f", LO, LA, binary_dilation(under, iterations=2 if hires else 1).astype(float), levels=[0.5, 1.5],
                            colors=[TM.BELOW_GROUND], zorder=0.5)
-            f = fill(ax, LO, LA, np.where(S >= L[0], S, np.nan) if lev == 250 else S, L, cm, "max")
+            f = fill(ax, LO, LA, np.where(S >= L[0], S, np.nan) if lev in (250, 500) else S, L, cm, "max")
             cb = HS.hbar(fig, f, tk, "Wind (kt)", ky)
             HS.outlines(ax, cf, res="10m" if v == "wa" else "50m")
-            labelled(ax, LO, LA, Zs, np.arange(0, 1300, dz)); barbs(fig, ax, LO, LA, U, V_, v)
+            if heights: labelled(ax, LO, LA, Zs, np.arange(0, 1300, dz))
+            barbs(fig, ax, LO, LA, U, V_, v)
             finish(fig, ax, m, c, s, v, outdir(c, f"w{lev}", m, v, s), f"w{lev}", f"{lev} mb Wind",
-                   f"speed in kt  \u00b7  heights every {dz} dam  \u00b7  barbs in kt" + ("  \u00b7  gray = ground above 850 mb" if lev == 850 else ""))
+                   f"speed in kt" + (f"  \u00b7  heights every {dz} dam" if heights else f"  \u00b7  shaded from {L[0]} kt") + "  \u00b7  barbs in kt"
+                   + ("  \u00b7  gray = ground above 850 mb" if lev == 850 else ""))
             print("ok", m, f"w{lev}", v, s, flush=True)
     return run
 
@@ -902,6 +908,7 @@ PRODUCTS = {   # name: (function, models, global views, high-res views)
     "pw": (prod_pw, ("ifs", "aifs", "hrrr", "rrfs"), ("pnw",), H_PNW),
     "pwanom": (prod_pwanom, ("ifs", "aifs", "hrrr"), G_NAPNW, H_PNW),
     "w850": (prod_wind(850), ("ifs", "aifs", "hrrr"), G_NAPNW, H_PNW),
+    "w500": (prod_wind(500, heights=False), ("ifs", "aifs", "hrrr"), G_NAPNW, H_PNW),
     "w250": (prod_wind(250), ("ifs", "aifs", "hrrr"), G_NAPNW, H_PNW),
     "thick": (prod_thick, ("ifs", "aifs", "hrrr"), ("pnw",), H_PNW),
     "tcc": (prod_tcc, ("ifs", "aifs", "hrrr", "rrfs"), G_PNWT, H_PNW),
