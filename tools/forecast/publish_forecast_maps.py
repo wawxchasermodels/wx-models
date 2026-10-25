@@ -269,6 +269,11 @@ def classify_adhoc(d, fn):
 def web_jpg(src, dst):
     os.makedirs(os.path.dirname(dst), exist_ok=True)
     im = Image.open(src).convert("RGB"); im.thumbnail((1600, 1600)); im.save(dst, "JPEG", quality=86, optimize=True)
+    return im.size
+
+
+def _web_jpg(args):
+    return web_jpg(*args)
 
 
 def main():
@@ -305,7 +310,7 @@ def main():
             best[k] = (info, mt, p)
     maps_dir = os.path.join(SITE, "maps")
     shutil.rmtree(maps_dir, ignore_errors=True)
-    tabs_out = []
+    tabs_out = []; todo = []   # (frame, (src, dst)): web copies are made in parallel below (speed: one process per core)
     for t in TABS:
         frames = {}
         for (tab, period, view, _, _m), (info, mt, p) in sorted(best.items(), key=lambda kv: kv[0]):
@@ -315,13 +320,11 @@ def main():
                 continue   # a view/period the menu does not offer (e.g. a test render): never ship it
             h = hashlib.sha1(f"{p}{mt}".encode()).hexdigest()[:10]
             rel = f"maps/{tab}/{period}/{view}/{info['end']:%Y%m%d%H}_{h}.jpg"  # hash keeps models apart
-            web_jpg(p, os.path.join(SITE, rel))
-            with Image.open(os.path.join(SITE, rel)) as im_:
-                wh = im_.size
-            frames.setdefault(f"{period}/{view}", []).append(
-                {"src": rel, "label": label(info["start"], info["end"], period), "run": info["run"],
-                 "model": info.get("model", ""), "start": info["start"].isoformat(), "end": info["end"].isoformat(),
-                 "init": init_iso(info), "w": wh[0], "h": wh[1]})
+            fr = {"src": rel, "label": label(info["start"], info["end"], period), "run": info["run"],
+                  "model": info.get("model", ""), "start": info["start"].isoformat(), "end": info["end"].isoformat(),
+                  "init": init_iso(info), "w": 0, "h": 0}
+            todo.append((fr, (p, os.path.join(SITE, rel))))
+            frames.setdefault(f"{period}/{view}", []).append(fr)
         for v in frames.values():
             v.sort(key=lambda fr: fr["end"])
         extra = {k: t[k] for k in ("models",) if k in t}
@@ -329,6 +332,16 @@ def main():
         tabs_out.append({**extra, "id": t["id"], "label": t["label"],
                          "periods": [{"id": i, "label": l} for i, l in t["periods"]],
                          "views": [{"id": i, "label": l} for i, l in t["views"]], "frames": frames})
+    from concurrent.futures import ProcessPoolExecutor
+    n = int(os.environ.get("PUBLISH_JOBS", os.cpu_count() or 1))
+    if n > 1 and len(todo) > 50:
+        with ProcessPoolExecutor(n) as ex:
+            sizes = list(ex.map(_web_jpg, [j for _, j in todo], chunksize=32))
+    else:
+        sizes = [web_jpg(*j) for _, j in todo]
+    for (fr, _), wh in zip(todo, sizes):
+        fr["w"], fr["h"] = wh
+    print(f"web copies: {len(todo)} images, {n} processes", flush=True)
     tabs_out.sort(key=lambda t: SECTION_ORDER.index(t["group"]) if t.get("group") in SECTION_ORDER else 99)
     made_p = os.path.join(SITE, "meteograms", "made.json")
     made = json.load(open(made_p)) if os.path.exists(made_p) else {}
