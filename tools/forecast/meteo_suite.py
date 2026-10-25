@@ -393,6 +393,7 @@ def latest_long(src, min_f):
     for b in range(0, 36):
         c = now - dt.timedelta(hours=b)
         if c.hour % 6: continue
+        if os.environ.get("WX_CYCLE_HOUR") and c.hour != int(os.environ["WX_CYCLE_HOUR"]): continue   # scheduled run: 12Z only
         try: get(urls["sfc"].format(d=f"{c:%Y%m%d}", h=c.hour, f=min_f) + ".idx", (0, 10)); return c
         except Exception: pass
     raise SystemExit(f"no long {src} run found")

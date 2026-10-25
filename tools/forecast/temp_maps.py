@@ -130,6 +130,7 @@ def latest_cycle(m):
         for b in range(0, 30):
             c = now - dt.timedelta(hours=b)
             if c.hour % 6: continue
+            if os.environ.get("WX_CYCLE_HOUR") and c.hour != int(os.environ["WX_CYCLE_HOUR"]): continue   # scheduled run: 12Z only
             try:
                 get(HIRES[m]["url"].format(d=f"{c:%Y%m%d}", h=c.hour, s=HIRES[m]["hours"]) + ".idx", (0, 10)); return c
             except Exception: pass
@@ -138,6 +139,7 @@ def latest_cycle(m):
     for b in range(0, 48):
         c = now - dt.timedelta(hours=b)
         if c.hour % 12: continue   # menu_v2: globals 00Z + 12Z only
+        if os.environ.get("WX_CYCLE_HOUR") and c.hour != int(os.environ["WX_CYCLE_HOUR"]): continue   # scheduled run: 12Z only
         try:
             get(MODELS[m]["url"]["sfc"].format(d=f"{c:%Y%m%d}", h=c.hour, s=240) + ".index", (0, 10)); return c
         except Exception: pass

@@ -334,6 +334,7 @@ def latest_rrfs_long(min_fh=60):
     for b in range(0, 30):
         c = now - dt.timedelta(hours=b)
         if c.hour % 6: continue
+        if os.environ.get("WX_CYCLE_HOUR") and c.hour != int(os.environ["WX_CYCLE_HOUR"]): continue   # scheduled run: 12Z only
         try:
             get(RRFS.format(d=f"{c:%Y%m%d}", h=c.hour, f=min_fh) + ".idx", (0, 10)); return c
         except Exception: pass

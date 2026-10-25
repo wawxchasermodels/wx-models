@@ -925,6 +925,7 @@ def latest(m):
     for b in range(0, 48):
         c = now - dt.timedelta(hours=b)
         if c.hour % 12: continue
+        if os.environ.get("WX_CYCLE_HOUR") and c.hour != int(os.environ["WX_CYCLE_HOUR"]): continue   # scheduled run: 12Z only
         try: get(GFS.format(d=f"{c:%Y%m%d}", h=c.hour, s=240) + ".idx", (0, 10)); return c
         except Exception: pass
     raise SystemExit("no GFS run found")

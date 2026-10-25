@@ -36,6 +36,7 @@ def latest_long(m, now=None):
     for b in range(0, 30):
         c = now - dt.timedelta(hours=b)
         if c.hour % 6: continue
+        if os.environ.get("WX_CYCLE_HOUR") and c.hour != int(os.environ["WX_CYCLE_HOUR"]): continue   # scheduled run: 12Z only
         req = urllib.request.Request(url.format(d=f"{c:%Y%m%d}", h=c.hour, s=hours) + ".idx", headers={"Range": "bytes=0-10", "User-Agent": "wx-models"})
         try:
             with urllib.request.urlopen(req, timeout=30): return f"{c:%Y%m%d%H}"

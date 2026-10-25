@@ -1,5 +1,5 @@
 # Forecast maps + meteograms site (Washington forecast maps, AIFS upper air, ECMWF EPS / HRRR / RRFS town meteograms).
-# ON (10-25-26): full build once a day at 2:10 AM PDT on the schedule below, plus manual runs (Actions > Forecast site > Run workflow).
+# ON (10-25-26): full build once a day from the 12Z runs, 21:50 UTC (2:50 PM PDT / 1:50 PM PST), on the schedule below, plus manual runs (Actions > Forecast site > Run workflow).
 # To switch off, see web/forecast/README.md ("Turning it on").
 #
 # Job layout (every job stays well under the 6 h GitHub limit; timeouts are 300 min = 5 h):
@@ -61,15 +61,17 @@ on:
       menu_opts:
         description: "Run switches: incremental=on|off (skip menu models already published), chunk_min=20 (0 = one job per tier), waves=on|off (publish in 4 priority waves; off = one deploy at the end)"
         default: "incremental=on,chunk_min=20,waves=on"
-  # Full build once a day (Benjamin, 10-25-26 11:55 AM PT; was twice a day): cron is UTC, 09:10 UTC = 2:10 AM PDT
-  # (1:10 AM PST in winter). By then the 00Z ECMWF run is out to 240 h (the plan job picks 00Z from 09 UTC), GFS 00Z is
-  # complete and the 06Z HRRR 48 h run is done. The afternoon (12Z) build runs only when Benjamin asks: Actions > Forecast site
-  # > Run workflow on main with the default inputs (= the same full build; start it after 21:10 UTC = 2:10 PM PDT so the
-  # plan job picks the 12Z ECMWF run). Scheduled runs use the full-build fallbacks below, waves on: 5 deploys per run,
-  # about 155/month (+5 per manual run; < 500 Pages limit). The concurrency group below keeps runs from overlapping.
+  # Full build once a day from the 12Z runs (Benjamin, 10-25-26 12:20 PM PT; replaces the 2:10 AM run). Cron is UTC:
+  # 21:50 UTC = 2:50 PM PDT, and 1:50 PM PST after the Nov 1 change (UTC cron does not shift; the data times are UTC too).
+  # 12Z data seen on the open-data servers (Last-Modified of the last file we read, 10-23 and 10-24): HRRR f48 13:47,
+  # RRFS f84 15:23-16:21, GFS f240 16:37, AIFS 18:55, AIFS ENS 19:20, EPS 19:40, ECMWF IFS 0.1 deg f240 21:34 UTC.
+  # IFS 0.1 deg (the 9 km maps) is last, so 21:50 leaves about 15 min margin (plus GitHub's usual schedule delay).
+  # Scheduled runs set WX_CYCLE_HOUR=12 so every model uses its 12Z cycle (otherwise HRRR/RRFS would pick 18Z, out by then).
+  # Manual runs (Actions > Forecast site > Run workflow, default inputs = the same full build) are not pinned: newest data.
+  # 5 deploys per run, about 155/month (+5 per manual run; < 500 Pages limit). The concurrency group keeps runs apart.
   # To stop: comment out this block or disable the workflow in the Actions tab.
   schedule:
-    - cron: "10 9 * * *"
+    - cron: "50 21 * * *"
 
 concurrency:   # one run at a time: a new (scheduled or manual) run waits until the running one finishes, never cancels it
   group: forecast-site
@@ -79,6 +81,7 @@ permissions:
   contents: read
 
 env:
+  WX_CYCLE_HOUR: ${{ github.event_name == 'schedule' && '12' || '' }}   # scheduled run: 12Z cycle for every model
   PRODUCTS: ${{ github.event.inputs.products || 'wa,aifs,gfs,temps,mslp,menu,ens,eps,hrrr,rrfs' }}
   WA_TABS: ${{ github.event.inputs.wa_tabs || 'rain,snow,gusts,lows,highs,waves,bcrain' }}
   WA_PERIODS: ${{ github.event.inputs.wa_periods || 'all' }}
