@@ -1,0 +1,8 @@
+# render outputs and caches (never committed; images go only to the Access-locked Pages site)
+.site_batch/
+.meteo_cache/
+.wx_cache/
+out/
+cache/
+__pycache__/
+xs_cache/

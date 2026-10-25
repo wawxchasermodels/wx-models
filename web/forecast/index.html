@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#241c16">
+  <title>Washington Forecast Maps</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="base.css">
+  <link rel="stylesheet" href="forecast.css">
+  <link rel="stylesheet" href="obs/obs.css">
+</head>
+<body>
+  <a class="skip" href="#stage">Skip to map</a>
+  <header class="mast">
+    <div class="brand">
+      <h1 class="word">Forecast Maps</h1>
+      <p class="tag">Washington forecast maps and town meteograms</p>
+    </div>
+    <p class="stamp" id="stamp" role="status">Loading…</p>
+  </header>
+
+  <div class="menubar" id="menubar">
+    <nav class="tabs" id="tabs" role="tablist" aria-label="Map sections"></nav>
+    <div class="menu-pop" id="menu-pop" role="menu" hidden></div>
+  </div>
+
+  <section id="map-pane" role="tabpanel" aria-labelledby="tab-current">
+    <div class="controls">
+      <div class="ctl" id="ctl-products"><span class="ctl-label" id="lbl-products">Product</span><div class="chips" id="products" role="group" aria-labelledby="lbl-products"></div></div>
+      <div class="ctl" id="ctl-models"><span class="ctl-label" id="lbl-models">Model</span><div class="chips" id="models" role="group" aria-labelledby="lbl-models"></div></div>
+      <p class="model-note" id="model-note" hidden></p>
+      <div class="ctl" id="ctl-periods"><span class="ctl-label" id="lbl-periods">Period</span><div class="chips" id="periods" role="group" aria-labelledby="lbl-periods"></div></div>
+      <div class="ctl" id="ctl-views"><span class="ctl-label" id="lbl-views">View</span><div class="chips" id="views" role="group" aria-labelledby="lbl-views"></div></div>
+    </div>
+
+    <div class="timebar">
+      <div class="readout" aria-live="polite">
+        <p class="valid" id="valid">–</p>
+        <p class="meta" id="meta"></p>
+      </div>
+      <div class="transport">
+        <button type="button" class="ico" id="prev" aria-label="Previous time" title="Previous (←)">&#9664;</button>
+        <button type="button" class="ico play" id="play" aria-label="Play" title="Play / pause (space)">&#9654;</button>
+        <button type="button" class="ico" id="next" aria-label="Next time" title="Next (→)">&#9654;&#9654;</button>
+        <div class="slide">
+          <input id="slider" type="range" min="0" max="0" value="0" step="1" aria-label="Forecast time">
+          <div class="ticks" id="ticks" aria-hidden="true"></div>
+        </div>
+      </div>
+    </div>
+
+    <figure class="plate">
+      <figcaption><span id="cap-left"></span><span id="cap-right"></span></figcaption>
+      <div class="stage" id="stage" tabindex="0" aria-label="Forecast map. Use the arrow keys or swipe to change time.">
+        <img id="map-img" alt="" decoding="async">
+        <div class="loader" id="map-loader" hidden><span></span>Loading map…</div>
+        <div class="empty" id="map-empty" hidden></div>
+      </div>
+      <div class="savebar">
+        <a class="savebtn" id="dl-img" role="button" download aria-disabled="true">Download image</a>
+        <button type="button" class="savebtn" id="dl-loop-open" aria-expanded="false" aria-controls="loop-panel">Download loop</button>
+        <span class="save-tip">or right-click the map and choose “Save image as”</span>
+      </div>
+      <div class="looppanel" id="loop-panel" hidden>
+        <div class="loop-row">
+          <label class="ctl">
+            <span class="ctl-label">From</span><select id="loop-from"></select>
+          </label>
+          <label class="ctl">
+            <span class="ctl-label">To</span><select id="loop-to"></select>
+          </label>
+          <label class="ctl">
+            <span class="ctl-label">Frame speed</span>
+            <select id="loop-speed">
+              <option value="250">Fast (0.25 s)</option>
+              <option value="500">Quick (0.5 s)</option>
+              <option value="800" selected>Normal (0.8 s)</option>
+              <option value="1200">Slow (1.2 s)</option>
+              <option value="2000">Very slow (2 s)</option>
+            </select>
+          </label>
+          <label class="ctl">
+            <span class="ctl-label">Size</span>
+            <select id="loop-size">
+              <option value="0">Full size</option>
+              <option value="1200" selected>Large (1200 px)</option>
+              <option value="800">Medium (800 px)</option>
+              <option value="540">Small (540 px)</option>
+            </select>
+          </label>
+          <label class="ctl">
+            <span class="ctl-label">Format</span>
+            <select id="loop-fmt">
+              <option value="gif" selected>Animated GIF</option>
+              <option value="video">Video</option>
+            </select>
+          </label>
+        </div>
+        <div class="loop-row loop-actions">
+          <button type="button" class="savebtn primary" id="loop-go">Make loop</button>
+          <button type="button" class="savebtn" id="loop-cancel" hidden>Cancel</button>
+          <p class="loop-info" id="loop-info"></p>
+        </div>
+        <progress id="loop-prog" value="0" max="1" hidden></progress>
+        <p class="loop-status" id="loop-status" role="status" aria-live="polite"></p>
+        <p class="loop-result" id="loop-result"></p>
+        <p class="loop-note">Loops are built in your browser from the frames on this page. GIF is up to 72 frames and video up to 240. Video plays back in real time while it records.</p>
+      </div>
+      <p class="hint">Tip: ← → keys or swipe the map to step through time. Your hour is kept when you change model, period, view or product.</p>
+    </figure>
+  </section>
+
+  <section id="meteo-pane" role="tabpanel" hidden>
+    <div class="controls">
+      <div class="ctl"><span class="ctl-label" id="lbl-msec">Model</span><div class="chips" id="msections" role="group" aria-labelledby="lbl-msec"></div></div>
+      <div class="ctl"><label class="ctl-label" for="town">Town</label><select id="town"></select></div>
+      <div class="ctl prodpick"><label class="ctl-label" for="mproduct">Product</label><select id="mproduct"></select></div>
+    </div>
+    <div class="meteo-grid">
+      <ul class="prodlist" id="prodlist" aria-label="Products"></ul>
+      <figure class="plate">
+        <figcaption><span id="mcap-left"></span><span id="mcap-right"></span></figcaption>
+        <div class="stage meteo" id="mstage">
+          <img id="meteo-img" alt="" decoding="async">
+          <div class="loader" id="meteo-loader" hidden><span></span>Loading…</div>
+          <div class="empty" id="meteo-empty" hidden></div>
+        </div>
+        <div class="savebar">
+          <a class="savebtn" id="dl-meteo" role="button" download aria-disabled="true">Download image</a>
+          <span class="save-tip">or right-click the chart and choose “Save image as”</span>
+        </div>
+      </figure>
+    </div>
+  </section>
+
+  <section id="obs-pane" role="tabpanel" hidden><div id="obs-root"></div></section>
+
+  <footer class="colophon">
+    <p><strong>Data.</strong> ECMWF open data (IFS 9 km, AIFS, ENS 0.25&deg;, WAM), Copyright &copy; European Centre for Medium-Range Weather Forecasts (ECMWF), <a href="https://www.ecmwf.int">www.ecmwf.int</a>, licensed under <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>. Charts are modified from the data. ECMWF does not accept any liability whatsoever for any error or omission in the data, their availability, or for any loss or damage arising from their use. NOAA NBM, HRRR and RRFS data are public domain. Upper-air anomalies use the NCEP/NCAR Reanalysis 1991-2020 climatology (NOAA PSL). Basemap: U.S. Census and Natural Earth (public domain), GSHHG shoreline (NOAA), GeoNames (CC BY 4.0).</p>
+    <p>All times are Pacific (PT). F+ is hours after the model run started.</p>
+  </footer>
+  <script src="export.js"></script>
+  <script src="obs/obs.js"></script>
+  <script src="forecast.js"></script>
+</body>
+</html>
