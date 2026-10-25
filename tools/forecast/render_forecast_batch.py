@@ -14,9 +14,9 @@ Periods (rain/snow): 1h (rain, HRRR only), step (3 h, the finest ECMWF step), 6h
 24h, 48h, total (run start to each 6 h step). Gusts: step, max6h, max12h, max24h.
 Waves: step, max24h (hmax). Lows/highs: daily (NBM, one per day).
 
-Models (--models, default ecmwf; lows/highs default nbm): ecmwf, nbm, gfs, eps (ENS mean), eps90 (ENS 90th percentile).
-Each tab only renders the models it supports (MODELS below). Finest steps: ECMWF 3 h, NBM 1 h to 36 h, GFS 3 h to 120 h
-then 6 h, ENS 3 h to 144 h then 6 h; "step" windows that fall between a model's steps are skipped.
+Models (--models, default ecmwf; lows/highs default nbm): ecmwf, nbm, eps (ENS mean), eps90 (ENS 90th percentile), hrrr.
+Each tab only renders the models it supports (MODELS below). Finest steps: ECMWF 3 h, NBM 1 h to 36 h, ENS 3 h to 144 h
+then 6 h; "step" windows that fall between a model's steps are skipped. (GFS removed 10-24-26.)
 """
 import argparse, datetime as dt, json, os, subprocess, sys, time
 from concurrent.futures import ThreadPoolExecutor
@@ -41,9 +41,11 @@ TABS = {
     "lows":   {"script": "nbm_map.py", "views": ["full", "west", "east"], "periods": ["daily"]},
     "highs":  {"script": "nbm_map.py", "views": ["full", "west", "east"], "periods": ["daily"]},
 }
-MODELS = {"rain": ["ecmwf", "nbm", "gfs", "eps", "eps90", "hrrr"], "bcrain": ["ecmwf", "gfs", "eps", "eps90"],
-          "snow": ["ecmwf", "nbm", "gfs", "eps", "eps90"], "gusts": ["ecmwf", "nbm", "gfs", "eps"],
-          "lows": ["nbm", "gfs", "eps"], "highs": ["nbm", "gfs", "eps"], "waves": ["ecmwf"]}
+# GFS left the Washington tabs on 10-24-26 (Benjamin: GFS only as 500 mb anomaly + sea-level pressure). The old lists are in
+# archive/gfs_products_20261024/wa_tab_models.py.txt; the map scripts still accept --source gfs / --model gfs.
+MODELS = {"rain": ["ecmwf", "nbm", "eps", "eps90", "hrrr"], "bcrain": ["ecmwf", "eps", "eps90"],
+          "snow": ["ecmwf", "nbm", "eps", "eps90"], "gusts": ["ecmwf", "nbm", "eps"],
+          "lows": ["nbm", "eps"], "highs": ["nbm", "eps"], "waves": ["ecmwf"]}
 DEFAULT_MODEL = {"lows": "nbm", "highs": "nbm"}
 MODEL_NAME = {"ecmwf": "ECMWF", "nbm": "NBM", "gfs": "GFS", "eps": "EPS mean", "eps90": "EPS 90th pct", "hrrr": "HRRR"}
 HOURLY = {"hrrr"}          # 1 h windows only for the hourly 3 km model (A1); HRRR 00/12Z runs reach 48 h
@@ -118,7 +120,7 @@ def main():
     ap.add_argument("--periods", default="all")
     ap.add_argument("--views", default="all")
     ap.add_argument("--hours", type=int, default=144, help="forecast horizon (h)")
-    ap.add_argument("--models", default="default", help="comma list of ecmwf,nbm,gfs,eps,eps90 or 'all' (default: each tab's usual model)")
+    ap.add_argument("--models", default="default", help="comma list of ecmwf,nbm,eps,eps90,hrrr or 'all' (default: each tab's usual model)")
     ap.add_argument("--jobs", type=int, default=1, help="parallel renders (each uses ~1-2 GB RAM)")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--shard", default="1/1", help="K/N: render only every N-th job starting at K (workflow matrix split)")

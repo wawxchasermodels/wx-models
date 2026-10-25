@@ -5,10 +5,11 @@
 # Job layout (every job stays well under the 6 h GitHub limit; timeouts are 300 min = 5 h):
 #   plan            picks the ECMWF cycle once and splits the WA map list into shards (auto: about 4 h of work each)
 #   wa-maps (N)     matrix, one job per shard: renders its share of the WA maps -> artifact wa-maps-<k>
-#   aifs            AIFS 500 mb anomaly, MSLP, MSLP + 10 m wind -> artifact aifs-maps
+#   aifs            AIFS 500 mb anomaly (NA, PNW), MSLP and MSLP + 10 m wind (NA, PNW, PNW tight), every 6 h -> artifact aifs-maps
+#   gfs             the only GFS maps (10-24-26): 500 mb anomaly + sea-level pressure (NA, PNW, PNW tight), every 6 h -> gfs-maps
 #   mslp            ECMWF 9 km MSLP + precip (NA, PNW, WA), 3 h to 72 h then 6 h to 240 h -> artifact mslp-maps (only when 'mslp' is picked)
-#   temps           2 m temp + 850 mb temp/wind, ECMWF IFS and AIFS (NA, PNW, WA) -> artifact temp-maps (only when 'temps' is picked)
-#   menu (M x 3)    menu maps (menu_maps.py), one job per model and frame tier (A native, B 6 h / 3 h, C 12 h / 6 h) -> menu-<model>-<tier>
+#   temps           2 m temp + anomaly (NA, PNW, PNW tight, WA) and 850 mb (NA, PNW, WA), ECMWF IFS and AIFS, every 6 h -> temp-maps
+#   menu (M x 3)    menu maps (menu_maps.py), one job per model and product tier; IFS/AIFS every 6 h to 240 h, HRRR/RRFS hourly -> menu-<model>-<tier>
 #   ens (2)         ensemble low centers + 500 mb heights, EPS and AIFS ENS, every 6 h to 240 h (00Z/12Z cycles) -> ens-<src>
 #   meteograms      EPS (6 h steps, 00Z/12Z only) / HRRR / RRFS town meteograms, meteo_suite.py, one job so made.json is
 #                   written once -> artifact meteograms
@@ -21,7 +22,7 @@ on:
   workflow_dispatch:
     inputs:
       products:
-        description: "Comma list: wa,aifs,temps,mslp,menu,ens,eps,hrrr,rrfs (eps/hrrr/rrfs = meteograms)"
+        description: "Comma list: wa,aifs,gfs,temps,mslp,menu,ens,eps,hrrr,rrfs (eps/hrrr/rrfs = meteograms)"
         default: "aifs"
       wa_tabs:
         description: "WA map tabs (rain,bcrain,snow,gusts,waves,lows,highs)"
@@ -36,11 +37,11 @@ on:
         description: "WA map horizon in hours"
         default: "48"
       wa_models:
-        description: "WA map models (ecmwf,nbm,gfs,eps,eps90,hrrr, 'default' = ECMWF, NBM for temps, or 'all'); hrrr = Rain 1h"
+        description: "WA map models (ecmwf,nbm,eps,eps90,hrrr, 'default' = ECMWF, NBM for temps, or 'all'); hrrr = Rain 1h"
         default: "default"
       menu_models:
-        description: "Menu-map models (ifs,gfs,aifs,hrrr,rrfs)"
-        default: "ifs,gfs,aifs,hrrr,rrfs"
+        description: "Menu-map models (ifs,aifs,hrrr,rrfs)"
+        default: "ifs,aifs,hrrr,rrfs"
       menu_tiers:
         description: "Menu frame tiers (A,B,C; see plan/menu_v2.md)"
         default: "A,B,C"
@@ -104,7 +105,7 @@ jobs:
           PY
           python - >> "$GITHUB_OUTPUT" <<'PY'
           import json, os
-          ms = [m for m in (os.environ.get("MENU_MODELS") or "ifs,gfs,aifs,hrrr,rrfs").split(",") if m]
+          ms = [m for m in (os.environ.get("MENU_MODELS") or "ifs,aifs,hrrr,rrfs").split(",") if m and m != "gfs"]   # GFS: own job (gfs)
           ts = [t for t in (os.environ.get("MENU_TIERS") or "A,B,C").split(",") if t]
           print("menu=" + json.dumps({"include": [{"model": m, "tier": t} for m in ms for t in ts]}))
           PY
@@ -178,13 +179,53 @@ jobs:
             python tools/forecast/make_clim.py /tmp/hgt.nc .clim/ncep_hgt500_mon_ltm_1991_2020.npz
           fi
           cp .clim/ncep_hgt500_mon_ltm_1991_2020.npz .site_batch/clim/
-      - name: AIFS 500 mb anomaly, MSLP, MSLP + 10 m wind
-        run: python tools/forecast/aifs_maps.py --hours 240 --every 12
+      - name: AIFS 500 mb anomaly, MSLP, MSLP + 10 m wind (every 6 h to 240 h)
+        run: python tools/forecast/aifs_maps.py --hours 240 --every 6 --views na,pnw,pnwt
       - name: Keep only the site files
         run: rm -rf .site_batch/clim
       - uses: actions/upload-artifact@v4
         with:
           name: aifs-maps
+          path: .site_batch
+          include-hidden-files: true   # the batch folders start with a dot
+          retention-days: 1
+          if-no-files-found: warn
+
+  gfs:
+    needs: plan
+    if: contains(github.event.inputs.products || 'aifs,eps,hrrr,rrfs', 'gfs')
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      SITE_BATCH: ${{ github.workspace }}/.site_batch
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install Python packages (pinned, permissive licenses)
+        run: pip install -r tools/requirements.txt
+      - name: Restore climatology cache
+        uses: actions/cache@v4
+        with:
+          path: .clim
+          key: forecast-clim-v1
+      - name: Climatology (NCEP/NCAR Reanalysis 1991-2020 monthly mean 500 mb height, NOAA PSL; same file as the AIFS anomaly)
+        run: |
+          mkdir -p .clim .site_batch/clim
+          if [ ! -f .clim/ncep_hgt500_mon_ltm_1991_2020.npz ]; then
+            pip install h5py
+            curl -sSfo /tmp/hgt.nc https://downloads.psl.noaa.gov/Datasets/ncep.reanalysis.derived/pressure/hgt.mon.ltm.1991-2020.nc
+            python tools/forecast/make_clim.py /tmp/hgt.nc .clim/ncep_hgt500_mon_ltm_1991_2020.npz
+          fi
+          cp .clim/ncep_hgt500_mon_ltm_1991_2020.npz .site_batch/clim/
+      - name: GFS 500 mb anomaly + sea-level pressure (latest 00Z/12Z run, every 6 h to 240 h)
+        run: python tools/forecast/gfs_maps.py --hours 240 --every 6 --views na,pnw,pnwt
+      - name: Keep only the site files
+        run: rm -rf .site_batch/clim
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gfs-maps
           path: .site_batch
           include-hidden-files: true   # the batch folders start with a dot
           retention-days: 1
@@ -254,10 +295,10 @@ jobs:
             python tools/forecast/make_clim_t2m.py /tmp/air2m.nc /tmp/hgtsfc.nc .clim/ncep_t2m_6h_ltm_1991_2020.npz
           fi
           cp .clim/ncep_t2m_6h_ltm_1991_2020.npz .site_batch/clim/
-      - name: ECMWF IFS 2 m temp, 2 m anomaly, 850 mb temp/wind (every 12 h to 240 h)
-        run: python tools/forecast/temp_maps.py --model ifs --cycle "${{ needs.plan.outputs.cycle }}" --hours 240 --every 12 --products t2m,t2manom,t850
-      - name: AIFS 2 m temp, 2 m anomaly, 850 mb temp/wind (every 12 h to 240 h)
-        run: python tools/forecast/temp_maps.py --model aifs --cycle "${{ needs.plan.outputs.cycle }}" --hours 240 --every 12 --products t2m,t2manom,t850
+      - name: ECMWF IFS 2 m temp, 2 m anomaly, 850 mb temp/wind (every 6 h to 240 h)
+        run: python tools/forecast/temp_maps.py --model ifs --cycle "${{ needs.plan.outputs.cycle }}" --hours 240 --every 6 --views na,pnw,pnwt,wa --products t2m,t2manom,t850
+      - name: AIFS 2 m temp, 2 m anomaly, 850 mb temp/wind (every 6 h to 240 h)
+        run: python tools/forecast/temp_maps.py --model aifs --cycle "${{ needs.plan.outputs.cycle }}" --hours 240 --every 6 --views na,pnw,pnwt,wa --products t2m,t2manom,t850
       - name: Keep only the site files
         run: rm -rf .site_batch/clim
       - uses: actions/upload-artifact@v4
@@ -289,12 +330,12 @@ jobs:
           echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true" | sudo debconf-set-selections
           sudo apt-get update -qq && sudo apt-get install -y -qq ttf-mscorefonts-installer libcairo2
           test -f /usr/share/fonts/truetype/msttcorefonts/Impact.ttf
-      - name: HRRR 2 m temp + 850 mb temp/wind (latest full 48 h run, every 3 h)
+      - name: HRRR 2 m temp + 850 mb temp/wind (latest full 48 h run, hourly)
         if: contains(github.event.inputs.products || 'aifs,eps,hrrr,rrfs', 'hrrr')
-        run: python tools/forecast/temp_maps.py --model hrrr --hours 48 --every 3
-      - name: RRFS 2 m temp (latest 84 h run, every 3 h)
+        run: python tools/forecast/temp_maps.py --model hrrr --hours 48 --every 1
+      - name: RRFS 2 m temp (latest 84 h run, hourly)
         if: contains(github.event.inputs.products || 'aifs,eps,hrrr,rrfs', 'rrfs')
-        run: python tools/forecast/temp_maps.py --model rrfs --hours 84 --every 3
+        run: python tools/forecast/temp_maps.py --model rrfs --hours 84 --every 1
       - uses: actions/upload-artifact@v4
         with:
           name: hires-maps
@@ -314,9 +355,10 @@ jobs:
       matrix: ${{ fromJSON(needs.plan.outputs.menu) }}
     env:
       SITE_BATCH: ${{ github.workspace }}/.site_batch
-      # products per frame tier (plan/menu_v2.md ranking). 2 m temp / 850 / 2 m anomaly come from the temps job.
+      # products per job tier (plan/menu_v2.md ranking). 2 m temp / 850 / 2 m anomaly come from the temps job.
+      # Since 10-24-26 every tier uses the same frames: IFS/AIFS every 6 h to 240 h, HRRR/RRFS hourly. mslp500 dropped.
       TIER_A: gust10,peakgust,feels,t925,t700,t500,t300
-      TIER_B: mslp500,qpf,snowkuch,ivt,snow10,pwanom,frzr,w850,w250,mslpptype
+      TIER_B: qpf,snowkuch,ivt,snow10,pwanom,frzr,w850,w250,mslpptype
       TIER_C: snowk24,thick,td2m,pw,snowrate,tcc,ir,vis,fog
     steps:
       - uses: actions/checkout@v4
@@ -351,17 +393,15 @@ jobs:
       - name: Menu maps, ${{ matrix.model }} tier ${{ matrix.tier }}
         run: |
           case "${{ matrix.tier }}" in
-            A) P="$TIER_A"; E=0 ;;
-            B) P="$TIER_B"; E=6 ;;
-            C) P="$TIER_C"; E=12 ;;
+            A) P="$TIER_A" ;;
+            B) P="$TIER_B" ;;
+            C) P="$TIER_C" ;;
           esac
           case "${{ matrix.model }}" in
-            hrrr|rrfs) [ "$E" = 6 ] && E=3; [ "$E" = 12 ] && E=6; CY="" ;;
-            *) CY="--cycle ${{ needs.plan.outputs.cycle }}" ;;
+            hrrr|rrfs) E=0; CY="" ;;    # every native hour; HRRR/RRFS pick their latest long run
+            *) E=6; CY="--cycle ${{ needs.plan.outputs.cycle }}" ;;
           esac
-          # GFS picks its own latest 00Z/12Z run; HRRR/RRFS pick their latest long run
-          [ "${{ matrix.model }}" = gfs ] && CY=""
-          python tools/forecast/menu_maps.py --model "${{ matrix.model }}" $CY --hours 240 --every "$E" --products "$P"
+          python tools/forecast/menu_maps.py --model "${{ matrix.model }}" $CY --hours 240 --every "$E" --views na,pnw,pnwt,wa --products "$P"
       - name: Keep only the site files
         run: rm -rf .site_batch/clim
       - uses: actions/upload-artifact@v4
@@ -447,7 +487,7 @@ jobs:
           if-no-files-found: warn
 
   deploy:
-    needs: [plan, wa-maps, aifs, mslp, temps, hires, menu, ens, meteograms]
+    needs: [plan, wa-maps, aifs, gfs, mslp, temps, hires, menu, ens, meteograms]
     # runs when every render job either succeeded or was switched off by the products input; any failure or cancel stops it
     if: ${{ !cancelled() && needs.plan.result == 'success' && !contains(needs.*.result, 'failure') }}
     runs-on: ubuntu-latest
@@ -462,11 +502,11 @@ jobs:
           python-version: "3.13"
       - name: Install Python packages (pinned, permissive licenses)
         run: pip install -r tools/requirements.txt
-      - name: Collect map artifacts (WA shards + AIFS + MSLP + temps + HRRR/RRFS)
+      - name: Collect map artifacts (WA shards + AIFS + GFS + MSLP + temps + HRRR/RRFS)
         uses: actions/download-artifact@v4
         continue-on-error: true   # nothing to collect when only meteograms were picked
         with:
-          pattern: "{wa-maps-*,aifs-maps,mslp-maps,temp-maps,hires-maps,menu-*,ens-*}"
+          pattern: "{wa-maps-*,aifs-maps,gfs-maps,mslp-maps,temp-maps,hires-maps,menu-*,ens-*}"
           path: .site_batch
           merge-multiple: true
       - name: Collect meteograms
