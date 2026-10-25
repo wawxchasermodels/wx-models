@@ -185,6 +185,7 @@ jobs:
     timeout-minutes: 300
     strategy:
       fail-fast: false
+      max-parallel: 10   # runner budget: GitHub runs 20 jobs at once; caps keep a runner free so each wave's deploy starts at once
       matrix:
         shard: ${{ fromJSON(needs.plan.outputs.shards) }}
     env:
@@ -447,7 +448,7 @@ jobs:
     timeout-minutes: 90
     strategy:
       fail-fast: false
-      max-parallel: 20
+      max-parallel: 4   # runner budget: GitHub runs 20 jobs at once; caps keep a runner free so each wave's deploy starts at once
       matrix: ${{ fromJSON(needs.plan.outputs.menu_w3) }}
     env:
       SITE_BATCH: ${{ github.workspace }}/.site_batch
@@ -519,7 +520,7 @@ jobs:
     timeout-minutes: 90
     strategy:
       fail-fast: false
-      max-parallel: 20
+      max-parallel: 2   # runner budget: GitHub runs 20 jobs at once; caps keep a runner free so each wave's deploy starts at once
       matrix: ${{ fromJSON(needs.plan.outputs.menu_w4) }}
     env:
       SITE_BATCH: ${{ github.workspace }}/.site_batch
@@ -633,6 +634,7 @@ jobs:
     timeout-minutes: 300
     strategy:
       fail-fast: false
+      max-parallel: 2   # runner budget: GitHub runs 20 jobs at once; caps keep a runner free so each wave's deploy starts at once
       matrix:
         src: [eps, aifsens]
     env:
