@@ -44,24 +44,32 @@ The WA shard job is off (it runs only when the repo variable `WA_SHARDS` is `on`
 (Washington view for ECMWF 9 km, HRRR, RRFS; Pacific NW tight for ECMWF). Restore steps: `RESTORE_WA_SHARDS.md`.
 
 ## Staged builds (10-25-26, PR #19)
-Each 00Z/12Z cycle is published in four stages, each as soon as its models are out (times are UTC, from the
-Last-Modified of each model's last file):
+Each 00Z/12Z cycle is published in five stages, each as soon as its models are out (times are UTC, from the
+Last-Modified of each model's last file). Order (10-26-26, Benjamin: "have the main global runs and high res runs before
+any ensemble or meteograms"): every deterministic global and high-res stage deploys before the ensembles and meteograms.
 
 | Stage | Products | Data ready (UTC) |
 |---|---|---|
-| s1 | HRRR temps, HRRR menu maps, HRRR meteograms | about 01:47 / 13:47 |
-| s2 | RRFS temps/menu/meteograms, GFS 500 mb + SLP | about 04:38 / 16:37 (GFS f240) |
-| s3 | AIFS maps/temps/menu, EPS + AIFS ENS lows, EPS meteograms | about 07:40 / 19:40 |
+| s1 | HRRR temps, HRRR menu maps | about 01:47 / 13:47 |
+| s2 | RRFS temps/menu, GFS 500 mb + SLP | about 04:38 / 16:37 (GFS f240) |
+| s3 | AIFS maps/temps/menu | about 06:55 / 18:55 |
 | s4 | ECMWF 9 km MSLP/precip, SLP, temps, menu | about 09:34 / 21:34 |
+| s5 | EPS + AIFS ENS lows, EPS/HRRR/RRFS meteograms (last) | after s4 of the same cycle (EPS out about 07:40 / 19:40) |
+
+Before 10-26-26 there were four stages: s3 also held the ensembles and EPS meteograms, s1 deployed the HRRR meteograms and
+s2 rendered the RRFS ones. `site-state` written by the old layout still works: until the first s5 run, s5 counts as
+published at the ensemble group's cycle (`published()` in `stage_tools.py`), so nothing is redone or skipped.
+- **Catch-up (10-26-26).** If a stage deploys but one of its groups failed (GFS 12Z on 10-26: NOAA files not found yet),
+  the next stage run of the same cycle re-renders that group once its data is out (`CATCHUP`, GFS for now). No extra deploy.
 
 How it works:
-- **Triggers (live 10-25-26).** `forecast-poll.yml` runs every 10 min. When no Forecast site run is going, it starts the first stage whose models have a newer complete run than the site (`stage=sN cycle=YYYYMMDDHH`). Backup crons in `forecast-site.yml` (`10 2,14,20`, `50 4,16`, `0 8,20`, `50 9,21` UTC) start a stage only if it has not been published yet.
+- **Triggers (live 10-25-26).** `forecast-poll.yml` runs every 10 min. When no Forecast site run is going, it starts the first stage whose models have a newer complete run than the site (`stage=sN cycle=YYYYMMDDHH`). Same-cycle stages start in order s1..s5, and s5 waits until s4 has published that cycle (or s4 failed twice). Backup crons in `forecast-site.yml` (`10 2,8,14,20`, `50 4,16`, `0 8,20`, `50 9,21`, `40 10,22` UTC) start a stage only if it has not been published yet (the s5 backup does not wait for s4).
 - **What each stage does.** A stage renders only its own groups. Its single deploy contains the whole site: its new products laid over every group carried forward from the run that last built it. Only the newest cycle of each product is kept.
 - **Site state.** The `site-state` artifact (30 days) says which run holds each group. Map artifacts are kept 3 days. If the state or a carried artifact is gone, the stage stops before deploying. A full build (`stage=all`) reseeds everything.
 - **Safety check.** There is no deploy if the main site would have fewer than 85% of the last deploy's files, or more than 19,500.
-- **Deploys.** 4 main deploys plus 3 meteogram-project deploys (s1-s3) per 00Z/12Z cycle, plus 1 main deploy each for HRRR 06Z and 18Z (s1, maps only). 10-26-26: no meteogram-project deploy on s2 (RRFS charts go live with the next s3/s1 meteogram deploy), so 4 main + 2 meteogram deploys per 00Z/12Z cycle + 2 maps-only: 14 a day, about 420-434 a month (Pages Free limit: 500). HRRR keeps the newest two of 00/06/12/18Z. ECMWF 9 km 06Z/18Z (to 144 h; gusts to 90 h) rides along with the next stage run for five products (500 mb anomaly, MSLP + 10 m wind, 850 mb temp/wind, 850 mb anomaly, 10 m gusts) as a second run on the toggle (about +335 files). The poller stops re-dispatching a stage/cycle after 2 finished runs that did not publish it.
+- **Deploys (10-26-26 reorder).** 5 main deploys (s1-s5) plus 1 meteogram-project deploy (s5) per 00Z/12Z cycle, plus 1 main deploy each for HRRR 06Z and 18Z: still 14 a day, about 420-434 a month. Meteograms now update twice a day (s5, about 22:10 / 10:10 UTC) instead of with s1/s3. Earlier history: 4 main deploys plus 3 meteogram-project deploys (s1-s3) per 00Z/12Z cycle, plus 1 main deploy each for HRRR 06Z and 18Z (s1, maps only). 10-26-26: no meteogram-project deploy on s2 (RRFS charts go live with the next s3/s1 meteogram deploy), so 4 main + 2 meteogram deploys per 00Z/12Z cycle + 2 maps-only: 14 a day, about 420-434 a month (Pages Free limit: 500). HRRR keeps the newest two of 00/06/12/18Z. ECMWF 9 km 06Z/18Z (to 144 h; gusts to 90 h) rides along with the next stage run for five products (500 mb anomaly, MSLP + 10 m wind, 850 mb temp/wind, 850 mb anomaly, 10 m gusts) as a second run on the toggle (about +335 files). The poller stops re-dispatching a stage/cycle after 2 finished runs that did not publish it.
 - **HRRR 18Z** is its own s1 run (f48 out about 19:47 UTC); AIFS 18Z still rides along with the next stage run (normally HRRR 00Z).
-- **Manual runs.** Actions > Forecast site > Run workflow with `stage=s1`..`s4` (optional `cycle`, `dry_run`). Default `stage=all` is the old full build, unchanged.
+- **Manual runs.** Actions > Forecast site > Run workflow with `stage=s1`..`s5` (optional `cycle`, `dry_run`). Default `stage=all` is the old full build, unchanged.
 
 ### Two runs of HRRR and AIFS (10-25-26, PR "two-run HRRR + AIFS")
 - **What the site shows.** The two newest HRRR runs (00Z/12Z/18Z long runs) and the two newest ECMWF AIFS single runs
@@ -73,7 +81,7 @@ How it works:
   keeps the two newest cycles of every HRRR/AIFS product folder (`*-hrrr`, `*-aifs`, `aifs500`, `aifsmslp`, `aifswind`).
 - **18Z runs add no deploys and no crons.** Each one rides along with the first stage run after its data is out
   (`RIDERS` in `stage_tools.py`):
-  - HRRR 18Z (f48 out about 19:47 UTC) normally rides with the 12Z s3 run, or with s4 if s3 started first.
+  - HRRR 18Z (f48 out about 19:47 UTC) is its own s1 run since 10-25-26 (this rider line is history).
   - AIFS 18Z (240 h out about 00:55 UTC) rides with the 00Z s1 run.
   - Riders draw maps only. HRRR multi-run meteograms already read the 18Z run themselves.
 - **Full builds** show one run of each model. The next stage run brings back the second run.
@@ -84,7 +92,7 @@ How it works:
 
 Rollback to the once-a-day full build:
 1. Comment out the `schedule:` block in `.github/workflows/forecast-poll.yml`, or disable "Forecast poll" in the Actions tab.
-2. In `forecast-site.yml`, comment out the four staged backup crons and make sure `- cron: "50 21 * * *"` is active.
+2. In `forecast-site.yml`, comment out the five staged backup crons and make sure `- cron: "50 21 * * *"` is active.
 3. Optional: run Forecast site with the default inputs (`stage=all`) once. That rebuilds the whole site from one run and reseeds the site state.
 No secrets, tokens or Cloudflare settings change in either direction. The staged code stays in place and is inert without its triggers.
 

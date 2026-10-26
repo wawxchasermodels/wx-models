@@ -63,7 +63,7 @@ on:
         description: "Run switches: incremental=on|off (skip menu models already published), chunk_min=20 (0 = one job per tier), waves=on|off (publish in 4 priority waves; off = one deploy at the end)"
         default: "incremental=on,chunk_min=20,waves=on"
       stage:
-        description: "all = full build (default, unchanged). s1 HRRR | s2 RRFS+GFS | s3 AIFS+ensembles+EPS meteograms | s4 ECMWF 9 km: render only that stage, deploy the site with the other groups carried forward"
+        description: "all = full build (default, unchanged). s1 HRRR | s2 RRFS+GFS | s3 AIFS | s4 ECMWF 9 km | s5 ensembles + all meteograms (last): render only that stage, deploy the site with the other groups carried forward"
         default: "all"
       cycle:
         description: "Stage runs: model cycle YYYYMMDDHH (00/12; s1 also 06/18); empty = newest complete run for that stage"
@@ -87,7 +87,10 @@ on:
   # Staged builds (10-25-26): forecast-poll.yml starts each stage as soon as its data is out (every 20 min check); these
   # backup crons start a stage only if it was not published yet (plan job checks the site state). UTC; PDT = UTC-7, PST = UTC-8.
   #   s1 HRRR 02:10/08:10/14:10/20:10 (7:10 PM / 1:10 AM / 7:10 AM / 1:10 PM PDT)  s2 RRFS+GFS 04:50/16:50 (9:50 PM / 9:50 AM)
-  #   s3 AIFS+ens 08:00/20:00 (1:00 AM / 1:00 PM)  s4 ECMWF 9 km 09:50/21:50 (2:50 AM / 2:50 PM)
+  #   s3 AIFS 08:00/20:00 (1:00 AM / 1:00 PM)  s4 ECMWF 9 km 09:50/21:50 (2:50 AM / 2:50 PM)
+  #   s5 ensembles + all meteograms 10:40/22:40 (3:40 AM / 3:40 PM)
+  # Order (10-26-26, Benjamin 12:43 PM): main global (GFS, AIFS, ECMWF 9 km) and high-res (HRRR, RRFS) deploy before any
+  # ensemble or meteogram work; s5 goes last (the poller starts it only after s4 of the same cycle). Still 14 deploys a day.
   # Poller every 10 min (forecast-poll.yml). HRRR 06Z and 18Z are their own s1 runs (+1 deploy a day each, maps only); AIFS 18Z still rides along.
   # Two-run HRRR + AIFS (10-25-26): the site keeps the 2 newest runs of each (run toggle). Their 18Z runs add no deploys and
   # no crons: they ride along with the first stage run after their data is out (stage_tools.py RIDERS), normally
@@ -100,8 +103,9 @@ on:
     - cron: "50 21 * * *"
     - cron: "10 2,8,14,20 * * *"   # STAGED BACKUP s1 HRRR 00/06/12/18Z (06Z added 10-26-26); each does nothing if already published
     - cron: "50 4,16 * * *"      # s2 RRFS + GFS
-    - cron: "0 8,20 * * *"       # s3 AIFS + ensembles + EPS meteograms (EPS 240 h about 07:40 / 19:40)
+    - cron: "0 8,20 * * *"       # s3 AIFS (240 h about 06:55 / 18:55)
     - cron: "50 9,21 * * *"      # s4 ECMWF 9 km
+    - cron: "40 10,22 * * *"     # s5 EPS + AIFS ENS maps + EPS/HRRR/RRFS meteograms (last; 10-26-26)
 
 concurrency:   # one run at a time: a new (scheduled or manual) run waits until the running one finishes, never cancels it
   group: forecast-site
@@ -166,7 +170,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - name: Stage (all = full build; s1-s4 = staged build, tools/forecast/stage_tools.py)
+      - name: Stage (all = full build; s1-s5 = staged build, tools/forecast/stage_tools.py)
         id: st
         env:
           GH_TOKEN: ${{ github.token }}
@@ -918,7 +922,7 @@ jobs:
           if-no-files-found: warn
 
   meteo-stage:
-    # staged builds: meteograms split by model (s1 HRRR, s2 RRFS, s3 EPS), each with its own point cache and its own
+    # staged builds: meteograms split by model (EPS, HRRR, RRFS; all in s5 since 10-26-26), each with its own point cache and its own
     # made.json; forecast-deploy.yml merges the parts (newest per model) with the ones carried from earlier runs
     needs: [plan, start-w3]
     if: needs.plan.outputs.stage != 'all' && needs.plan.outputs.go == 'true' && needs.plan.outputs.meteo_srcs != '[]'
@@ -1026,7 +1030,7 @@ jobs:
       wave: ${{ needs.plan.outputs.stage }}
       patterns: ${{ needs.plan.outputs.stage_patterns }}
       with_meteo: false
-      deploy_meteo: ${{ needs.plan.outputs.meteo_deploy == 'true' }}   # s2: no meteogram-project deploy (10-26-26)
+      deploy_meteo: ${{ needs.plan.outputs.meteo_deploy == 'true' }}   # meteogram-project deploy only in s5 (10-26-26)
       carry: ${{ needs.plan.outputs.carry }}
       meteo_parts: ${{ needs.plan.outputs.meteo_deploy == 'true' }}
       min_files: ${{ needs.plan.outputs.min_files }}
@@ -1059,7 +1063,8 @@ jobs:
   menu-state:
     # incremental: after a good deploy, record which cycle of each model is now on the site (small JSON in the Actions cache)
     needs: [plan, menu-w3, menu-w4, menu-store, menu-reuse, deploy-w3, deploy-w4, deploy-stage]
-    if: ${{ !cancelled() && github.event.inputs.dry_run != 'true' && (needs.deploy-w4.result == 'success' || needs.deploy-stage.result == 'success' || (needs.deploy-w3.result == 'success' && needs.deploy-w4.result == 'skipped')) }}
+    # stage runs without menu maps (s5) leave the menu state alone
+    if: ${{ !cancelled() && github.event.inputs.dry_run != 'true' && (needs.plan.outputs.stage == 'all' || contains(needs.plan.outputs.products, 'menu')) && (needs.deploy-w4.result == 'success' || needs.deploy-stage.result == 'success' || (needs.deploy-w3.result == 'success' && needs.deploy-w4.result == 'skipped')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

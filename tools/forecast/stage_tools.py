@@ -1,8 +1,14 @@
 #!/usr/bin/env python3
 """Staged forecast builds: plan a stage, collect carried products, write site state, and poll for new data.
 
-Four stages per 00Z/12Z cycle publish each model group as soon as its data is out:
-  s1 HRRR | s2 RRFS + GFS | s3 AIFS + EPS/AIFS ENS maps + EPS meteograms | s4 ECMWF 9 km (IFS 0.1 deg)
+Five stages per 00Z/12Z cycle publish each model group as soon as its data is out:
+  s1 HRRR | s2 RRFS + GFS | s3 AIFS | s4 ECMWF 9 km (IFS 0.1 deg) | s5 EPS/AIFS ENS maps + all meteograms (EPS, HRRR, RRFS)
+Order (10-26-26, Benjamin 12:43 PM: "have the main global runs and high res runs before any ensemble or meteograms"): the
+deterministic global (GFS, AIFS, ECMWF 9 km) and high-res (HRRR, RRFS) stages all deploy before any ensemble or meteogram
+work. s5 waits for s4 of the same cycle (AFTER), so ensembles and meteograms always go last. Before 10-26-26 s3 also held
+the ensembles + EPS meteograms and s1/s2 rendered the HRRR/RRFS meteograms; deploys stay at 14 a day.
+Catch-up (10-26-26): a group whose own stage published a cycle without it (a failed job, e.g. GFS 12Z on 10-26) is
+re-rendered by the next stage run of the same cycle (CATCHUP), with no extra deploy.
 Two-run models (10-25-26, Benjamin: "Keep 2 hrrr runs at any given time, have a toggle", then the same for AIFS): HRRR and
 AIFS keep their two newest runs on the site. The state's `hrrr_prev` / `aifs_prev` groups carry the run before the current
 one, and the deploy keeps the two newest cycles of every HRRR / AIFS product; every other product keeps only its newest.
@@ -23,10 +29,11 @@ import argparse
 import time, datetime as dt, fnmatch, glob, json, os, re, shutil, subprocess, sys, tempfile, urllib.request
 
 UTC = dt.timezone.utc
-STAGES = ("s1", "s2", "s3", "s4")
-GROUPS = {"s1": ["hrrr"], "s2": ["rrfs", "gfs"], "s3": ["aifs", "ens"], "s4": ["ifs"]}
-MENU = {"s1": "hrrr", "s2": "rrfs", "s3": "aifs", "s4": "ifs"}
-METEO = {"s1": ["hrrr"], "s2": ["rrfs"], "s3": ["eps"], "s4": []}
+STAGES = ("s1", "s2", "s3", "s4", "s5")   # also the priority order: same-cycle stages are started in this order
+GROUPS = {"s1": ["hrrr"], "s2": ["rrfs", "gfs"], "s3": ["aifs"], "s4": ["ifs"], "s5": ["ens"]}
+MENU = {"s1": "hrrr", "s2": "rrfs", "s3": "aifs", "s4": "ifs", "s5": ""}
+METEO = {"s1": [], "s2": [], "s3": [], "s4": [], "s5": ["eps", "hrrr", "rrfs"]}   # meteograms only in the last stage
+AFTER = {"s5": "s4"}   # s5 (ensembles + meteograms) for a cycle starts only after s4 published that cycle (or gave up)
 # artifact names per group; the same jobs make them in full builds and stage runs
 PATTERNS = {"hrrr": ["hires-hrrr-maps", "menu-hrrr-*", "menu-reuse-hrrr"],
             "rrfs": ["hires-rrfs-maps", "menu-rrfs-*", "menu-reuse-rrfs"],
@@ -37,6 +44,7 @@ PATTERNS = {"hrrr": ["hires-hrrr-maps", "menu-hrrr-*", "menu-reuse-hrrr"],
             # 10-26-26 (Benjamin 6:59 AM): ECMWF 9 km 06Z/18Z runs to 144 h for five products only (IFSX_DIRS), a rider
             "ifsx": ["ifsx-maps"]}
 GROUP_METEO = {"hrrr": "hrrr", "rrfs": "rrfs", "ens": "eps"}   # meteogram source carried with each group
+METEO_GROUP = {v: k for k, v in GROUP_METEO.items()}
 # two-run models (10-25-26): the run before the current one, carried as its own group (maps only, no meteograms)
 PREV = {"hrrr": "hrrr_prev", "aifs": "aifs_prev"}
 KEEP_RUNS = {"hrrr": 2, "aifs": 2, "ifs": 2}   # cycles kept on the site per two-run model (every other product: 1)
@@ -73,18 +81,22 @@ READY = {   # last file of each stage's models; a stage is ready for cycle c whe
     "s1": ["https://noaa-hrrr-bdp-pds.s3.amazonaws.com/hrrr.{d}/conus/hrrr.t{h:02d}z.wrfsfcf48.grib2.idx"],
     "s2": ["https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{d}/{h:02d}/rrfs.t{h:02d}z.2dfld.3km.f084.conus.grib2.idx",
            "https://noaa-gfs-bdp-pds.s3.amazonaws.com/gfs.{d}/{h:02d}/atmos/gfs.t{h:02d}z.pgrb2.0p25.f240.idx"],
-    "s3": [E + "aifs-single/0p25/oper/{d}{h:02d}0000-240h-oper-fc.index",
-           E + "ifs/0p25/enfo/{d}{h:02d}0000-240h-enfo-ef.index",
-           E + "aifs-ens/0p25/enfo/{d}{h:02d}0000-240h-enfo-pf.index"],
+    "s3": [E + "aifs-single/0p25/oper/{d}{h:02d}0000-240h-oper-fc.index"],
     "s4": [E + "ifs/0p1/oper/{d}{h:02d}0000-240h-oper-fc-sfc.index"],
+    "s5": [E + "ifs/0p25/enfo/{d}{h:02d}0000-240h-enfo-ef.index",
+           E + "aifs-ens/0p25/enfo/{d}{h:02d}0000-240h-enfo-pf.index"],
 }
+# catch-up: groups re-rendered by a later stage run of the same cycle when their own stage published it without them
+CATCHUP = {"gfs": {"stage": "s2", "products": "gfs", "menu": "",
+                   "ready": ["https://noaa-gfs-bdp-pds.s3.amazonaws.com/gfs.{d}/{h:02d}/atmos/gfs.t{h:02d}z.pgrb2.0p25.f240.idx"]}}
 # backup crons (UTC) -> stage; they publish only if the poller has not already done it
-BACKUP = {"10 2,8,14,20 * * *": "s1", "50 4,16 * * *": "s2", "0 8,20 * * *": "s3", "50 9,21 * * *": "s4"}
+BACKUP = {"10 2,8,14,20 * * *": "s1", "50 4,16 * * *": "s2", "0 8,20 * * *": "s3", "50 9,21 * * *": "s4",
+          "40 10,22 * * *": "s5"}
 FULL_CRON = "50 21 * * *"
 MIN_FRACTION = 0.85
 MAX_TRIES = 2   # poller: stop re-dispatching a stage/cycle after this many finished runs that did not publish it
-METEO_DEPLOY = {"s1", "s3"}   # stages that deploy the meteogram project (s2 skipped 10-26-26 to save 2 deploys a day)
-PRODUCTS = {"s1": "hrrr,menu", "s2": "rrfs,gfs,menu", "s3": "aifs,temps,menu,ens", "s4": "mslp,temps,menu"}
+METEO_DEPLOY = {"s5"}   # stages that deploy the meteogram project (10-26-26: only the last stage; was s1 00Z/12Z + s3)
+PRODUCTS = {"s1": "hrrr,menu", "s2": "rrfs,gfs,menu", "s3": "aifs,temps,menu", "s4": "mslp,temps,menu", "s5": "ens"}
 
 
 def sh(*cmd, check=True):
@@ -152,6 +164,29 @@ def riders_due(stage, st, now=None, check=None):
                 break
             if all(check(u.format(d=f"{c:%Y%m%d}", h=c.hour)) for u in r["ready"]):
                 due[g] = cyc; break
+    return due
+
+
+def published(st, stage):
+    """Cycle of `stage` on the site. s5 is new (10-26-26): until its first run, a site state written by the old 4-stage
+    layout (s3 held the ensembles) counts the ensemble group's cycle, so the reorder never redoes a published cycle."""
+    pub = (st.get("stages") or {}).get(stage)
+    if pub is None and stage == "s5":
+        pub = ((st.get("groups") or {}).get("ens") or {}).get("cycle", "")
+    return pub or ""
+
+
+def catchup_due(stage, cycle, st, check=None):
+    """{group: cycle} for CATCHUP groups whose own stage already published `cycle` but the group itself is older."""
+    check = check or exists
+    due = {}
+    for g, r in CATCHUP.items():
+        if g in GROUPS[stage] or not cycle_ok(r["stage"], cycle):
+            continue
+        have = ((st.get("groups") or {}).get(g) or {}).get("cycle", "")
+        if published(st, r["stage"]) >= cycle > have and \
+                all(check(u.format(d=cycle[:8], h=int(cycle[8:]))) for u in r["ready"]):
+            due[g] = cycle
     return due
 
 
@@ -250,10 +285,10 @@ def cmd_plan(a):
         print(f"seeding carried groups from full-build run {a.seed_run}")
     if not st:
         sys.exit("no site-state artifact found: run a full build (stage=all) or pass seed_run=<full build run id>")
-    published = st.get("stages", {}).get(stage, "")
+    pub = published(st, stage)
     go = "true"
-    if a.event == "schedule" and published >= cycle:
-        print(f"::notice::{stage} {cycle} already published (state {published}); backup cron does nothing")
+    if a.event == "schedule" and pub >= cycle:
+        print(f"::notice::{stage} {cycle} already published (state {pub}); backup cron does nothing")
         go = "false"
     # every group is carried, the stage's own too (fallback if one of its jobs fails); the new run's artifacts are laid
     # over them in the deploy and only the newest cycle of each product is kept
@@ -264,10 +299,15 @@ def cmd_plan(a):
     riders = riders_due(stage, st) if go == "true" else {}
     if riders:
         print(f"riders (18Z runs of two-run models, no extra deploy): {riders}")
+    catch = catchup_due(stage, cycle, st) if go == "true" else {}
+    if catch:
+        print(f"catch-up (published by its own stage without this group, no extra deploy): {catch}")
+        riders = {**riders, **catch}
+    extra = {**RIDERS, **CATCHUP}
     groups = GROUPS[stage] + list(riders)
     pats = "{" + ",".join(p for g in groups for p in PATTERNS[g]) + "}"
-    prods = ",".join(dict.fromkeys(",".join([PRODUCTS[stage]] + [RIDERS[g]["products"] for g in riders]).split(",")))
-    menus = ",".join(dict.fromkeys(m for m in [MENU[stage]] + [RIDERS[g]["menu"] for g in riders] if m))
+    prods = ",".join(dict.fromkeys(p for p in ",".join([PRODUCTS[stage]] + [extra[g]["products"] for g in riders]).split(",") if p))
+    menus = ",".join(dict.fromkeys(m for m in [MENU[stage]] + [extra[g]["menu"] for g in riders] if m))
     meteo = METEO[stage] if go == "true" else []
     if stage == "s1" and cycle[-2:] in ("06", "18"):
         meteo = []   # HRRR 06Z/18Z: maps only, no meteogram-project deploy (keeps deploys under the Pages limit; 00Z/12Z redo them)
@@ -406,6 +446,12 @@ def cmd_state(a):
                 gcyc = old.get("cycle", "")   # nothing new from this run (failed job): the group keeps its cycle
             st["groups"][g] = {"items": items, "meteo": meteo, "cycle": gcyc, "at": now}
             print(f"{g}: new {[i[1] for i in items if i[0] == run_id]}, kept {[i for i in items if i[0] != run_id]}")
+        # meteograms of models whose maps another stage owns (s5 renders HRRR/RRFS charts): new charts only, maps untouched
+        for src in METEO[a.stage]:
+            g = METEO_GROUP.get(src)
+            if g and g not in GROUPS[a.stage] and g in st["groups"] and match(f"meteo-{src}"):
+                st["groups"][g]["meteo"] = [[run_id, f"meteo-{src}"]]
+                print(f"{g}: meteograms now from this run (meteo-{src})")
         st.setdefault("stages", {})[a.stage] = a.cycle
     st.update(files_main=int(a.files_main or 0), files_meteo=int(a.files_meteo or 0), updated=now, run_id=run_id, stage=a.stage)
     json.dump(st, open(a.out, "w"), indent=1)
@@ -426,12 +472,16 @@ def poll_once(a):
     if not st:
         print("::warning::no site-state artifact; poller waits for a full build"); return "nothing"
     due = []
+    tries_of = lambda s, c: sum(1 for x in runs if x["displayTitle"] == f"Forecast site {s} {c}" and x["status"] == "completed")
     for s in STAGES:
         c = ready_cycle(s)
-        pub = st.get("stages", {}).get(s, "")
+        pub = published(st, s)
         print(f"{s}: newest ready {c or '-'}; published {pub or '-'}")
-        tries = sum(1 for x in runs if x["displayTitle"] == f"Forecast site {s} {c}" and x["status"] == "completed")
-        if c and c > pub and tries >= MAX_TRIES:
+        tries = tries_of(s, c)
+        dep = AFTER.get(s)
+        if c and c > pub and dep and published(st, dep) < c and tries_of(dep, c) < MAX_TRIES:
+            print(f"{s} {c} waits for {dep} {c} (ensembles and meteograms go last)")
+        elif c and c > pub and tries >= MAX_TRIES:
             print(f"::warning::{s} {c} already tried {tries} times without publishing; skipped (backup cron or a manual run can retry)")
         elif c and c > pub:
             due.append((c, STAGES.index(s), s))
