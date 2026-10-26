@@ -671,7 +671,7 @@ def render_t2manom(m, c, step, lat, lon, t2k, zm, vid, out):
 # make_clim_t850.py), linearly interpolated in time to the valid date (months centred on the 15th) and bilinearly in space:
 # the same source, period and method as the 500 mb height anomaly. Deg C, -20..+20 in 1 C bins, colors from the 500 mb anomaly
 # family (1 C drawn like 22.5 m, so +/-20 C = the +/-450 m ends) so every anomaly product reads the same way. Air under the
-# ground (surface pressure < 850 mb) is flat gray like the 850 mb temp map. 850 mb heights every 3 dam when the model has them.
+# ground is no longer grayed (10-26-26): values there are the model's extrapolation. 850 mb heights every 3 dam when the model has them.
 CLIM_T850 = f"{ROOT}/clim/ncep_t850_mon_ltm_1991_2020.npz"
 T8A_LEVELS = np.arange(-20, 21, 1)
 T8A_TICKS = list(range(-20, 21, 4))
@@ -696,14 +696,17 @@ def clim_t850(valid, LA, LO):
 
 def render_t850anom(c, step, lat, lon, tk, vid, out, who, gh=None, sp=None, orog=None):
     """who = dict(name, res, site, credit[, members]). tk in K on a regular lat/lon grid; gh in gpm (optional);
-    sp in Pa (optional) or orog in m (ensembles: ground above ~1,450 m stands in for surface pressure < 850 mb)."""
+    sp in Pa / orog in m are accepted but unused since 10-26-26 (no below-ground mask; extrapolated values shown)."""
     arrs = [tk] + [a for a in (gh, sp, orog) if a is not None]
     LA, LO, A = cut(lat, lon, arrs, vid); T = A.pop(0); Z = A.pop(0) if gh is not None else None
     SP = A.pop(0) if sp is not None else None; OR = A.pop(0) if orog is not None else None
     LA2, LO2 = np.meshgrid(LA, LO, indexing="ij"); valid = c + dt.timedelta(hours=step)
     res = abs(float(LA[1] - LA[0])); k = 0.25 / res if res < 0.2 else 1.0   # 0.1 deg grids: same ground smoothing as 0.25 deg
     An = gaussian_filter((T - 273.15) - clim_t850(valid, LA2, LO2), max(SMOOTH[vid], 1.0) * k)   # the normal is 2.5 deg: keep it soft
-    under = (gaussian_filter(SP, k) < 85000.0) if SP is not None else (gaussian_filter(OR, 1.0) > 1450.0) if OR is not None else np.zeros(An.shape, bool)
+    # Benjamin 10-26-26 7:23 AM ("fill it in completely"): no below-ground gray; where the ground is above 850 mb the map shows the
+    # model's own extrapolated 850 mb value (the 1991-2020 normal is extrapolated the same way, so the anomaly stays smooth).
+    # sp / orog are still accepted (callers unchanged) but no longer mask anything.
+    under = np.zeros(An.shape, bool)
     An = np.where(under, np.nan, An)
     fig, ax, key_y = frame(vid); pc = ccrs.PlateCarree(); cm = t8a_cmap()
     if under.any():
@@ -722,7 +725,7 @@ def render_t850anom(c, step, lat, lon, tk, vid, out, who, gh=None, sp=None, orog
     run = f"{who['name']} {who['res']}" + (f" {who['members']} members" if who.get("members") else "")
     HS.header(fig, "850 mb Temperature Anomaly" + (" (Ensemble Mean)" if who.get("members") else ""), f"Valid {vl:%a %-m-%-d} \u00b7 {vl:%-I %p} PT",
               f"{run} {c:%HZ} run {c.astimezone(PT):%-m-%-d-%y (%-I %p PT)}  \u00b7  {VIEWS[vid]['label']}  \u00b7  vs 1991-2020 normal for the date"
-              + ("  \u00b7  heights every 3 dam" if Z is not None else "") + f"  \u00b7  {lo:+.0f} to {hi:+.0f}\u00b0C in view  \u00b7  gray = ground above 850 mb",
+              + ("  \u00b7  heights every 3 dam" if Z is not None else "") + f"  \u00b7  {lo:+.0f} to {hi:+.0f}\u00b0C in view  \u00b7  under-terrain values extrapolated",
               f"F+{step}", f"{valid:%HZ %a}".upper())
     HS.credit(fig, who["credit"] + CREDIT_CLIM)
     HS.hbar(fig, fill, T8A_TICKS, "Anomaly (\u00b0C)", key_y, signed=True)

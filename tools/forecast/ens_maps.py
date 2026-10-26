@@ -301,7 +301,7 @@ def p_500(E, s, vids):
 def p_t850anom(E, s, vids):
     """850 mb Temperature Anomaly of the ensemble mean (Benjamin 10-25-26): mean of the 50 perturbed members' 850 mb temperature
     minus the NCEP/NCAR Reanalysis 1991-2020 monthly normal (temp_maps.render_t850anom). No surface pressure is fetched for
-    50 members: ground above ~1,450 m (deterministic AIFS terrain, same 0.25 deg grid) is grayed as 'under 850 mb'."""
+    50 members: no below-ground gray since 10-26-26 (extrapolated 850 mb values shown everywhere)."""
     (t,) = E.get(s, [("t", "850")]); S = E.S
     who = dict(name=S["name"], res="0.25\u00b0", site=S["site"] + " mean", credit=S["credit"], members=t.shape[0])
     for v in vids:

@@ -419,7 +419,8 @@ def prod_aloft(lev):
             if TM.SMOOTH.get(v): C = gaussian_filter(C, TM.SMOOTH[v])
             if hires: C = gaussian_filter(C, 1.0)
             Zs = gaussian_filter(Z / 10.0, 7.0 if hires else (1.5 if v != "wa" else 2.5))
-            under = gaussian_filter(SP, 2.0 if hires else 1.0) < lev * 100.0
+            # 925 mb: no below-ground gray (Benjamin 10-26-26 7:23 AM), the model's extrapolated values are shown; 850/700 keep it
+            under = (gaussian_filter(SP, 2.0 if hires else 1.0) < lev * 100.0) if lev != 925 else np.zeros(C.shape, bool)
             C, Zs, U, Vw = (np.where(under, np.nan, a) for a in (C, Zs, U, Vw))
             fig, ax, ky = TM.frame(v)
             if under.any():
@@ -432,7 +433,7 @@ def prod_aloft(lev):
             HS.hbar(fig, f, list(range(lo_, hi_ + 1, 5)), "Temp (\u00b0C)", ky, signed=True)
             finish(fig, ax, m, c, step, v, outdir(c, f"t{lev}", m, v, step), f"t{lev}", f"{lev} mb Temperature + Wind",
                    ("0\u00b0C line dashed  \u00b7  " if lo_ <= 0 <= hi_ else "") + f"heights every {dz} dam  \u00b7  barbs in kt"
-                   + ("  \u00b7  gray = ground above %d mb" % lev if lev >= 700 else "")); print("ok", m, f"t{lev}", v, step, flush=True)
+                   + ("  \u00b7  under-terrain values extrapolated" if lev == 925 else "  \u00b7  gray = ground above %d mb" % lev if lev >= 700 else "")); print("ok", m, f"t{lev}", v, step, flush=True)
     return run
 
 
