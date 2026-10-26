@@ -59,7 +59,7 @@ How it works:
 - **What each stage does.** A stage renders only its own groups. Its single deploy contains the whole site: its new products laid over every group carried forward from the run that last built it. Only the newest cycle of each product is kept.
 - **Site state.** The `site-state` artifact (30 days) says which run holds each group. Map artifacts are kept 3 days. If the state or a carried artifact is gone, the stage stops before deploying. A full build (`stage=all`) reseeds everything.
 - **Safety check.** There is no deploy if the main site would have fewer than 85% of the last deploy's files, or more than 19,500.
-- **Deploys.** 4 main deploys plus 3 meteogram-project deploys (s1-s3) per 00Z/12Z cycle, plus 1 main deploy for HRRR 18Z (s1, maps only), about 465 a month (Pages Free limit: 500). The poller stops re-dispatching a stage/cycle after 2 finished runs that did not publish it.
+- **Deploys.** 4 main deploys plus 3 meteogram-project deploys (s1-s3) per 00Z/12Z cycle, plus 1 main deploy each for HRRR 06Z and 18Z (s1, maps only): 16 a day, about 480-496 a month (Pages Free limit: 500; little room for manual runs or retries). HRRR keeps the newest two of 00/06/12/18Z. The poller stops re-dispatching a stage/cycle after 2 finished runs that did not publish it.
 - **HRRR 18Z** is its own s1 run (f48 out about 19:47 UTC); AIFS 18Z still rides along with the next stage run (normally HRRR 00Z).
 - **Manual runs.** Actions > Forecast site > Run workflow with `stage=s1`..`s4` (optional `cycle`, `dry_run`). Default `stage=all` is the old full build, unchanged.
 

@@ -40,7 +40,7 @@ PREV = {"hrrr": "hrrr_prev", "aifs": "aifs_prev"}
 KEEP_RUNS = {"hrrr": 2, "aifs": 2}   # cycles kept on the site per two-run model (every other product: 1)
 AIFS_DIRS = {"aifs500", "aifsmslp", "aifswind"}   # aifs_maps.py folders (no model suffix); other AIFS folders end in -aifs
 CYCLE_HOURS = {s_: (0, 12) for s_ in STAGES}   # stage cycles; AIFS 18Z comes in as a rider below
-CYCLE_HOURS["s1"] = (0, 12, 18)   # HRRR 18Z is its own s1 run (10-25-26, Benjamin: high-res as soon as its data is out)
+CYCLE_HOURS["s1"] = (0, 6, 12, 18)   # HRRR 18Z (10-25-26) and 06Z (10-26-26, Benjamin 6:51 AM) are their own s1 runs, maps only
 
 
 def run_model(prod):
@@ -53,7 +53,7 @@ def run_model(prod):
 
 
 # 18Z riders: rendered inside whichever stage run comes first after their last file is out (never in the stage that owns
-# the group). No extra deploys. 06Z is left out (Benjamin: 00Z/12Z/18Z).
+# the group). No extra deploys. AIFS 06Z is left out (Benjamin: 00Z/12Z/18Z); HRRR 06Z is its own s1 run (CYCLE_HOURS).
 RIDERS = {"aifs": {"hour": 18, "ready": ["https://data.ecmwf.int/forecasts/{d}/{h:02d}z/aifs-single/0p25/oper/{d}{h:02d}0000-240h-oper-fc.index"],
                    "products": "aifs,temps,menu", "menu": "aifs"}}
 E = "https://data.ecmwf.int/forecasts/{d}/{h:02d}z/"
@@ -67,7 +67,7 @@ READY = {   # last file of each stage's models; a stage is ready for cycle c whe
     "s4": [E + "ifs/0p1/oper/{d}{h:02d}0000-240h-oper-fc-sfc.index"],
 }
 # backup crons (UTC) -> stage; they publish only if the poller has not already done it
-BACKUP = {"10 2,14,20 * * *": "s1", "50 4,16 * * *": "s2", "0 8,20 * * *": "s3", "50 9,21 * * *": "s4"}
+BACKUP = {"10 2,8,14,20 * * *": "s1", "50 4,16 * * *": "s2", "0 8,20 * * *": "s3", "50 9,21 * * *": "s4"}
 FULL_CRON = "50 21 * * *"
 MIN_FRACTION = 0.85
 MAX_TRIES = 2   # poller: stop re-dispatching a stage/cycle after this many finished runs that did not publish it
@@ -114,7 +114,7 @@ def cycles_back(stage, now=None, back=3):
 
 
 def ready_cycle(stage, now=None, back=3, check=None):
-    """Newest accepted cycle (00Z/12Z; s1 also 18Z) whose last files for this stage are all out (checks the last `back`)."""
+    """Newest accepted cycle (00Z/12Z; s1 also 06Z/18Z) whose last files for this stage are all out (checks the last `back`)."""
     check = check or exists
     for c in cycles_back(stage, now, back):
         if all(check(u.format(d=f"{c:%Y%m%d}", h=c.hour)) for u in READY[stage]):
@@ -255,8 +255,8 @@ def cmd_plan(a):
     prods = ",".join(dict.fromkeys(",".join([PRODUCTS[stage]] + [RIDERS[g]["products"] for g in riders]).split(",")))
     menus = ",".join(dict.fromkeys([MENU[stage]] + [RIDERS[g]["menu"] for g in riders]))
     meteo = METEO[stage] if go == "true" else []
-    if stage == "s1" and cycle.endswith("18"):
-        meteo = []   # HRRR 18Z: maps only, no meteogram-project deploy (keeps deploys under the Pages limit; 00Z/12Z redo them)
+    if stage == "s1" and cycle[-2:] in ("06", "18"):
+        meteo = []   # HRRR 06Z/18Z: maps only, no meteogram-project deploy (keeps deploys under the Pages limit; 00Z/12Z redo them)
     out(stage=stage, go=go, cycle=cycle, pin=cycle[-2:], products=prods if go == "true" else "", menu_models=menus,
         meteo_srcs=meteo, carry=carry, min_files=str(min_files), prev_state=st, stage_patterns=pats,
         riders=riders, hrrr_cycle=riders.get("hrrr", ""), aifs_cycle=riders.get("aifs", ""), menu_cycles=riders)

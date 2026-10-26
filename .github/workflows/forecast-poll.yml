@@ -1,7 +1,7 @@
 # Staged forecast builds: poller (10-25-26, Benjamin: "whatever the best option is to get me the data faster").
 # Every 10 min: if no Forecast site run is going, finds the first stage whose models have a newer complete 00Z/12Z run
 # than the one on the site (site-state artifact) and starts it (forecast-site.yml, stage=s1..s4, cycle=YYYYMMDDHH).
-#   s1 HRRR 00/12/18Z (HRRR f48 out about 01:48 / 13:47 / 19:47 UTC)        s2 RRFS + GFS (GFS f240 about 04:38 / 16:37 UTC)
+#   s1 HRRR 00/06/12/18Z (HRRR f48 out about 01:48 / 07:47 / 13:47 / 19:47 UTC)        s2 RRFS + GFS (GFS f240 about 04:38 / 16:37 UTC)
 #   s3 AIFS + EPS/AIFS ENS maps + EPS meteograms (about 07:40 / 19:40 UTC)   s4 ECMWF 9 km (about 09:34 / 21:34 UTC)
 # The backup crons in forecast-site.yml start a stage only if the poller has not published it.
 # AIFS 18Z (two-run model) needs no stage of its own: it rides along with the next stage run (stage_tools.py RIDERS), normally HRRR 00Z s1.
