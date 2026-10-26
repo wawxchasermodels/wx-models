@@ -1,10 +1,10 @@
 # Staged forecast builds: poller (10-25-26, Benjamin: "whatever the best option is to get me the data faster").
-# Every 20 min: if no Forecast site run is going, finds the first stage whose models have a newer complete 00Z/12Z run
+# Every 10 min: if no Forecast site run is going, finds the first stage whose models have a newer complete 00Z/12Z run
 # than the one on the site (site-state artifact) and starts it (forecast-site.yml, stage=s1..s4, cycle=YYYYMMDDHH).
-#   s1 HRRR (HRRR f48 out about 01:47 / 13:47 UTC)        s2 RRFS + GFS (GFS f240 about 04:38 / 16:37 UTC)
+#   s1 HRRR 00/12/18Z (HRRR f48 out about 01:48 / 13:47 / 19:47 UTC)        s2 RRFS + GFS (GFS f240 about 04:38 / 16:37 UTC)
 #   s3 AIFS + EPS/AIFS ENS maps + EPS meteograms (about 07:40 / 19:40 UTC)   s4 ECMWF 9 km (about 09:34 / 21:34 UTC)
 # The backup crons in forecast-site.yml start a stage only if the poller has not published it.
-# HRRR 18Z and AIFS 18Z (two-run models) need no poll of their own: they ride along with the next stage run (stage_tools.py RIDERS).
+# AIFS 18Z (two-run model) needs no stage of its own: it rides along with the next stage run (stage_tools.py RIDERS), normally HRRR 00Z s1.
 # To stop: comment out the schedule below (or disable this workflow in the Actions tab). Rollback: web/forecast/README.md.
 name: Forecast poll
 
@@ -15,8 +15,8 @@ on:
         description: "only report what would be started"
         type: boolean
         default: false
-  # schedule:              # ENABLED only after the manual staged test cycle passes
-  #   - cron: "*/20 * * * *"
+  schedule:              # live 10-25-26 (Benjamin: "Switch it on"); every 10 min, starts nothing unless new data is out
+    - cron: "*/10 * * * *"
 
 concurrency:
   group: forecast-poll

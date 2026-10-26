@@ -38,7 +38,8 @@ GROUP_METEO = {"hrrr": "hrrr", "rrfs": "rrfs", "ens": "eps"}   # meteogram sourc
 PREV = {"hrrr": "hrrr_prev", "aifs": "aifs_prev"}
 KEEP_RUNS = {"hrrr": 2, "aifs": 2}   # cycles kept on the site per two-run model (every other product: 1)
 AIFS_DIRS = {"aifs500", "aifsmslp", "aifswind"}   # aifs_maps.py folders (no model suffix); other AIFS folders end in -aifs
-CYCLE_HOURS = {s_: (0, 12) for s_ in STAGES}   # stage cycles; the 18Z runs come in as riders below
+CYCLE_HOURS = {s_: (0, 12) for s_ in STAGES}   # stage cycles; AIFS 18Z comes in as a rider below
+CYCLE_HOURS["s1"] = (0, 12, 18)   # HRRR 18Z is its own s1 run (10-25-26, Benjamin: high-res as soon as its data is out)
 
 
 def run_model(prod):
@@ -52,9 +53,7 @@ def run_model(prod):
 
 # 18Z riders: rendered inside whichever stage run comes first after their last file is out (never in the stage that owns
 # the group). No extra deploys. 06Z is left out (Benjamin: 00Z/12Z/18Z).
-RIDERS = {"hrrr": {"hour": 18, "ready": ["https://noaa-hrrr-bdp-pds.s3.amazonaws.com/hrrr.{d}/conus/hrrr.t{h:02d}z.wrfsfcf48.grib2.idx"],
-                   "products": "hrrr,menu", "menu": "hrrr"},
-          "aifs": {"hour": 18, "ready": ["https://data.ecmwf.int/forecasts/{d}/{h:02d}z/aifs-single/0p25/oper/{d}{h:02d}0000-240h-oper-fc.index"],
+RIDERS = {"aifs": {"hour": 18, "ready": ["https://data.ecmwf.int/forecasts/{d}/{h:02d}z/aifs-single/0p25/oper/{d}{h:02d}0000-240h-oper-fc.index"],
                    "products": "aifs,temps,menu", "menu": "aifs"}}
 E = "https://data.ecmwf.int/forecasts/{d}/{h:02d}z/"
 READY = {   # last file of each stage's models; a stage is ready for cycle c when every one answers
@@ -67,9 +66,10 @@ READY = {   # last file of each stage's models; a stage is ready for cycle c whe
     "s4": [E + "ifs/0p1/oper/{d}{h:02d}0000-240h-oper-fc-sfc.index"],
 }
 # backup crons (UTC) -> stage; they publish only if the poller has not already done it
-BACKUP = {"0 2,14 * * *": "s1", "50 4,16 * * *": "s2", "50 7,19 * * *": "s3", "50 9,21 * * *": "s4"}
+BACKUP = {"10 2,14,20 * * *": "s1", "50 4,16 * * *": "s2", "0 8,20 * * *": "s3", "50 9,21 * * *": "s4"}
 FULL_CRON = "50 21 * * *"
 MIN_FRACTION = 0.85
+MAX_TRIES = 2   # poller: stop re-dispatching a stage/cycle after this many finished runs that did not publish it
 PRODUCTS = {"s1": "hrrr,menu", "s2": "rrfs,gfs,menu", "s3": "aifs,temps,menu,ens", "s4": "mslp,temps,menu"}
 
 
@@ -253,8 +253,11 @@ def cmd_plan(a):
     pats = "{" + ",".join(p for g in groups for p in PATTERNS[g]) + "}"
     prods = ",".join(dict.fromkeys(",".join([PRODUCTS[stage]] + [RIDERS[g]["products"] for g in riders]).split(",")))
     menus = ",".join(dict.fromkeys([MENU[stage]] + [RIDERS[g]["menu"] for g in riders]))
+    meteo = METEO[stage] if go == "true" else []
+    if stage == "s1" and cycle.endswith("18"):
+        meteo = []   # HRRR 18Z: maps only, no meteogram-project deploy (keeps deploys under the Pages limit; 00Z/12Z redo them)
     out(stage=stage, go=go, cycle=cycle, pin=cycle[-2:], products=prods if go == "true" else "", menu_models=menus,
-        meteo_srcs=METEO[stage] if go == "true" else [], carry=carry, min_files=str(min_files), prev_state=st, stage_patterns=pats,
+        meteo_srcs=meteo, carry=carry, min_files=str(min_files), prev_state=st, stage_patterns=pats,
         riders=riders, hrrr_cycle=riders.get("hrrr", ""), aifs_cycle=riders.get("aifs", ""), menu_cycles=riders)
 
 
@@ -387,8 +390,9 @@ def cmd_state(a):
 
 # ---------------------------------------------------------------------------------------------------------- poll
 def cmd_poll(a):
-    r = sh("gh", "run", "list", "-R", repo(), "-w", "forecast-site.yml", "-L", "20", "--json", "status,displayTitle,databaseId")
-    busy = [x for x in json.loads(r.stdout) if x["status"] in ("queued", "in_progress", "waiting", "pending", "requested")]
+    r = sh("gh", "run", "list", "-R", repo(), "-w", "forecast-site.yml", "-L", "40", "--json", "status,displayTitle,databaseId")
+    runs = json.loads(r.stdout)
+    busy = [x for x in runs if x["status"] in ("queued", "in_progress", "waiting", "pending", "requested")]
     if busy:
         print(f"forecast-site busy ({busy[0]['displayTitle']}, run {busy[0]['databaseId']}); next poll will check again")
         return
@@ -400,7 +404,10 @@ def cmd_poll(a):
         c = ready_cycle(s)
         pub = st.get("stages", {}).get(s, "")
         print(f"{s}: newest ready {c or '-'}; published {pub or '-'}")
-        if c and c > pub:
+        tries = sum(1 for x in runs if x["displayTitle"] == f"Forecast site {s} {c}" and x["status"] == "completed")
+        if c and c > pub and tries >= MAX_TRIES:
+            print(f"::warning::{s} {c} already tried {tries} times without publishing; skipped (backup cron or a manual run can retry)")
+        elif c and c > pub:
             due.append((c, STAGES.index(s), s))
     if not due:
         print("nothing new"); return

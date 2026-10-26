@@ -55,11 +55,12 @@ Last-Modified of each model's last file):
 | s4 | ECMWF 9 km MSLP/precip, SLP, temps, menu | about 09:34 / 21:34 |
 
 How it works:
-- **Triggers.** `forecast-poll.yml` runs every 20 min. When no Forecast site run is going, it starts the first stage whose models have a newer complete run than the site (`stage=sN cycle=YYYYMMDDHH`). Backup crons in `forecast-site.yml` (`0 2,14`, `50 4,16`, `50 7,19`, `50 9,21` UTC) start a stage only if it has not been published yet.
+- **Triggers (live 10-25-26).** `forecast-poll.yml` runs every 10 min. When no Forecast site run is going, it starts the first stage whose models have a newer complete run than the site (`stage=sN cycle=YYYYMMDDHH`). Backup crons in `forecast-site.yml` (`10 2,14,20`, `50 4,16`, `0 8,20`, `50 9,21` UTC) start a stage only if it has not been published yet.
 - **What each stage does.** A stage renders only its own groups. Its single deploy contains the whole site: its new products laid over every group carried forward from the run that last built it. Only the newest cycle of each product is kept.
 - **Site state.** The `site-state` artifact (30 days) says which run holds each group. Map artifacts are kept 3 days. If the state or a carried artifact is gone, the stage stops before deploying. A full build (`stage=all`) reseeds everything.
 - **Safety check.** There is no deploy if the main site would have fewer than 85% of the last deploy's files, or more than 19,500.
-- **Deploys.** 4 main deploys plus 3 meteogram-project deploys (s1-s3) per cycle, about 434 a month (Pages Free limit: 500).
+- **Deploys.** 4 main deploys plus 3 meteogram-project deploys (s1-s3) per 00Z/12Z cycle, plus 1 main deploy for HRRR 18Z (s1, maps only), about 465 a month (Pages Free limit: 500). The poller stops re-dispatching a stage/cycle after 2 finished runs that did not publish it.
+- **HRRR 18Z** is its own s1 run (f48 out about 19:47 UTC); AIFS 18Z still rides along with the next stage run (normally HRRR 00Z).
 - **Manual runs.** Actions > Forecast site > Run workflow with `stage=s1`..`s4` (optional `cycle`, `dry_run`). Default `stage=all` is the old full build, unchanged.
 
 ### Two runs of HRRR and AIFS (10-25-26, PR "two-run HRRR + AIFS")

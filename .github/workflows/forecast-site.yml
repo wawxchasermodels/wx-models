@@ -66,7 +66,7 @@ on:
         description: "all = full build (default, unchanged). s1 HRRR | s2 RRFS+GFS | s3 AIFS+ensembles+EPS meteograms | s4 ECMWF 9 km: render only that stage, deploy the site with the other groups carried forward"
         default: "all"
       cycle:
-        description: "Stage runs: model cycle YYYYMMDDHH (00/12); empty = newest complete run for that stage"
+        description: "Stage runs: model cycle YYYYMMDDHH (00/12; s1 also 18); empty = newest complete run for that stage"
         default: ""
       seed_run:
         description: "Stage runs: carry the other groups from this full-build run id instead of the saved site state (bootstrap)"
@@ -86,8 +86,9 @@ on:
   # To stop: comment out this block or disable the workflow in the Actions tab.
   # Staged builds (10-25-26): forecast-poll.yml starts each stage as soon as its data is out (every 20 min check); these
   # backup crons start a stage only if it was not published yet (plan job checks the site state). UTC; PDT = UTC-7, PST = UTC-8.
-  #   s1 HRRR 02:00/14:00 (7:00 PM / 7:00 AM PDT)  s2 RRFS+GFS 04:50/16:50 (9:50 PM / 9:50 AM)
-  #   s3 AIFS+ens 07:50/19:50 (12:50 AM / 12:50 PM)  s4 ECMWF 9 km 09:50/21:50 (2:50 AM / 2:50 PM)
+  #   s1 HRRR 02:10/14:10/20:10 (7:10 PM / 7:10 AM / 1:10 PM PDT)  s2 RRFS+GFS 04:50/16:50 (9:50 PM / 9:50 AM)
+  #   s3 AIFS+ens 08:00/20:00 (1:00 AM / 1:00 PM)  s4 ECMWF 9 km 09:50/21:50 (2:50 AM / 2:50 PM)
+  # Poller every 10 min (forecast-poll.yml). HRRR 18Z is its own s1 run (+1 deploy a day); AIFS 18Z still rides along.
   # Two-run HRRR + AIFS (10-25-26): the site keeps the 2 newest runs of each (run toggle). Their 18Z runs add no deploys and
   # no crons: they ride along with the first stage run after their data is out (stage_tools.py RIDERS), normally
   # HRRR 18Z (f48 about 19:47 UTC) with the 12Z s3 run (or s4 if s3 started first), AIFS 18Z (240 h about 00:55 UTC) with
@@ -97,10 +98,10 @@ on:
   # never redraw HRRR at 12Z over the 18Z run or reseed the site state under the staged builds.
   schedule:
     - cron: "50 21 * * *"
-    # - cron: "0 2,14 * * *"     # STAGED BACKUP s1 (enabled only after the manual staged test cycle passes)
-    # - cron: "50 4,16 * * *"    # s2
-    # - cron: "50 7,19 * * *"    # s3
-    # - cron: "50 9,21 * * *"    # s4
+    - cron: "10 2,14,20 * * *"   # STAGED BACKUP s1 HRRR 00/12/18Z (live 10-25-26); each does nothing if already published
+    - cron: "50 4,16 * * *"      # s2 RRFS + GFS
+    - cron: "0 8,20 * * *"       # s3 AIFS + ensembles + EPS meteograms (EPS 240 h about 07:40 / 19:40)
+    - cron: "50 9,21 * * *"      # s4 ECMWF 9 km
 
 concurrency:   # one run at a time: a new (scheduled or manual) run waits until the running one finishes, never cancels it
   group: forecast-site
