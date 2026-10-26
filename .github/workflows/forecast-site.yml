@@ -192,7 +192,9 @@ jobs:
 
   wa-maps:
     needs: [plan, start-w2]
-    if: contains(github.event.inputs.products || 'wa,aifs,gfs,temps,mslp,menu,ens,eps,hrrr,rrfs', 'wa')
+    # WA map shards archived 10-25-26 (Benjamin): repo variable WA_SHARDS=off skips them on every run (scheduled and manual);
+    # the code stays in place. To bring them back: RESTORE_WA_SHARDS.md (gh variable set WA_SHARDS --body on).
+    if: vars.WA_SHARDS != 'off' && contains(github.event.inputs.products || 'wa,aifs,gfs,temps,mslp,menu,ens,eps,hrrr,rrfs', 'wa')
     runs-on: ubuntu-latest
     timeout-minutes: 300
     strategy:

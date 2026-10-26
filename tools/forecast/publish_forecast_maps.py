@@ -112,7 +112,7 @@ TABS = [  # order = tab order on the site; most used first
     {"id": "ir", "label": "Simulated IR satellite", "models": ["HRRR", "RRFS"], "periods": [("step", "Each step")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwhr", "Pacific NW (high-res)"), ("wa", "Washington")]},
     {"id": "vis", "label": "Visibility", "models": ["HRRR", "RRFS"], "periods": [("step", "Each step")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwhr", "Pacific NW (high-res)"), ("wa", "Washington")]},
     {"id": "fog", "label": "Fog risk index", "models": ["ECMWF 9 km", "HRRR", "RRFS"], "periods": [("step", "Each step")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwt", "Pacific NW tight"), ("pnwhr", "Pacific NW (high-res)"), ("wa", "Washington")]},
-    {"id": "qpf", "label": "Precip total", "models": ["ECMWF 9 km", "AIFS", "HRRR", "RRFS"], "periods": [("1h", "1 h (HRRR/RRFS)"), ("6h", "6 h"), ("12h", "12 h"), ("24h", "24 h"), ("48h", "48 h"), ("total", "Run total")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwhr", "Pacific NW (high-res)")]},
+    {"id": "qpf", "label": "Precip total", "models": ["ECMWF 9 km", "AIFS", "HRRR", "RRFS"], "periods": [("1h", "1 h (HRRR/RRFS)"), ("6h", "6 h"), ("12h", "12 h"), ("24h", "24 h"), ("48h", "48 h"), ("total", "Run total")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwt", "Pacific NW tight"), ("pnwhr", "Pacific NW (high-res)"), ("wa", "Washington")]},
     {"id": "ivt", "label": "IVT (vapor transport)", "models": ["ECMWF 9 km", "AIFS", "HRRR"], "periods": [("step", "Each step")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwhr", "Pacific NW (high-res)")]},
     {"id": "pwanom", "label": "PW anomaly", "models": ["ECMWF 9 km", "AIFS", "HRRR"], "periods": [("step", "Each step")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwhr", "Pacific NW (high-res)")]},
     {"id": "pw", "label": "Precipitable water", "models": ["ECMWF 9 km", "AIFS", "HRRR", "RRFS"], "periods": [("step", "Each step")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwhr", "Pacific NW (high-res)")]},
@@ -328,6 +328,8 @@ def main():
             frames.setdefault(f"{period}/{view}", []).append(fr)
         for v in frames.values():
             v.sort(key=lambda fr: fr["end"])
+        if not frames and MENU.get(t["id"], ("",))[0] == "wa":
+            continue   # Washington group with no maps (WA shards off, see RESTORE_WA_SHARDS.md): leave it out of the menu
         extra = {k: t[k] for k in ("models",) if k in t}
         if t["id"] in MENU: extra.update(group=MENU[t["id"]][0], groupLabel=MENU[t["id"]][1], sub=MENU[t["id"]][2])
         tabs_out.append({**extra, "id": t["id"], "label": t["label"],
