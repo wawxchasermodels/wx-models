@@ -333,6 +333,7 @@ const Obs = (() => {
     const c = $("obs-canvas"), r = c.getBoundingClientRect();
     if (!r.width) return false;
     const first = !S.w;
+    setNumberScale();
     S.w = r.width; S.h = r.height; S.dpr = Math.min(window.devicePixelRatio || 1, 2.5);
     c.width = Math.round(S.w * S.dpr); c.height = Math.round(S.h * S.dpr);
     if (first || S.pending) applyView();
@@ -348,8 +349,16 @@ const Obs = (() => {
   const tempColor = (t) => (Math.round(t) <= 32 ? "#8fd3ff" : "#ffffff");   // white; light blue at or below freezing
   const TOWN_FONT = "500 11px 'Outfit', system-ui, sans-serif", ISO_FONT = "600 12px 'IBM Plex Mono', ui-monospace, monospace";
   const Z = 1.5;   // station-plot scale (text, circle, barb, spacing all scale together)
-  const FONT_S = `600 ${Math.round(11.5 * Z)}px 'IBM Plex Mono', ui-monospace, monospace`;   // used when a station shows 3+ numbers
-  const FONT = `600 ${Math.round(13 * Z)}px 'IBM Plex Mono', ui-monospace, monospace`, CITY_FONT = "500 12px 'Outfit', system-ui, sans-serif";
+  // station numbers: NF shrinks them ~22% on phone-sized screens (same breakpoint as obs.css, max-width 640px); desktop NF = 1
+  const PHONE_NF = 0.78, phoneMQ = window.matchMedia ? window.matchMedia("(max-width: 640px)") : null;
+  let NF = 1, FONT, FONT_S;   // FONT_S is used when a station shows 3+ numbers
+  function setNumberScale() {
+    NF = phoneMQ && phoneMQ.matches ? PHONE_NF : 1;
+    FONT = `600 ${Math.round(13 * Z * NF)}px 'IBM Plex Mono', ui-monospace, monospace`;
+    FONT_S = `600 ${Math.round(11.5 * Z * NF)}px 'IBM Plex Mono', ui-monospace, monospace`;
+  }
+  setNumberScale();
+  const CITY_FONT = "500 12px 'Outfit', system-ui, sans-serif";
 
   function draw() {
     if (!S.shown || !S.base || !S.w || !S.P) return;
@@ -618,8 +627,8 @@ const Obs = (() => {
       if (!lab) continue;
       for (const it of lab.items) {
         g.font = it.font; g.fillStyle = it.kind === "t" ? tempColor(s.t) : KC[it.kind] || C.gust;
-        g.shadowColor = "rgba(0,0,0,.85)"; g.shadowBlur = 3 * Z; g.shadowOffsetX = 1 * Z; g.shadowOffsetY = 1.2 * Z;
-        g.lineWidth = it.font === FONT_S ? 2.6 * Z : 3 * Z; g.strokeStyle = C.halo; g.strokeText(it.text, it.x, it.y);
+        g.shadowColor = "rgba(0,0,0,.85)"; g.shadowBlur = 3 * Z * NF; g.shadowOffsetX = Z * NF; g.shadowOffsetY = 1.2 * Z * NF;
+        g.lineWidth = (it.font === FONT_S ? 2.6 : 3) * Z * NF; g.strokeStyle = C.halo; g.strokeText(it.text, it.x, it.y);
         g.shadowColor = "transparent"; g.fillText(it.text, it.x, it.y);
       }
     }
@@ -633,7 +642,7 @@ const Obs = (() => {
   function numbers(g, L, R, px, py, avoid) {
     if (!L.length && !R.length) return null;
     const small = L.length + R.length > 2, font = small ? FONT_S : FONT;
-    const asc = (small ? 8.8 : 10) * Z, gap = 2 * Z, off = 7 * Z;
+    const asc = (small ? 8.8 : 10) * Z * NF, gap = 2 * Z * NF, off = 7 * Z;
     g.font = font;
     const hits = (rects, others) => rects.some((r) => others.some((o) => r[0] < o[2] && r[2] > o[0] && r[1] < o[3] && r[3] > o[1]));
     const column = (lines, pref, others) => {

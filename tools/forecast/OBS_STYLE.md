@@ -15,6 +15,8 @@ Rebuild the basemap with `python tools/forecast/obs_basemap.py`.
   from, feathers on the clockwise / northern-hemisphere side, half = 5 kt, full = 10 kt, pennant = 50 kt, circle = calm),
   rotated for grid convergence. Checked against matplotlib/MetPy (`qa/qa_barbs.py`).
 - Markers are 1.5x the original size (constant `Z = 1.5` in obs.js scales text, circle, barb and spacing together).
+- Phone-sized screens (max-width 640px, same breakpoint as obs.css): station numbers are 22% smaller (`PHONE_NF = 0.78`:
+  19.5 px -> 15 px, 3+ number font 17 px -> 13 px; halo, shadow and line spacing scale with them). Desktop unchanged.
 - No legend box on the map. Meaning is explained in the hint text, the credits and the tap-for-details box.
 
 ## Layers (added 2026-10-25, sample for review; toggle chips under the view buttons, any combination)
