@@ -20,15 +20,41 @@ on:
         description: "also deploy the separate meteogram project (METEO_SPLIT=1)"
         type: boolean
         default: false
+      # staged builds (stage runs only; the defaults keep the full build's waves exactly as before)
+      carry:
+        description: "JSON list of groups carried from earlier runs ({group, items: [[run_id, pattern]], meteo: [[run_id, name]]})"
+        type: string
+        default: "[]"
+      meteo_parts:
+        description: "merge this run's meteo-<model> parts over the carried meteograms"
+        type: boolean
+        default: false
+      min_files:
+        description: "stop (no deploy) if the main site has fewer files than this (0 = no check)"
+        type: string
+        default: "0"
+      dry_run:
+        description: "build and count, but do not deploy"
+        type: boolean
+        default: false
+    outputs:
+      files_main:
+        value: ${{ jobs.deploy.outputs.files_main }}
+      files_meteo:
+        value: ${{ jobs.deploy.outputs.files_meteo }}
 
 permissions:
   contents: read
+  actions: read   # staged builds: download carried artifacts of earlier runs
 
 jobs:
   deploy:
     name: deploy wave ${{ inputs.wave }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    outputs:
+      files_main: ${{ steps.count.outputs.files_main }}
+      files_meteo: ${{ steps.count.outputs.files_meteo }}
     env:
       SITE_BATCH: ${{ github.workspace }}/.site_batch
       SITE_DIR: ${{ github.workspace }}/web/forecast
@@ -39,6 +65,26 @@ jobs:
           python-version: "3.13"
       - name: Install Python packages (pinned, permissive licenses)
         run: pip install -r tools/requirements.txt
+      - name: Carried products (staged builds; oldest run first)
+        if: inputs.carry != '[]'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CARRY: ${{ inputs.carry }}
+        run: python tools/forecast/stage_tools.py collect --carry "$CARRY" --batch .site_batch --meteo-dst web/forecast/meteograms
+      - name: Collect this run's meteogram parts (staged builds)
+        if: inputs.meteo_parts
+        uses: actions/download-artifact@v4
+        continue-on-error: true   # a failed part keeps the carried charts
+        with:
+          pattern: meteo-*
+          path: .meteo_cur
+      - name: Merge this run's meteogram parts over the carried ones (staged builds)
+        if: inputs.meteo_parts
+        run: |
+          python - <<'PY'
+          import glob, sys; sys.path.insert(0, "tools/forecast"); import stage_tools as S
+          S.merge_meteo(sorted(glob.glob(".meteo_cur/*/")), "web/forecast/meteograms")
+          PY
       - name: Collect map artifacts (WA shards + AIFS + GFS + MSLP + temps + HRRR/RRFS)
         uses: actions/download-artifact@v4
         continue-on-error: true   # nothing to collect when only meteograms were picked
@@ -53,6 +99,13 @@ jobs:
         with:
           name: meteograms
           path: web/forecast/meteograms
+      - name: Keep the newest cycle of each product (staged builds; new artifacts over carried ones)
+        if: inputs.carry != '[]'
+        run: |
+          python - <<'PY'
+          import sys; sys.path.insert(0, "tools/forecast"); import stage_tools as S
+          S.prune_old_cycles(".site_batch")
+          PY
       - name: Build manifest (METEO_SPLIT=1 -> meteogram links point at the same-origin /m/ function)
         env:
           METEO_BASE: ${{ vars.METEO_SPLIT == '1' && 'm/' || '' }}
@@ -60,12 +113,18 @@ jobs:
           [ -z "$METEO_BASE" ] && unset METEO_BASE
           python tools/forecast/publish_forecast_maps.py --batch-root .site_batch --no-adhoc
       - name: File count check (Pages limit 20,000 files per project; stop at 19,500)
+        id: count
         run: |
           N=$(find web/forecast -type f | wc -l); M=$(find web/forecast/meteograms -type f 2>/dev/null | wc -l)
           MAIN=$N; [ "${{ vars.METEO_SPLIT }}" = "1" ] && MAIN=$((N - M))
           echo "Wave ${{ inputs.wave }}: main site $MAIN files, meteograms $M (limit 20,000; stop line 19,500)" | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "files_main=$MAIN" >> "$GITHUB_OUTPUT"; echo "files_meteo=$M" >> "$GITHUB_OUTPUT"
           if [ "$MAIN" -gt 19500 ] || [ "$M" -gt 19500 ]; then echo "::error::over the 19,500-file stop line, not deploying"; exit 1; fi
+          MIN="${{ inputs.min_files }}"
+          if [ "$MAIN" -lt "${MIN:-0}" ]; then echo "::error::main site $MAIN files < $MIN (85% of the last deploy): products missing, not deploying"; exit 1; fi
+          if [ "${{ inputs.dry_run }}" = "true" ]; then echo "Dry run: no deploy" | tee -a "$GITHUB_STEP_SUMMARY"; fi
       - name: Require Cloudflare secrets
+        if: ${{ !inputs.dry_run }}
         env:
           CF_KEY: ${{ secrets.CF_PAGES_KEY }}
           CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -80,7 +139,7 @@ jobs:
           cp -r web/meteo-proxy/functions .deploy/main/functions
           echo "files: main $(find .deploy/main/public -type f | wc -l), meteograms $(find .deploy/meteo -type f | wc -l)" >> "$GITHUB_STEP_SUMMARY"
       - name: Deploy the meteograms to the second Access-locked Pages project (METEO_SPLIT=1 only, wave with meteograms)
-        if: vars.METEO_SPLIT == '1' && inputs.deploy_meteo
+        if: vars.METEO_SPLIT == '1' && inputs.deploy_meteo && !inputs.dry_run
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CF_PAGES_KEY }}
@@ -88,7 +147,7 @@ jobs:
           workingDirectory: .deploy/meteo
           command: pages deploy . --project-name=${{ vars.METEO_PROJECT || 'wx-forecast-meteograms' }} --branch=main --commit-dirty=true
       - name: Deploy the main site with the /m/ function (METEO_SPLIT=1 only)
-        if: vars.METEO_SPLIT == '1'
+        if: vars.METEO_SPLIT == '1' && !inputs.dry_run
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CF_PAGES_KEY }}
@@ -96,7 +155,7 @@ jobs:
           workingDirectory: .deploy/main
           command: pages deploy public --project-name=wx-forecast-maps --branch=main --commit-dirty=true
       - name: Deploy to the Access-locked Pages project, one site (images never enter the repo)
-        if: vars.METEO_SPLIT != '1'
+        if: vars.METEO_SPLIT != '1' && !inputs.dry_run
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CF_PAGES_KEY }}
