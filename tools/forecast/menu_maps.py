@@ -913,36 +913,36 @@ G_NAPNWT, G_ALLT, G_PNWTWA, G_PNWT = ("na", "pnw", "pnwt"), ("na", "pnw", "pnwt"
 # GFS (10-24-26): removed from every menu product; its only maps are the 500 mb anomaly and sea-level pressure (gfs_maps.py).
 # The old GFS entries and the dropped mslp500 product are in archive/gfs_products_20261024/ (README there says how to restore).
 PRODUCTS = {   # name: (function, models, global views, high-res views)
-    "gust10": (prod_gust10, ("ifs", "hrrr", "rrfs"), G_NAPNWT, H_PNWWA),
+    "gust10": (prod_gust10, ("ifs", "hrrr", "rrfs"), G_ALLT, H_PNWWA),
     "peakgust": (prod_peakgust, ("ifs", "hrrr", "rrfs"), G_ALLT, H_PNWWA),
     "feels": (prod_feels, ("ifs", "aifs", "hrrr", "rrfs"), G_ALLT, H_PNWWA),
     "t925": (prod_aloft(925), ("ifs", "aifs", "hrrr"), G_ALL, H_PNWWA),
     "t700": (prod_aloft(700), ("ifs", "aifs", "hrrr"), G_NAPNW, H_PNW),
     "t500": (prod_aloft(500), ("ifs", "aifs", "hrrr"), G_NAPNW, H_PNW),
     "t300": (prod_aloft(300), ("ifs", "aifs", "hrrr"), G_NAPNW, H_PNW),
-    "td2m": (prod_td2m, ("ifs", "hrrr", "rrfs"), G_PNWTWA, H_PNWWA),
-    "mslpptype": (prod_mslpptype, ("ifs", "hrrr", "rrfs"), G_PNWWA, ("wa",)),
+    "td2m": (prod_td2m, ("ifs", "hrrr", "rrfs"), G_ALLT, H_PNWWA),
+    "mslpptype": (prod_mslpptype, ("ifs", "hrrr", "rrfs"), G_ALL, H_PNWWA),
     # 10-25-26: HRRR / RRFS pills on the "MSLP + 10 m wind" combo tab (ECMWF 9 km and AIFS come from gfs_maps / aifs_maps)
     "aifswind": (prod_mslpwind, ("hrrr", "rrfs"), (), H_PNWWA),
-    "snowkuch": (prod_snowkuch, ("ifs", "hrrr"), ("pnw",), H_PNW),
-    "snow10": (prod_snow10, ("ifs", "hrrr", "rrfs"), ("pnw",), H_PNW),
-    "snowk24": (prod_snowk24, ("ifs", "hrrr"), G_PNWWA, H_PNWWA),
+    "snowkuch": (prod_snowkuch, ("ifs", "hrrr"), G_ALL, H_PNWWA),
+    "snow10": (prod_snow10, ("ifs", "hrrr", "rrfs"), G_ALL, H_PNWWA),
+    "snowk24": (prod_snowk24, ("ifs", "hrrr"), G_ALL, H_PNWWA),
     "snowrate": (prod_snowrate, ("hrrr", "rrfs"), G_PNWWA, H_PNWWA),
-    "frzr": (prod_frzr, ("ifs", "hrrr", "rrfs"), G_PNWWA, H_PNWWA),
+    "frzr": (prod_frzr, ("ifs", "hrrr", "rrfs"), G_ALL, H_PNWWA),
     "ivt": (prod_ivt, ("ifs", "aifs", "hrrr"), G_NAPNW, H_PNW),
-    "pw": (prod_pw, ("ifs", "aifs", "hrrr", "rrfs"), ("pnw",), H_PNW),
+    "pw": (prod_pw, ("ifs", "aifs", "hrrr", "rrfs"), G_NAPNW, H_PNW),
     "pwanom": (prod_pwanom, ("ifs", "aifs", "hrrr"), G_NAPNW, H_PNW),
     "w850": (prod_wind(850), ("ifs", "aifs", "hrrr"), G_NAPNW, H_PNW),
     "w500": (prod_wind(500, heights=False), ("ifs", "aifs", "hrrr"), G_NAPNW, H_PNW),
     "w250": (prod_wind(250), ("ifs", "aifs", "hrrr"), G_NAPNW, H_PNW),
-    "thick": (prod_thick, ("ifs", "aifs", "hrrr"), ("pnw",), H_PNW),
-    "tcc": (prod_tcc, ("ifs", "aifs", "hrrr", "rrfs"), G_PNWT, H_PNW),
-    "ir": (prod_ir, ("hrrr", "rrfs"), ("pnw",), H_PNW),
-    "vis": (prod_vis, ("hrrr", "rrfs"), G_PNWWA, ("wa",)),   # no visibility field in ECMWF open data, so 3 km models only now
-    "fog": (prod_fog, ("ifs", "hrrr", "rrfs"), G_PNWTWA, ("wa",)),
+    "thick": (prod_thick, ("ifs", "aifs", "hrrr"), G_NAPNW, H_PNW),
+    "tcc": (prod_tcc, ("ifs", "aifs", "hrrr", "rrfs"), G_ALLT, H_PNWWA),
+    "ir": (prod_ir, ("hrrr", "rrfs"), ("pnw",), H_PNWWA),
+    "vis": (prod_vis, ("hrrr", "rrfs"), G_PNWWA, H_PNWWA),   # no visibility field in ECMWF open data, so 3 km models only now
+    "fog": (prod_fog, ("ifs", "hrrr", "rrfs"), G_ALLT, H_PNWWA),
     # 10-25-26 (Benjamin): Washington + Pacific NW tight views for ECMWF 9 km, Washington for HRRR/RRFS (no tight frame on
     # 3 km grids), replacing the archived WA Rain shards. AIFS keeps Pacific NW only (QPF_PNW_ONLY below).
-    "qpf": (prod_qpf, ("ifs", "aifs", "hrrr", "rrfs"), G_PNWTWA, H_PNWWA),
+    "qpf": (prod_qpf, ("ifs", "aifs", "hrrr", "rrfs"), G_ALLT, H_PNWWA),
 }
 # AIFS upper air: no Washington view (already true: t700-t300 have no WA view); t925 drops WA for AIFS below.
 
@@ -969,12 +969,16 @@ def latest(m):
 #   MENU_WORKERS=N   frames drawn at once in forked worker processes (default: all cores); 1 = the old one-at-a-time loop
 #   MENU_PREFETCH=0  no background download (each step's data is fetched right before it is drawn, old behavior)
 #   MENU_AHEAD=2     how many steps the downloader may run ahead of the drawing; MENU_DL_THREADS=4 fields fetched at once
+# 10-26-26 (Benjamin: "make sure the products generate on all the sectors we made"): every view pill a tab offers now gets
+# maps where the model grid covers it. Still left out on purpose: HRRR/RRFS na/pnw/pnwt (3 km grid stops short), AIFS
+# Washington aloft (AIFS_ALOFT), AIFS QPF beyond Pacific NW (QPF_PNW_ONLY), tight/Washington frames on 700-300 mb maps.
+AIFS_ALOFT = {"t925", "t700", "t500", "t300", "thick"}
 STATEFUL = {"peakgust", "qpf"}   # products whose function also advances a running total (idempotent within a step)
 
 
 def vids_of(m, p, views):
     fn, _, gv, hv = PRODUCTS[p]; vids = views_for(m, views, gv, hv)
-    if m == "aifs" and p.startswith("t") and p not in ("td2m",): vids = [v for v in vids if v != "wa"]
+    if m == "aifs" and p in AIFS_ALOFT: vids = [v for v in vids if v != "wa"]   # AIFS upper air: no Washington view (Benjamin 10-23-26)
     if m == "aifs" and p == "qpf": vids = [v for v in vids if v == "pnw"]   # QPF_PNW_ONLY
     return vids
 
@@ -1219,7 +1223,7 @@ if __name__ == "__main__":
         n = 0; byp = {}
         for p in prods:
             fn, _, gv, hv = PRODUCTS[p]; vids = views_for(m, a.views.split(","), gv, hv)
-            if m == "aifs" and p.startswith("t") and p not in ("td2m",): vids = [v for v in vids if v != "wa"]
+            if m == "aifs" and p in AIFS_ALOFT: vids = [v for v in vids if v != "wa"]   # AIFS upper air: no Washington view (Benjamin 10-23-26)
             if m == "aifs" and p == "qpf": vids = [v for v in vids if v == "pnw"]   # QPF_PNW_ONLY
             k = 0
             for s in render:
