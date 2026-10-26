@@ -172,6 +172,8 @@ These rules apply to every model product: AIFS, GFS, GEFS, ECMWF/EPS, HRRR, RRFS
   on the Washington view (gusts, feels-like, 2 m temp / anomaly, dewpoint, 10 m wind, precip, snow, ice, visibility), each city
   gets the same number in the same format ("Seattle 54", bold 9.5 pt), read at the city point (bilinear on ECMWF lat/lon grids,
   nearest 3 km point on HRRR / RRFS). Same priority order; "Name 54" inline, then the number under the name; if neither fits
-  the city is dropped (never name only; logged with the drop list). Missing value (off grid) = name only (logged). Upper-air
-  frames stay names only. Typical: pnwhr 52-53 of 60 placed, pnwt 35-38 of 55. TOWN_NUMBERS=0 turns numbers off everywhere.
+  the city is dropped (never name only; logged with the drop list). Missing value (off grid) = name only (logged). Typical: pnwhr 52-53 of 60 placed, pnwt 35-38 of 55. TOWN_NUMBERS=0 turns numbers off everywhere.
+- Upper air (Benjamin 10-25-26 10:09 PM, "don't need town names when showing upper air stuff"): no town dots, names or numbers
+  on upper-air maps in any view (temp_maps.UPPER_AIR_TABS: t925, t850, t700, t500, t300, mslp500, pw, pwanom, ivt, w850, w500,
+  w250, thick, t850anom; menu_maps.finish skips towns(), render_t850 no longer calls it). Ground-level tabs keep labels/numbers.
 - HRRR / RRFS nearest-point KD-tree cached per cropped grid (temp_maps._grid_tree), built once in menu_maps.prewarm.

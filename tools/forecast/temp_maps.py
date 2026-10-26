@@ -351,6 +351,9 @@ REGION_REQUESTED = ("Seattle", "Portland", "Spokane", "Victoria", "Bellingham", 
                     "Chehalis", "Long Beach", "Cannon Beach", "Yakima", "Wenatchee", "Winthrop", "Oroville", "Omak",
                     "Tri-Cities", "Pendleton", "Walla Walla")
 _PLACES = None
+# Upper-air tabs (Benjamin 10-25-26 10:09 PM: "don't need town names when showing upper air stuff"): no town dots, names or
+# numbers on these maps in any view (menu_maps.finish skips towns(); render_t850 never calls it). Ground-level tabs keep them.
+UPPER_AIR_TABS = {"t925", "t850", "t700", "t500", "t300", "mslp500", "pw", "pwanom", "ivt", "w850", "w500", "w250", "thick", "t850anom"}
 
 
 def region_places(vid):
@@ -636,8 +639,7 @@ def render_t850(m, c, step, lat, lon, tk, gh, u, v, vid, out, sp=None):
     fig_w, fig_h = fig.get_size_inches() * ax.get_position().size; nx = HS.BARBS_ACROSS[vid]; ny = max(4, round(nx * fig_h / fig_w))
     ax.barbs(LO, LA, U * 1.94384, Vw * 1.94384, transform=pc, regrid_shape=(nx, ny), length=HS.BARB_LENGTH, color=HS.BARB_COLOR,
              linewidth=HS.BARB_LW, zorder=5)
-    towns(ax, vid)
-    HS.frame(ax)
+    HS.frame(ax)   # no town labels on upper-air maps (Benjamin 10-25-26 10:09 PM)
     vl = header(fig, m, c, step, vid, "850 mb Temperature + Wind", "0\u00b0C line dashed  \u00b7  heights every 3 dam  \u00b7  barbs in kt  \u00b7  gray = ground above 850 mb")
     HS.hbar(fig, fill, HS.T850_TICKS, "Temp (\u00b0C)", key_y, signed=True)
     save(fig, out, {"tab": "t850", "period": "step", "view": vid, "model": MODELS[m]["site"], "cycle": f"{c:%Y%m%d%H}",

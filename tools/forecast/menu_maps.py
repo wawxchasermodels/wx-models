@@ -321,7 +321,8 @@ def credit(m):
 
 
 def finish(fig, ax, m, c, step, vid, out, tab, title, extra, valid_start=None, period="step", town=None, town_fmt=TM.fmt_int, pass_corr=None):
-    TM.towns(ax, vid, town, town_fmt, pass_corr); HS.frame(ax)   # town = (LA, LO, F) in map units adds "Seattle 54" numbers (WA view)
+    if tab not in TM.UPPER_AIR_TABS: TM.towns(ax, vid, town, town_fmt, pass_corr)   # upper air: no towns at all
+    HS.frame(ax)   # town = (LA, LO, F) in map units adds "Seattle 54" numbers (WA view)
     valid = c + dt.timedelta(hours=step); vl = valid.astimezone(PT); M = MODELS[m]
     when = (f"{valid_start:%a %-I %p} to {vl:%a %-m-%-d %-I %p} PT" if period != "step" and valid_start is not None
             else f"Valid {vl:%a %-m-%-d} \u00b7 {vl:%-I %p} PT")
