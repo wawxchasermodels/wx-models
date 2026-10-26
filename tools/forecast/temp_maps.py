@@ -11,7 +11,9 @@ projection space. Data: ECMWF open data, CC BY 4.0. Basemap: Natural Earth (publ
 2 m anomaly (--products t2manom, ECMWF 9 km and AIFS): model 2 m temperature minus the NCEP/NCAR Reanalysis 1991-2020
 6-hourly mean for that date and hour (NOAA PSL, public domain; build it with make_clim_t2m.py), interpolated in time and
 space and moved from reanalysis terrain to model terrain with a 6.5 C/km lapse rate. In deg F.
-Writes $SITE_BATCH/<cycle>/<t2m|t850|t2manom>-<model>/step/<view>/<valid>/final.jpg + site_frame.json (model "ECMWF 9 km" or "AIFS").
+850 mb anomaly (--products t850anom, ECMWF 9 km and AIFS; GFS via gfs_maps.py, ensemble means via ens_maps.py): 850 mb
+temperature minus the NCEP/NCAR Reanalysis 1991-2020 monthly mean at 850 mb (make_clim_t850.py), in deg C. North America + Pacific NW.
+Writes $SITE_BATCH/<cycle>/<t2m|t850|t2manom|t850anom>-<model>/step/<view>/<valid>/final.jpg + site_frame.json (model "ECMWF 9 km" or "AIFS").
 """
 import sys, argparse, datetime as dt, json, os, urllib.request, urllib.error
 from zoneinfo import ZoneInfo
@@ -516,6 +518,70 @@ def render_t2manom(m, c, step, lat, lon, t2k, zm, vid, out):
                     "start_pt": vl.isoformat(), "end_pt": vl.isoformat()})
 
 
+# 850 mb temperature anomaly (Benjamin 10-25-26 9:24 PM: "850mb temp anomaly added to the global models"): model 850 mb
+# temperature minus the NCEP/NCAR Reanalysis 1 monthly long-term mean 1991-2020 at 850 mb (NOAA PSL, public domain; built by
+# make_clim_t850.py), linearly interpolated in time to the valid date (months centred on the 15th) and bilinearly in space:
+# the same source, period and method as the 500 mb height anomaly. Deg C, -20..+20 in 1 C bins, colors from the 500 mb anomaly
+# family (1 C drawn like 22.5 m, so +/-20 C = the +/-450 m ends) so every anomaly product reads the same way. Air under the
+# ground (surface pressure < 850 mb) is flat gray like the 850 mb temp map. 850 mb heights every 3 dam when the model has them.
+CLIM_T850 = f"{ROOT}/clim/ncep_t850_mon_ltm_1991_2020.npz"
+T8A_LEVELS = np.arange(-20, 21, 1)
+T8A_TICKS = list(range(-20, 21, 4))
+T8A_VIEWS = ("na", "pnw")   # upper-air rule: no tight PNW or Washington frame aloft
+
+
+def t8a_cmap():
+    return HS.cmap([HS._anom_color(22.5 * x) for x in (T8A_LEVELS[:-1] + T8A_LEVELS[1:]) / 2.0], HS.ANOM_UNDER, HS.ANOM_OVER)
+
+
+def clim_t850(valid, LA, LO):
+    """Normal 850 mb temperature (C) for the valid date on the (2-D) LA, LO points."""
+    from scipy.interpolate import RegularGridInterpolator
+    z = np.load(CLIM_T850); T, cl, co = z["t850"].astype("f4"), z["lat"], z["lon"]
+    v = valid.astimezone(dt.timezone.utc); m = v.month - 1; mid = v.replace(day=15, hour=0, minute=0, second=0, microsecond=0)
+    m2 = (m + (1 if v >= mid else -1)) % 12; w = min(abs((v - mid).total_seconds()) / (30.4 * 86400), 1.0)
+    f = (1 - w) * T[m] + w * T[m2]
+    f = np.concatenate([f, f[:, :1]], 1); co = np.append(co, 360.0)
+    it = RegularGridInterpolator((cl[::-1], co), f[::-1], bounds_error=False, fill_value=None)
+    return it(np.stack([np.asarray(LA, float), np.asarray(LO, float) % 360], -1))
+
+
+def render_t850anom(c, step, lat, lon, tk, vid, out, who, gh=None, sp=None, orog=None):
+    """who = dict(name, res, site, credit[, members]). tk in K on a regular lat/lon grid; gh in gpm (optional);
+    sp in Pa (optional) or orog in m (ensembles: ground above ~1,450 m stands in for surface pressure < 850 mb)."""
+    arrs = [tk] + [a for a in (gh, sp, orog) if a is not None]
+    LA, LO, A = cut(lat, lon, arrs, vid); T = A.pop(0); Z = A.pop(0) if gh is not None else None
+    SP = A.pop(0) if sp is not None else None; OR = A.pop(0) if orog is not None else None
+    LA2, LO2 = np.meshgrid(LA, LO, indexing="ij"); valid = c + dt.timedelta(hours=step)
+    res = abs(float(LA[1] - LA[0])); k = 0.25 / res if res < 0.2 else 1.0   # 0.1 deg grids: same ground smoothing as 0.25 deg
+    An = gaussian_filter((T - 273.15) - clim_t850(valid, LA2, LO2), max(SMOOTH[vid], 1.0) * k)   # the normal is 2.5 deg: keep it soft
+    under = (gaussian_filter(SP, k) < 85000.0) if SP is not None else (gaussian_filter(OR, 1.0) > 1450.0) if OR is not None else np.zeros(An.shape, bool)
+    An = np.where(under, np.nan, An)
+    fig, ax, key_y = frame(vid); pc = ccrs.PlateCarree(); cm = t8a_cmap()
+    if under.any():
+        from scipy.ndimage import binary_dilation
+        ax.contourf(LO, LA, binary_dilation(under, iterations=2).astype(float), levels=[0.5, 1.5], colors=[BELOW_GROUND], transform=pc, zorder=0.5)
+    fill = ax.contourf(LO, LA, An, levels=T8A_LEVELS, cmap=cm, norm=BoundaryNorm(T8A_LEVELS, cm.N), extend="both", transform=pc)
+    HS.outlines(ax, cf, res="50m")
+    if Z is not None:
+        Zs = np.where(under, np.nan, gaussian_filter(Z / 10.0, 1.5 * k))
+        hc = ax.contour(LO, LA, Zs, levels=np.arange(90, 180, 3), colors=HS.ISOBAR_COLOR, linewidths=HS.ISOBAR_LW, transform=pc, zorder=4)
+        hc.set(path_effects=HS.halo("white", HS.ISOBAR_HALO))
+        for t in ax.clabel(hc, fmt="%d", inline=True, inline_spacing=6):
+            t.set_fontproperties(HS.font(700, 10)); t.set_path_effects(HS.halo("white", 3.2))
+    HS.frame(ax)
+    vl = valid.astimezone(PT); lo, hi = np.nanpercentile(An, [0.5, 99.5])
+    run = f"{who['name']} {who['res']}" + (f" {who['members']} members" if who.get("members") else "")
+    HS.header(fig, "850 mb Temperature Anomaly" + (" (Ensemble Mean)" if who.get("members") else ""), f"Valid {vl:%a %-m-%-d} \u00b7 {vl:%-I %p} PT",
+              f"{run} {c:%HZ} run {c.astimezone(PT):%-m-%-d-%y (%-I %p PT)}  \u00b7  {VIEWS[vid]['label']}  \u00b7  vs 1991-2020 normal for the date"
+              + ("  \u00b7  heights every 3 dam" if Z is not None else "") + f"  \u00b7  {lo:+.0f} to {hi:+.0f}\u00b0C in view  \u00b7  gray = ground above 850 mb",
+              f"F+{step}", f"{valid:%HZ %a}".upper())
+    HS.credit(fig, who["credit"] + CREDIT_CLIM)
+    HS.hbar(fig, fill, T8A_TICKS, "Anomaly (\u00b0C)", key_y, signed=True)
+    save(fig, out, {"tab": "t850anom", "period": "step", "view": vid, "model": who["site"], "cycle": f"{c:%Y%m%d%H}",
+                    "start_pt": vl.isoformat(), "end_pt": vl.isoformat()})
+
+
 def steps(hours, every):
     return list(range(0, hours + 1, every))
 
@@ -540,7 +606,7 @@ if __name__ == "__main__":
                     except StopIteration: oro = None
                     for v in views:
                         out = f"{ROOT}/{c:%Y%m%d%H}/t2m-{a.model}/step/{v}/{vt}"; render_t2m(a.model, c, s, lat, lon, t2, v, out, oro); print("ok", out, flush=True)
-                if "t850" in a.products and "t850" in HIRES[a.model]["products"]:
+                if "t850" in a.products.split(",") and "t850" in HIRES[a.model]["products"]:
                     lat, lon, t = st.field("TMP", "850 mb"); _, _, z = st.field("HGT", "850 mb")
                     _, _, u = st.field("UGRD", "850 mb"); _, _, w = st.field("VGRD", "850 mb"); u, w = earth_relative(u, w, lon, a.model)
                     _, _, sp = st.field("PRES", "surface")
@@ -561,13 +627,19 @@ if __name__ == "__main__":
                 lat, lon, t2 = st.field("2t")
                 for v in a.views.split(","):
                     out = f"{ROOT}/{c:%Y%m%d%H}/t2manom-{a.model}/step/{v}/{vt}"; render_t2manom(a.model, c, s, lat, lon, t2, zorog, v, out); print("ok", out, flush=True)
+            if "t850anom" in a.products.split(","):
+                lat, lon, t = st.field("t", 850, "pl"); _, _, z = st.field("gh", 850, "pl"); _, _, sp = st.field("sp")
+                M_ = MODELS[a.model]; who = dict(name=M_["name"], res=M_["res"], site=M_["site"], credit=CREDIT.format(name=M_["name"]))
+                for v in a.views.split(","):
+                    if v not in T8A_VIEWS: continue
+                    out = f"{ROOT}/{c:%Y%m%d%H}/t850anom-{a.model}/step/{v}/{vt}"; render_t850anom(c, s, lat, lon, t, v, out, who, gh=z, sp=sp); print("ok", out, flush=True)
             if "t2m" in a.products.split(","):
                 lat, lon, t2 = st.field("2t")
                 try: oro = ecmwf_orog(a.model, c) if "wa" in a.views.split(",") else None
                 except StopIteration: oro = None
                 for v in a.views.split(","):
                     out = f"{ROOT}/{c:%Y%m%d%H}/t2m-{a.model}/step/{v}/{vt}"; render_t2m(a.model, c, s, lat, lon, t2, v, out, oro); print("ok", out, flush=True)
-            if "t850" in a.products:
+            if "t850" in a.products.split(","):
                 lat, lon, t = st.field("t", 850, "pl"); _, _, z = st.field("gh", 850, "pl")
                 _, _, u = st.field("u", 850, "pl"); _, _, w = st.field("v", 850, "pl"); _, _, sp = st.field("sp")
                 for v in a.views.split(","):

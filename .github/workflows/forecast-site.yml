@@ -362,8 +362,22 @@ jobs:
             python tools/forecast/make_clim.py /tmp/hgt.nc .clim/ncep_hgt500_mon_ltm_1991_2020.npz
           fi
           cp .clim/ncep_hgt500_mon_ltm_1991_2020.npz .site_batch/clim/
-      - name: GFS 500 mb anomaly + sea-level pressure (latest 00Z/12Z run, every 6 h to 240 h)
-        run: python tools/forecast/gfs_maps.py --hours 240 --every 6 --views na,pnw,pnwt
+      - name: Restore 850 mb climatology cache
+        uses: actions/cache@v4
+        with:
+          path: .clim_t850
+          key: forecast-clim-t850-v1
+      - name: 850 mb temperature climatology (NCEP/NCAR Reanalysis 1991-2020 monthly mean, NOAA PSL) for the 850 mb anomaly
+        run: |
+          mkdir -p .clim_t850 .site_batch/clim
+          if [ ! -f .clim_t850/ncep_t850_mon_ltm_1991_2020.npz ]; then
+            pip install h5py
+            curl -sSfo /tmp/air.nc https://downloads.psl.noaa.gov/Datasets/ncep.reanalysis.derived/pressure/air.mon.ltm.1991-2020.nc
+            python tools/forecast/make_clim_t850.py /tmp/air.nc .clim_t850/ncep_t850_mon_ltm_1991_2020.npz
+          fi
+          cp .clim_t850/ncep_t850_mon_ltm_1991_2020.npz .site_batch/clim/
+      - name: GFS 500 mb anomaly + sea-level pressure + 850 mb temp anomaly (latest 00Z/12Z run, every 6 h to 240 h)
+        run: python tools/forecast/gfs_maps.py --hours 240 --every 6 --views na,pnw,pnwt --products z500,mslp,t850anom
       - name: Keep only the site files
         run: rm -rf .site_batch/clim
       - uses: actions/upload-artifact@v4
@@ -396,8 +410,24 @@ jobs:
           test -f /usr/share/fonts/truetype/msttcorefonts/Impact.ttf
       - name: ECMWF 9 km MSLP + precip (3 h to 72 h, then 6 h to 240 h)
         run: python tools/forecast/ecmwf_mslp_precip.py --cycle "${{ needs.plan.outputs.cycle }}" --plan
-      - name: ECMWF 9 km sea-level pressure with H/L centers (Sea-level pressure tab, every 6 h to 240 h)
-        run: python tools/forecast/gfs_maps.py --model ifs --cycle "${{ needs.plan.outputs.cycle }}" --hours 240 --every 6
+      - name: Restore climatology cache
+        uses: actions/cache@v4
+        with:
+          path: .clim
+          key: forecast-clim-v1
+      - name: Climatology (NCEP/NCAR Reanalysis 1991-2020 monthly mean 500 mb height, NOAA PSL) for the ECMWF 9 km 500 mb anomaly
+        run: |
+          mkdir -p .clim .site_batch/clim
+          if [ ! -f .clim/ncep_hgt500_mon_ltm_1991_2020.npz ]; then
+            pip install h5py
+            curl -sSfo /tmp/hgt.nc https://downloads.psl.noaa.gov/Datasets/ncep.reanalysis.derived/pressure/hgt.mon.ltm.1991-2020.nc
+            python tools/forecast/make_clim.py /tmp/hgt.nc .clim/ncep_hgt500_mon_ltm_1991_2020.npz
+          fi
+          cp .clim/ncep_hgt500_mon_ltm_1991_2020.npz .site_batch/clim/
+      - name: ECMWF 9 km 500 mb anomaly, sea-level pressure with H/L centers, MSLP + 10 m wind (every 6 h to 240 h)
+        run: python tools/forecast/gfs_maps.py --model ifs --cycle "${{ needs.plan.outputs.cycle }}" --hours 240 --every 6 --products z500,mslp,wind
+      - name: Keep only the site files
+        run: rm -rf .site_batch/clim
       - uses: actions/upload-artifact@v4
         with:
           name: mslp-maps
@@ -442,12 +472,26 @@ jobs:
             python tools/forecast/make_clim_t2m.py /tmp/air2m.nc /tmp/hgtsfc.nc .clim/ncep_t2m_6h_ltm_1991_2020.npz
           fi
           cp .clim/ncep_t2m_6h_ltm_1991_2020.npz .site_batch/clim/
-      - name: ECMWF IFS 2 m temp, 2 m anomaly, 850 mb temp/wind (every 6 h to 240 h)
+      - name: Restore 850 mb climatology cache
+        uses: actions/cache@v4
+        with:
+          path: .clim_t850
+          key: forecast-clim-t850-v1
+      - name: 850 mb temperature climatology (NCEP/NCAR Reanalysis 1991-2020 monthly mean, NOAA PSL) for the 850 mb anomaly
+        run: |
+          mkdir -p .clim_t850 .site_batch/clim
+          if [ ! -f .clim_t850/ncep_t850_mon_ltm_1991_2020.npz ]; then
+            pip install h5py
+            curl -sSfo /tmp/air.nc https://downloads.psl.noaa.gov/Datasets/ncep.reanalysis.derived/pressure/air.mon.ltm.1991-2020.nc
+            python tools/forecast/make_clim_t850.py /tmp/air.nc .clim_t850/ncep_t850_mon_ltm_1991_2020.npz
+          fi
+          cp .clim_t850/ncep_t850_mon_ltm_1991_2020.npz .site_batch/clim/
+      - name: ECMWF IFS 2 m temp, 2 m anomaly, 850 mb temp/wind, 850 mb anomaly (every 6 h to 240 h)
         if: needs.plan.outputs.stage == 'all' || needs.plan.outputs.stage == 's4'   # s3 and the AIFS 18Z rider = AIFS temps only
-        run: python tools/forecast/temp_maps.py --model ifs --cycle "${{ needs.plan.outputs.cycle }}" --hours 240 --every 6 --views na,pnw,pnwt,wa --products t2m,t2manom,t850
-      - name: AIFS 2 m temp, 2 m anomaly, 850 mb temp/wind (every 6 h to 240 h)
+        run: python tools/forecast/temp_maps.py --model ifs --cycle "${{ needs.plan.outputs.cycle }}" --hours 240 --every 6 --views na,pnw,pnwt,wa --products t2m,t2manom,t850,t850anom
+      - name: AIFS 2 m temp, 2 m anomaly, 850 mb temp/wind, 850 mb anomaly (every 6 h to 240 h)
         if: needs.plan.outputs.stage == 'all' || needs.plan.outputs.stage == 's3' || needs.plan.outputs.aifs_cycle != ''
-        run: python tools/forecast/temp_maps.py --model aifs --cycle "${{ needs.plan.outputs.aifs_cycle || needs.plan.outputs.cycle }}" --hours 240 --every 6 --views na,pnw,pnwt,wa --products t2m,t2manom,t850
+        run: python tools/forecast/temp_maps.py --model aifs --cycle "${{ needs.plan.outputs.aifs_cycle || needs.plan.outputs.cycle }}" --hours 240 --every 6 --views na,pnw,pnwt,wa --products t2m,t2manom,t850,t850anom
       - name: Keep only the site files
         run: rm -rf .site_batch/clim
       - uses: actions/upload-artifact@v4
@@ -542,7 +586,7 @@ jobs:
       # 10-25-26 priority tiers: A = precip/snow/ice/p-type and B = gust/feels/dewpoint/temps aloft (wave 3),
       # C = heavy extras: IVT, upper winds, PW, thickness, cloud, IR, vis, fog (wave 4, last)
       TIER_A: qpf,snowkuch,snow10,snowk24,snowrate,frzr,mslpptype
-      TIER_B: gust10,peakgust,feels,td2m,t925,t700,t500,t300
+      TIER_B: gust10,peakgust,feels,td2m,t925,t700,t500,t300,aifswind
       TIER_C: ivt,w850,w500,w250,pwanom,pw,thick,tcc,ir,vis,fog
     steps:
       - uses: actions/checkout@v4
@@ -615,7 +659,7 @@ jobs:
       # 10-25-26 priority tiers: A = precip/snow/ice/p-type and B = gust/feels/dewpoint/temps aloft (wave 3),
       # C = heavy extras: IVT, upper winds, PW, thickness, cloud, IR, vis, fog (wave 4, last)
       TIER_A: qpf,snowkuch,snow10,snowk24,snowrate,frzr,mslpptype
-      TIER_B: gust10,peakgust,feels,td2m,t925,t700,t500,t300
+      TIER_B: gust10,peakgust,feels,td2m,t925,t700,t500,t300,aifswind
       TIER_C: ivt,w850,w500,w250,pwanom,pw,thick,tcc,ir,vis,fog
     steps:
       - uses: actions/checkout@v4
@@ -738,8 +782,24 @@ jobs:
           echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true" | sudo debconf-set-selections
           sudo apt-get update -qq && sudo apt-get install -y -qq ttf-mscorefonts-installer libcairo2
           test -f /usr/share/fonts/truetype/msttcorefonts/Impact.ttf
-      - name: Ensemble low centers + 500 mb heights, ${{ matrix.src }} (every 6 h to 240 h; about 47 MB EPS / 72 MB AIFS ENS per step)
-        run: python tools/forecast/ens_maps.py "${{ matrix.src }}" --cycle "${{ needs.plan.outputs.cycle }}" --hours 240
+      - name: Restore 850 mb climatology cache
+        uses: actions/cache@v4
+        with:
+          path: .clim_t850
+          key: forecast-clim-t850-v1
+      - name: 850 mb temperature climatology (NCEP/NCAR Reanalysis 1991-2020 monthly mean, NOAA PSL) for the 850 mb anomaly
+        run: |
+          mkdir -p .clim_t850 .site_batch/clim
+          if [ ! -f .clim_t850/ncep_t850_mon_ltm_1991_2020.npz ]; then
+            pip install h5py
+            curl -sSfo /tmp/air.nc https://downloads.psl.noaa.gov/Datasets/ncep.reanalysis.derived/pressure/air.mon.ltm.1991-2020.nc
+            python tools/forecast/make_clim_t850.py /tmp/air.nc .clim_t850/ncep_t850_mon_ltm_1991_2020.npz
+          fi
+          cp .clim_t850/ncep_t850_mon_ltm_1991_2020.npz .site_batch/clim/
+      - name: Ensemble low centers + 500 mb heights + mean 850 mb anomaly, ${{ matrix.src }} (every 6 h to 240 h; about 47 MB EPS / 72 MB AIFS ENS per step, +14 MB for 850 mb)
+        run: python tools/forecast/ens_maps.py "${{ matrix.src }}" --cycle "${{ needs.plan.outputs.cycle }}" --hours 240 --products elows,e500,t850anom
+      - name: Keep only the site files
+        run: rm -rf .site_batch/clim
       - uses: actions/upload-artifact@v4
         with:
           name: ens-${{ matrix.src }}

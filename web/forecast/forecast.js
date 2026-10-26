@@ -3,7 +3,7 @@ const $ = (id) => document.getElementById(id);
 const S = { m: null, tab: "", period: "", view: "", model: "", run: 0, keepEnd: "", i: 0, playing: 0, msec: "", town: "", prod: "" };
 const TZ = "America/Los_Angeles";
 const PREF_PERIOD = ["24h", "6h", "step", "12h", "48h", "total", "max24h", "max12h", "max6h", "daily"];
-const INSTANT_TABS = new Set(["gusts", "waves", "aifs500", "aifsmslp", "aifswind", "t2m", "t2manom", "t850", "gust10", "feels", "td2m", "t925", "t700", "t500", "t300", "mslpptype", "ivt", "pw", "pwanom", "w850", "w500", "w250", "thick", "tcc", "ir", "vis", "fog", "elows", "e500"]);
+const INSTANT_TABS = new Set(["gusts", "waves", "aifs500", "aifsmslp", "aifswind", "t2m", "t2manom", "t850", "t850anom", "gust10", "feels", "td2m", "t925", "t700", "t500", "t300", "mslpptype", "ivt", "pw", "pwanom", "w850", "w500", "w250", "thick", "tcc", "ir", "vis", "fog", "elows", "e500"]);
 const cache = new Map(); // src -> Image (preloaded)
 
 const fmt = (opts) => new Intl.DateTimeFormat("en-US", { timeZone: TZ, ...opts });
