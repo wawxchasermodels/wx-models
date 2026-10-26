@@ -33,12 +33,18 @@ PATTERNS = {"hrrr": ["hires-hrrr-maps", "menu-hrrr-*", "menu-reuse-hrrr"],
             "gfs": ["gfs-maps"],
             "aifs": ["aifs-maps", "temp-maps", "menu-aifs-*", "menu-reuse-aifs"],
             "ens": ["ens-*"],
-            "ifs": ["mslp-maps", "temp-maps", "menu-ifs-*", "menu-reuse-ifs"]}
+            "ifs": ["mslp-maps", "temp-maps", "menu-ifs-*", "menu-reuse-ifs"],
+            # 10-26-26 (Benjamin 6:59 AM): ECMWF 9 km 06Z/18Z runs to 144 h for five products only (IFSX_DIRS), a rider
+            "ifsx": ["ifsx-maps"]}
 GROUP_METEO = {"hrrr": "hrrr", "rrfs": "rrfs", "ens": "eps"}   # meteogram source carried with each group
 # two-run models (10-25-26): the run before the current one, carried as its own group (maps only, no meteograms)
 PREV = {"hrrr": "hrrr_prev", "aifs": "aifs_prev"}
-KEEP_RUNS = {"hrrr": 2, "aifs": 2}   # cycles kept on the site per two-run model (every other product: 1)
-AIFS_DIRS = {"aifs500", "aifsmslp", "aifswind"}   # aifs_maps.py folders (no model suffix); other AIFS folders end in -aifs
+KEEP_RUNS = {"hrrr": 2, "aifs": 2, "ifs": 2}   # cycles kept on the site per two-run model (every other product: 1)
+AIFS_DIRS = {"aifs500", "aifsmslp", "aifswind"}
+# ECMWF 9 km products that also get the 06Z/18Z run (to 144 h) as a second run on the toggle; every other ECMWF product
+# keeps only its newest 00Z/12Z run. The site keeps the newest 00Z/12Z run of these plus the newest 06Z/18Z run when
+# that one is at most 6 h older than it (so a stale off-hour run never lingers).
+IFSX_DIRS = {"aifs500-ifs", "t850-ifs", "t850anom-ifs", "aifswind-ifs", "gust10-ifs"}   # aifs_maps.py folders (no model suffix); other AIFS folders end in -aifs
 CYCLE_HOURS = {s_: (0, 12) for s_ in STAGES}   # stage cycles; AIFS 18Z comes in as a rider below
 CYCLE_HOURS["s1"] = (0, 6, 12, 18)   # HRRR 18Z (10-25-26) and 06Z (10-26-26, Benjamin 6:51 AM) are their own s1 runs, maps only
 
@@ -49,13 +55,19 @@ def run_model(prod):
         return "hrrr"
     if prod.endswith("-aifs") or prod in AIFS_DIRS:
         return "aifs"
+    if prod in IFSX_DIRS:
+        return "ifs"
     return None
 
 
 # 18Z riders: rendered inside whichever stage run comes first after their last file is out (never in the stage that owns
 # the group). No extra deploys. AIFS 06Z is left out (Benjamin: 00Z/12Z/18Z); HRRR 06Z is its own s1 run (CYCLE_HOURS).
-RIDERS = {"aifs": {"hour": 18, "ready": ["https://data.ecmwf.int/forecasts/{d}/{h:02d}z/aifs-single/0p25/oper/{d}{h:02d}0000-240h-oper-fc.index"],
-                   "products": "aifs,temps,menu", "menu": "aifs"}}
+RIDERS = {"aifs": {"hours": (18,), "ready": ["https://data.ecmwf.int/forecasts/{d}/{h:02d}z/aifs-single/0p25/oper/{d}{h:02d}0000-240h-oper-fc.index"],
+                   "products": "aifs,temps,menu", "menu": "aifs"},
+          # ECMWF 9 km 06Z/18Z to 144 h (out about 14:27 / 02:27 UTC): rides with the 12Z s2 / 00Z s2 run as a rule
+          "ifsx": {"hours": (6, 18), "ready": ["https://data.ecmwf.int/forecasts/{d}/{h:02d}z/ifs/0p1/oper/{d}{h:02d}0000-144h-oper-fc-sfc.index",
+                                               "https://data.ecmwf.int/forecasts/{d}/{h:02d}z/ifs/0p1/oper/{d}{h:02d}0000-144h-oper-fc-pl.index"],
+                   "products": "ifsx", "menu": ""}}
 E = "https://data.ecmwf.int/forecasts/{d}/{h:02d}z/"
 READY = {   # last file of each stage's models; a stage is ready for cycle c when every one answers
     "s1": ["https://noaa-hrrr-bdp-pds.s3.amazonaws.com/hrrr.{d}/conus/hrrr.t{h:02d}z.wrfsfcf48.grib2.idx"],
@@ -71,6 +83,7 @@ BACKUP = {"10 2,8,14,20 * * *": "s1", "50 4,16 * * *": "s2", "0 8,20 * * *": "s3
 FULL_CRON = "50 21 * * *"
 MIN_FRACTION = 0.85
 MAX_TRIES = 2   # poller: stop re-dispatching a stage/cycle after this many finished runs that did not publish it
+METEO_DEPLOY = {"s1", "s3"}   # stages that deploy the meteogram project (s2 skipped 10-26-26 to save 2 deploys a day)
 PRODUCTS = {"s1": "hrrr,menu", "s2": "rrfs,gfs,menu", "s3": "aifs,temps,menu,ens", "s4": "mslp,temps,menu"}
 
 
@@ -131,8 +144,9 @@ def riders_due(stage, st, now=None, check=None):
         if g in GROUPS[stage]:
             continue
         have = ((st.get("groups") or {}).get(g) or {}).get("cycle", "")
-        c = now.replace(hour=r["hour"]) if now.hour >= r["hour"] else (now - dt.timedelta(days=1)).replace(hour=r["hour"])
-        for c in (c, c - dt.timedelta(days=1)):
+        cands = sorted((day.replace(hour=h) for day in (now, now - dt.timedelta(days=1), now - dt.timedelta(days=2))
+                        for h in r["hours"]), reverse=True)
+        for c in [c for c in cands if c <= now][:2]:
             cyc = f"{c:%Y%m%d%H}"
             if cyc <= have:
                 break
@@ -216,7 +230,7 @@ def cmd_plan(a):
                 go = "false"
         out(stage="all", go=go, cycle="", pin="12" if a.event == "schedule" else "", products=os.environ.get("PRODUCTS", "") if go == "true" else "",
             menu_models="", meteo_srcs="[]", carry="[]", min_files="0", prev_state="{}", stage_patterns="",
-            riders={}, hrrr_cycle="", aifs_cycle="", menu_cycles={})
+            riders={}, hrrr_cycle="", aifs_cycle="", ifsx_cycle="", menu_cycles={}, meteo_deploy="false")
         return
     if stage not in STAGES:
         sys.exit(f"unknown stage {stage}")
@@ -225,7 +239,7 @@ def cmd_plan(a):
         hrs = "/".join(f"{h:02d}Z" for h in CYCLE_HOURS[stage])
         print(f"::notice::{stage}: no complete {hrs} run found yet (or cycle {cycle!r} is not one of them); nothing to do")
         out(stage=stage, go="false", cycle="", pin="", products="", menu_models="", meteo_srcs="[]", carry="[]", min_files="0",
-            prev_state="{}", stage_patterns="", riders={}, hrrr_cycle="", aifs_cycle="", menu_cycles={})
+            prev_state="{}", stage_patterns="", riders={}, hrrr_cycle="", aifs_cycle="", ifsx_cycle="", menu_cycles={}, meteo_deploy="false")
         return
     rid, st = latest_state()
     if a.seed_run:
@@ -253,13 +267,17 @@ def cmd_plan(a):
     groups = GROUPS[stage] + list(riders)
     pats = "{" + ",".join(p for g in groups for p in PATTERNS[g]) + "}"
     prods = ",".join(dict.fromkeys(",".join([PRODUCTS[stage]] + [RIDERS[g]["products"] for g in riders]).split(",")))
-    menus = ",".join(dict.fromkeys([MENU[stage]] + [RIDERS[g]["menu"] for g in riders]))
+    menus = ",".join(dict.fromkeys(m for m in [MENU[stage]] + [RIDERS[g]["menu"] for g in riders] if m))
     meteo = METEO[stage] if go == "true" else []
     if stage == "s1" and cycle[-2:] in ("06", "18"):
         meteo = []   # HRRR 06Z/18Z: maps only, no meteogram-project deploy (keeps deploys under the Pages limit; 00Z/12Z redo them)
     out(stage=stage, go=go, cycle=cycle, pin=cycle[-2:], products=prods if go == "true" else "", menu_models=menus,
         meteo_srcs=meteo, carry=carry, min_files=str(min_files), prev_state=st, stage_patterns=pats,
-        riders=riders, hrrr_cycle=riders.get("hrrr", ""), aifs_cycle=riders.get("aifs", ""), menu_cycles=riders)
+        riders=riders, hrrr_cycle=riders.get("hrrr", ""), aifs_cycle=riders.get("aifs", ""), ifsx_cycle=riders.get("ifsx", ""),
+        menu_cycles={g: c for g, c in riders.items() if RIDERS.get(g, {}).get("menu")},
+        # 10-26-26 (Benjamin 6:59 AM): no meteogram-project deploy on s2 (RRFS). Its new RRFS charts are recorded in the
+        # site state and go live with the next meteogram deploy (s3 / s1 00Z-12Z); until then s2 keeps the carried ones.
+        meteo_deploy="true" if meteo and stage in METEO_DEPLOY else "false")
 
 
 # ------------------------------------------------------------------------------------------------------- collect
@@ -286,6 +304,11 @@ def prune_old_cycles(batch):
         if mdl:
             model_cycles.setdefault(mdl, set()).add(cyc)
     keep = {suf: set(sorted(cs, reverse=True)[:KEEP_RUNS[suf]]) for suf, cs in model_cycles.items()}
+    if "ifs" in model_cycles:   # ECMWF: newest 00Z/12Z run + the newest 06Z/18Z run if it is at most 6 h older than that
+        cs = model_cycles["ifs"]; main = max([c for c in cs if c[-2:] in ("00", "12")] or [""]); off = max([c for c in cs if c[-2:] in ("06", "18")] or [""])
+        keep["ifs"] = {main} if main else set()
+        if off and (not main or dt.datetime.strptime(off, "%Y%m%d%H") >= dt.datetime.strptime(main, "%Y%m%d%H") - dt.timedelta(hours=6)):
+            keep["ifs"].add(off)
     n = 0
     for d, cyc, prod in dirs:
         mdl = run_model(prod)

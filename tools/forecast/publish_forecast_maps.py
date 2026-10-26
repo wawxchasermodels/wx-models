@@ -37,7 +37,7 @@ def meteo_src(src):
 
 # models whose two newest runs are both published (10-25-26, Benjamin: "Keep 2 hrrr runs at any given time, have a toggle",
 # then the same for ECMWF AIFS single)
-MULTI_RUN = {"HRRR": 2, "AIFS": 2}
+MULTI_RUN = {"HRRR": 2, "AIFS": 2, "ECMWF 9 km": 2}   # ECMWF: 06Z/18Z second run on five products only (stage_tools IFSX_DIRS)
 
 
 def run_toggle_labels(cycles):

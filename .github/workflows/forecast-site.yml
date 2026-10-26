@@ -156,6 +156,8 @@ jobs:
       riders: ${{ steps.st.outputs.riders }}
       hrrr_cycle: ${{ steps.st.outputs.hrrr_cycle }}
       aifs_cycle: ${{ steps.st.outputs.aifs_cycle }}
+      ifsx_cycle: ${{ steps.st.outputs.ifsx_cycle }}
+      meteo_deploy: ${{ steps.st.outputs.meteo_deploy }}
     permissions:
       contents: read
       actions: read     # list the saved menu-map caches (incremental rendering); staged builds: read the site state
@@ -432,6 +434,70 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: mslp-maps
+          path: .site_batch
+          include-hidden-files: true   # the batch folders start with a dot
+          retention-days: 3   # staged builds carry products forward from earlier runs
+          if-no-files-found: warn
+
+  ifsx:
+    # 10-26-26 (Benjamin 6:59 AM): ECMWF 9 km 06Z/18Z run (to 144 h, every 6 h) as a second run on the toggle for five
+    # products only: 500 mb anomaly, MSLP + 10 m wind (NA, PNW, PNW tight), 850 mb temp/wind (NA, PNW, WA), 850 mb anomaly
+    # (NA, PNW), 10 m gusts to 90 h (NA, PNW, PNW tight, WA). Rides along with the next stage run after its data is out
+    # (stage_tools.py RIDERS "ifsx"; no extra deploy) -> artifact ifsx-maps. About 335 site files.
+    needs: plan
+    continue-on-error: true   # never blocks the stage's own deploy
+    if: needs.plan.outputs.go == 'true' && needs.plan.outputs.ifsx_cycle != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      SITE_BATCH: ${{ github.workspace }}/.site_batch
+      C: ${{ needs.plan.outputs.ifsx_cycle }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install Python packages (pinned, permissive licenses)
+        run: pip install -r tools/requirements.txt
+      - name: Title font (Impact from the Microsoft core fonts package; installed on the runner, never committed)
+        run: |
+          echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true" | sudo debconf-set-selections
+          sudo apt-get update -qq && sudo apt-get install -y -qq ttf-mscorefonts-installer libcairo2
+          test -f /usr/share/fonts/truetype/msttcorefonts/Impact.ttf
+      - name: Restore 500 mb climatology cache
+        uses: actions/cache@v4
+        with:
+          path: .clim
+          key: forecast-clim-v1
+      - name: Restore 850 mb climatology cache
+        uses: actions/cache@v4
+        with:
+          path: .clim_t850
+          key: forecast-clim-t850-v1
+      - name: Climatologies (NCEP/NCAR Reanalysis 1991-2020 monthly means, NOAA PSL)
+        run: |
+          mkdir -p .clim .clim_t850 .site_batch/clim
+          if [ ! -f .clim/ncep_hgt500_mon_ltm_1991_2020.npz ] || [ ! -f .clim_t850/ncep_t850_mon_ltm_1991_2020.npz ]; then pip install h5py; fi
+          if [ ! -f .clim/ncep_hgt500_mon_ltm_1991_2020.npz ]; then
+            curl -sSfo /tmp/hgt.nc https://downloads.psl.noaa.gov/Datasets/ncep.reanalysis.derived/pressure/hgt.mon.ltm.1991-2020.nc
+            python tools/forecast/make_clim.py /tmp/hgt.nc .clim/ncep_hgt500_mon_ltm_1991_2020.npz
+          fi
+          if [ ! -f .clim_t850/ncep_t850_mon_ltm_1991_2020.npz ]; then
+            curl -sSfo /tmp/air.nc https://downloads.psl.noaa.gov/Datasets/ncep.reanalysis.derived/pressure/air.mon.ltm.1991-2020.nc
+            python tools/forecast/make_clim_t850.py /tmp/air.nc .clim_t850/ncep_t850_mon_ltm_1991_2020.npz
+          fi
+          cp .clim/ncep_hgt500_mon_ltm_1991_2020.npz .clim_t850/ncep_t850_mon_ltm_1991_2020.npz .site_batch/clim/
+      - name: ECMWF 9 km 500 mb anomaly + MSLP/10 m wind, 0-144 h every 6 h
+        run: python tools/forecast/gfs_maps.py --model ifs --cycle "$C" --hours 144 --every 6 --views na,pnw,pnwt --products z500,wind
+      - name: ECMWF 9 km 850 mb temp/wind + 850 mb anomaly, 0-144 h every 6 h
+        run: python tools/forecast/temp_maps.py --model ifs --cycle "$C" --hours 144 --every 6 --views na,pnw,pnwt,wa --products t850,t850anom
+      - name: ECMWF 9 km 10 m gusts, 6-90 h every 6 h
+        run: python tools/forecast/menu_maps.py --model ifs --cycle "$C" --steps "$(seq -s, 6 6 90)" --views na,pnw,pnwt,wa --products gust10   # 10 m gust (10fg) is published to 90 h only
+      - name: Keep only the site files
+        run: rm -rf .site_batch/clim
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ifsx-maps
           path: .site_batch
           include-hidden-files: true   # the batch folders start with a dot
           retention-days: 3   # staged builds carry products forward from earlier runs
@@ -952,7 +1018,7 @@ jobs:
   deploy-stage:
     # staged builds: one deploy per stage. The site = this stage's new products laid over every group carried forward
     # from the runs that last built it (site-state artifact); stops if the main file count drops below 85% of the last.
-    needs: [plan, aifs, gfs, mslp, temps, hires-hrrr, hires-rrfs, menu-w3, menu-w4, menu-reuse, ens, meteo-stage]
+    needs: [plan, aifs, gfs, mslp, temps, ifsx, hires-hrrr, hires-rrfs, menu-w3, menu-w4, menu-reuse, ens, meteo-stage]
     if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.stage != 'all' && needs.plan.outputs.go == 'true' }}
     uses: ./.github/workflows/forecast-deploy.yml
     secrets: inherit
@@ -960,9 +1026,9 @@ jobs:
       wave: ${{ needs.plan.outputs.stage }}
       patterns: ${{ needs.plan.outputs.stage_patterns }}
       with_meteo: false
-      deploy_meteo: ${{ needs.plan.outputs.meteo_srcs != '[]' }}
+      deploy_meteo: ${{ needs.plan.outputs.meteo_deploy == 'true' }}   # s2: no meteogram-project deploy (10-26-26)
       carry: ${{ needs.plan.outputs.carry }}
-      meteo_parts: ${{ needs.plan.outputs.meteo_srcs != '[]' }}
+      meteo_parts: ${{ needs.plan.outputs.meteo_deploy == 'true' }}
       min_files: ${{ needs.plan.outputs.min_files }}
       dry_run: ${{ github.event.inputs.dry_run == 'true' }}
 
