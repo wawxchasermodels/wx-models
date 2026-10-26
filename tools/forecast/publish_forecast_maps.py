@@ -37,7 +37,13 @@ def meteo_src(src):
 
 # models whose two newest runs are both published (10-25-26, Benjamin: "Keep 2 hrrr runs at any given time, have a toggle",
 # then the same for ECMWF AIFS single)
-MULTI_RUN = {"HRRR": 2, "AIFS": 2, "ECMWF 9 km": 2}   # ECMWF: 06Z/18Z second run on five products only (stage_tools IFSX_DIRS)
+# 10-26-26 (Benjamin 12:53 PM): every ECMWF IFS product moved from 0.1 deg (9 km) to the 0.25 deg open data (out 1.5-2 h
+# sooner). Frames still on the site from the old 9 km runs (and the WA tabs' model "ECMWF") join the same pill, so the run
+# toggle keeps working while they roll off (their corner tags still say 9 km). If 9 km products come back as their own
+# pill, take "ECMWF 9 km" out of ECMWF_ALIAS.
+ECMWF_SITE = "ECMWF 0.25\u00b0"
+ECMWF_ALIAS = {"ECMWF": ECMWF_SITE, "ECMWF 9 km": ECMWF_SITE}
+MULTI_RUN = {"HRRR": 2, "AIFS": 2, ECMWF_SITE: 2}   # ECMWF: 06Z/18Z second run on five products only (stage_tools IFSX_DIRS)
 
 
 def run_toggle_labels(cycles):
@@ -59,7 +65,7 @@ P_ACC = [("step", "Each 3 h step"), ("6h", "6-hour"), ("12h", "12-hour"), ("24h"
 WA_VIEWS = [("full", "Full state"), ("west", "Western WA"), ("east", "Eastern WA")]
 # Shown under the model pills: source, finest step, licence/credit (NOAA data is public domain, no credit needed).
 MODEL_NOTES = {
-    "ECMWF 9 km": "ECMWF IFS open data 0.1\u00b0. Menu maps every 6 h to 240 h; Washington tabs 3 h steps to 144 h, then 6 h. Data: ECMWF, CC BY 4.0.",
+    "ECMWF 0.25\u00b0": "ECMWF IFS open data 0.25\u00b0 (about 28 km; was 0.1\u00b0 / 9 km until 10-26-26). Menu maps every 6 h to 240 h; Washington tabs 3 h steps to 144 h, then 6 h. Data: ECMWF, CC BY 4.0.",
     "NBM": "NOAA National Blend of Models, 2.5 km. Finest step 1 h to 36 h; site steps are 3 h. Public domain.",
     "GFS": "NOAA GFS 0.25\u00b0, 00Z/12Z runs. On this site: 500 mb anomaly, 850 mb temp anomaly and sea-level pressure only, every 6 h to 240 h. Public domain.",
     "EPS mean": "ECMWF ensemble mean of 50 members, 0.25\u00b0. 3 h steps to 144 h, then 6 h. Snow uses a 10:1 ratio. Data: ECMWF, CC BY 4.0.",
@@ -95,57 +101,57 @@ MENU = {
 }
 SECTION_ORDER = ["wa", "ground", "precip", "aloft", "combo"]
 TABS = [  # order = tab order on the site; most used first
-    {"id": "rain", "label": "Rain", "models": ["ECMWF 9 km", "NBM", "EPS mean", "EPS 90th pct", "HRRR", "RRFS"], "periods": P_ACC_RAIN, "views": WA_VIEWS},
-    {"id": "snow", "label": "Snow", "models": ["ECMWF 9 km", "NBM", "EPS mean", "EPS 90th pct"], "periods": P_ACC,
+    {"id": "rain", "label": "Rain", "models": [ECMWF_SITE, "NBM", "EPS mean", "EPS 90th pct", "HRRR", "RRFS"], "periods": P_ACC_RAIN, "views": WA_VIEWS},
+    {"id": "snow", "label": "Snow", "models": [ECMWF_SITE, "NBM", "EPS mean", "EPS 90th pct"], "periods": P_ACC,
      "views": WA_VIEWS + [("cascades", "Cascades"), ("northeast", "NE WA mountains")]},
-    {"id": "gusts", "label": "Wind gusts", "models": ["ECMWF 9 km", "NBM", "EPS mean", "HRRR", "RRFS"], "periods": [("step", "Each step"), ("max6h", "6-hour max"),
+    {"id": "gusts", "label": "Wind gusts", "models": [ECMWF_SITE, "NBM", "EPS mean", "HRRR", "RRFS"], "periods": [("step", "Each step"), ("max6h", "6-hour max"),
                                                       ("max12h", "12-hour max"), ("max24h", "24-hour max")], "views": WA_VIEWS},
     {"id": "lows", "label": "Lows", "models": ["NBM", "EPS mean"], "periods": [("daily", "Daily low")], "views": WA_VIEWS},
     {"id": "highs", "label": "Highs", "models": ["NBM", "EPS mean"], "periods": [("daily", "Daily high")], "views": WA_VIEWS},
-    {"id": "t2m", "label": "2 m temp", "models": ["ECMWF 9 km", "AIFS", "HRRR", "RRFS"], "periods": [("step", "Each step")],
+    {"id": "t2m", "label": "2 m temp", "models": [ECMWF_SITE, "AIFS", "HRRR", "RRFS"], "periods": [("step", "Each step")],
      "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwt", "Pacific NW tight"), ("pnwhr", "Pacific NW (high-res)"), ("wa", "Washington")]},
-    {"id": "t2manom", "label": "2 m temp anomaly", "models": ["ECMWF 9 km", "AIFS"], "periods": [("step", "Each step")],
+    {"id": "t2manom", "label": "2 m temp anomaly", "models": [ECMWF_SITE, "AIFS"], "periods": [("step", "Each step")],
      "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwt", "Pacific NW tight"), ("wa", "Washington")]},
-    {"id": "feels", "label": "Feels-like temp", "models": ["ECMWF 9 km", "AIFS", "HRRR", "RRFS"], "periods": [("step", "Each step")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwt", "Pacific NW tight"), ("pnwhr", "Pacific NW (high-res)"), ("wa", "Washington")]},
-    {"id": "t850", "label": "850 mb temp + wind", "models": ["ECMWF 9 km", "AIFS", "HRRR"], "periods": [("step", "Each step")],
+    {"id": "feels", "label": "Feels-like temp", "models": [ECMWF_SITE, "AIFS", "HRRR", "RRFS"], "periods": [("step", "Each step")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwt", "Pacific NW tight"), ("pnwhr", "Pacific NW (high-res)"), ("wa", "Washington")]},
+    {"id": "t850", "label": "850 mb temp + wind", "models": [ECMWF_SITE, "AIFS", "HRRR"], "periods": [("step", "Each step")],
      "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwhr", "Pacific NW (high-res)"), ("wa", "Washington")]},
-    {"id": "gust10", "label": "10 m wind gusts", "models": ["ECMWF 9 km", "HRRR", "RRFS"], "periods": [("step", "Each step")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwt", "Pacific NW tight"), ("pnwhr", "Pacific NW (high-res)"), ("wa", "Washington")]},
-    {"id": "peakgust", "label": "Peak gust so far", "models": ["ECMWF 9 km", "HRRR", "RRFS"], "periods": [("step", "Each step")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwt", "Pacific NW tight"), ("pnwhr", "Pacific NW (high-res)"), ("wa", "Washington")]},
-    {"id": "td2m", "label": "2 m dewpoint", "models": ["ECMWF 9 km", "HRRR", "RRFS"], "periods": [("step", "Each step")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwt", "Pacific NW tight"), ("pnwhr", "Pacific NW (high-res)"), ("wa", "Washington")]},
-    {"id": "t925", "label": "925 mb temp + wind", "models": ["ECMWF 9 km", "AIFS", "HRRR"], "periods": [("step", "Each step")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwhr", "Pacific NW (high-res)"), ("wa", "Washington")]},
-    {"id": "t700", "label": "700 mb temp + wind", "models": ["ECMWF 9 km", "AIFS", "HRRR"], "periods": [("step", "Each step")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwhr", "Pacific NW (high-res)"), ("wa", "Washington")]},
-    {"id": "t500", "label": "500 mb temp + wind", "models": ["ECMWF 9 km", "AIFS", "HRRR"], "periods": [("step", "Each step")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwhr", "Pacific NW (high-res)"), ("wa", "Washington")]},
-    {"id": "t300", "label": "300 mb temp + wind", "models": ["ECMWF 9 km", "AIFS", "HRRR"], "periods": [("step", "Each step")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwhr", "Pacific NW (high-res)"), ("wa", "Washington")]},
-    {"id": "mslpptype", "label": "MSLP + precip type", "models": ["ECMWF 9 km", "HRRR", "RRFS"], "periods": [("step", "Each step")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwhr", "Pacific NW (high-res)"), ("wa", "Washington")]},
-    {"id": "snowkuch", "label": "Snow total (Kuchera)", "models": ["ECMWF 9 km", "HRRR"], "periods": [("1h", "1 h (HRRR/RRFS)"), ("6h", "6 h"), ("12h", "12 h"), ("24h", "24 h"), ("48h", "48 h"), ("total", "Run total")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwhr", "Pacific NW (high-res)"), ("wa", "Washington")]},
-    {"id": "snow10", "label": "Snow total (10:1)", "models": ["ECMWF 9 km", "HRRR", "RRFS"], "periods": [("1h", "1 h (HRRR/RRFS)"), ("6h", "6 h"), ("12h", "12 h"), ("24h", "24 h"), ("48h", "48 h"), ("total", "Run total")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwhr", "Pacific NW (high-res)"), ("wa", "Washington")]},
-    {"id": "snowk24", "label": "24 h snow (Kuchera)", "models": ["ECMWF 9 km", "HRRR"], "periods": [("step", "Each step")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwhr", "Pacific NW (high-res)"), ("wa", "Washington")]},
+    {"id": "gust10", "label": "10 m wind gusts", "models": [ECMWF_SITE, "HRRR", "RRFS"], "periods": [("step", "Each step")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwt", "Pacific NW tight"), ("pnwhr", "Pacific NW (high-res)"), ("wa", "Washington")]},
+    {"id": "peakgust", "label": "Peak gust so far", "models": [ECMWF_SITE, "HRRR", "RRFS"], "periods": [("step", "Each step")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwt", "Pacific NW tight"), ("pnwhr", "Pacific NW (high-res)"), ("wa", "Washington")]},
+    {"id": "td2m", "label": "2 m dewpoint", "models": [ECMWF_SITE, "HRRR", "RRFS"], "periods": [("step", "Each step")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwt", "Pacific NW tight"), ("pnwhr", "Pacific NW (high-res)"), ("wa", "Washington")]},
+    {"id": "t925", "label": "925 mb temp + wind", "models": [ECMWF_SITE, "AIFS", "HRRR"], "periods": [("step", "Each step")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwhr", "Pacific NW (high-res)"), ("wa", "Washington")]},
+    {"id": "t700", "label": "700 mb temp + wind", "models": [ECMWF_SITE, "AIFS", "HRRR"], "periods": [("step", "Each step")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwhr", "Pacific NW (high-res)"), ("wa", "Washington")]},
+    {"id": "t500", "label": "500 mb temp + wind", "models": [ECMWF_SITE, "AIFS", "HRRR"], "periods": [("step", "Each step")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwhr", "Pacific NW (high-res)"), ("wa", "Washington")]},
+    {"id": "t300", "label": "300 mb temp + wind", "models": [ECMWF_SITE, "AIFS", "HRRR"], "periods": [("step", "Each step")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwhr", "Pacific NW (high-res)"), ("wa", "Washington")]},
+    {"id": "mslpptype", "label": "MSLP + precip type", "models": [ECMWF_SITE, "HRRR", "RRFS"], "periods": [("step", "Each step")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwhr", "Pacific NW (high-res)"), ("wa", "Washington")]},
+    {"id": "snowkuch", "label": "Snow total (Kuchera)", "models": [ECMWF_SITE, "HRRR"], "periods": [("1h", "1 h (HRRR/RRFS)"), ("6h", "6 h"), ("12h", "12 h"), ("24h", "24 h"), ("48h", "48 h"), ("total", "Run total")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwhr", "Pacific NW (high-res)"), ("wa", "Washington")]},
+    {"id": "snow10", "label": "Snow total (10:1)", "models": [ECMWF_SITE, "HRRR", "RRFS"], "periods": [("1h", "1 h (HRRR/RRFS)"), ("6h", "6 h"), ("12h", "12 h"), ("24h", "24 h"), ("48h", "48 h"), ("total", "Run total")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwhr", "Pacific NW (high-res)"), ("wa", "Washington")]},
+    {"id": "snowk24", "label": "24 h snow (Kuchera)", "models": [ECMWF_SITE, "HRRR"], "periods": [("step", "Each step")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwhr", "Pacific NW (high-res)"), ("wa", "Washington")]},
     {"id": "snowrate", "label": "1 h snowfall rate", "models": ["HRRR", "RRFS"], "periods": [("step", "Each step")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwhr", "Pacific NW (high-res)"), ("wa", "Washington")]},
-    {"id": "frzr", "label": "Freezing rain total", "models": ["ECMWF 9 km", "HRRR", "RRFS"], "periods": [("1h", "1 h (HRRR/RRFS)"), ("6h", "6 h"), ("12h", "12 h"), ("24h", "24 h"), ("48h", "48 h"), ("total", "Run total")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwhr", "Pacific NW (high-res)"), ("wa", "Washington")]},
-    {"id": "tcc", "label": "Total cloud cover", "models": ["ECMWF 9 km", "AIFS", "HRRR", "RRFS"], "periods": [("step", "Each step")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwt", "Pacific NW tight"), ("pnwhr", "Pacific NW (high-res)"), ("wa", "Washington")]},
+    {"id": "frzr", "label": "Freezing rain total", "models": [ECMWF_SITE, "HRRR", "RRFS"], "periods": [("1h", "1 h (HRRR/RRFS)"), ("6h", "6 h"), ("12h", "12 h"), ("24h", "24 h"), ("48h", "48 h"), ("total", "Run total")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwhr", "Pacific NW (high-res)"), ("wa", "Washington")]},
+    {"id": "tcc", "label": "Total cloud cover", "models": [ECMWF_SITE, "AIFS", "HRRR", "RRFS"], "periods": [("step", "Each step")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwt", "Pacific NW tight"), ("pnwhr", "Pacific NW (high-res)"), ("wa", "Washington")]},
     {"id": "ir", "label": "Simulated IR satellite", "models": ["HRRR", "RRFS"], "periods": [("step", "Each step")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwhr", "Pacific NW (high-res)"), ("wa", "Washington")]},
     {"id": "vis", "label": "Visibility", "models": ["HRRR", "RRFS"], "periods": [("step", "Each step")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwhr", "Pacific NW (high-res)"), ("wa", "Washington")]},
-    {"id": "fog", "label": "Fog risk index", "models": ["ECMWF 9 km", "HRRR", "RRFS"], "periods": [("step", "Each step")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwt", "Pacific NW tight"), ("pnwhr", "Pacific NW (high-res)"), ("wa", "Washington")]},
-    {"id": "qpf", "label": "Precip total", "models": ["ECMWF 9 km", "AIFS", "HRRR", "RRFS"], "periods": [("1h", "1 h (HRRR/RRFS)"), ("6h", "6 h"), ("12h", "12 h"), ("24h", "24 h"), ("48h", "48 h"), ("total", "Run total")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwt", "Pacific NW tight"), ("pnwhr", "Pacific NW (high-res)"), ("wa", "Washington")]},
-    {"id": "ivt", "label": "IVT (vapor transport)", "models": ["ECMWF 9 km", "AIFS", "HRRR"], "periods": [("step", "Each step")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwhr", "Pacific NW (high-res)")]},
-    {"id": "pwanom", "label": "PW anomaly", "models": ["ECMWF 9 km", "AIFS", "HRRR"], "periods": [("step", "Each step")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwhr", "Pacific NW (high-res)")]},
-    {"id": "pw", "label": "Precipitable water", "models": ["ECMWF 9 km", "AIFS", "HRRR", "RRFS"], "periods": [("step", "Each step")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwhr", "Pacific NW (high-res)")]},
-    {"id": "w250", "label": "250 mb wind (jet)", "models": ["ECMWF 9 km", "AIFS", "HRRR"], "periods": [("step", "Each step")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwhr", "Pacific NW (high-res)")]},
-    {"id": "w500", "label": "500 mb wind", "models": ["ECMWF 9 km", "AIFS", "HRRR"], "periods": [("step", "Each step")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwhr", "Pacific NW (high-res)")]},
-    {"id": "w850", "label": "850 mb wind + barbs", "models": ["ECMWF 9 km", "AIFS", "HRRR"], "periods": [("step", "Each step")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwhr", "Pacific NW (high-res)")]},
-    {"id": "thick", "label": "1000-500 mb thickness", "models": ["ECMWF 9 km", "AIFS", "HRRR"], "periods": [("step", "Each step")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwhr", "Pacific NW (high-res)")]},
+    {"id": "fog", "label": "Fog risk index", "models": [ECMWF_SITE, "HRRR", "RRFS"], "periods": [("step", "Each step")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwt", "Pacific NW tight"), ("pnwhr", "Pacific NW (high-res)"), ("wa", "Washington")]},
+    {"id": "qpf", "label": "Precip total", "models": [ECMWF_SITE, "AIFS", "HRRR", "RRFS"], "periods": [("1h", "1 h (HRRR/RRFS)"), ("6h", "6 h"), ("12h", "12 h"), ("24h", "24 h"), ("48h", "48 h"), ("total", "Run total")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwt", "Pacific NW tight"), ("pnwhr", "Pacific NW (high-res)"), ("wa", "Washington")]},
+    {"id": "ivt", "label": "IVT (vapor transport)", "models": [ECMWF_SITE, "AIFS", "HRRR"], "periods": [("step", "Each step")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwhr", "Pacific NW (high-res)")]},
+    {"id": "pwanom", "label": "PW anomaly", "models": [ECMWF_SITE, "AIFS", "HRRR"], "periods": [("step", "Each step")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwhr", "Pacific NW (high-res)")]},
+    {"id": "pw", "label": "Precipitable water", "models": [ECMWF_SITE, "AIFS", "HRRR", "RRFS"], "periods": [("step", "Each step")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwhr", "Pacific NW (high-res)")]},
+    {"id": "w250", "label": "250 mb wind (jet)", "models": [ECMWF_SITE, "AIFS", "HRRR"], "periods": [("step", "Each step")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwhr", "Pacific NW (high-res)")]},
+    {"id": "w500", "label": "500 mb wind", "models": [ECMWF_SITE, "AIFS", "HRRR"], "periods": [("step", "Each step")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwhr", "Pacific NW (high-res)")]},
+    {"id": "w850", "label": "850 mb wind + barbs", "models": [ECMWF_SITE, "AIFS", "HRRR"], "periods": [("step", "Each step")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwhr", "Pacific NW (high-res)")]},
+    {"id": "thick", "label": "1000-500 mb thickness", "models": [ECMWF_SITE, "AIFS", "HRRR"], "periods": [("step", "Each step")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwhr", "Pacific NW (high-res)")]},
     {"id": "waves", "label": "Waves", "periods": [("step", "Each step"), ("max24h", "24-hour max wave")],
      "views": [("full", "WA coast and Sound"), ("vi", "Vancouver Island (metric)")]},
-    {"id": "bcrain", "label": "BC rain", "models": ["ECMWF 9 km", "EPS mean", "EPS 90th pct"], "periods": P_ACC, "views": [("bc", "Southern BC"), ("lowermainland", "Lower Mainland")]},
-    {"id": "t850anom", "label": "850 mb temp anomaly", "models": ["ECMWF 9 km", "AIFS", "GFS", "EPS mean", "AIFS ENS mean"], "periods": [("step", "Every 6 h")],
+    {"id": "bcrain", "label": "BC rain", "models": [ECMWF_SITE, "EPS mean", "EPS 90th pct"], "periods": P_ACC, "views": [("bc", "Southern BC"), ("lowermainland", "Lower Mainland")]},
+    {"id": "t850anom", "label": "850 mb temp anomaly", "models": [ECMWF_SITE, "AIFS", "GFS", "EPS mean", "AIFS ENS mean"], "periods": [("step", "Every 6 h")],
      "views": [("na", "North America"), ("pnw", "Pacific NW")]},
-    {"id": "aifs500", "label": "500 mb anomaly", "models": ["ECMWF 9 km", "AIFS", "GFS"], "periods": [("step", "Every 6 h")],
+    {"id": "aifs500", "label": "500 mb anomaly", "models": [ECMWF_SITE, "AIFS", "GFS"], "periods": [("step", "Every 6 h")],
      "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwt", "Pacific NW tight")]},
-    {"id": "aifsmslp", "label": "Sea-level pressure", "models": ["ECMWF 9 km", "AIFS", "GFS"], "periods": [("step", "Every 6 h")],
+    {"id": "aifsmslp", "label": "Sea-level pressure", "models": [ECMWF_SITE, "AIFS", "GFS"], "periods": [("step", "Every 6 h")],
      "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwt", "Pacific NW tight")]},
-    {"id": "mslpprecip", "label": "MSLP + precip", "models": ["ECMWF 9 km"],
+    {"id": "mslpprecip", "label": "MSLP + precip", "models": [ECMWF_SITE],
      "periods": [("qpf", "3 h to 72 h, then 6 h")], "views": [("na", "North America"), ("pnw", "Pacific NW"), ("wa", "Washington")]},
-    {"id": "aifswind", "label": "MSLP + 10 m wind", "models": ["ECMWF 9 km", "AIFS", "HRRR", "RRFS"], "periods": [("step", "Each step")],
+    {"id": "aifswind", "label": "MSLP + 10 m wind", "models": [ECMWF_SITE, "AIFS", "HRRR", "RRFS"], "periods": [("step", "Each step")],
      "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwt", "Pacific NW tight"), ("pnwhr", "Pacific NW (high-res)"), ("wa", "Washington")]},
     {"id": "elows", "label": "Ensemble low centers", "models": ["EPS", "AIFS ENS"], "periods": [("step", "Every 6 h")],
      "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwt", "Pacific NW tight")]},
@@ -305,7 +311,7 @@ def main():
         j = json.load(open(sf)); d = os.path.dirname(sf)
         info = dict(tab=j["tab"], period=j["period"], view=j["view"], start=pt(j["start_pt"]), end=pt(j["end_pt"]),
                     run=run_label(j["model"], j["cycle"]), cycle=j["cycle"],
-                    model={"ECMWF": "ECMWF 9 km"}.get(j["model"], j["model"]))
+                    model=ECMWF_ALIAS.get(j["model"], j["model"]))
         found.append((info, os.path.getmtime(f"{d}/final.jpg"), f"{d}/final.jpg"))
     for f in ([] if a.no_adhoc else glob.glob(f"{EXTRAS}/*/*final.jpg") if EXTRAS else []):
         d = os.path.dirname(f)
@@ -315,7 +321,7 @@ def main():
         if info:
             info["cycle"] = "adhoc"
             ml = info.get("run", "")
-            info["model"] = "HRRR" if "HRRR" in ml else "NBM" if ml == "NBM" else "ECMWF 9 km"
+            info["model"] = "HRRR" if "HRRR" in ml else "NBM" if ml == "NBM" else ECMWF_SITE
             found.append((info, os.path.getmtime(f), f))
     # newest run wins per tab/period/view/end time
     best = {}

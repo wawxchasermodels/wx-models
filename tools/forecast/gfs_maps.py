@@ -11,15 +11,22 @@ Data: NOAA GFS 0.25 deg (AWS open data, public domain). Basemap: Natural Earth. 
 Writes $SITE_BATCH/<cycle>/aifs500-<model>|aifsmslp-<model>/step/<view>/<valid>/final.jpg + site_frame.json
 (tab aifs500 / aifsmslp, model "GFS", so they show as a GFS pill on the AIFS tabs).
 --products t850anom (10-25-26): 850 mb Temperature Anomaly (GFS pill on the 850 mb temp anomaly tab; na + pnw).
---model ifs --products wind (10-25-26): MSLP + 10 m wind from ECMWF IFS 0.1 deg, "ECMWF 9 km" pill on the MSLP + 10 m wind tab.
+--model ifs --products wind (10-25-26): MSLP + 10 m wind from ECMWF IFS (0.25 deg open data since 10-26-26), "ECMWF 0.25°" pill on the MSLP + 10 m wind tab.
 --model ifs --products mslp (10-25-26): the same Sea-Level Pressure map from ECMWF IFS open data (0.1 deg), written to
-aifsmslp-ifs/ as the "ECMWF 9 km" pill on the Sea-level pressure tab (run in the workflow's mslp job).
+aifsmslp-ifs/ as the "ECMWF 0.25°" pill on the Sea-level pressure tab (run in the workflow's mslp job).
 """
 import sys, argparse, datetime as dt, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import aifs_maps as AM
 import menu_maps as MM
 import temp_maps as TM
+
+
+def _k(lat):
+    """Smoothing scale for the ECMWF IFS grid: sigmas were set on 0.1 deg (9 km) data; 10-26-26 the IFS maps moved to
+    0.25 deg open data, so the same ground distance is 0.4x the cells there."""
+    import numpy as _np
+    return 0.1 / max(abs(float(_np.ravel(lat)[1] - _np.ravel(lat)[0])), 0.01)
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
@@ -38,16 +45,16 @@ if __name__ == "__main__":
         try:
             if "z500" in a.products:
                 lat, lon, z = R.f("Z:500"); z = z / 10.0   # gpm -> dam
-                if M == "ifs":   # 0.1 deg: light smoothing so the contours read like the 0.25 deg AIFS/GFS maps
-                    from scipy.ndimage import gaussian_filter; z = gaussian_filter(z, 1.5)
+                if M == "ifs":   # smoothing tuned on the 0.1 deg grid (sigma 1.5 cells); scaled to the grid so 0.25 deg gets the same ground smoothing
+                    from scipy.ndimage import gaussian_filter; z = gaussian_filter(z, 1.5 * _k(lat))
                 an = z - AM.clim_at(c + dt.timedelta(hours=s), lat, lon)
                 for v in views:
                     out = f"{AM.ROOT}/{c:%Y%m%d%H}/aifs500-{M}/step/{v}/{vt}"
                     AM.render(c, s, lat, lon, z, an, v, out, src=M); print("ok", out, flush=True)
             if "mslp" in a.products:
                 lat, lon, p = R.f("msl")
-                if M == "ifs":   # 0.1 deg MSLP is noisy over terrain: smooth to about the GFS/AIFS 0.25 deg look
-                    from scipy.ndimage import gaussian_filter; p = gaussian_filter(p, 2.5)
+                if M == "ifs":   # MSLP is noisy over terrain: same ground smoothing as before (2.5 cells at 0.1 deg), scaled to the grid
+                    from scipy.ndimage import gaussian_filter; p = gaussian_filter(p, 2.5 * _k(lat))
                 for v in views:
                     out = f"{AM.ROOT}/{c:%Y%m%d%H}/aifsmslp-{M}/step/{v}/{vt}"
                     AM.render_mslp(c, s, lat, lon, p, v, out, src=M); print("ok", out, flush=True)
@@ -55,7 +62,7 @@ if __name__ == "__main__":
                 # 10-25-26 (Benjamin 9:26 PM): ECMWF 9 km pill on the "MSLP + 10 m wind" combo tab, same renderer as the AIFS map
                 # (10 m wind speed fill in mph, haloed isobars, H/L, barbs in kt). MSLP smoothed as above; wind fill smoothed in render_mslp.
                 lat, lon, p = R.f("msl"); _, _, u = R.f("u10"); _, _, w = R.f("v10")
-                from scipy.ndimage import gaussian_filter; p = gaussian_filter(p, 2.5)
+                from scipy.ndimage import gaussian_filter; p = gaussian_filter(p, 2.5 * _k(lat))
                 for v in views:
                     out = f"{AM.ROOT}/{c:%Y%m%d%H}/aifswind-{M}/step/{v}/{vt}"
                     AM.render_mslp(c, s, lat, lon, p, v, out, wind=(u, w), src=M); print("ok", out, flush=True)

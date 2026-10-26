@@ -8,7 +8,7 @@
 #   wa-maps (N)     matrix, one job per shard: renders its share of the WA maps -> artifact wa-maps-<k>
 #   aifs            AIFS 500 mb anomaly (NA, PNW), MSLP and MSLP + 10 m wind (NA, PNW, PNW tight), every 6 h -> artifact aifs-maps
 #   gfs             the only GFS maps (10-24-26): 500 mb anomaly + sea-level pressure (NA, PNW, PNW tight), every 6 h -> gfs-maps
-#   mslp            ECMWF 9 km MSLP + precip (NA, PNW, WA), 3 h to 72 h then 6 h to 240 h -> artifact mslp-maps (only when 'mslp' is picked)
+#   mslp            ECMWF (IFS 0.25 deg) MSLP + precip (NA, PNW, WA), 3 h to 72 h then 6 h to 240 h -> artifact mslp-maps (only when 'mslp' is picked)
 #   hires-hrrr/rrfs HRRR 2 m + 850 mb temps (wave 1) / RRFS 2 m temp (wave 2), hourly -> hires-<model>-maps
 #   temps           2 m temp + anomaly (NA, PNW, PNW tight, WA) and 850 mb (NA, PNW, WA), ECMWF IFS and AIFS, every 6 h -> temp-maps
 #   menu-w3/menu-w4 menu maps (menu_maps.py), one job per model, tier and forecast-hour chunk (about 20 min each, max 20 at once);
@@ -63,7 +63,7 @@ on:
         description: "Run switches: incremental=on|off (skip menu models already published), chunk_min=20 (0 = one job per tier), waves=on|off (publish in 4 priority waves; off = one deploy at the end)"
         default: "incremental=on,chunk_min=20,waves=on"
       stage:
-        description: "all = full build (default, unchanged). s1 HRRR | s2 RRFS+GFS | s3 AIFS | s4 ECMWF 9 km | s5 ensembles + all meteograms (last): render only that stage, deploy the site with the other groups carried forward"
+        description: "all = full build (default, unchanged). s1 HRRR | s2 RRFS+GFS | s3 AIFS | s4 ECMWF IFS 0.25 deg | s5 ensembles + all meteograms (last): render only that stage, deploy the site with the other groups carried forward"
         default: "all"
       cycle:
         description: "Stage runs: model cycle YYYYMMDDHH (00/12; s1 also 06/18); empty = newest complete run for that stage"
@@ -80,6 +80,8 @@ on:
   # 12Z data seen on the open-data servers (Last-Modified of the last file we read, 10-23 and 10-24): HRRR f48 13:47,
   # RRFS f84 15:23-16:21, GFS f240 16:37, AIFS 18:55, AIFS ENS 19:20, EPS 19:40, ECMWF IFS 0.1 deg f240 21:34 UTC.
   # IFS 0.1 deg (the 9 km maps) is last, so 21:50 leaves about 15 min margin (plus GitHub's usual schedule delay).
+  # 10-26-26 (Benjamin 12:53 PM): every ECMWF IFS product now reads the 0.25 deg open data (ifs/0p25/oper, f240 out about
+  # 07:40 / 19:40 UTC), so s4 no longer waits for the 0.1 deg set.
   # Scheduled runs set WX_CYCLE_HOUR=12 so every model uses its 12Z cycle (otherwise HRRR/RRFS would pick 18Z, out by then).
   # Manual runs (Actions > Forecast site > Run workflow, default inputs = the same full build) are not pinned: newest data.
   # 5 deploys per run, about 155/month (+5 per manual run; < 500 Pages limit). The concurrency group keeps runs apart.
@@ -87,9 +89,9 @@ on:
   # Staged builds (10-25-26): forecast-poll.yml starts each stage as soon as its data is out (every 20 min check); these
   # backup crons start a stage only if it was not published yet (plan job checks the site state). UTC; PDT = UTC-7, PST = UTC-8.
   #   s1 HRRR 02:10/08:10/14:10/20:10 (7:10 PM / 1:10 AM / 7:10 AM / 1:10 PM PDT)  s2 RRFS+GFS 04:50/16:50 (9:50 PM / 9:50 AM)
-  #   s3 AIFS 08:00/20:00 (1:00 AM / 1:00 PM)  s4 ECMWF 9 km 09:50/21:50 (2:50 AM / 2:50 PM)
+  #   s3 AIFS 08:00/20:00 (1:00 AM / 1:00 PM)  s4 ECMWF IFS 0.25 deg 08:30/20:30 (1:30 AM / 1:30 PM)
   #   s5 ensembles + all meteograms 10:40/22:40 (3:40 AM / 3:40 PM)
-  # Order (10-26-26, Benjamin 12:43 PM): main global (GFS, AIFS, ECMWF 9 km) and high-res (HRRR, RRFS) deploy before any
+  # Order (10-26-26, Benjamin 12:43 PM): main global (GFS, AIFS, ECMWF) and high-res (HRRR, RRFS) deploy before any
   # ensemble or meteogram work; s5 goes last (the poller starts it only after s4 of the same cycle). Still 14 deploys a day.
   # Poller every 10 min (forecast-poll.yml). HRRR 06Z and 18Z are their own s1 runs (+1 deploy a day each, maps only); AIFS 18Z still rides along.
   # Two-run HRRR + AIFS (10-25-26): the site keeps the 2 newest runs of each (run toggle). Their 18Z runs add no deploys and
@@ -104,7 +106,7 @@ on:
     - cron: "10 2,8,14,20 * * *"   # STAGED BACKUP s1 HRRR 00/06/12/18Z (06Z added 10-26-26); each does nothing if already published
     - cron: "50 4,16 * * *"      # s2 RRFS + GFS
     - cron: "0 8,20 * * *"       # s3 AIFS (240 h about 06:55 / 18:55)
-    - cron: "50 9,21 * * *"      # s4 ECMWF 9 km
+    - cron: "30 8,20 * * *"      # s4 ECMWF IFS 0.25 deg (was 50 9,21 for 0.1 deg until 10-26-26)
     - cron: "40 10,22 * * *"     # s5 EPS + AIFS ENS maps + EPS/HRRR/RRFS meteograms (last; 10-26-26)
 
 concurrency:   # one run at a time: a new (scheduled or manual) run waits until the running one finishes, never cancels it
@@ -415,14 +417,14 @@ jobs:
           echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true" | sudo debconf-set-selections
           sudo apt-get update -qq && sudo apt-get install -y -qq ttf-mscorefonts-installer libcairo2
           test -f /usr/share/fonts/truetype/msttcorefonts/Impact.ttf
-      - name: ECMWF 9 km MSLP + precip (3 h to 72 h, then 6 h to 240 h)
+      - name: ECMWF 0.25 deg MSLP + precip (3 h to 72 h, then 6 h to 240 h)
         run: python tools/forecast/ecmwf_mslp_precip.py --cycle "${{ needs.plan.outputs.cycle }}" --plan
       - name: Restore climatology cache
         uses: actions/cache@v4
         with:
           path: .clim
           key: forecast-clim-v1
-      - name: Climatology (NCEP/NCAR Reanalysis 1991-2020 monthly mean 500 mb height, NOAA PSL) for the ECMWF 9 km 500 mb anomaly
+      - name: Climatology (NCEP/NCAR Reanalysis 1991-2020 monthly mean 500 mb height, NOAA PSL) for the ECMWF 0.25 deg 500 mb anomaly
         run: |
           mkdir -p .clim .site_batch/clim
           if [ ! -f .clim/ncep_hgt500_mon_ltm_1991_2020.npz ]; then
@@ -431,7 +433,7 @@ jobs:
             python tools/forecast/make_clim.py /tmp/hgt.nc .clim/ncep_hgt500_mon_ltm_1991_2020.npz
           fi
           cp .clim/ncep_hgt500_mon_ltm_1991_2020.npz .site_batch/clim/
-      - name: ECMWF 9 km 500 mb anomaly, sea-level pressure with H/L centers, MSLP + 10 m wind (every 6 h to 240 h)
+      - name: ECMWF 0.25 deg 500 mb anomaly, sea-level pressure with H/L centers, MSLP + 10 m wind (every 6 h to 240 h)
         run: python tools/forecast/gfs_maps.py --model ifs --cycle "${{ needs.plan.outputs.cycle }}" --hours 240 --every 6 --products z500,mslp,wind
       - name: Keep only the site files
         run: rm -rf .site_batch/clim
@@ -444,7 +446,7 @@ jobs:
           if-no-files-found: warn
 
   ifsx:
-    # 10-26-26 (Benjamin 6:59 AM): ECMWF 9 km 06Z/18Z run (to 144 h, every 6 h) as a second run on the toggle for five
+    # 10-26-26 (Benjamin 6:59 AM): ECMWF 06Z/18Z run (0.25 deg since 12:53 PM) (to 144 h, every 6 h) as a second run on the toggle for five
     # products only: 500 mb anomaly, MSLP + 10 m wind (NA, PNW, PNW tight), 850 mb temp/wind (NA, PNW, WA), 850 mb anomaly
     # (NA, PNW), 10 m gusts to 90 h (NA, PNW, PNW tight, WA). Rides along with the next stage run after its data is out
     # (stage_tools.py RIDERS "ifsx"; no extra deploy) -> artifact ifsx-maps. About 335 site files.
@@ -491,11 +493,11 @@ jobs:
             python tools/forecast/make_clim_t850.py /tmp/air.nc .clim_t850/ncep_t850_mon_ltm_1991_2020.npz
           fi
           cp .clim/ncep_hgt500_mon_ltm_1991_2020.npz .clim_t850/ncep_t850_mon_ltm_1991_2020.npz .site_batch/clim/
-      - name: ECMWF 9 km 500 mb anomaly + MSLP/10 m wind, 0-144 h every 6 h
+      - name: ECMWF 0.25 deg 500 mb anomaly + MSLP/10 m wind, 0-144 h every 6 h
         run: python tools/forecast/gfs_maps.py --model ifs --cycle "$C" --hours 144 --every 6 --views na,pnw,pnwt --products z500,wind
-      - name: ECMWF 9 km 850 mb temp/wind + 850 mb anomaly, 0-144 h every 6 h
+      - name: ECMWF 0.25 deg 850 mb temp/wind + 850 mb anomaly, 0-144 h every 6 h
         run: python tools/forecast/temp_maps.py --model ifs --cycle "$C" --hours 144 --every 6 --views na,pnw,pnwt,wa --products t850,t850anom
-      - name: ECMWF 9 km 10 m gusts, 6-90 h every 6 h
+      - name: ECMWF 0.25 deg 10 m gusts, 6-90 h every 6 h
         run: python tools/forecast/menu_maps.py --model ifs --cycle "$C" --steps "$(seq -s, 6 6 90)" --views na,pnw,pnwt,wa --products gust10   # 10 m gust (10fg) is published to 90 h only
       - name: Keep only the site files
         run: rm -rf .site_batch/clim

@@ -43,6 +43,23 @@ Needs repo secrets `CF_PAGES_KEY` and `CLOUDFLARE_ACCOUNT_ID`, and optionally th
 The WA shard job is off (it runs only when the repo variable `WA_SHARDS` is `on`; unset = off); Washington precip now comes from the menu's Precip total
 (Washington view for ECMWF 9 km, HRRR, RRFS; Pacific NW tight for ECMWF). Restore steps: `RESTORE_WA_SHARDS.md`.
 
+## ECMWF IFS on 0.25° open data (10-26-26)
+
+Benjamin 10-26-26 12:53 PM: "swap all the ECMWF 9km products over to that". Every ECMWF IFS product (menu maps, temps,
+500 mb anomaly, SLP, MSLP + 10 m wind, MSLP + precip, and the 06Z/18Z `ifsx` second run) now reads
+`data.ecmwf.int/forecasts/<d>/<hh>z/ifs/0p25/oper/<d><hh>0000-<step>h-oper-fc.grib2` (surface and pressure levels in one
+file per step) instead of `ifs/0p1/oper/...-fc-sfc` / `-fc-pl`. Same parameters, same steps (3 h to 144 h, then 6 h; 10 m
+gust on the 06Z/18Z runs still to 90 h), so no product was dropped and the file count is unchanged.
+- s4 is ready when `ifs/0p25/oper/...-240h-oper-fc.index` answers (about 07:40 / 19:40 UTC, 1.5-2 h before 0.1°);
+  the ifsx rider checks `...-144h-oper-fc.index`. Backup cron s4 moved from `50 9,21` to `30 8,20` (UTC).
+- Site pill renamed "ECMWF 9 km" -> "ECMWF 0.25°" (`ECMWF_SITE` in publish_forecast_maps.py). Frames still carried from
+  old 9 km runs join the new pill (`ECMWF_ALIAS`) until they roll off; their corner tags still say 9 km.
+  If 9 km products come back as their own pill, remove "ECMWF 9 km" from `ECMWF_ALIAS`.
+- Map headers read "ECMWF IFS 0.25°"; WA snow/rain/gust corner tag "[ECMWF 0.25°]".
+- gfs_maps.py IFS smoothing (500 mb heights, MSLP) is scaled to the grid spacing so it keeps the same ground distance.
+- Climatology/anomaly normals are interpolated onto whatever grid the GRIB has, so they needed no change.
+- Rollback: `git revert <sha>` (plain push). The 0.1° URLs and the 21:34 UTC timing come back with it.
+
 ## Staged builds (10-25-26, PR #19)
 Each 00Z/12Z cycle is published in five stages, each as soon as its models are out (times are UTC, from the
 Last-Modified of each model's last file). Order (10-26-26, Benjamin: "have the main global runs and high res runs before
@@ -53,7 +70,7 @@ any ensemble or meteograms"): every deterministic global and high-res stage depl
 | s1 | HRRR temps, HRRR menu maps | about 01:47 / 13:47 |
 | s2 | RRFS temps/menu, GFS 500 mb + SLP | about 04:38 / 16:37 (GFS f240) |
 | s3 | AIFS maps/temps/menu | about 06:55 / 18:55 |
-| s4 | ECMWF 9 km MSLP/precip, SLP, temps, menu | about 09:34 / 21:34 |
+| s4 | ECMWF IFS 0.25° MSLP/precip, SLP, temps, menu (0.1° / 9 km until 10-26-26) | about 07:40 / 19:40 (0.25° f240) |
 | s5 | EPS + AIFS ENS lows, EPS/HRRR/RRFS meteograms (last) | after s4 of the same cycle (EPS out about 07:40 / 19:40) |
 
 Before 10-26-26 there were four stages: s3 also held the ensembles and EPS meteograms, s1 deployed the HRRR meteograms and

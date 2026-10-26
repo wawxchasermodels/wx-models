@@ -2,9 +2,9 @@
 """Staged forecast builds: plan a stage, collect carried products, write site state, and poll for new data.
 
 Five stages per 00Z/12Z cycle publish each model group as soon as its data is out:
-  s1 HRRR | s2 RRFS + GFS | s3 AIFS | s4 ECMWF 9 km (IFS 0.1 deg) | s5 EPS/AIFS ENS maps + all meteograms (EPS, HRRR, RRFS)
+  s1 HRRR | s2 RRFS + GFS | s3 AIFS | s4 ECMWF IFS (0.25 deg open data since 10-26-26; was 0.1 deg / 9 km) | s5 EPS/AIFS ENS maps + all meteograms (EPS, HRRR, RRFS)
 Order (10-26-26, Benjamin 12:43 PM: "have the main global runs and high res runs before any ensemble or meteograms"): the
-deterministic global (GFS, AIFS, ECMWF 9 km) and high-res (HRRR, RRFS) stages all deploy before any ensemble or meteogram
+deterministic global (GFS, AIFS, ECMWF) and high-res (HRRR, RRFS) stages all deploy before any ensemble or meteogram
 work. s5 waits for s4 of the same cycle (AFTER), so ensembles and meteograms always go last. Before 10-26-26 s3 also held
 the ensembles + EPS meteograms and s1/s2 rendered the HRRR/RRFS meteograms; deploys stay at 14 a day.
 Catch-up (10-26-26): a group whose own stage published a cycle without it (a failed job, e.g. GFS 12Z on 10-26) is
@@ -41,7 +41,7 @@ PATTERNS = {"hrrr": ["hires-hrrr-maps", "menu-hrrr-*", "menu-reuse-hrrr"],
             "aifs": ["aifs-maps", "temp-maps", "menu-aifs-*", "menu-reuse-aifs"],
             "ens": ["ens-*"],
             "ifs": ["mslp-maps", "temp-maps", "menu-ifs-*", "menu-reuse-ifs"],
-            # 10-26-26 (Benjamin 6:59 AM): ECMWF 9 km 06Z/18Z runs to 144 h for five products only (IFSX_DIRS), a rider
+            # 10-26-26 (Benjamin 6:59 AM): ECMWF 06Z/18Z runs to 144 h for five products only (IFSX_DIRS), a rider
             "ifsx": ["ifsx-maps"]}
 GROUP_METEO = {"hrrr": "hrrr", "rrfs": "rrfs", "ens": "eps"}   # meteogram source carried with each group
 METEO_GROUP = {v: k for k, v in GROUP_METEO.items()}
@@ -49,7 +49,7 @@ METEO_GROUP = {v: k for k, v in GROUP_METEO.items()}
 PREV = {"hrrr": "hrrr_prev", "aifs": "aifs_prev"}
 KEEP_RUNS = {"hrrr": 2, "aifs": 2, "ifs": 2}   # cycles kept on the site per two-run model (every other product: 1)
 AIFS_DIRS = {"aifs500", "aifsmslp", "aifswind"}
-# ECMWF 9 km products that also get the 06Z/18Z run (to 144 h) as a second run on the toggle; every other ECMWF product
+# ECMWF products that also get the 06Z/18Z run (to 144 h) as a second run on the toggle; every other ECMWF product
 # keeps only its newest 00Z/12Z run. The site keeps the newest 00Z/12Z run of these plus the newest 06Z/18Z run when
 # that one is at most 6 h older than it (so a stale off-hour run never lingers).
 IFSX_DIRS = {"aifs500-ifs", "t850-ifs", "t850anom-ifs", "aifswind-ifs", "gust10-ifs"}   # aifs_maps.py folders (no model suffix); other AIFS folders end in -aifs
@@ -72,9 +72,9 @@ def run_model(prod):
 # the group). No extra deploys. AIFS 06Z is left out (Benjamin: 00Z/12Z/18Z); HRRR 06Z is its own s1 run (CYCLE_HOURS).
 RIDERS = {"aifs": {"hours": (18,), "ready": ["https://data.ecmwf.int/forecasts/{d}/{h:02d}z/aifs-single/0p25/oper/{d}{h:02d}0000-240h-oper-fc.index"],
                    "products": "aifs,temps,menu", "menu": "aifs"},
-          # ECMWF 9 km 06Z/18Z to 144 h (out about 14:27 / 02:27 UTC): rides with the 12Z s2 / 00Z s2 run as a rule
-          "ifsx": {"hours": (6, 18), "ready": ["https://data.ecmwf.int/forecasts/{d}/{h:02d}z/ifs/0p1/oper/{d}{h:02d}0000-144h-oper-fc-sfc.index",
-                                               "https://data.ecmwf.int/forecasts/{d}/{h:02d}z/ifs/0p1/oper/{d}{h:02d}0000-144h-oper-fc-pl.index"],
+          # ECMWF 06Z/18Z to 144 h: rides with the next stage run after it is out. 10-26-26 (Benjamin 12:53 PM): 0.25 deg open
+          # data (one file per step, surface + pressure levels), out well before the 0.1 deg set
+          "ifsx": {"hours": (6, 18), "ready": ["https://data.ecmwf.int/forecasts/{d}/{h:02d}z/ifs/0p25/oper/{d}{h:02d}0000-144h-oper-fc.index"],
                    "products": "ifsx", "menu": ""}}
 E = "https://data.ecmwf.int/forecasts/{d}/{h:02d}z/"
 READY = {   # last file of each stage's models; a stage is ready for cycle c when every one answers
@@ -82,7 +82,8 @@ READY = {   # last file of each stage's models; a stage is ready for cycle c whe
     "s2": ["https://noaa-rrfs-ops-pds.s3.amazonaws.com/rrfs.{d}/{h:02d}/rrfs.t{h:02d}z.2dfld.3km.f084.conus.grib2.idx",
            "https://noaa-gfs-bdp-pds.s3.amazonaws.com/gfs.{d}/{h:02d}/atmos/gfs.t{h:02d}z.pgrb2.0p25.f240.idx"],
     "s3": [E + "aifs-single/0p25/oper/{d}{h:02d}0000-240h-oper-fc.index"],
-    "s4": [E + "ifs/0p1/oper/{d}{h:02d}0000-240h-oper-fc-sfc.index"],
+    # s4: ECMWF IFS 0.25 deg open data (10-26-26, Benjamin 12:53 PM; f240 out about 07:40 / 19:40 UTC, 1.5-2 h before 0.1 deg)
+    "s4": [E + "ifs/0p25/oper/{d}{h:02d}0000-240h-oper-fc.index"],
     "s5": [E + "ifs/0p25/enfo/{d}{h:02d}0000-240h-enfo-ef.index",
            E + "aifs-ens/0p25/enfo/{d}{h:02d}0000-240h-enfo-pf.index"],
 }
@@ -90,7 +91,7 @@ READY = {   # last file of each stage's models; a stage is ready for cycle c whe
 CATCHUP = {"gfs": {"stage": "s2", "products": "gfs", "menu": "",
                    "ready": ["https://noaa-gfs-bdp-pds.s3.amazonaws.com/gfs.{d}/{h:02d}/atmos/gfs.t{h:02d}z.pgrb2.0p25.f240.idx"]}}
 # backup crons (UTC) -> stage; they publish only if the poller has not already done it
-BACKUP = {"10 2,8,14,20 * * *": "s1", "50 4,16 * * *": "s2", "0 8,20 * * *": "s3", "50 9,21 * * *": "s4",
+BACKUP = {"10 2,8,14,20 * * *": "s1", "50 4,16 * * *": "s2", "0 8,20 * * *": "s3", "30 8,20 * * *": "s4",
           "40 10,22 * * *": "s5"}
 FULL_CRON = "50 21 * * *"
 MIN_FRACTION = 0.85

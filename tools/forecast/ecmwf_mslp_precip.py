@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ECMWF 9 km MSLP + precipitation: sea-level pressure isobars (every 4 mb, labeled) with H/L centers over
+"""ECMWF (IFS 0.25 deg open data since 10-26-26; was 9 km) MSLP + precipitation: sea-level pressure isobars (every 4 mb, labeled) with H/L centers over
 precipitation accumulated in the period ending at the valid time (3 h to 72 h, then 6 h), shaded by type.
 
 Methods (standard): QPF = tp(step) - tp(step - period), inches liquid equivalent. Type from the snowfall share of
@@ -7,7 +7,7 @@ the same period, sf / tp (>= 70 % snow, 30-70 % mix, else rain); hatched where t
 is freezing rain (3), ice pellets (8) or freezing drizzle (12). MSLP smoothed lightly before contouring. --model aifs: ECMWF AIFS 0.25 deg, 6 h periods, no ptype (no hatching). Data: ECMWF
 IFS open data 0.1 deg (from the native ~9 km grid), CC BY 4.0. Basemap: Natural Earth. NOT scheduled; run by hand:
   python ecmwf_mslp_precip.py [--cycle YYYYMMDDHH] [--steps 6,24,48] | [--plan]   (--plan = 3 h to 72 h, then 6 h to 240 h)
-Writes $SITE_BATCH/<cycle>/mslpprecip/qpf/<view>/<valid>/final.jpg + site_frame.json (model "ECMWF 9 km").
+Writes $SITE_BATCH/<cycle>/mslpprecip/qpf/<view>/<valid>/final.jpg + site_frame.json (model "ECMWF 0.25°").
 """
 import sys, argparse, datetime as dt, os
 import numpy as np
@@ -36,7 +36,7 @@ def plan_steps():
 
 
 def render(c, step, per, lat, lon, P, Q, frac, ice, vid, out, model="ifs"):
-    M = {"ifs": ("ECMWF IFS 0.1\u00b0", "ECMWF IFS", "ECMWF 9 km"), "aifs": ("ECMWF AIFS 0.25\u00b0", "ECMWF AIFS", "AIFS")}[model]
+    M = {"ifs": ("ECMWF IFS 0.25\u00b0", "ECMWF IFS", "ECMWF 0.25\u00b0"), "aifs": ("ECMWF AIFS 0.25\u00b0", "ECMWF AIFS", "AIFS")}[model]
     V = TM.VIEWS[vid]; pc = ccrs.PlateCarree()
     LA, LO, (P, Q, frac, ice) = TM.cut(lat, lon, [P, Q, frac, ice], vid)
     fig, ax, key_y = TM.frame(vid)

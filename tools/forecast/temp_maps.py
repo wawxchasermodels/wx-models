@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Menu products: 2 m Temperature and 850 mb Temperature + Wind, for ECMWF IFS (open data 0.1 deg, from native ~9 km)
+"""Menu products: 2 m Temperature and 850 mb Temperature + Wind, for ECMWF IFS (open data 0.25 deg since 10-26-26; was 0.1 deg)
 and ECMWF AIFS (0.25 deg). Views: North America, Pacific NW, Pacific NW tight (2 m maps only), Washington
 (AIFS 850 mb has no WA view: upper-air rule).
 
@@ -8,12 +8,12 @@ temperature scale with the 32 F line dashed. 850 mb: temperature (K -> C) on the
 equal across products), 0 C line dashed, 850 mb geopotential height contours every 3 dam, wind barbs in kt thinned in
 projection space. Data: ECMWF open data, CC BY 4.0. Basemap: Natural Earth (public domain). NOT scheduled; run by hand:
   python temp_maps.py --model ifs|aifs [--cycle YYYYMMDDHH] [--hours 240] [--every 12] [--views na,pnw,wa] [--products t2m,t850]
-2 m anomaly (--products t2manom, ECMWF 9 km and AIFS): model 2 m temperature minus the NCEP/NCAR Reanalysis 1991-2020
+2 m anomaly (--products t2manom, ECMWF 0.25° and AIFS): model 2 m temperature minus the NCEP/NCAR Reanalysis 1991-2020
 6-hourly mean for that date and hour (NOAA PSL, public domain; build it with make_clim_t2m.py), interpolated in time and
 space and moved from reanalysis terrain to model terrain with a 6.5 C/km lapse rate. In deg F.
-850 mb anomaly (--products t850anom, ECMWF 9 km and AIFS; GFS via gfs_maps.py, ensemble means via ens_maps.py): 850 mb
+850 mb anomaly (--products t850anom, ECMWF 0.25° and AIFS; GFS via gfs_maps.py, ensemble means via ens_maps.py): 850 mb
 temperature minus the NCEP/NCAR Reanalysis 1991-2020 monthly mean at 850 mb (make_clim_t850.py), in deg C. North America + Pacific NW.
-Writes $SITE_BATCH/<cycle>/<t2m|t850|t2manom|t850anom>-<model>/step/<view>/<valid>/final.jpg + site_frame.json (model "ECMWF 9 km" or "AIFS").
+Writes $SITE_BATCH/<cycle>/<t2m|t850|t2manom|t850anom>-<model>/step/<view>/<valid>/final.jpg + site_frame.json (model "ECMWF 0.25°" or "AIFS").
 """
 import sys, argparse, datetime as dt, json, os, urllib.request, urllib.error
 from zoneinfo import ZoneInfo
@@ -33,8 +33,9 @@ PT = ZoneInfo("America/Los_Angeles")
 ROOT = os.environ.get("SITE_BATCH", ".site_batch")
 E = "https://data.ecmwf.int/forecasts/{d}/{h:02d}z/"
 MODELS = {
-    "ifs": dict(site="ECMWF 9 km", name="ECMWF IFS", res="0.1\u00b0",
-                url={"sfc": E + "ifs/0p1/oper/{d}{h:02d}0000-{s}h-oper-fc-sfc", "pl": E + "ifs/0p1/oper/{d}{h:02d}0000-{s}h-oper-fc-pl"}),
+    # 10-26-26 (Benjamin 12:53 PM): ECMWF IFS from the 0.25 deg open data (one file per step, out about 1.5-2 h before 0.1 deg)
+    "ifs": dict(site="ECMWF 0.25\u00b0", name="ECMWF IFS", res="0.25\u00b0",
+                url={"sfc": E + "ifs/0p25/oper/{d}{h:02d}0000-{s}h-oper-fc", "pl": E + "ifs/0p25/oper/{d}{h:02d}0000-{s}h-oper-fc"}),
     "aifs": dict(site="AIFS", name="ECMWF AIFS", res="0.25\u00b0",
                  url={"sfc": E + "aifs-single/0p25/oper/{d}{h:02d}0000-{s}h-oper-fc", "pl": E + "aifs-single/0p25/oper/{d}{h:02d}0000-{s}h-oper-fc"}),
 }

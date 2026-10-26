@@ -3,7 +3,7 @@
   gust10    10 m Wind Gusts            peakgust  Peak Gust So Far (run max)
   feels     Feels-Like Temp            t925/t700/t500/t300  Temp + Barbs at that level
   td2m      2 m Dewpoint               mslpptype MSLP + P-Type (instant)      (+ precip, snow, aloft, sky products below)
-Models: ifs (ECMWF 9 km open data), aifs (ECMWF AIFS), hrrr, rrfs (NOAA 3 km). GFS has no menu products since 10-24-26
+Models: ifs (ECMWF IFS 0.25 deg open data; 0.1 deg / 9 km until 10-26-26), aifs (ECMWF AIFS), hrrr, rrfs (NOAA 3 km). GFS has no menu products since 10-24-26
 (only gfs_maps.py: 500 mb anomaly + sea-level pressure); the Reader below still serves GFS for gfs_maps.py.
 Methods are standard and written next to each product. NOAA data: public domain. ECMWF: CC BY 4.0.
 NOT scheduled; run by hand:
@@ -28,7 +28,7 @@ PT, ROOT, get = TM.PT, TM.ROOT, TM.get
 MPH, KT = 2.23694, 1.94384
 GFS = "https://noaa-gfs-bdp-pds.s3.amazonaws.com/gfs.{d}/{h:02d}/atmos/gfs.t{h:02d}z.pgrb2.0p25.f{s:03d}"
 MODELS = {
-    "ifs": dict(site="ECMWF 9 km", name="ECMWF IFS", res="0.1\u00b0", kind="ecmwf"),
+    "ifs": dict(site="ECMWF 0.25\u00b0", name="ECMWF IFS", res="0.25\u00b0", kind="ecmwf"),   # 0.25 deg open data since 10-26-26
     "aifs": dict(site="AIFS", name="ECMWF AIFS", res="0.25\u00b0", kind="ecmwf"),
     "gfs": dict(site="GFS", name="NOAA GFS", res="0.25\u00b0", kind="idx", url=GFS),
     "hrrr": dict(site="HRRR", name="NOAA HRRR", res="3 km", kind="idx", url=TM.HRRR, lambert=True,

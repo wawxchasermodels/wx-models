@@ -2,7 +2,7 @@
 # Every 10 min: if no Forecast site run is going, finds the first stage whose models have a newer complete 00Z/12Z run
 # than the one on the site (site-state artifact) and starts it (forecast-site.yml, stage=s1..s5, cycle=YYYYMMDDHH).
 #   s1 HRRR 00/06/12/18Z (HRRR f48 out about 01:48 / 07:47 / 13:47 / 19:47 UTC)        s2 RRFS + GFS (GFS f240 about 04:38 / 16:37 UTC)
-#   s3 AIFS (about 06:55 / 18:55 UTC)   s4 ECMWF 9 km (about 09:34 / 21:34 UTC)
+#   s3 AIFS (about 06:55 / 18:55 UTC)   s4 ECMWF IFS 0.25 deg (about 07:40 / 19:40 UTC; 0.1 deg until 10-26-26)
 #   s5 EPS/AIFS ENS maps + EPS/HRRR/RRFS meteograms: last, only after s4 of the same cycle (10-26-26, Benjamin 12:43 PM:
 #      main global and high-res runs before any ensemble or meteograms)
 # The backup crons in forecast-site.yml start a stage only if the poller has not published it.

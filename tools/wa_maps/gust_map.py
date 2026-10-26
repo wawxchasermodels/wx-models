@@ -402,7 +402,7 @@ def render(TF, LAT1, LON1, title, subtitle, out_path, model_line, src, sub_title
     _lp, _ls = (CORNER_PAD or int(W * 0.015)), (CORNER_S or int(W * 0.075))
     if globals().get("WEST_TIGHT") and VSCALE: tb = tt_
     placed = [tb, (0, 0, _lp + _ls + 10, _lp + _ls + 10)]
-    MODEL_TAG = "[HRRR 3 km]" if model_line.startswith("HRRR") else "[ECMWF Ensemble Mean]" if "ENS" in model_line else "[ECMWF IFS]"
+    MODEL_TAG = "[HRRR 3 km]" if model_line.startswith("HRRR") else "[ECMWF Ensemble Mean]" if "ENS" in model_line else "[ECMWF 0.25\u00b0]"
     if model_line.startswith("NBM"): MODEL_TAG = "[NBM 2.5 km]"
     elif model_line.startswith("GFS"): MODEL_TAG = "[GFS 0.25\u00b0]"
 

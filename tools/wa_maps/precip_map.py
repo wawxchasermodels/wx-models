@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Estimated rain total maps for Washington (ECMWF IFS 0.1 deg, NOAA NBM, NOAA GFS, ECMWF ENS mean / 90th pct) and southern BC (mm).
+"""Estimated rain total maps for Washington (ECMWF IFS 0.25 deg (0.1 deg until 10-26-26), NOAA NBM, NOAA GFS, ECMWF ENS mean / 90th pct) and southern BC (mm).
 Data: ECMWF open data (CC BY 4.0), NOAA (public domain). Basemap: U.S. Census, Natural Earth (public domain), GSHHG (NOAA, LGPL). Places: GeoNames (CC BY 4.0), Census Gazetteer (public domain).
 Part of wx-models (MIT). Renders a static JPEG; no branding."""
 import os as _os, sys as _sys
@@ -99,7 +99,7 @@ def plan_window(ws, we, run):
 
 def step_url(run, stream, st):
     d8, hh = run.strftime("%Y%m%d"), run.hour
-    return "%s/%s/%02dz/ifs/0p1/%s/%s%02d0000-%dh-%s-fc-sfc" % (ECM, d8, hh, stream, d8, hh, st, stream)
+    return "%s/%s/%02dz/ifs/0p25/%s/%s%02d0000-%dh-%s-fc" % (ECM, d8, hh, stream, d8, hh, st, stream)   # 0.25 deg since 10-26-26 (was ifs/0p1 ...-fc-sfc)
 
 def pick_run(ws, we, cycle=None, log=print):
     now = dt.datetime.now(UTC)
@@ -115,7 +115,7 @@ def pick_run(ws, we, cycle=None, log=print):
             if all(_ok(step_url(run, stream, x) + ".index") for x in (s0, s1) if x > 0):
                 return run, stream, s0, s1, note
         why.append("run %s not published yet (no tp index for steps %d/%d)" % (run.strftime("%Y%m%d%HZ"), s0, s1))
-    raise SystemExit("REFUSED: no ECMWF 0.1 deg run covers this window.\n  " + "\n  ".join(why[:6]))
+    raise SystemExit("REFUSED: no ECMWF 0.25 deg run covers this window.\n  " + "\n  ".join(why[:6]))
 
 def fetch_tp(run, stream, s0, s1, log=print):
     recs = []
@@ -125,7 +125,7 @@ def fetch_tp(run, stream, s0, s1, log=print):
         js = [j for j in (json.loads(l) for l in _get(u + ".index").decode().splitlines()) if j.get("param") == "tp" and j.get("type") == "fc"]
         if len(js) != 1: raise SystemExit("tp record count %d in %s" % (len(js), u))
         recs.append((u + ".grib2", js[0]))
-    log("ECMWF IFS 0.1 deg run %s stream %s tp steps %d and %d" % (run, stream, s0, s1))
+    log("ECMWF IFS 0.25 deg run %s stream %s tp steps %d and %d" % (run, stream, s0, s1))
     fl = [None if r is None else _decode(_get(r[0], (r[1]["_offset"], r[1]["_offset"] + r[1]["_length"] - 1)))[0] for r in recs]
     v1, LA, LO, info1 = fl[1]
     v0 = fl[0][0] if fl[0] is not None else np.zeros_like(v1)
@@ -135,7 +135,7 @@ def fetch_tp(run, stream, s0, s1, log=print):
                 grib_name=info1["name"], gridType=info1["gridType"], Ni_crop=int(G.shape[1]), Nj_crop=int(G.shape[0]),
                 dlat=float(abs(lat1[1] - lat1[0])), dlon=float(abs(lon1[1] - lon1[0])), stepRange_end=info1["stepRange"],
                 window_utc=[(run + dt.timedelta(hours=s0)).isoformat(), (run + dt.timedelta(hours=s1)).isoformat()],
-                resolution="0.1 deg regular lat/lon (ECMWF open data ifs/0p1, from native ~9 km)", source=[r[0] if r else None for r in recs],
+                resolution="0.25 deg regular lat/lon (ECMWF open data ifs/0p25)", source=[r[0] if r else None for r in recs],
                 bytes=sum(r[1]["_length"] for r in recs if r), license="CC BY 4.0, Source: ECMWF")
     return G, lat1, lon1, meta
 
@@ -501,7 +501,7 @@ def render(TF, LAT1, LON1, title, subtitle, out_path, model_line, src, sub_title
     _lp, _ls = (CORNER_PAD or int(W * 0.015)), (CORNER_S or int(W * 0.075))
     if globals().get("WEST_TIGHT") and VSCALE: tb = tt_
     placed = [tb, (0, 0, _lp + _ls + 10, _lp + _ls + 10)]
-    MODEL_TAG = MODEL_TAG_OVR or "[ECMWF 9 km]"
+    MODEL_TAG = MODEL_TAG_OVR or "[ECMWF 0.25\u00b0]"
 
     fmt_ = R.font(R.MONT, 32, 700); mtw_ = d.textlength(MODEL_TAG, font=fmt_)
     d.text((W - 34, 30), MODEL_TAG, font=fmt_, fill=(255, 255, 255), stroke_width=4, stroke_fill=INK, anchor="ra")
@@ -1142,7 +1142,7 @@ def render_bc(TF_in, LAT1, LON1, title, subtitle, out_path, model_line, src):
         d = ImageDraw.Draw(im)
 
         INK, WHITE = (14, 16, 22), (255, 255, 255)
-        TPX, TY = BC_TITLE_PX, 8; fmt_ = R.font(R.MONT, 32, 700); MT = "[ECMWF 9 km]"; mtw = d.textlength(MT, font=fmt_)
+        TPX, TY = BC_TITLE_PX, 8; fmt_ = R.font(R.MONT, 32, 700); MT = "[ECMWF 0.25\u00b0]"; mtw = d.textlength(MT, font=fmt_)
         while d.textlength(title, font=R.font(R.IMPACT, TPX)) > Wd - 2 * (mtw + 60): TPX -= 2
         ft_t = R.font(R.IMPACT, TPX); tw = d.textlength(title, font=ft_t); tbot = TY + TPX * 1.15
         bx0, bx1, by0 = 50, Wd - 50, int(tbot) + 40; bh = 18
@@ -1279,7 +1279,7 @@ def main(argv=None):
     ap.add_argument("--cycle", help="force a run YYYYMMDDHH (UTC); default = newest published run that covers the window")
     ap.add_argument("--out"); ap.add_argument("--refresh", action="store_true", help="re-download even if this run's data is cached (newest run is always checked)")
     ap.add_argument("--title", help='default "Estimated <N>HR Rain Totals" (N = actual window hours)'); ap.add_argument("--no-corner", action="store_true")
-    ap.add_argument("--source", choices=["ecmwf", "nbm", "hrrr", "gfs", "eps", "eps90"], default="ecmwf", help="QPF model: ECMWF IFS 0.1 deg (default), NOAA NBM core 2.5 km (1 h APCP summed), NOAA GFS 0.25 deg, ECMWF ensemble mean (eps) or 90th percentile (eps90)")
+    ap.add_argument("--source", choices=["ecmwf", "nbm", "hrrr", "gfs", "eps", "eps90"], default="ecmwf", help="QPF model: ECMWF IFS 0.25 deg (default), NOAA NBM core 2.5 km (1 h APCP summed), NOAA GFS 0.25 deg, ECMWF ensemble mean (eps) or 90th percentile (eps90)")
     ap.add_argument("--region", choices=["west", "east", "west_wide", "bc", "lowermainland"], help="vertical 1600x2400 regional map (not test-rendered yet)")
     ap.add_argument("--top-scale", action="store_true", help="--region maps: old header (region/window/model lines) and horizontal scale in a tall top bar")
     ap.add_argument("--no-neighbor-towns", action="store_true", help="turn OFF the default OR/ID/BC reference town labels (and the frame/bar move north on --region; full-state fill back to off)")
@@ -1323,11 +1323,11 @@ def main(argv=None):
     tt = lambda t: "%s %s" % (_hr(t.hour), d3(t)) + (" %d-%d" % (t.month, t.day) if long_ else "")
     WIN_LINE = "%s to %s" % (tt(ws_a), tt(we_a))
     sub = "%d hr total %s %s %d-%d to %s %s %d-%d" % (hrs, _hr(ws_a.hour), d3(ws_a), ws_a.month, ws_a.day, _hr(we_a.hour), d3(we_a), we_a.month, we_a.day)
-    model_line = "ECMWF IFS 9 km, %02dZ run (%s PT %d-%d)" % (run.hour, _hr(rl.hour), rl.month, rl.day)
+    model_line = "ECMWF IFS 0.25\u00b0, %02dZ run (%s PT %d-%d)" % (run.hour, _hr(rl.hour), rl.month, rl.day)
     title = a.title or "Estimated %dHR Rain Totals" % hrs
     if BC: globals()["BC_WINDOW"] = (ws_a, we_a)
     if BC: r = render_bc(z["g"], z["lat"], z["lon"], title, sub, os.path.join(out, "final.jpg"), model_line, "Data: ECMWF (CC BY 4.0)")
-    else: r = render(z["g"], z["lat"], z["lon"], title, sub, os.path.join(out, "final.jpg"), model_line, "Data: ECMWF (CC BY 4.0)", sub_title="European (ECMWF) 9 km")
+    else: r = render(z["g"], z["lat"], z["lon"], title, sub, os.path.join(out, "final.jpg"), model_line, "Data: ECMWF (CC BY 4.0)", sub_title="European (ECMWF) 0.25\u00b0")
     r.update(meta=meta, window_line=WIN_LINE, requested_pt=[ws_l.isoformat(), we_l.isoformat()], used_pt=[ws_a.isoformat(), we_a.isoformat()], snap_note=note)
     json.dump(r, open(os.path.join(out, "run.json"), "w"), indent=1, default=str)
     print(json.dumps({k: r[k] for k in ("out", "wa_min", "wa_max", "wa_max_at", "wa_p99", "n_labels", "l1", "l2", "model_line", "title", "window_line", "subtitle")}, default=str))
