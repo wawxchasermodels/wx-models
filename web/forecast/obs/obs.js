@@ -349,13 +349,14 @@ const Obs = (() => {
   const tempColor = (t) => (Math.round(t) <= 32 ? "#8fd3ff" : "#ffffff");   // white; light blue at or below freezing
   const TOWN_FONT = "500 11px 'Outfit', system-ui, sans-serif", ISO_FONT = "600 12px 'IBM Plex Mono', ui-monospace, monospace";
   const Z = 1.5;   // station-plot scale (text, circle, barb, spacing all scale together)
-  // station numbers: NF shrinks them ~22% on phone-sized screens (same breakpoint as obs.css, max-width 640px); desktop NF = 1
-  const PHONE_NF = 0.78, phoneMQ = window.matchMedia ? window.matchMedia("(max-width: 640px)") : null;
+  // station numbers: NF halves them on phone-sized screens (same breakpoint as obs.css, max-width 640px); desktop NF = 1
+  const PHONE_NF = 0.5, phoneMQ = window.matchMedia ? window.matchMedia("(max-width: 640px)") : null;
   let NF = 1, FONT, FONT_S;   // FONT_S is used when a station shows 3+ numbers
   function setNumberScale() {
     NF = phoneMQ && phoneMQ.matches ? PHONE_NF : 1;
-    FONT = `600 ${Math.round(13 * Z * NF)}px 'IBM Plex Mono', ui-monospace, monospace`;
-    FONT_S = `600 ${Math.round(11.5 * Z * NF)}px 'IBM Plex Mono', ui-monospace, monospace`;
+    const px = (v) => (NF === 1 ? Math.round(v) : Math.round(v * 4) / 4);   // desktop keeps whole px; phone keeps quarter px
+    FONT = `600 ${px(13 * Z * NF)}px 'IBM Plex Mono', ui-monospace, monospace`;
+    FONT_S = `600 ${px(11.5 * Z * NF)}px 'IBM Plex Mono', ui-monospace, monospace`;
   }
   setNumberScale();
   const CITY_FONT = "500 12px 'Outfit', system-ui, sans-serif";
