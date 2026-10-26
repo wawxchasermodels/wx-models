@@ -7,6 +7,7 @@ from the .index byte offsets (adjacent records coalesced), first from ECMWF's AW
 Products (6 h frames):
   elows  Low centers: every member's sea-level pressure lows (dots colored by central pressure), the chance a low center
          passes within R km (fill), thin mean isobars, and the ensemble-mean lows marked L with member count and pressure range.
+  t850anom  850 mb Temperature Anomaly of the ensemble mean (na, pnw), vs the NCEP/NCAR R1 1991-2020 monthly normal.
   e500   500 mb heights: ensemble-mean heights (black, every 6 dam), spread (fill, 1 std dev in dam), and each member's
          552 dam (blue) and 576 dam (red) line ("spaghetti").
 Writes ROOT/<cycle>/<tab>-<src>/step/<view>/<valid>/final.jpg + site_frame.json like menu_maps.py.
@@ -297,7 +298,20 @@ def p_500(E, s, vids):
               "black = mean, fill = spread, thin = members' 552 / 576 dam")
 
 
-PRODUCTS = {"elows": p_lows, "e500": p_500}
+def p_t850anom(E, s, vids):
+    """850 mb Temperature Anomaly of the ensemble mean (Benjamin 10-25-26): mean of the 50 perturbed members' 850 mb temperature
+    minus the NCEP/NCAR Reanalysis 1991-2020 monthly normal (temp_maps.render_t850anom). No surface pressure is fetched for
+    50 members: ground above ~1,450 m (deterministic AIFS terrain, same 0.25 deg grid) is grayed as 'under 850 mb'."""
+    (t,) = E.get(s, [("t", "850")]); S = E.S
+    who = dict(name=S["name"], res="0.25\u00b0", site=S["site"] + " mean", credit=S["credit"], members=t.shape[0])
+    for v in vids:
+        if v not in TM.T8A_VIEWS: continue
+        out = f"{ROOT}/{E.c:%Y%m%d%H}/t850anom-{E.src}/step/{v}/{E.c + dt.timedelta(hours=s):%Y%m%d%H}"
+        TM.render_t850anom(E.c, s, E.lat, E.lon, t.mean(0), v, out, who, orog=orog(E)); print("ok", E.src, "t850anom", v, s, flush=True)
+
+
+PRODUCTS = {"elows": p_lows, "e500": p_500, "t850anom": p_t850anom}
+DEFAULT_PRODUCTS = "elows,e500"   # t850anom is asked for by name (--products elows,e500,t850anom): +50 member fields a step
 
 
 def latest(src):
@@ -313,7 +327,7 @@ def latest(src):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(); ap.add_argument("src", choices=list(SRC)); ap.add_argument("--cycle"); ap.add_argument("--steps")
-    ap.add_argument("--hours", type=int, default=240); ap.add_argument("--products", default=",".join(PRODUCTS)); ap.add_argument("--views", default=",".join(VIEWS))
+    ap.add_argument("--hours", type=int, default=240); ap.add_argument("--products", default=DEFAULT_PRODUCTS); ap.add_argument("--views", default=",".join(VIEWS))
     # 500 mb maps draw all three frames (tight PNW view switched on 10-24-26); --e500-views na,pnw drops it again (-82 files a run)
     ap.add_argument("--e500-views", default="na,pnw,pnwt")
     a = ap.parse_args()

@@ -10,6 +10,8 @@ Data: NOAA GFS 0.25 deg (AWS open data, public domain). Basemap: Natural Earth. 
   python tools/forecast/gfs_maps.py [--cycle YYYYMMDDHH] [--hours 240] [--every 6] [--views na,pnw,pnwt] [--products z500,mslp]
 Writes $SITE_BATCH/<cycle>/aifs500-<model>|aifsmslp-<model>/step/<view>/<valid>/final.jpg + site_frame.json
 (tab aifs500 / aifsmslp, model "GFS", so they show as a GFS pill on the AIFS tabs).
+--products t850anom (10-25-26): 850 mb Temperature Anomaly (GFS pill on the 850 mb temp anomaly tab; na + pnw).
+--model ifs --products wind (10-25-26): MSLP + 10 m wind from ECMWF IFS 0.1 deg, "ECMWF 9 km" pill on the MSLP + 10 m wind tab.
 --model ifs --products mslp (10-25-26): the same Sea-Level Pressure map from ECMWF IFS open data (0.1 deg), written to
 aifsmslp-ifs/ as the "ECMWF 9 km" pill on the Sea-level pressure tab (run in the workflow's mslp job).
 """
@@ -17,6 +19,7 @@ import sys, argparse, datetime as dt, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import aifs_maps as AM
 import menu_maps as MM
+import temp_maps as TM
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
@@ -48,6 +51,25 @@ if __name__ == "__main__":
                 for v in views:
                     out = f"{AM.ROOT}/{c:%Y%m%d%H}/aifsmslp-{M}/step/{v}/{vt}"
                     AM.render_mslp(c, s, lat, lon, p, v, out, src=M); print("ok", out, flush=True)
+            if "wind" in a.products.split(",") and M == "ifs":
+                # 10-25-26 (Benjamin 9:26 PM): ECMWF 9 km pill on the "MSLP + 10 m wind" combo tab, same renderer as the AIFS map
+                # (10 m wind speed fill in mph, haloed isobars, H/L, barbs in kt). MSLP smoothed as above; wind fill smoothed in render_mslp.
+                lat, lon, p = R.f("msl"); _, _, u = R.f("u10"); _, _, w = R.f("v10")
+                from scipy.ndimage import gaussian_filter; p = gaussian_filter(p, 2.5)
+                for v in views:
+                    out = f"{AM.ROOT}/{c:%Y%m%d%H}/aifswind-{M}/step/{v}/{vt}"
+                    AM.render_mslp(c, s, lat, lon, p, v, out, wind=(u, w), src=M); print("ok", out, flush=True)
+            if "t850anom" in a.products.split(","):
+                # 10-25-26 (Benjamin 9:24 PM): 850 mb temperature anomaly (temp_maps.render_t850anom, NCEP/NCAR R1 1991-2020 normal)
+                lat, lon, t = R.f("T:850"); _, _, z = R.f("Z:850")
+                try: sp = R.f("sp")[2]
+                except KeyError: sp = None
+                who = dict(name=MM.MODELS[M]["name"], res=MM.MODELS[M]["res"], site=MM.MODELS[M]["site"],
+                           credit="Data: NOAA GFS (public domain).  Basemap: Natural Earth." if M == "gfs" else TM.CREDIT.format(name="ECMWF IFS"))
+                for v in views:
+                    if v not in TM.T8A_VIEWS: continue
+                    out = f"{AM.ROOT}/{c:%Y%m%d%H}/t850anom-{M}/step/{v}/{vt}"
+                    TM.render_t850anom(c, s, lat, lon, t, v, out, who, gh=z, sp=sp); print("ok", out, flush=True)
         except KeyError as e:
             print(f"{M.upper()} step {s}: no field {e}, skipped", flush=True)
         tot += R.bytes
