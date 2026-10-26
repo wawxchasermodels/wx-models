@@ -128,4 +128,4 @@ def value_point(name, census):
 # Pass summit elevations, ft (WSDOT MountainPass feed 10-24-26; checked against USGS 3DEP within 60 ft at the table points;
 # Sherman's Snow-tab point sits ~1.2 km east of the 5,575 ft summit). Used only by the pass height correction (pass_terrain.py).
 PASS_ELEV_FT = {"Snoqualmie Pass": 3022, "Stevens Pass": 4061, "White Pass": 4500, "Chinook Pass": 5430, "Blewett Pass": 4102,
-                "Sherman Pass": 5575, "Loup Loup Pass": 4020, "Washington Pass": 5477}
+                "Sherman Pass": 5575}

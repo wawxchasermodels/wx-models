@@ -317,8 +317,7 @@ def fetch_hrrr_valid(valid, cycle=None, log=print):
 
 W, H = 2400, 1600
 PASSES = {"Snoqualmie Pass": (-121.4136, 47.4245), "Stevens Pass": (-121.0854, 47.7465), "White Pass": (-121.3911, 46.6383),
-          "Chinook Pass": (-121.5156, 46.8714), "Blewett Pass": (-120.5786, 47.3348), "Sherman Pass": (-118.4636, 48.6055),
-          "Loup Loup Pass": (-119.9026, 48.3926), "Washington Pass": (-120.6545, 48.5253)}
+          "Chinook Pass": (-121.5156, 46.8714), "Blewett Pass": (-120.5786, 47.3348), "Sherman Pass": (-118.4636, 48.6055)}   # Washington Pass and Loup Loup Pass removed 10-25-26 (Benjamin)
 CORE = ["Bellingham", "Seattle", "Spokane", "Vancouver", "Tacoma", "Olympia", "Everett", "Mount Vernon", "Oak Harbor",
         "Wenatchee", "Yakima", "Kennewick", "Walla Walla", "Ellensburg"]
 BACK = ["Cle Elum", "Leavenworth", "Port Townsend", "Winthrop", "Toppenish", "Oroville", "Republic", "Quincy", "Stevenson",

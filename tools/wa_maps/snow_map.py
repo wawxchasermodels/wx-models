@@ -304,8 +304,7 @@ def fetch_hrrr_valid(valid, cycle=None, log=print):
 
 W, H = 2400, 1600
 PASSES = {"Snoqualmie Pass": (-121.4136, 47.4245), "Stevens Pass": (-121.0854, 47.7465), "White Pass": (-121.3911, 46.6383),
-          "Chinook Pass": (-121.5156, 46.8714), "Blewett Pass": (-120.5786, 47.3348), "Sherman Pass": (-118.4636, 48.6055),
-          "Loup Loup Pass": (-119.9026, 48.3926), "Washington Pass": (-120.6545, 48.5253)}
+          "Chinook Pass": (-121.5156, 46.8714), "Blewett Pass": (-120.5786, 47.3348), "Sherman Pass": (-118.4636, 48.6055)}   # Washington Pass and Loup Loup Pass removed 10-25-26 (Benjamin)
 CORE = ["Bellingham", "Seattle", "Spokane", "Vancouver", "Tacoma", "Olympia", "Everett", "Mount Vernon", "Oak Harbor",
         "Wenatchee", "Yakima", "Kennewick", "Walla Walla", "Ellensburg"]
 BACK = ["Cle Elum", "Leavenworth", "Port Townsend", "Winthrop", "Toppenish", "Oroville", "Republic", "Quincy", "Stevenson",
@@ -961,7 +960,7 @@ SPECIAL = {
                ("S", "530"), ("S", "970"), ("S", "153"), ("S", "706"), ("S", "207"), ("S", "150")],
         shields=[("I", "90"), ("I", "5"), ("I", "82"), ("U", "2"), ("U", "12"), ("U", "97"), ("S", "20"), ("S", "410"), ("S", "542"), ("S", "123")],
         spots={"Snoqualmie Pass": (-121.4136, 47.4245), "Stevens Pass": (-121.0854, 47.7465), "White Pass": (-121.3911, 46.6383),
-               "Chinook Pass": (-121.5167, 46.8719), "Washington Pass": (-120.6545, 48.5253),
+               "Chinook Pass": (-121.5167, 46.8719),
                "Rainy Pass": (-120.7356, 48.5157), "Mt Baker Ski Area": (-121.6660, 48.8570), "Blewett Pass": (-120.5786, 47.3348),
                "Crystal Mountain": (-121.4745, 46.9353)},
         spot_opt={"Crystal Mountain"}, no_towns=True, pass_scale=1.45, shield_scale=2.0, shield_near={("S", "20"): (-121.10, 48.70)},
@@ -973,7 +972,7 @@ SPECIAL = {
         roads=[("I", "90"), ("U", "395"), ("U", "2"), ("U", "97"), ("S", "20"), ("S", "21"), ("S", "31"), ("S", "25"), ("S", "155"), ("S", "206"),
                ("S", "211"), ("S", "292"), ("S", "231"), ("S", "174"), ("S", "17"), ("S", "153"), ("S", "7")],
         shields=[("U", "395"), ("U", "2"), ("U", "97"), ("S", "20"), ("S", "21"), ("S", "31"), ("S", "25"), ("I", "90"), ("S", "155"), ("S", "206")],
-        spots={"Sherman Pass": (-118.4636, 48.6055), "Loup Loup Pass": (-119.9026, 48.3926), "Wauconda Pass": (-118.9930, 48.7270),
+        spots={"Sherman Pass": (-118.4636, 48.6055), "Wauconda Pass": (-118.9930, 48.7270),
                "49 Degrees North": (-117.5630, 48.3020), "Mt Spokane": (-117.1230, 47.9210)},
         spot_opt={"Mt Spokane"},
         towns=["Colville", "Republic", "Tonasket", "Omak", "Kettle Falls", "Metaline Falls", "Newport", "Chewelah", "Ione", "Spokane", "Oroville",
@@ -982,7 +981,7 @@ SPECIAL = {
                "Danville", "Hunters", "Ford", "Clayton", "Addy", "Pateros", "Malott", "Twisp", "Keller", "Valley", "Molson"]),
 }
 
-SPOT_SIDE = {"Chinook Pass": "right", "Paradise": "below", "Rainy Pass": "below", "Washington Pass": "above"}
+SPOT_SIDE = {"Chinook Pass": "right", "Paradise": "below", "Rainy Pass": "below"}
 SPECIAL_PTS = {"Newhalem": (-121.2486, 48.6726), "Stehekin": (-120.6567, 48.3093), "Randle": (-121.9568, 46.5357), "Mazama": (-120.4040, 48.5926),
                "Plain": (-120.6587, 47.7637), "Usk": (-117.2827, 48.3093), "Hunters": (-118.2108, 48.1199), "Ford": (-117.8105, 47.9077),
                "Molson": (-119.2017, 48.9783)}
