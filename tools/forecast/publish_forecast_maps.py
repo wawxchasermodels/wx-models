@@ -344,7 +344,10 @@ def main():
                 continue
             if view not in {i for i, _ in t["views"]} or period not in {i for i, _ in t["periods"]}:
                 continue   # a view/period the menu does not offer (e.g. a test render): never ship it
-            h = hashlib.sha1(f"{p}{mt}".encode()).hexdigest()[:10]
+            # 10-26-26: name from the batch path (<cycle>/<product>/<period>/<view>/<valid>), not the file time. Carried
+            # artifacts get a fresh mtime on every download, so the old name changed every frame on every deploy and an
+            # open page (manifest from before the deploy) got "Image could not be loaded" on most maps until reloaded.
+            h = hashlib.sha1(os.path.relpath(p, a.batch_root).encode()).hexdigest()[:10]
             rel = f"maps/{tab}/{period}/{view}/{info['end']:%Y%m%d%H}_{h}.jpg"  # hash keeps models apart
             fr = {"src": rel, "label": label(info["start"], info["end"], period), "run": info["run"],
                   "model": info.get("model", ""), "start": info["start"].isoformat(), "end": info["end"].isoformat(),

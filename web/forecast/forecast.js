@@ -265,8 +265,20 @@ function loadInto(img, src, which, onFail) {
   if (img.getAttribute("src") === src && img.complete && img.naturalWidth) { setLoading(false, which); return; }
   setLoading(!(pre && pre.complete && pre.naturalWidth), which);
   img.onload = () => { setLoading(false, which); img.classList.remove("fade"); };
-  img.onerror = () => { setLoading(false, which); onFail(); };
+  img.onerror = () => { setLoading(false, which); onFail(); reloadIfStale(); };
   img.src = src;
+}
+// 10-26-26: every deploy can rename or drop map files; a page opened before the deploy then asks for files that are gone.
+// On a failed image, look at the live manifest once a minute at most and reload the page (state is kept in the URL hash)
+// when the site has been rebuilt since this page loaded.
+let staleAt = 0;
+async function reloadIfStale() {
+  if (!S.m || Date.now() - staleAt < 60000) return;
+  staleAt = Date.now();
+  try {
+    const r = await fetch("manifest.json", { cache: "no-store" });
+    if (r.ok && (await r.json()).generated !== S.m.generated) location.reload();
+  } catch (e) { /* offline or signed out: keep the message on screen */ }
 }
 function preload(f, i, n = 2) {
   for (let d = 1; d <= n; d++) for (const j of [i + d, i - d]) {
