@@ -208,7 +208,13 @@ def cut(lat, lon, arrs, vid):
     return lat[sl], l360[so], [a[:, o][np.ix_(sl, so)] for a in arrs]
 
 
-# Washington view: a few reference towns (dot + name), spread so they don't pile up. "r" = name right of the dot, "l" = left.
+# Washington view: reference towns (dot + name). "r" = name right of the dot, "l" = left, "a" = above, "b" = below (the
+# preferred side; placement falls back to the other sides when a label would touch another one, see place_towns).
+# List order = placement priority. The first 20 are the original set; the rest were requested by Benjamin 10-25-26 9:46 PM
+# (Long Beach on the coast, Forks (already here), Arlington, Oak Harbor, Mount Vernon, Sumas, Cannon Beach OR, Chehalis,
+# Victoria BC, Neah Bay, Port Townsend, Winthrop, Oroville, Pendleton OR; Shelton 9:47 PM). Points: GeoNames town centers
+# (web/forecast/obs/basemap.json towns, CC BY 4.0; Victoria and Pendleton from its Natural Earth places; Winthrop from the
+# 2023 Census Gazetteer in tools/wa_maps/assets).
 WA_TOWNS = [
     ("Bellingham", 48.75, -122.48, "r"), ("Port Angeles", 48.12, -123.43, "l"), ("Forks", 47.95, -124.39, "r"),
     ("Everett", 47.98, -122.20, "r"), ("Seattle", 47.61, -122.33, "r"), ("Tacoma", 47.25, -122.44, "r"),
@@ -217,6 +223,11 @@ WA_TOWNS = [
     ("Ellensburg", 46.99, -120.55, "r"), ("Yakima", 46.60, -120.51, "r"), ("Tri-Cities", 46.23, -119.15, "r"),
     ("Walla Walla", 46.06, -118.34, "r"), ("Moses Lake", 47.13, -119.28, "r"), ("Colville", 48.55, -117.91, "r"),
     ("Spokane", 47.66, -117.43, "l"), ("Pullman", 46.73, -117.18, "l"),
+    ("Victoria", 48.43, -123.36, "l"), ("Mount Vernon", 48.42, -122.33, "r"), ("Oak Harbor", 48.29, -122.64, "l"),
+    ("Port Townsend", 48.12, -122.76, "r"), ("Arlington", 48.20, -122.13, "r"), ("Sumas", 49.00, -122.26, "r"),
+    ("Neah Bay", 48.37, -124.62, "a"), ("Long Beach", 46.35, -124.05, "r"), ("Cannon Beach", 45.89, -123.96, "r"),
+    ("Chehalis", 46.66, -122.96, "r"), ("Shelton", 47.22, -123.10, "l"), ("Winthrop", 48.48, -120.19, "r"),
+    ("Oroville", 48.94, -119.44, "r"), ("Pendleton", 45.67, -118.79, "r"),
 ]
 
 
@@ -233,16 +244,16 @@ TOWN_NUM_COLOR, TOWN_NUM_SIZE, TOWN_NUM_HALO = "#0d0f13", 10.5, 3.0   # bold dar
 
 # Mountain passes on the Washington view (Benjamin 10-24-26 10:22 PM: "main mountain pass locations on the Washington view").
 # Coordinates are NOT new: the first 8 are the Washington Snow tab table (tools/wa_maps/snow_map.py PASSES, same in gust_map,
-# nbm_map, precip_map); Cayuse, Satus, Wauconda and Disautel are the WSDOT MountainPass API points the pass watcher follows
+# nbm_map, precip_map); Satus, Wauconda and Disautel are the WSDOT MountainPass API points the pass watcher follows
 # (wsdot.com/Travel/Real-time/Service/api/MountainPass, read 10-24-26). Elevation (ft) = WSDOT's summit elevation, kept to
 # report how far the model's smoothed terrain sits below the real pass. Stampede Pass is in neither list, so it is not shown.
+# Removed 10-25-26 (Benjamin): Washington Pass and Loup Loup Pass ("don't need"), Cayuse Pass (no Cayuse anywhere).
 # name: (label, lat, lon, elev_ft), in placement priority order (main I-90 / US 2 / US 12 crossings first)
 WA_PASSES = {
     "Snoqualmie Pass": ("Snoqualmie", 47.4245, -121.4136, 3022), "Stevens Pass": ("Stevens", 47.7465, -121.0854, 4061),
     "White Pass": ("White", 46.6383, -121.3911, 4500), "Chinook Pass": ("Chinook", 46.8714, -121.5156, 5430),
-    "Blewett Pass": ("Blewett", 47.3348, -120.5786, 4102), "Washington Pass": ("Washington Pass", 48.5253, -120.6545, 5477),
-    "Loup Loup Pass": ("Loup Loup", 48.3926, -119.9026, 4020), "Sherman Pass": ("Sherman", 48.6055, -118.4636, 5575),
-    "Cayuse Pass": ("Cayuse", 46.8656, -121.5361, 4675), "Satus Pass": ("Satus", 45.9847, -120.6536, 3107),
+    "Blewett Pass": ("Blewett", 47.3348, -120.5786, 4102), "Sherman Pass": ("Sherman", 48.6055, -118.4636, 5575),
+    "Satus Pass": ("Satus", 45.9847, -120.6536, 3107),
     "Wauconda Pass": ("Wauconda", 48.7262, -118.9595, 4310), "Disautel Pass": ("Disautel", 48.2818, -119.1434, 3252),
 }
 # Pass height correction (Benjamin 10-24-26 10:32 PM): value + rate * (model ground at the pass - real summit), ft.
@@ -277,15 +288,28 @@ def ecmwf_orog(m, c):
 PASS_COLOR, PASS_NAME_SIZE, PASS_NUM_SIZE = "#3b2a5c", 8.0, 9.5   # deep plum, small italic name: reads as "not a town"
 
 
+_TREES = {}
+
+
+def _grid_tree(LA, LO):
+    """KD-tree of a 2-D (Lambert) lat/lon grid, cached per grid (shape + corner points): the same cropped HRRR / RRFS grid is
+    used by every product of a view, and menu_maps.prewarm builds it once in the parent so forked workers inherit it."""
+    la, lo = np.asarray(LA, float), np.asarray(LO, float)
+    key = (la.shape, la[0, 0], la[-1, -1], lo[0, 0], lo[-1, -1], la[0, -1], lo[-1, 0])
+    if key not in _TREES:
+        from scipy.spatial import cKDTree
+        if len(_TREES) > 8: _TREES.clear()
+        lo = (lo + 180) % 360 - 180; k = np.cos(np.deg2rad(np.nanmean(la)))
+        _TREES[key] = (cKDTree(np.column_stack([la.ravel(), lo.ravel() * k])), k)
+    return _TREES[key]
+
+
 def town_values(LA, LO, F, pts):
     """Model value at each (lat, lon) point. Regular lat/lon grids (ECMWF): bilinear. 2-D Lambert grids (HRRR/RRFS 3 km):
     nearest grid point. NaN where the point is off the grid or touches a missing value."""
     F = np.asarray(F, float); out = []
     if np.ndim(LA) == 2:
-        from scipy.spatial import cKDTree
-        la, lo = np.asarray(LA, float), np.asarray(LO, float)
-        lo = (lo + 180) % 360 - 180; k = np.cos(np.deg2rad(np.nanmean(la)))
-        tree = cKDTree(np.column_stack([la.ravel(), lo.ravel() * k]))
+        tree, k = _grid_tree(LA, LO)
         for pla, plo in pts:
             d, i = tree.query([pla, ((plo + 180) % 360 - 180) * k])
             out.append(F.ravel()[i] if d < 0.06 else np.nan)   # 0.06 deg ~ 6 km: farther means off the 3 km grid
@@ -313,53 +337,178 @@ def _hits(bb, others, pad=1.5):
     return any(bb.x0 - pad < o.x1 and o.x0 < bb.x1 + pad and bb.y0 - pad < o.y1 and o.y0 < bb.y1 + pad for o in others)
 
 
+# Regional (Pacific NW) views: dot + city name only (no model numbers), tiered by population so the label density follows the zoom.
+# Source: Natural Earth populated places in web/forecast/obs/basemap.json ("places": name, lon, lat, scalerank, metro pop;
+# public domain), already used by the Observations tab. Tier 1 is tried first, then the Washington towns Benjamin asked for
+# (WA_TOWNS above, the ones inside the frame), then lower tiers by population; any label that would touch another label,
+# a dot or the frame is skipped (counted in the log). Benjamin 10-25-26 9:46 PM: "more cities on every state view".
+REGION_TOWNS = {   # view: (min population per tier, newest-to-oldest), max labels
+    "pnwhr": ((250000, 60000, 15000), 60),
+    "pnwt": ((250000, 60000, 20000), 55),
+}
+REGION_REQUESTED = ("Seattle", "Portland", "Spokane", "Victoria", "Bellingham", "Port Angeles", "Forks", "Neah Bay",
+                    "Port Townsend", "Oak Harbor", "Mount Vernon", "Arlington", "Sumas", "Olympia", "Shelton", "Aberdeen",
+                    "Chehalis", "Long Beach", "Cannon Beach", "Yakima", "Wenatchee", "Winthrop", "Oroville", "Omak",
+                    "Tri-Cities", "Pendleton", "Walla Walla")
+_PLACES = None
+# Upper-air tabs (Benjamin 10-25-26 10:09 PM: "don't need town names when showing upper air stuff"): no town dots, names or
+# numbers on these maps in any view (menu_maps.finish skips towns(); render_t850 never calls it). Ground-level tabs keep them.
+UPPER_AIR_TABS = {"t925", "t850", "t700", "t500", "t300", "mslp500", "pw", "pwanom", "ivt", "w850", "w500", "w250", "thick", "t850anom"}
+
+
+def region_places(vid):
+    """(name, lat, lon, tier) for a regional view, in placement order."""
+    global _PLACES
+    if _PLACES is None:
+        f = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "web", "forecast", "obs", "basemap.json")
+        try: _PLACES = json.load(open(f))["places"]
+        except Exception as e: print(f"town list unavailable ({e}); regional towns off", flush=True); _PLACES = []
+    tiers, cap = REGION_TOWNS[vid]; lo0, lo1, la0, la1 = VIEWS[vid]["ll"]
+    inside = lambda la, lo: lo0 + 0.3 <= lo <= lo1 - 0.3 and la0 + 0.2 <= la <= la1 - 0.2
+    pl, seen, dup = [], set(), set()
+    for p in sorted([p for p in _PLACES if inside(p[2], p[1]) and p[4] >= tiers[-1]], key=lambda p: -p[4]):
+        if p[0] in seen: dup.add(p[0]); continue   # same name twice in one frame (Vancouver BC + WA): keep the bigger one only
+        seen.add(p[0]); pl.append(p)
+    tier = lambda pop: next(i for i, t in enumerate(tiers) if pop >= t) + 1
+    wa = {t[0]: t for t in WA_TOWNS}
+    out = [(p[0], p[2], p[1], 1) for p in pl if tier(p[4]) == 1]
+    names = {n for n, *_ in out}
+    for n in REGION_REQUESTED:
+        if n in names or n in dup or n not in wa: continue
+        _, la, lo, _ = wa[n]
+        if inside(la, lo): out.append((n, la, lo, 2)); names.add(n)
+    out += [(p[0], p[2], p[1], tier(p[4])) for p in pl if tier(p[4]) > 1 and p[0] not in names]
+    return out[:cap]
+
+
+def place_label(arts_r, k, x, y, cands, taken, axbb, r, pt):
+    """Try label groups at candidate offsets; arts_r = list of (artist, dx_from_group_left) laid out left to right.
+    cands = (gx, gy) offsets of the group's left edge in points. Returns the boxes if one fits, else None."""
+    for gx, gy in cands:
+        for t, dx in arts_r: t.xyann = (gx + dx, gy)
+        bbs = [t.get_window_extent(r) for t, _ in arts_r]
+        if not any(_hits(b, taken) for b in bbs) and all(axbb.contains(b.x0, b.y0) and axbb.contains(b.x1, b.y1) for b in bbs):
+            return bbs
+    return None
+
+
+def _cands(side, w):
+    """Group offsets (left edge, points) for a label w points wide: preferred side first, then the others."""
+    c = {"r": (5, 0), "l": (-5 - w, 0), "a": (-w / 2, 9.5), "b": (-w / 2, -9.5)}
+    order = [side] + [s_ for s_ in ("r", "l", "a", "b") if s_ != side]
+    return [c[s_] for s_ in order] + [(5, 6), (5, -6), (-5 - w, 6), (-5 - w, -6)]
+
+
 def towns(ax, vid, field=None, fmt=fmt_int, pass_corr=None):
-    """Town dots and names on the Washington view only (dark text on a white halo, like the contour labels).
-    field = (LA, LO, F) in the map's units adds the model value after each name ("Seattle 54"), read at the town's official
-    station pin (bilinear on lat/lon grids, nearest point on 3 km grids). Numbers never overlap a name, another number or the
-    frame edge: a number that would is moved under its name, and dropped (logged) if it still collides. Returns the text artists
-    (so isobar labels can be cleared around them) and stores the sampled values on ax.town_values for checks."""
+    """Town dots and names (dark text on a white halo, like the contour labels).
+    Washington view: WA_TOWNS in list order. field = (LA, LO, F) in the map's units adds the model value after each name
+    ("Seattle 54"), read at the town's official station pin (bilinear on lat/lon grids, nearest point on 3 km grids).
+    Each town tries its preferred side, then the other sides; the whole "Name 54" group must clear every other label, every
+    town dot and the frame. If it cannot, the number goes under the name; if that fails too the number is dropped (logged),
+    and a name that cannot be placed at all is dropped (logged).
+    Pacific NW views (REGION_TOWNS): tiered by population (region_places); with a field, the same numbers (region_towns).
+    Returns the text artists (so isobar labels can be cleared around them) and stores the sampled values on ax.town_values."""
+    if vid in REGION_TOWNS and os.environ.get("REGION_TOWNS", "1") != "0": return region_towns(ax, vid, field, fmt)
     if vid != "wa": return []
-    pc = ccrs.PlateCarree(); tr = pc._as_mpl_transform(ax); arts, names = [], []
+    ax.apply_aspect()   # cartopy fixes the map's aspect only at draw time: lay labels out on the final axes box, not the slot
+    pc = ccrs.PlateCarree(); tr = pc._as_mpl_transform(ax); arts = []
+    fig = ax.figure; r = fig.canvas.get_renderer(); pt = 72.0 / fig.dpi; axbb = ax.get_window_extent(r)
+    xy = [tr.transform((lo, la)) for _, la, lo, _ in WA_TOWNS]
+    taken = [matplotlib.transforms.Bbox([[x - 3, y - 3], [x + 3, y + 3]]) for x, y in xy]   # every town dot is off limits
     for name, la, lo, side in WA_TOWNS:
         ax.plot(lo, la, "o", ms=3.6, mfc="#1b1d22", mec="white", mew=1.0, transform=pc, zorder=7)
-        names.append(ax.annotate(name, (lo, la), xycoords=tr, xytext=(5 if side == "r" else -5, 0), textcoords="offset points",
-                                 ha="left" if side == "r" else "right", va="center", color="#1b1d22", fontproperties=HS.font(600, 9.5),
-                                 path_effects=HS.halo("white", 2.6), zorder=7))
-    arts += names
-    if field is None or os.environ.get("TOWN_NUMBERS", "1") == "0": return arts   # TOWN_NUMBERS=0 turns the numbers off
-    vals = town_values(*field, [TOWN_PIN.get(n, (la, lo)) for n, la, lo, _ in WA_TOWNS])
-    ax.town_values = {t[0]: float(v) for t, v in zip(WA_TOWNS, vals)}
-    fig = ax.figure; r = fig.canvas.get_renderer(); pt = 72.0 / fig.dpi; axbb = ax.get_window_extent(r)
-    nums = [None] * len(WA_TOWNS)
+    nums_on = field is not None and os.environ.get("TOWN_NUMBERS", "1") != "0"   # TOWN_NUMBERS=0 turns the numbers off
+    vals = town_values(*field, [TOWN_PIN.get(n, (la, lo)) for n, la, lo, _ in WA_TOWNS]) if nums_on else [np.nan] * len(WA_TOWNS)
+    if nums_on: ax.town_values = {t[0]: float(v) for t, v in zip(WA_TOWNS, vals)}
     for k, ((name, la, lo, side), v) in enumerate(zip(WA_TOWNS, vals)):
-        s = fmt(v)
-        if s is None: continue
-        nums[k] = ax.annotate(s, (lo, la), xycoords=tr, xytext=(0, 0), textcoords="offset points", ha="left", va="center",
-                              color=TOWN_NUM_COLOR, fontproperties=HS.font(800, TOWN_NUM_SIZE),
-                              path_effects=HS.halo("white", TOWN_NUM_HALO), zorder=7.5)
-    # inline first: "Name 54" right of the dot, "Name 54 •" left of it (the name slides left to make room)
-    for k, (name, la, lo, side) in enumerate(WA_TOWNS):
-        n = nums[k]
-        if n is None: continue
-        nw = names[k].get_window_extent(r).width * pt; vw = n.get_window_extent(r).width * pt
-        if side == "r": n.xyann = (5 + nw + 3.5, 0)
-        else: n.xyann = (-5 - vw, 0); names[k].xyann = (-5 - vw - 3.5, 0)
-    nb = [t.get_window_extent(r) for t in names]
-    for k, n in enumerate(nums):
-        if n is None: continue
-        others = [b for j, b in enumerate(nb) if j != k] + [nums[j].get_window_extent(r) for j in range(len(nums)) if j != k and nums[j] is not None]
-        bb = n.get_window_extent(r)
-        ok = not _hits(bb, others) and axbb.contains(bb.x0, bb.y0) and axbb.contains(bb.x1, bb.y1)
-        if not ok:   # fallback: centered under the name, name back next to its dot
-            side = WA_TOWNS[k][3]; names[k].xyann = (5 if side == "r" else -5, 0); nb[k] = names[k].get_window_extent(r)
-            n.set_ha("center"); n.xyann = ((nb[k].x0 + nb[k].x1) / 2 * pt - (tr.transform((WA_TOWNS[k][2], WA_TOWNS[k][1]))[0]) * pt, -11)
-            bb = n.get_window_extent(r)
-            if _hits(bb, others) or not (axbb.contains(bb.x0, bb.y0) and axbb.contains(bb.x1, bb.y1)):
-                print(f"town number dropped (no room): {WA_TOWNS[k][0]} {n.get_text()}", flush=True); n.remove(); nums[k] = None; continue
-        arts.append(n)
-    if os.environ.get("PASS_LABELS", "1") != "0":
-        arts += pass_labels(ax, field, fmt, nb + [n.get_window_extent(r) for n in nums if n is not None], r, pt, axbb, pass_corr)
+        x, y = xy[k]
+        nm = ax.annotate(name, (lo, la), xycoords=tr, xytext=(0, 0), textcoords="offset points", ha="left", va="center",
+                         color="#1b1d22", fontproperties=HS.font(600, 9.5), path_effects=HS.halo("white", 2.6), zorder=7)
+        s_ = fmt(v) if nums_on else None
+        n = None if s_ is None else ax.annotate(s_, (lo, la), xycoords=tr, xytext=(0, 0), textcoords="offset points", ha="left",
+                                               va="center", color=TOWN_NUM_COLOR, fontproperties=HS.font(800, TOWN_NUM_SIZE),
+                                               path_effects=HS.halo("white", TOWN_NUM_HALO), zorder=7.5)
+        nw = nm.get_window_extent(r).width * pt; vw = 0 if n is None else n.get_window_extent(r).width * pt
+        others = taken   # every dot (its own too: labels sit 5 pt off the dot) and every label placed so far
+        bbs = None
+        if n is not None:   # inline first: "Name 54"
+            w = nw + 3.5 + vw
+            bbs = place_label([(nm, 0), (n, nw + 3.5)], k, x, y, _cands(side, w), others, axbb, r, pt)
+            if bbs is None:   # number centered under the name
+                cs = [(gx, gy) for gx, gy in _cands(side, nw)]
+                for gx, gy in cs:
+                    nm.xyann = (gx, gy); n.xyann = (gx + (nw - vw) / 2, gy - 11)
+                    bb2 = [nm.get_window_extent(r), n.get_window_extent(r)]
+                    if not any(_hits(b, others) for b in bb2) and all(axbb.contains(b.x0, b.y0) and axbb.contains(b.x1, b.y1) for b in bb2):
+                        bbs = bb2; break
+            if bbs is None:
+                print(f"town number dropped (no room): {name} {s_}", flush=True); n.remove(); n = None
+        if bbs is None:
+            bbs = place_label([(nm, 0)], k, x, y, _cands(side, nw), others, axbb, r, pt)
+        if bbs is None:
+            print(f"town label dropped (no room): {name}", flush=True); nm.remove(); continue
+        taken += bbs; arts += [nm] + ([n] if n is not None else [])
+    if nums_on and os.environ.get("PASS_LABELS", "1") != "0":
+        arts += pass_labels(ax, field, fmt, taken, r, pt, axbb, pass_corr)
+    return arts
+
+
+REGION_NUM_SIZE = 9.5   # bold value next to the city name on the Pacific NW frames (a bit smaller than the WA view's 10.5)
+
+
+def region_towns(ax, vid, field=None, fmt=fmt_int):
+    """City names on the Pacific NW frames: small dot + name, tiered (region_places).
+    field = (LA, LO, F) in map units adds the model value at the city point, same numbers and formats as the Washington view
+    (Benjamin 10-25-26 10:08 PM: "dropping more towns is fine"). With numbers on, each city tries "Name 54" inline (preferred
+    side, other sides, diagonal nudges), then the number centered under the name; if neither fits, the city is dropped (no
+    name-only fallback; logged). A city whose value is missing (off the model grid) keeps its name only (logged).
+    Without a field (upper air, products without town numbers) it is names only, as before."""
+    ax.apply_aspect()   # see towns()
+    pc = ccrs.PlateCarree(); tr = pc._as_mpl_transform(ax); arts = []
+    fig = ax.figure; r = fig.canvas.get_renderer(); pt = 72.0 / fig.dpi; axbb = ax.get_window_extent(r)
+    dots, labels, skipped, nonum, size = [], [], [], [], {1: 9.5, 2: 8.5, 3: 8.0}
+    places = region_places(vid)
+    nums_on = field is not None and os.environ.get("TOWN_NUMBERS", "1") != "0"   # TOWN_NUMBERS=0 turns the numbers off
+    vals = town_values(*field, [(la, lo) for _, la, lo, _ in places]) if nums_on and places else [np.nan] * len(places)
+    if nums_on: ax.town_values = {}
+    placed = 0
+    for (name, la, lo, t), v in zip(places, vals):
+        x, y = tr.transform((lo, la))
+        if not axbb.contains(x, y): continue
+        dot = matplotlib.transforms.Bbox([[x - 3, y - 3], [x + 3, y + 3]])
+        if _hits(dot, dots, pad=1.0) or any(b.x0 - 4 < x < b.x1 + 4 and b.y0 - 4 < y < b.y1 + 4 for b in labels):   # dot center
+            skipped.append(name); continue   # inside (or within 4 px of, the halo) a label already placed
+        nm = ax.annotate(name, (lo, la), xycoords=tr, xytext=(0, 0), textcoords="offset points", ha="left", va="center",
+                         color="#1b1d22", fontproperties=HS.font(700 if t == 1 else 600, size.get(t, 8.0)),
+                         path_effects=HS.halo("white", 2.4), zorder=7)
+        s_ = fmt(v) if nums_on else None
+        n = None if s_ is None else ax.annotate(s_, (lo, la), xycoords=tr, xytext=(0, 0), textcoords="offset points", ha="left",
+                                               va="center", color=TOWN_NUM_COLOR, fontproperties=HS.font(800, REGION_NUM_SIZE),
+                                               path_effects=HS.halo("white", TOWN_NUM_HALO), zorder=7.5)
+        nw = nm.get_window_extent(r).width * pt; vw = 0 if n is None else n.get_window_extent(r).width * pt
+        side = next((t_[3] for t_ in WA_TOWNS if t_[0] == name), "r")   # same preferred side as on the Washington view
+        taken = [b.padded(2.5) for b in labels] + [b.padded(2.0) for b in dots + [dot]]
+        if n is not None:
+            bbs = place_label([(nm, 0), (n, nw + 3.0)], 0, x, y, _cands(side, nw + 3.0 + vw), taken, axbb, r, pt)   # "Name 54"
+            if bbs is None:   # number centered under the name
+                for gx, gy in _cands(side, nw):
+                    nm.xyann = (gx, gy); n.xyann = (gx + (nw - vw) / 2, gy - 10)
+                    bb2 = [nm.get_window_extent(r), n.get_window_extent(r)]
+                    if not any(_hits(b, taken) for b in bb2) and all(axbb.contains(b.x0, b.y0) and axbb.contains(b.x1, b.y1) for b in bb2):
+                        bbs = bb2; break
+            if bbs is None: nm.remove(); n.remove(); skipped.append(name); continue   # no name-only fallback: drop the city
+        else:
+            if nums_on: nonum.append(name)
+            bbs = place_label([(nm, 0)], 0, x, y, _cands(side, nw), taken, axbb, r, pt)
+            if bbs is None: nm.remove(); skipped.append(name); continue
+        ax.plot(lo, la, "o", ms=3.2 if t > 1 else 3.8, mfc="#1b1d22", mec="white", mew=0.9, transform=pc, zorder=7)
+        labels += bbs; dots.append(dot); arts += [nm] + ([n] if n is not None else []); placed += 1
+        if n is not None: ax.town_values[name] = float(v)
+    print(f"{vid} towns{' with numbers' if nums_on else ''}: {placed} placed, {len(skipped)} dropped for room"
+          + (f" ({', '.join(skipped)})" if skipped else "")
+          + (f"; no model value, name only: {', '.join(nonum)}" if nonum else ""), flush=True)
+    ax.region_town_names = [a.get_text() for a in arts if a.get_text() in {p[0] for p in places}]
+    ax.region_towns_dropped = skipped
     return arts
 
 
@@ -490,8 +639,7 @@ def render_t850(m, c, step, lat, lon, tk, gh, u, v, vid, out, sp=None):
     fig_w, fig_h = fig.get_size_inches() * ax.get_position().size; nx = HS.BARBS_ACROSS[vid]; ny = max(4, round(nx * fig_h / fig_w))
     ax.barbs(LO, LA, U * 1.94384, Vw * 1.94384, transform=pc, regrid_shape=(nx, ny), length=HS.BARB_LENGTH, color=HS.BARB_COLOR,
              linewidth=HS.BARB_LW, zorder=5)
-    towns(ax, vid)
-    HS.frame(ax)
+    HS.frame(ax)   # no town labels on upper-air maps (Benjamin 10-25-26 10:09 PM)
     vl = header(fig, m, c, step, vid, "850 mb Temperature + Wind", "0\u00b0C line dashed  \u00b7  heights every 3 dam  \u00b7  barbs in kt  \u00b7  gray = ground above 850 mb")
     HS.hbar(fig, fill, HS.T850_TICKS, "Temp (\u00b0C)", key_y, signed=True)
     save(fig, out, {"tab": "t850", "period": "step", "view": vid, "model": MODELS[m]["site"], "cycle": f"{c:%Y%m%d%H}",

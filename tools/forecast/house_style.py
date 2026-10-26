@@ -79,12 +79,18 @@ def frame(ax):
         ax.outline_patch.set_edgecolor(PANEL_EDGE)
 
 
+# State / province line width (Benjamin 10-25-26 10:28 PM: "we gotta make the state lines thicker"): 0.5 -> 0.75 pt (+50%).
+# Country borders never thinner than state lines. HS_STATE_LW overrides (comparison samples only).
+STATE_LW = float(os.environ.get("HS_STATE_LW", "0.75"))
+COAST_LW, COUNTRY_LW = 1.0, max(0.9, STATE_LW)
+
+
 def outlines(ax, cf, res="50m", states=True):
     """Coastlines and borders: dark line over a soft light halo, readable over dark and light fills."""
-    feats = [(cf.NaturalEarthFeature("physical", "coastline", res), 1.0),
-             (cf.NaturalEarthFeature("cultural", "admin_0_boundary_lines_land", res), 0.9)]
+    feats = [(cf.NaturalEarthFeature("physical", "coastline", res), COAST_LW),
+             (cf.NaturalEarthFeature("cultural", "admin_0_boundary_lines_land", res), COUNTRY_LW)]
     if states:
-        feats.append((cf.NaturalEarthFeature("cultural", "admin_1_states_provinces_lines", res), 0.5))
+        feats.append((cf.NaturalEarthFeature("cultural", "admin_1_states_provinces_lines", res), STATE_LW))
     for f, lw in feats:
         ax.add_feature(f, facecolor="none", edgecolor=COAST_HALO, lw=lw + 1.4, zorder=3)
     for f, lw in feats:
