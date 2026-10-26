@@ -27,6 +27,7 @@
 #                   (repo variable METEO_SPLIT=1): charts go to a second Pages project (deployed in the meteogram wave)
 #                   and the main site reaches them through its same-origin /m/ function; unset METEO_SPLIT = one site.
 name: Forecast site
+run-name: ${{ (inputs.stage && inputs.stage != 'all') && format('Forecast site {0} {1}{2}', inputs.stage, inputs.cycle, inputs.dry_run && ' (dry run)' || '') || (github.event_name == 'schedule' && format('Forecast site cron {0}', github.event.schedule)) || 'Forecast site' }}
 
 on:
   workflow_dispatch:
@@ -61,6 +62,19 @@ on:
       menu_opts:
         description: "Run switches: incremental=on|off (skip menu models already published), chunk_min=20 (0 = one job per tier), waves=on|off (publish in 4 priority waves; off = one deploy at the end)"
         default: "incremental=on,chunk_min=20,waves=on"
+      stage:
+        description: "all = full build (default, unchanged). s1 HRRR | s2 RRFS+GFS | s3 AIFS+ensembles+EPS meteograms | s4 ECMWF 9 km: render only that stage, deploy the site with the other groups carried forward"
+        default: "all"
+      cycle:
+        description: "Stage runs: model cycle YYYYMMDDHH (00/12); empty = newest complete run for that stage"
+        default: ""
+      seed_run:
+        description: "Stage runs: carry the other groups from this full-build run id instead of the saved site state (bootstrap)"
+        default: ""
+      dry_run:
+        description: "Stage runs: render and collect, check file counts, but do not deploy or save the site state"
+        type: boolean
+        default: false
   # Full build once a day from the 12Z runs (Benjamin, 10-25-26 12:20 PM PT; replaces the 2:10 AM run). Cron is UTC:
   # 21:50 UTC = 2:50 PM PDT, and 1:50 PM PST after the Nov 1 change (UTC cron does not shift; the data times are UTC too).
   # 12Z data seen on the open-data servers (Last-Modified of the last file we read, 10-23 and 10-24): HRRR f48 13:47,
@@ -70,8 +84,17 @@ on:
   # Manual runs (Actions > Forecast site > Run workflow, default inputs = the same full build) are not pinned: newest data.
   # 5 deploys per run, about 155/month (+5 per manual run; < 500 Pages limit). The concurrency group keeps runs apart.
   # To stop: comment out this block or disable the workflow in the Actions tab.
+  # Staged builds (10-25-26): forecast-poll.yml starts each stage as soon as its data is out (every 20 min check); these
+  # backup crons start a stage only if it was not published yet (plan job checks the site state). UTC; PDT = UTC-7, PST = UTC-8.
+  #   s1 HRRR 02:00/14:00 (7:00 PM / 7:00 AM PDT)  s2 RRFS+GFS 04:50/16:50 (9:50 PM / 9:50 AM)
+  #   s3 AIFS+ens 07:50/19:50 (12:50 AM / 12:50 PM)  s4 ECMWF 9 km 09:50/21:50 (2:50 AM / 2:50 PM)
+  # The 21:50 full build stays as a fallback until the first scheduled staged cycle completes, then it is removed.
   schedule:
     - cron: "50 21 * * *"
+    # - cron: "0 2,14 * * *"     # STAGED BACKUP s1 (enabled only after the manual staged test cycle passes)
+    # - cron: "50 4,16 * * *"    # s2
+    # - cron: "50 7,19 * * *"    # s3
+    # - cron: "50 9,21 * * *"    # s4
 
 concurrency:   # one run at a time: a new (scheduled or manual) run waits until the running one finishes, never cancels it
   group: forecast-site
@@ -79,6 +102,7 @@ concurrency:   # one run at a time: a new (scheduled or manual) run waits until 
 
 permissions:
   contents: read
+  actions: read   # staged builds: read the site-state artifact and download carried artifacts of earlier runs
 
 env:
   WX_CYCLE_HOUR: ${{ github.event_name == 'schedule' && '12' || '' }}   # scheduled run: 12Z cycle for every model
@@ -112,14 +136,33 @@ jobs:
       menu_keys: ${{ steps.mp.outputs.menu_keys }}
       menu_store: ${{ steps.mp.outputs.menu_store }}
       count: ${{ steps.p.outputs.count }}
+      stage: ${{ steps.st.outputs.stage }}
+      go: ${{ steps.st.outputs.go }}
+      stage_cycle: ${{ steps.st.outputs.cycle }}
+      pin: ${{ steps.st.outputs.pin }}
+      products: ${{ steps.st.outputs.products }}
+      meteo_srcs: ${{ steps.st.outputs.meteo_srcs }}
+      carry: ${{ steps.st.outputs.carry }}
+      min_files: ${{ steps.st.outputs.min_files }}
+      prev_state: ${{ steps.st.outputs.prev_state }}
+      stage_patterns: ${{ steps.st.outputs.stage_patterns }}
     permissions:
       contents: read
-      actions: read     # list the saved menu-map caches (incremental rendering)
+      actions: read     # list the saved menu-map caches (incremental rendering); staged builds: read the site state
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+      - name: Stage (all = full build; s1-s4 = staged build, tools/forecast/stage_tools.py)
+        id: st
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STAGE: ${{ github.event.inputs.stage }}
+          CYCLE_IN: ${{ github.event.inputs.cycle }}
+          SEED: ${{ github.event.inputs.seed_run }}
+          SCHED: ${{ github.event.schedule }}
+        run: python tools/forecast/stage_tools.py plan --stage "$STAGE" --cycle "$CYCLE_IN" --event "$GITHUB_EVENT_NAME" --schedule "$SCHED" --seed-run "$SEED"
       - name: Restore the menu state file (which model cycle was last published)
         uses: actions/cache/restore@v4
         with:
@@ -128,13 +171,17 @@ jobs:
           restore-keys: menu-state-
       - name: Cycle and WA shard list
         id: p
+        if: steps.st.outputs.go == 'true'
         env:
+          WX_CYCLE_HOUR: ${{ steps.st.outputs.pin }}
+          STAGE_CYCLE: ${{ steps.st.outputs.cycle }}
           WANT: ${{ github.event.inputs.wa_shards || 'auto' }}
           MENU_MODELS: ${{ github.event.inputs.menu_models }}
           MENU_TIERS: ${{ github.event.inputs.menu_tiers }}
         run: |
           H=$(date -u +%H); D=$(date -u +%Y%m%d)
           if [ "$H" -ge 21 ]; then C=${D}12; elif [ "$H" -ge 9 ]; then C=${D}00; else C=$(date -u -d yesterday +%Y%m%d)12; fi
+          if [ -n "$STAGE_CYCLE" ]; then C="$STAGE_CYCLE"; fi   # staged build: the stage's own 00Z/12Z cycle
           N=$(python tools/forecast/render_forecast_batch.py --cycle "$C" --tabs "$WA_TABS" --periods "$WA_PERIODS" \
                 --views "$WA_VIEWS" --hours "$WA_HOURS" --models "$WA_MODELS" --dry-run | sed -nE '1s/.*: ([0-9]+) renders.*/\1/p')
           python - "$N" "$WANT" >> "$GITHUB_OUTPUT" <<'PY'
@@ -150,9 +197,11 @@ jobs:
           echo "Cycle $C, $N WA maps" >> "$GITHUB_STEP_SUMMARY"
       - name: Menu-map chunks (forecast-hour ranges) and incremental skip list
         id: mp
+        if: steps.st.outputs.go == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          MENU_MODELS: ${{ github.event.inputs.menu_models }}
+          WX_CYCLE_HOUR: ${{ steps.st.outputs.pin }}
+          MENU_MODELS: ${{ steps.st.outputs.menu_models || github.event.inputs.menu_models }}
           MENU_TIERS: ${{ github.event.inputs.menu_tiers }}
           MENU_OPTS: ${{ github.event.inputs.menu_opts || 'incremental=on,chunk_min=20,waves=on' }}
           CYCLE: ${{ steps.p.outputs.cycle }}
@@ -194,7 +243,7 @@ jobs:
     needs: [plan, start-w2]
     # WA map shards archived 10-25-26 (Benjamin): they run only when the repo variable WA_SHARDS is "on" (unset = off, on
     # every run, scheduled and manual); the code stays in place. To bring them back: RESTORE_WA_SHARDS.md.
-    if: vars.WA_SHARDS == 'on' && contains(github.event.inputs.products || 'wa,aifs,gfs,temps,mslp,menu,ens,eps,hrrr,rrfs', 'wa')
+    if: vars.WA_SHARDS == 'on' && needs.plan.outputs.stage == 'all' && contains(needs.plan.outputs.products, 'wa')
     runs-on: ubuntu-latest
     timeout-minutes: 300
     strategy:
@@ -203,6 +252,7 @@ jobs:
       matrix:
         shard: ${{ fromJSON(needs.plan.outputs.shards) }}
     env:
+      WX_CYCLE_HOUR: ${{ needs.plan.outputs.pin }}   # 12 on the 21:50 cron, the cycle hour on stage runs, else unpinned
       WX_CACHE: ${{ github.workspace }}/.wx_cache
       SITE_BATCH: ${{ github.workspace }}/.site_batch
     steps:
@@ -229,15 +279,16 @@ jobs:
           name: wa-maps-${{ matrix.shard }}
           path: .site_batch
           include-hidden-files: true   # the batch folders start with a dot
-          retention-days: 1
+          retention-days: 3   # staged builds carry products forward from earlier runs
           if-no-files-found: warn
 
   aifs:
     needs: [plan, start-w2]
-    if: contains(github.event.inputs.products || 'wa,aifs,gfs,temps,mslp,menu,ens,eps,hrrr,rrfs', 'aifs')
+    if: needs.plan.outputs.go == 'true' && contains(needs.plan.outputs.products, 'aifs')
     runs-on: ubuntu-latest
     timeout-minutes: 300
     env:
+      WX_CYCLE_HOUR: ${{ needs.plan.outputs.pin }}   # 12 on the 21:50 cron, the cycle hour on stage runs, else unpinned
       SITE_BATCH: ${{ github.workspace }}/.site_batch
     steps:
       - uses: actions/checkout@v4
@@ -269,15 +320,16 @@ jobs:
           name: aifs-maps
           path: .site_batch
           include-hidden-files: true   # the batch folders start with a dot
-          retention-days: 1
+          retention-days: 3   # staged builds carry products forward from earlier runs
           if-no-files-found: warn
 
   gfs:
     needs: plan
-    if: contains(github.event.inputs.products || 'wa,aifs,gfs,temps,mslp,menu,ens,eps,hrrr,rrfs', 'gfs')
+    if: needs.plan.outputs.go == 'true' && contains(needs.plan.outputs.products, 'gfs')
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
+      WX_CYCLE_HOUR: ${{ needs.plan.outputs.pin }}   # 12 on the 21:50 cron, the cycle hour on stage runs, else unpinned
       SITE_BATCH: ${{ github.workspace }}/.site_batch
     steps:
       - uses: actions/checkout@v4
@@ -309,15 +361,16 @@ jobs:
           name: gfs-maps
           path: .site_batch
           include-hidden-files: true   # the batch folders start with a dot
-          retention-days: 1
+          retention-days: 3   # staged builds carry products forward from earlier runs
           if-no-files-found: warn
 
   mslp:
     needs: plan
-    if: contains(github.event.inputs.products || 'wa,aifs,gfs,temps,mslp,menu,ens,eps,hrrr,rrfs', 'mslp')
+    if: needs.plan.outputs.go == 'true' && contains(needs.plan.outputs.products, 'mslp')
     runs-on: ubuntu-latest
     timeout-minutes: 300
     env:
+      WX_CYCLE_HOUR: ${{ needs.plan.outputs.pin }}   # 12 on the 21:50 cron, the cycle hour on stage runs, else unpinned
       SITE_BATCH: ${{ github.workspace }}/.site_batch
     steps:
       - uses: actions/checkout@v4
@@ -340,15 +393,16 @@ jobs:
           name: mslp-maps
           path: .site_batch
           include-hidden-files: true   # the batch folders start with a dot
-          retention-days: 1
+          retention-days: 3   # staged builds carry products forward from earlier runs
           if-no-files-found: warn
 
   temps:
     needs: [plan, start-w2]
-    if: contains(github.event.inputs.products || 'wa,aifs,gfs,temps,mslp,menu,ens,eps,hrrr,rrfs', 'temps')
+    if: needs.plan.outputs.go == 'true' && contains(needs.plan.outputs.products, 'temps')
     runs-on: ubuntu-latest
     timeout-minutes: 300
     env:
+      WX_CYCLE_HOUR: ${{ needs.plan.outputs.pin }}   # 12 on the 21:50 cron, the cycle hour on stage runs, else unpinned
       SITE_BATCH: ${{ github.workspace }}/.site_batch
     steps:
       - uses: actions/checkout@v4
@@ -379,8 +433,10 @@ jobs:
           fi
           cp .clim/ncep_t2m_6h_ltm_1991_2020.npz .site_batch/clim/
       - name: ECMWF IFS 2 m temp, 2 m anomaly, 850 mb temp/wind (every 6 h to 240 h)
+        if: needs.plan.outputs.stage != 's3'   # stage s3 = AIFS temps only; s4 = IFS temps only
         run: python tools/forecast/temp_maps.py --model ifs --cycle "${{ needs.plan.outputs.cycle }}" --hours 240 --every 6 --views na,pnw,pnwt,wa --products t2m,t2manom,t850
       - name: AIFS 2 m temp, 2 m anomaly, 850 mb temp/wind (every 6 h to 240 h)
+        if: needs.plan.outputs.stage != 's4'
         run: python tools/forecast/temp_maps.py --model aifs --cycle "${{ needs.plan.outputs.cycle }}" --hours 240 --every 6 --views na,pnw,pnwt,wa --products t2m,t2manom,t850
       - name: Keep only the site files
         run: rm -rf .site_batch/clim
@@ -389,17 +445,18 @@ jobs:
           name: temp-maps
           path: .site_batch
           include-hidden-files: true   # the batch folders start with a dot
-          retention-days: 1
+          retention-days: 3   # staged builds carry products forward from earlier runs
           if-no-files-found: warn
 
   hires-hrrr:
     needs: plan
     # a NOAA bucket outage must not block the ECMWF deploy
     continue-on-error: true
-    if: contains(github.event.inputs.products || 'wa,aifs,gfs,temps,mslp,menu,ens,eps,hrrr,rrfs', 'hrrr')
+    if: needs.plan.outputs.go == 'true' && contains(needs.plan.outputs.products, 'hrrr')
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
+      WX_CYCLE_HOUR: ${{ needs.plan.outputs.pin }}   # 12 on the 21:50 cron, the cycle hour on stage runs, else unpinned
       SITE_BATCH: ${{ github.workspace }}/.site_batch
     steps:
       - uses: actions/checkout@v4
@@ -420,17 +477,18 @@ jobs:
           name: hires-hrrr-maps
           path: .site_batch
           include-hidden-files: true   # the batch folders start with a dot
-          retention-days: 1
+          retention-days: 3   # staged builds carry products forward from earlier runs
           if-no-files-found: warn
 
   hires-rrfs:
     needs: [plan, start-w2]
     # a NOAA bucket outage must not block the ECMWF deploy
     continue-on-error: true
-    if: contains(github.event.inputs.products || 'wa,aifs,gfs,temps,mslp,menu,ens,eps,hrrr,rrfs', 'rrfs')
+    if: needs.plan.outputs.go == 'true' && contains(needs.plan.outputs.products, 'rrfs')
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
+      WX_CYCLE_HOUR: ${{ needs.plan.outputs.pin }}   # 12 on the 21:50 cron, the cycle hour on stage runs, else unpinned
       SITE_BATCH: ${{ github.workspace }}/.site_batch
     steps:
       - uses: actions/checkout@v4
@@ -451,7 +509,7 @@ jobs:
           name: hires-rrfs-maps
           path: .site_batch
           include-hidden-files: true   # the batch folders start with a dot
-          retention-days: 1
+          retention-days: 3   # staged builds carry products forward from earlier runs
           if-no-files-found: warn
 
   menu-w3:
@@ -459,7 +517,7 @@ jobs:
     needs: [plan, start-w3]
     # speed_build_v1: one job per model / tier / forecast-hour chunk (menu_plan.py), up to 20 at once (public repo limit);
     # each chunk draws on all 4 cores while the next hours download in the background (menu_maps.py run loop).
-    if: contains(github.event.inputs.products || 'wa,aifs,gfs,temps,mslp,menu,ens,eps,hrrr,rrfs', 'menu') && needs.plan.outputs.menu_w3_any == 'true'
+    if: needs.plan.outputs.go == 'true' && contains(needs.plan.outputs.products, 'menu') && needs.plan.outputs.menu_w3_any == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     strategy:
@@ -467,6 +525,7 @@ jobs:
       max-parallel: 4   # runner budget: GitHub runs 20 jobs at once; caps keep a runner free so each wave's deploy starts at once
       matrix: ${{ fromJSON(needs.plan.outputs.menu_w3) }}
     env:
+      WX_CYCLE_HOUR: ${{ needs.plan.outputs.pin }}   # 12 on the 21:50 cron, the cycle hour on stage runs, else unpinned
       SITE_BATCH: ${{ github.workspace }}/.site_batch
       # products per job tier (plan/menu_v2.md ranking). 2 m temp / 850 / 2 m anomaly come from the temps job.
       # Since 10-24-26 every tier uses the same frames: IFS/AIFS every 6 h to 240 h, HRRR/RRFS hourly. mslp500 dropped.
@@ -523,7 +582,7 @@ jobs:
           name: menu-${{ matrix.model }}-${{ matrix.tier }}-${{ matrix.chunk }}
           path: .site_batch
           include-hidden-files: true   # the batch folders start with a dot
-          retention-days: 1
+          retention-days: 3   # staged builds carry products forward from earlier runs
           if-no-files-found: warn
 
   menu-w4:
@@ -531,7 +590,7 @@ jobs:
     needs: [plan, start-w4]
     # speed_build_v1: one job per model / tier / forecast-hour chunk (menu_plan.py), up to 20 at once (public repo limit);
     # each chunk draws on all 4 cores while the next hours download in the background (menu_maps.py run loop).
-    if: contains(github.event.inputs.products || 'wa,aifs,gfs,temps,mslp,menu,ens,eps,hrrr,rrfs', 'menu') && needs.plan.outputs.menu_w4_any == 'true'
+    if: needs.plan.outputs.go == 'true' && contains(needs.plan.outputs.products, 'menu') && needs.plan.outputs.menu_w4_any == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     strategy:
@@ -539,6 +598,7 @@ jobs:
       max-parallel: 2   # runner budget: GitHub runs 20 jobs at once; caps keep a runner free so each wave's deploy starts at once
       matrix: ${{ fromJSON(needs.plan.outputs.menu_w4) }}
     env:
+      WX_CYCLE_HOUR: ${{ needs.plan.outputs.pin }}   # 12 on the 21:50 cron, the cycle hour on stage runs, else unpinned
       SITE_BATCH: ${{ github.workspace }}/.site_batch
       # products per job tier (plan/menu_v2.md ranking). 2 m temp / 850 / 2 m anomaly come from the temps job.
       # Since 10-24-26 every tier uses the same frames: IFS/AIFS every 6 h to 240 h, HRRR/RRFS hourly. mslp500 dropped.
@@ -595,7 +655,7 @@ jobs:
           name: menu-${{ matrix.model }}-${{ matrix.tier }}-${{ matrix.chunk }}
           path: .site_batch
           include-hidden-files: true   # the batch folders start with a dot
-          retention-days: 1
+          retention-days: 3   # staged builds carry products forward from earlier runs
           if-no-files-found: warn
 
   menu-store:
@@ -623,7 +683,7 @@ jobs:
   menu-reuse:
     # incremental: models whose newest cycle is already published are not redrawn; their saved maps go back into the deploy
     needs: [plan, start-w3]
-    if: contains(github.event.inputs.products || 'wa,aifs,gfs,temps,mslp,menu,ens,eps,hrrr,rrfs', 'menu') && needs.plan.outputs.menu_reuse_any == 'true'
+    if: needs.plan.outputs.go == 'true' && contains(needs.plan.outputs.products, 'menu') && needs.plan.outputs.menu_reuse_any == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -641,11 +701,11 @@ jobs:
           name: menu-reuse-${{ matrix.model }}
           path: .menu_out
           include-hidden-files: true
-          retention-days: 1
+          retention-days: 3   # staged builds carry products forward from earlier runs
 
   ens:
     needs: [plan, start-w3]
-    if: contains(github.event.inputs.products || 'wa,aifs,gfs,temps,mslp,menu,ens,eps,hrrr,rrfs', 'ens')
+    if: needs.plan.outputs.go == 'true' && contains(needs.plan.outputs.products, 'ens')
     runs-on: ubuntu-latest
     timeout-minutes: 300
     strategy:
@@ -654,6 +714,7 @@ jobs:
       matrix:
         src: [eps, aifsens]
     env:
+      WX_CYCLE_HOUR: ${{ needs.plan.outputs.pin }}   # 12 on the 21:50 cron, the cycle hour on stage runs, else unpinned
       SITE_BATCH: ${{ github.workspace }}/.site_batch
     steps:
       - uses: actions/checkout@v4
@@ -674,15 +735,16 @@ jobs:
           name: ens-${{ matrix.src }}
           path: .site_batch
           include-hidden-files: true   # the batch folders start with a dot
-          retention-days: 1
+          retention-days: 3   # staged builds carry products forward from earlier runs
           if-no-files-found: warn
 
   meteograms:
     needs: [plan, start-w3]
-    if: contains(github.event.inputs.products || 'wa,aifs,gfs,temps,mslp,menu,ens,eps,hrrr,rrfs', 'eps') || contains(github.event.inputs.products || 'wa,aifs,gfs,temps,mslp,menu,ens,eps,hrrr,rrfs', 'hrrr') || contains(github.event.inputs.products || 'wa,aifs,gfs,temps,mslp,menu,ens,eps,hrrr,rrfs', 'rrfs')
+    if: needs.plan.outputs.stage == 'all' && (contains(needs.plan.outputs.products, 'eps') || contains(needs.plan.outputs.products, 'hrrr') || contains(needs.plan.outputs.products, 'rrfs'))
     runs-on: ubuntu-latest
     timeout-minutes: 300
     env:
+      WX_CYCLE_HOUR: ${{ needs.plan.outputs.pin }}   # 12 on the 21:50 cron, the cycle hour on stage runs, else unpinned
       METEO_CACHE: ${{ github.workspace }}/.meteo_cache
       SITE_DIR: ${{ github.workspace }}/.meteo_site
     steps:
@@ -715,8 +777,55 @@ jobs:
           name: meteograms
           path: .meteo_site/meteograms
           include-hidden-files: true   # the batch folders start with a dot
-          retention-days: 1
+          retention-days: 3   # staged builds carry products forward from earlier runs
           if-no-files-found: warn
+
+  meteo-stage:
+    # staged builds: meteograms split by model (s1 HRRR, s2 RRFS, s3 EPS), each with its own point cache and its own
+    # made.json; forecast-deploy.yml merges the parts (newest per model) with the ones carried from earlier runs
+    needs: [plan, start-w3]
+    if: needs.plan.outputs.stage != 'all' && needs.plan.outputs.go == 'true' && needs.plan.outputs.meteo_srcs != '[]'
+    continue-on-error: true   # a failed part keeps the older charts of that model on the site
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        src: ${{ fromJSON(needs.plan.outputs.meteo_srcs) }}
+    env:
+      WX_CYCLE_HOUR: ${{ needs.plan.outputs.pin }}
+      METEO_CACHE: ${{ github.workspace }}/.meteo_cache
+      SITE_DIR: ${{ github.workspace }}/.meteo_site
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install Python packages (pinned, permissive licenses)
+        run: pip install -r tools/requirements.txt
+      - name: Restore multi-run point cache (per model; falls back to the full build's shared cache)
+        uses: actions/cache@v4
+        with:
+          path: .meteo_cache
+          key: forecast-meteo-${{ matrix.src }}-${{ github.run_id }}
+          restore-keys: |
+            forecast-meteo-${{ matrix.src }}-
+            forecast-meteo-
+      - name: ${{ matrix.src }} meteograms
+        run: |
+          C="${{ needs.plan.outputs.stage_cycle }}"
+          case "${{ matrix.src }}" in
+            eps) python tools/forecast/meteo_suite.py eps --cycle "$C" --hours 240 --every 6 ;;
+            hrrr) python tools/forecast/meteo_suite.py hrrr --cycle "$C" --hours 48 ;;
+            rrfs) python tools/forecast/meteo_suite.py rrfs --cycle "$C" ;;
+          esac
+      - uses: actions/upload-artifact@v4
+        with:
+          name: meteo-${{ matrix.src }}
+          path: .meteo_site/meteograms
+          include-hidden-files: true
+          retention-days: 3
+          if-no-files-found: error
 
   # Deploy waves (10-25-26). Each wave republishes everything finished so far (Pages replaces the whole site on
   # every deploy), so a slow job only holds back its own and later waves. 4 deploys per run (+1 meteogram project
@@ -727,7 +836,7 @@ jobs:
   # Wave 4: menu heavy extras (IVT, upper winds, PW, thickness, cloud, IR, vis, fog)
   deploy-w1:
     needs: [plan, gfs, mslp, hires-hrrr]
-    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.waves == 'on' && (needs.gfs.result == 'success' || needs.mslp.result == 'success' || needs.hires-hrrr.result == 'success') }}
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.stage == 'all' && needs.plan.outputs.waves == 'on' && (needs.gfs.result == 'success' || needs.mslp.result == 'success' || needs.hires-hrrr.result == 'success') }}
     uses: ./.github/workflows/forecast-deploy.yml
     secrets: inherit
     with:
@@ -738,7 +847,7 @@ jobs:
 
   deploy-w2:
     needs: [plan, deploy-w1, aifs, temps, hires-rrfs, wa-maps]
-    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.waves == 'on' && (needs.aifs.result == 'success' || needs.temps.result == 'success' || needs.hires-rrfs.result == 'success' || needs.wa-maps.result == 'success') }}
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.stage == 'all' && needs.plan.outputs.waves == 'on' && (needs.aifs.result == 'success' || needs.temps.result == 'success' || needs.hires-rrfs.result == 'success' || needs.wa-maps.result == 'success') }}
     uses: ./.github/workflows/forecast-deploy.yml
     secrets: inherit
     with:
@@ -749,7 +858,7 @@ jobs:
 
   deploy-w3:
     needs: [plan, deploy-w2, menu-w3, menu-reuse, ens, meteograms]
-    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.waves == 'on' && (needs.menu-w3.result == 'success' || needs.menu-reuse.result == 'success' || needs.ens.result == 'success' || needs.meteograms.result == 'success') }}
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.stage == 'all' && needs.plan.outputs.waves == 'on' && (needs.menu-w3.result == 'success' || needs.menu-reuse.result == 'success' || needs.ens.result == 'success' || needs.meteograms.result == 'success') }}
     uses: ./.github/workflows/forecast-deploy.yml
     secrets: inherit
     with:
@@ -760,7 +869,7 @@ jobs:
 
   deploy-w4:
     needs: [plan, deploy-w3, menu-w4]
-    if: ${{ !cancelled() && needs.plan.result == 'success' && (needs.plan.outputs.waves != 'on' || needs.menu-w4.result == 'success') }}
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.stage == 'all' && (needs.plan.outputs.waves != 'on' || needs.menu-w4.result == 'success') }}
     uses: ./.github/workflows/forecast-deploy.yml
     secrets: inherit
     with:
@@ -769,13 +878,59 @@ jobs:
       with_meteo: true
       deploy_meteo: ${{ needs.plan.outputs.waves != 'on' }}
 
-  menu-state:
-    # incremental: after a good deploy, record which cycle of each model is now on the site (small JSON in the Actions cache)
-    needs: [plan, menu-w3, menu-w4, menu-store, menu-reuse, deploy-w3, deploy-w4]
-    if: ${{ !cancelled() && (needs.deploy-w4.result == 'success' || (needs.deploy-w3.result == 'success' && needs.deploy-w4.result == 'skipped')) }}
+  deploy-stage:
+    # staged builds: one deploy per stage. The site = this stage's new products laid over every group carried forward
+    # from the runs that last built it (site-state artifact); stops if the main file count drops below 85% of the last.
+    needs: [plan, aifs, gfs, mslp, temps, hires-hrrr, hires-rrfs, menu-w3, menu-w4, menu-reuse, ens, meteo-stage]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.stage != 'all' && needs.plan.outputs.go == 'true' }}
+    uses: ./.github/workflows/forecast-deploy.yml
+    secrets: inherit
+    with:
+      wave: ${{ needs.plan.outputs.stage }}
+      patterns: ${{ needs.plan.outputs.stage_patterns }}
+      with_meteo: false
+      deploy_meteo: ${{ needs.plan.outputs.meteo_srcs != '[]' }}
+      carry: ${{ needs.plan.outputs.carry }}
+      meteo_parts: ${{ needs.plan.outputs.meteo_srcs != '[]' }}
+      min_files: ${{ needs.plan.outputs.min_files }}
+      dry_run: ${{ github.event.inputs.dry_run == 'true' }}
+
+  site-state:
+    # records which run now holds each product group (the next stage carries from these); stage runs and full builds
+    needs: [plan, deploy-stage, deploy-w4]
+    if: ${{ !cancelled() && github.event.inputs.dry_run != 'true' && (needs.deploy-stage.result == 'success' || needs.deploy-w4.result == 'success') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - uses: actions/checkout@v4
+      - name: Write site-state.json
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREV: ${{ needs.plan.outputs.prev_state }}
+          STAGE: ${{ needs.plan.outputs.stage }}
+          CYCLE: ${{ needs.plan.outputs.stage != 'all' && needs.plan.outputs.stage_cycle || needs.plan.outputs.cycle }}
+          FILES_MAIN: ${{ needs.deploy-stage.outputs.files_main || needs.deploy-w4.outputs.files_main }}
+          FILES_METEO: ${{ needs.deploy-stage.outputs.files_meteo || needs.deploy-w4.outputs.files_meteo }}
+        run: python3 tools/forecast/stage_tools.py state --stage "$STAGE" --cycle "$CYCLE" --prev-state "$PREV" --files-main "$FILES_MAIN" --files-meteo "$FILES_METEO"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: site-state
+          path: site-state.json
+          retention-days: 30
+
+  menu-state:
+    # incremental: after a good deploy, record which cycle of each model is now on the site (small JSON in the Actions cache)
+    needs: [plan, menu-w3, menu-w4, menu-store, menu-reuse, deploy-w3, deploy-w4, deploy-stage]
+    if: ${{ !cancelled() && github.event.inputs.dry_run != 'true' && (needs.deploy-w4.result == 'success' || needs.deploy-stage.result == 'success' || (needs.deploy-w3.result == 'success' && needs.deploy-w4.result == 'skipped')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Restore the previous menu state (stage runs update only their own model)
+        uses: actions/cache/restore@v4
+        with:
+          path: .menu_state
+          key: menu-state-${{ github.run_id }}
+          restore-keys: menu-state-
       - name: Write menu_state.json
         env:
           CYCLES: ${{ needs.plan.outputs.menu_cycles }}
@@ -789,7 +944,9 @@ jobs:
           cyc, keys = json.loads(os.environ["CYCLES"] or "{}"), json.loads(os.environ["KEYS"] or "{}")
           reused = {r["model"] for r in json.loads(os.environ["REUSED"] or "[]") if r.get("model") != "none"}
           ok = os.environ["STORED"] == "success"
-          st = {m: {"cycle": cyc[m], "key": keys[m], "published_utc": dt.datetime.now(dt.timezone.utc).isoformat(timespec="minutes")}
+          try: st = json.load(open(".menu_state/menu_state.json"))   # keep models this run did not touch
+          except (OSError, ValueError): st = {}
+          st |= {m: {"cycle": cyc[m], "key": keys[m], "published_utc": dt.datetime.now(dt.timezone.utc).isoformat(timespec="minutes")}
                 for m in cyc if m in reused or ok}
           json.dump(st, open(".menu_state/menu_state.json", "w"), indent=1); print(json.dumps(st))
           PY

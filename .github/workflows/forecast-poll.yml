@@ -1,0 +1,37 @@
+# Staged forecast builds: poller (10-25-26, Benjamin: "whatever the best option is to get me the data faster").
+# Every 20 min: if no Forecast site run is going, finds the first stage whose models have a newer complete 00Z/12Z run
+# than the one on the site (site-state artifact) and starts it (forecast-site.yml, stage=s1..s4, cycle=YYYYMMDDHH).
+#   s1 HRRR (HRRR f48 out about 01:47 / 13:47 UTC)        s2 RRFS + GFS (GFS f240 about 04:38 / 16:37 UTC)
+#   s3 AIFS + EPS/AIFS ENS maps + EPS meteograms (about 07:40 / 19:40 UTC)   s4 ECMWF 9 km (about 09:34 / 21:34 UTC)
+# The backup crons in forecast-site.yml start a stage only if the poller has not published it.
+# To stop: comment out the schedule below (or disable this workflow in the Actions tab). Rollback: web/forecast/README.md.
+name: Forecast poll
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "only report what would be started"
+        type: boolean
+        default: false
+  # schedule:              # ENABLED only after the manual staged test cycle passes
+  #   - cron: "*/20 * * * *"
+
+concurrency:
+  group: forecast-poll
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: write   # start Forecast site runs (workflow_dispatch) and read the site-state artifact
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start the next stage with new data
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/forecast/stage_tools.py poll --ref "${{ github.event.repository.default_branch }}" ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
