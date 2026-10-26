@@ -20,6 +20,7 @@ from matplotlib.colors import BoundaryNorm, ListedColormap
 import meteograms as MG
 import house_style as HS
 import member_grid as GRID_
+import snow_ens as SNOWENS
 
 PT, TOWNS, OUT, CACHE = MG.PT, MG.TOWNS, MG.OUT, MG.CACHE
 BG, PANEL, GRID, INK, MUTED = MG.BG, MG.PANEL, MG.GRID, MG.INK, MG.MUTED
@@ -168,7 +169,9 @@ def save(fig, src, town, pid):
 # ================================================================================================= ECMWF ENS
 EF = "https://data.ecmwf.int/forecasts/{d}/{h:02d}z/ifs/0p25/enfo/{d}{h:02d}0000-{s}h-enfo-ef"
 EF_MIRROR = "https://ecmwf-forecasts.s3.eu-central-1.amazonaws.com/{d}/{h:02d}z/ifs/0p25/enfo/{d}{h:02d}0000-{s}h-enfo-ef"
-CF_PARAMS = {"10fg", "mx2t3", "mn2t3", "tp"}
+CF_PARAMS = {"10fg", "mx2t3", "mn2t3", "tp", "sf"}
+# Snow-total member meteogram (eps_snow_members) reads snowfall past the other charts' range: 6 h steps to this hour.
+SNOW_HOURS = int(os.environ.get("METEO_SNOW_HOURS", "360"))
 # ECMWF renames some ENS fields by step: 10fg3 (3 h max gust) at 93-144 h, mx2t6/mn2t6 (6 h max/min) after 144 h. Stored
 # under the base name so each series is continuous (before 10-25-26 those steps were simply missing from the charts).
 EPS_ALIAS = {"10fg3": "10fg", "mx2t6": "mx2t3", "mn2t6": "mn2t3"}   # control run also fetched for these (member-grid meteograms)
@@ -223,6 +226,8 @@ def eps_fetch(P, c, s, params):
                 got.setdefault(f"{sn}{lev}", {}).setdefault(t, {})[num] = float(v[ii * ni + jj])
             off = i + L
     for k, towns in got.items(): P.put(k, s, {t: [m[x] for x in sorted(m)] for t, m in towns.items()})
+    for p, l in want_cf:   # control field not in this file (open-data ENS often has no cf): cache an empty marker so reruns skip it
+        if key(p) + "_cf" not in got: P.put(key(p) + "_cf", s, {t: [] for t in TOWNS})
     return n
 
 
@@ -253,6 +258,8 @@ def eps_charts(c, towns, prods, hours, every, runs):
     with ThreadPoolExecutor(2) as ex:
         want_p = os.environ.get("METEO_EPS_PARAMS", "").split(",") if os.environ.get("METEO_EPS_PARAMS") else list(EPS_PARAMS)   # tests only
         for k in ex.map(lambda s: eps_fetch(P, c, s, want_p), steps): n += k
+        xsteps = [s for s in range(hours + 6 - hours % 6, SNOW_HOURS + 1, 6)] if "eps_snow_members" in prods and SNOW_HOURS > hours else []
+        for k in ex.map(lambda s: eps_fetch(P, c, s, ["sf"]), xsteps): n += k   # snowfall only, past the main range
     P.save()
     past = []   # earlier runs for multi-run charts: whatever is cached, plus fetch the light fields for missing ones
     if any(p.startswith("eps_mr_") for p in prods):
@@ -368,7 +375,16 @@ def eps_charts(c, towns, prods, hours, every, runs):
         i6 = [i for i, s_ in enumerate(steps) if s_ % 6 == 0 and s_]
         grid("eps_qpf_members", "Total Precipitation: Each Member + Mean", "in", "Run total from the start of the run to each time (liquid)",
              [T[i] for i in i6], tp[i6], tpc[i6], f2, QL, QC)
-        mk("eps_snow_members", "Total Snow by Member (10:1)", "inches of snow", totals_bar(sn, SNOW, "in"))
+        if "eps_snow_members" in prods:   # 10-25-26: member grid + spread chart, to SNOW_HOURS (was a sorted bar of run totals)
+            st_s = steps + xsteps; T_s = [c + dt.timedelta(hours=s_) for s_ in st_s]
+            A_s = eps_series(P, "sf", town, st_s) * 10000 / 25.4; A_s[0] = 0
+            A_c = eps_series(P, "sf_cf", town, st_s)[:, 0] * 10000 / 25.4; A_c[0] = 0 if np.isfinite(A_c[1:]).any() else np.nan
+            okc = [i for i in range(len(st_s)) if np.isfinite(A_s[i]).any()]
+            st_s, T_s, A_s, A_c = [st_s[i] for i in okc], [T_s[i] for i in okc], A_s[okc], A_c[okc]
+            p_ = f"{OUT}/eps/{town}/eps_snow_members.png"; os.makedirs(os.path.dirname(p_), exist_ok=True)
+            SNOWENS.snow_ens_png(p_, f"{name}  \u00b7  Snow Totals by Member", f"{run}  \u00b7  0-{st_s[-1]} h", CREDIT["eps"],
+                                 T_s, st_s, A_s, A_c if np.isfinite(A_c[1:]).any() else None)
+            print("wrote", p_); made.setdefault(town, {})["eps_snow_members"] = p_
         q24, s24 = roll(tp, 24), roll(sn, 24)
         def d_roll(A, col):
             def d(ax): members(ax, T, A, col); floor0(ax); legend(ax, "upper left")
