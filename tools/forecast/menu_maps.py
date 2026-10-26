@@ -171,8 +171,8 @@ def aloft_cmap(lev):
 
 # ---------------------------------------------------------------------------------------------- drawing helpers
 def views_for(m, wanted, allowed_global, allowed_hires):
-    if m in HIRES:
-        w = ["pnwhr" if v == "pnw" else v for v in wanted]; return [v for v in dict.fromkeys(w) if v in allowed_hires]
+    if m in HIRES:   # "pnw" asks for the high-res frame; products listing "pnw" in allowed_hires also get the full PNW frame (clipped)
+        w = [x for v in wanted for x in (("pnwhr", "pnw") if v == "pnw" else (v,))]; return [v for v in dict.fromkeys(w) if v in allowed_hires]
     return [v for v in wanted if v in allowed_global]
 
 
@@ -912,6 +912,9 @@ G_NAPNW, H_PNW, H_PNWWA, G_ALL, G_PNWWA = ("na", "pnw"), ("pnwhr",), ("pnwhr", "
 G_NAPNWT, G_ALLT, G_PNWTWA, G_PNWT = ("na", "pnw", "pnwt"), ("na", "pnw", "pnwt", "wa"), ("pnw", "pnwt", "wa"), ("pnw", "pnwt")
 # GFS (10-24-26): removed from every menu product; its only maps are the 500 mb anomaly and sea-level pressure (gfs_maps.py).
 # The old GFS entries and the dropped mslp500 product are in archive/gfs_products_20261024/ (README there says how to restore).
+# 10-26-26 (Benjamin 6:41 AM): HRRR/RRFS also on the full Pacific NW frame for the two MSLP combo maps; the 3 km grid covers
+# only its SE part (NW corner near 48N 134W), the rest of the frame stays plain basemap.
+H_PNWFULL = ("pnwhr", "pnw", "wa")
 PRODUCTS = {   # name: (function, models, global views, high-res views)
     "gust10": (prod_gust10, ("ifs", "hrrr", "rrfs"), G_ALLT, H_PNWWA),
     "peakgust": (prod_peakgust, ("ifs", "hrrr", "rrfs"), G_ALLT, H_PNWWA),
@@ -921,9 +924,9 @@ PRODUCTS = {   # name: (function, models, global views, high-res views)
     "t500": (prod_aloft(500), ("ifs", "aifs", "hrrr"), G_NAPNW, H_PNW),
     "t300": (prod_aloft(300), ("ifs", "aifs", "hrrr"), G_NAPNW, H_PNW),
     "td2m": (prod_td2m, ("ifs", "hrrr", "rrfs"), G_ALLT, H_PNWWA),
-    "mslpptype": (prod_mslpptype, ("ifs", "hrrr", "rrfs"), G_ALL, H_PNWWA),
+    "mslpptype": (prod_mslpptype, ("ifs", "hrrr", "rrfs"), G_ALL, H_PNWFULL),
     # 10-25-26: HRRR / RRFS pills on the "MSLP + 10 m wind" combo tab (ECMWF 9 km and AIFS come from gfs_maps / aifs_maps)
-    "aifswind": (prod_mslpwind, ("hrrr", "rrfs"), (), H_PNWWA),
+    "aifswind": (prod_mslpwind, ("hrrr", "rrfs"), (), H_PNWFULL),
     "snowkuch": (prod_snowkuch, ("ifs", "hrrr"), G_ALL, H_PNWWA),
     "snow10": (prod_snow10, ("ifs", "hrrr", "rrfs"), G_ALL, H_PNWWA),
     "snowk24": (prod_snowk24, ("ifs", "hrrr"), G_ALL, H_PNWWA),
