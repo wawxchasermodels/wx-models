@@ -145,7 +145,7 @@ These rules apply to every model product: AIFS, GFS, GEFS, ECMWF/EPS, HRRR, RRFS
   Isobar labels that touch a number are removed. TOWN_NUMBERS=0 turns every number off.
 - Mountain passes (added 10-24-26 10:22 PM request): on the same Washington-view maps that carry town numbers, 12 passes from
   temp_maps.WA_PASSES (Snow tab table + WSDOT pass-watcher points; Stampede not in either list). Small plum (#3b2a5c) triangle,
-  8 pt italic name without "Pass" (except Washington Pass), bold 9.5 pt value. Placed after towns: right, left, above, below;
+  8 pt italic name without "Pass", bold 9.5 pt value. Placed after towns: right, left, above, below;
   label dropped (triangle kept, logged) if it cannot clear every town label/number/dot. Value = model at the pass point, no
   terrain correction. PASS_LABELS=0 turns passes off.
 - Pass height correction (Benjamin 10-24-26 10:32 PM): pass values on temperature and feels-like maps = model value + 3.5 F per
@@ -154,3 +154,17 @@ These rules apply to every model product: AIFS, GFS, GEFS, ECMWF/EPS, HRRR, RRFS
   WSDOT elevations (checked vs USGS 3DEP). Never applied to gusts, precip, snow, ice or visibility, and never to towns.
   PASS_HEIGHT_CORR=0 turns it off. Washington tab maps: same rule in tools/wa_maps/pass_terrain.py (nbm_map.py lows/highs only;
   NBM terrain = URMA 2.5 km HGT, EPS terrain = ECMWF 0.25 deg z, static files in tools/wa_maps/assets/terrain_*.npz).
+
+## Town labels v2 (Benjamin 10-25-26 9:46 PM; branch town-labels, not live)
+- Washington view: 34 towns (`temp_maps.WA_TOWNS`). Added: Victoria BC, Mount Vernon, Oak Harbor, Port Townsend, Arlington, Sumas,
+  Neah Bay, Long Beach, Cannon Beach OR, Chehalis, Shelton, Winthrop, Oroville, Pendleton OR (Forks was already there). They get
+  the same numbers as the other towns (read at the town point; no official-station pin).
+- Placement: list order = priority. Each "Name 54" group tries its preferred side (r/l/a/b), then the other sides and four
+  diagonal nudges, and must clear every town dot, every label already placed and the frame. Then the number under the name;
+  then name only (number dropped, logged); a name with no room at all is dropped (logged). Passes are placed after towns.
+- Passes removed: Washington Pass, Loup Loup Pass (also from the Washington tab maps in tools/wa_maps) and Cayuse Pass.
+- Pacific NW views (pnwhr, pnwt): dot + name only, no numbers. Cities from Natural Earth populated places
+  (web/forecast/obs/basemap.json "places", metro population). Order: tier 1 (250k+), then the WA towns above that fall in the
+  frame, then tier 2 (60k+) and tier 3 (15k+ pnwhr, 20k+ pnwt) by population; at most 60 (pnwhr) / 55 (pnwt) tried; labels
+  without room are skipped and counted in the log. Duplicate names in a frame keep the bigger place. REGION_TOWNS=0 = off.
+- NA and the big PNW frame (upper air) stay without towns. Labels only: no new views or files.
