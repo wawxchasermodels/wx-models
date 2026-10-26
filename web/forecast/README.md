@@ -42,3 +42,28 @@ Needs repo secrets `CF_PAGES_KEY` and `CLOUDFLARE_ACCOUNT_ID`, and optionally th
 ## Washington map shards archived (10-25-26)
 The WA shard job is off (it runs only when the repo variable `WA_SHARDS` is `on`; unset = off); Washington precip now comes from the menu's Precip total
 (Washington view for ECMWF 9 km, HRRR, RRFS; Pacific NW tight for ECMWF). Restore steps: `RESTORE_WA_SHARDS.md`.
+
+## Staged builds (10-25-26, PR #19)
+Each 00Z/12Z cycle is published in four stages, each as soon as its models are out (times are UTC, from the
+Last-Modified of each model's last file):
+
+| Stage | Products | Data ready (UTC) |
+|---|---|---|
+| s1 | HRRR temps, HRRR menu maps, HRRR meteograms | about 01:47 / 13:47 |
+| s2 | RRFS temps/menu/meteograms, GFS 500 mb + SLP | about 04:38 / 16:37 (GFS f240) |
+| s3 | AIFS maps/temps/menu, EPS + AIFS ENS lows, EPS meteograms | about 07:40 / 19:40 |
+| s4 | ECMWF 9 km MSLP/precip, SLP, temps, menu | about 09:34 / 21:34 |
+
+How it works:
+- **Triggers.** `forecast-poll.yml` runs every 20 min. When no Forecast site run is going, it starts the first stage whose models have a newer complete run than the site (`stage=sN cycle=YYYYMMDDHH`). Backup crons in `forecast-site.yml` (`0 2,14`, `50 4,16`, `50 7,19`, `50 9,21` UTC) start a stage only if it has not been published yet.
+- **What each stage does.** A stage renders only its own groups. Its single deploy contains the whole site: its new products laid over every group carried forward from the run that last built it. Only the newest cycle of each product is kept.
+- **Site state.** The `site-state` artifact (30 days) says which run holds each group. Map artifacts are kept 3 days. If the state or a carried artifact is gone, the stage stops before deploying. A full build (`stage=all`) reseeds everything.
+- **Safety check.** There is no deploy if the main site would have fewer than 85% of the last deploy's files, or more than 19,500.
+- **Deploys.** 4 main deploys plus 3 meteogram-project deploys (s1-s3) per cycle, about 434 a month (Pages Free limit: 500).
+- **Manual runs.** Actions > Forecast site > Run workflow with `stage=s1`..`s4` (optional `cycle`, `dry_run`). Default `stage=all` is the old full build, unchanged.
+
+Rollback to the once-a-day full build:
+1. Comment out the `schedule:` block in `.github/workflows/forecast-poll.yml`, or disable "Forecast poll" in the Actions tab.
+2. In `forecast-site.yml`, comment out the four staged backup crons and make sure `- cron: "50 21 * * *"` is active.
+3. Optional: run Forecast site with the default inputs (`stage=all`) once. That rebuilds the whole site from one run and reseeds the site state.
+No secrets, tokens or Cloudflare settings change in either direction. The staged code stays in place and is inert without its triggers.
