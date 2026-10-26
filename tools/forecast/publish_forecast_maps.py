@@ -123,7 +123,7 @@ TABS = [  # order = tab order on the site; most used first
     {"id": "waves", "label": "Waves", "periods": [("step", "Each step"), ("max24h", "24-hour max wave")],
      "views": [("full", "WA coast and Sound"), ("vi", "Vancouver Island (metric)")]},
     {"id": "bcrain", "label": "BC rain", "models": ["ECMWF 9 km", "EPS mean", "EPS 90th pct"], "periods": P_ACC, "views": [("bc", "Southern BC"), ("lowermainland", "Lower Mainland")]},
-    {"id": "aifs500", "label": "500 mb anomaly", "models": ["AIFS", "GFS"], "periods": [("step", "Every 6 h")],
+    {"id": "aifs500", "label": "500 mb anomaly", "models": ["ECMWF 9 km", "AIFS", "GFS"], "periods": [("step", "Every 6 h")],
      "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwt", "Pacific NW tight")]},
     {"id": "aifsmslp", "label": "Sea-level pressure", "models": ["ECMWF 9 km", "AIFS", "GFS"], "periods": [("step", "Every 6 h")],
      "views": [("na", "North America"), ("pnw", "Pacific NW"), ("pnwt", "Pacific NW tight")]},

@@ -8,7 +8,7 @@ archive/gfs_products_20261024/):
 Views: North America, Pacific NW, Pacific NW tight. Every 6 h to 240 h from the latest 00Z/12Z run.
 Data: NOAA GFS 0.25 deg (AWS open data, public domain). Basemap: Natural Earth. NOT scheduled; run by hand:
   python tools/forecast/gfs_maps.py [--cycle YYYYMMDDHH] [--hours 240] [--every 6] [--views na,pnw,pnwt] [--products z500,mslp]
-Writes $SITE_BATCH/<cycle>/aifs500-gfs|aifsmslp-gfs/step/<view>/<valid>/final.jpg + site_frame.json
+Writes $SITE_BATCH/<cycle>/aifs500-<model>|aifsmslp-<model>/step/<view>/<valid>/final.jpg + site_frame.json
 (tab aifs500 / aifsmslp, model "GFS", so they show as a GFS pill on the AIFS tabs).
 --model ifs --products mslp (10-25-26): the same Sea-Level Pressure map from ECMWF IFS open data (0.1 deg), written to
 aifsmslp-ifs/ as the "ECMWF 9 km" pill on the Sea-level pressure tab (run in the workflow's mslp job).
@@ -25,7 +25,8 @@ if __name__ == "__main__":
     ap.add_argument("--views", default="na,pnw,pnwt"); ap.add_argument("--products", default="z500,mslp")
     ap.add_argument("--model", default="gfs", choices=["gfs", "ifs"])
     a = ap.parse_args(); M = a.model
-    if M == "ifs": a.products = "mslp"   # no IFS anomaly map here (the 500 mb anomaly tab stays AIFS + GFS)
+    # 10-25-26 (Benjamin): ECMWF 9 km 500 mb height anomaly too, as the "ECMWF 9 km" pill on the 500 mb anomaly tab (Aloft);
+    # same climatology (NCEP/NCAR R1 1991-2020 monthly mean) and renderer as the AIFS/GFS anomaly maps
     c = dt.datetime.strptime(a.cycle, "%Y%m%d%H").replace(tzinfo=dt.timezone.utc) if a.cycle else MM.latest(M)
     steps = [int(x) for x in a.steps.split(",")] if a.steps else list(range(0, min(a.hours, 240) + 1, a.every))
     views = [v for v in a.views.split(",") if v in AM.VIEWS]; tot = 0
@@ -34,10 +35,12 @@ if __name__ == "__main__":
         try:
             if "z500" in a.products:
                 lat, lon, z = R.f("Z:500"); z = z / 10.0   # gpm -> dam
+                if M == "ifs":   # 0.1 deg: light smoothing so the contours read like the 0.25 deg AIFS/GFS maps
+                    from scipy.ndimage import gaussian_filter; z = gaussian_filter(z, 1.5)
                 an = z - AM.clim_at(c + dt.timedelta(hours=s), lat, lon)
                 for v in views:
-                    out = f"{AM.ROOT}/{c:%Y%m%d%H}/aifs500-gfs/step/{v}/{vt}"
-                    AM.render(c, s, lat, lon, z, an, v, out, src="gfs"); print("ok", out, flush=True)
+                    out = f"{AM.ROOT}/{c:%Y%m%d%H}/aifs500-{M}/step/{v}/{vt}"
+                    AM.render(c, s, lat, lon, z, an, v, out, src=M); print("ok", out, flush=True)
             if "mslp" in a.products:
                 lat, lon, p = R.f("msl")
                 if M == "ifs":   # 0.1 deg MSLP is noisy over terrain: smooth to about the GFS/AIFS 0.25 deg look
