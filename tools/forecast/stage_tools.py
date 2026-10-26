@@ -19,7 +19,8 @@ Subcommands:
   poll     (forecast-poll.yml)            -> dispatches the next stage whose models have a new, unpublished run
 Needs GH_TOKEN (actions: read; poll dispatch needs actions: write) and GITHUB_REPOSITORY.
 """
-import argparse, datetime as dt, fnmatch, glob, json, os, re, shutil, subprocess, sys, tempfile, urllib.request
+import argparse
+import time, datetime as dt, fnmatch, glob, json, os, re, shutil, subprocess, sys, tempfile, urllib.request
 
 UTC = dt.timezone.utc
 STAGES = ("s1", "s2", "s3", "s4")
@@ -391,16 +392,16 @@ def cmd_state(a):
 
 
 # ---------------------------------------------------------------------------------------------------------- poll
-def cmd_poll(a):
+def poll_once(a):
     r = sh("gh", "run", "list", "-R", repo(), "-w", "forecast-site.yml", "-L", "40", "--json", "status,displayTitle,databaseId")
     runs = json.loads(r.stdout)
     busy = [x for x in runs if x["status"] in ("queued", "in_progress", "waiting", "pending", "requested")]
     if busy:
         print(f"forecast-site busy ({busy[0]['displayTitle']}, run {busy[0]['databaseId']}); next poll will check again")
-        return
+        return "busy"
     _, st = latest_state()
     if not st:
-        print("::warning::no site-state artifact; poller waits for a full build"); return
+        print("::warning::no site-state artifact; poller waits for a full build"); return "nothing"
     due = []
     for s in STAGES:
         c = ready_cycle(s)
@@ -412,12 +413,26 @@ def cmd_poll(a):
         elif c and c > pub:
             due.append((c, STAGES.index(s), s))
     if not due:
-        print("nothing new"); return
+        print("nothing new"); return "nothing"
     c, _, s = min(due)
     print(f"dispatch {s} for {c}")
     if a.dry_run:
-        print("dry run: not dispatching"); return
+        print("dry run: not dispatching"); return "dispatched"
     sh("gh", "workflow", "run", "forecast-site.yml", "-R", repo(), "--ref", a.ref, "-f", f"stage={s}", "-f", f"cycle={c}")
+    return "dispatched"
+
+
+def cmd_poll(a):
+    """GitHub runs the */10 schedule late (30-45 min apart on 10-26-26), so one poll keeps checking every 2 min for up
+    to --wait-min minutes (while nothing is new, or while a stage run is going) and starts the next stage the moment it
+    is due. Stops after one dispatch."""
+    end = time.time() + 60 * a.wait_min
+    while True:
+        res = poll_once(a)
+        if res == "dispatched" or time.time() + 120 > end:
+            return
+        print(f"{dt.datetime.now(UTC):%H:%M} UTC: {res}; checking again in 2 min", flush=True)
+        time.sleep(120)
 
 
 def main():
@@ -431,6 +446,7 @@ def main():
     p.add_argument("--riders", default="{}")
     p.add_argument("--out", default="site-state.json")
     p = sp.add_parser("poll"); p.add_argument("--dry-run", action="store_true"); p.add_argument("--ref", default="main")
+    p.add_argument("--wait-min", type=float, default=0, help="keep checking every 2 min for this long (scheduled polls: 45)")
     a = ap.parse_args()
     {"plan": cmd_plan, "collect": cmd_collect, "state": cmd_state, "poll": cmd_poll}[a.cmd](a)
 

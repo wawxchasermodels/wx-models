@@ -29,10 +29,10 @@ permissions:
 jobs:
   poll:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 55   # scheduled polls keep checking for up to 45 min (GitHub runs the schedule late)
     steps:
       - uses: actions/checkout@v4
       - name: Start the next stage with new data
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 tools/forecast/stage_tools.py poll --ref "${{ github.event.repository.default_branch }}" ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
+        run: python3 tools/forecast/stage_tools.py poll --ref "${{ github.event.repository.default_branch }}" --wait-min ${{ github.event_name == 'schedule' && '45' || '0' }} ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
