@@ -43,7 +43,7 @@ EC = {"gust": ("10fg", None, "sfc"), "t2m": ("2t", None, "sfc"), "td2m": ("2d", 
 NO = {"gust": "GUST:surface", "t2m": "TMP:2 m above ground", "td2m": "DPT:2 m above ground", "u10": "UGRD:10 m above ground",
       "v10": "VGRD:10 m above ground", "msl": "PRMSL:mean sea level", "sp": "PRES:surface", "prate": "PRATE:surface",
       "pwat": "PWAT:entire atmosphere (considered as a single layer)", "orog": "HGT:surface", "crain": "CRAIN:surface", "csnow": "CSNOW:surface", "cfrzr": "CFRZR:surface", "cicep": "CICEP:surface"}
-NO_HIRES_MSL = "MSLMA:mean sea level"
+NO_HIRES_MSL = {"hrrr": "MSLMA:mean sea level", "rrfs": "MSLET:mean sea level"}   # 10-25-26: RRFS 2dfld has no MSLMA, only MSLET (Eta reduction)
 NO_BY = {"tcc": {"gfs": "TCDC:entire atmosphere", "hrrr": "TCDC:entire atmosphere", "rrfs": "TCDC:entire atmosphere (considered as a single layer)"},
          "vis": {"gfs": "VIS:surface", "hrrr": "VIS:surface", "rrfs": "VIS:surface"},
          "ir": {"hrrr": "SBT124:top of atmosphere", "rrfs": "SBTA1613:top of atmosphere"}}   # 10.7 um GOES imager ch4 / ABI band 13
@@ -90,7 +90,7 @@ class Reader:
             if ":" in name:
                 v, lev = name.split(":"); key = f"{ {'T': 'TMP', 'U': 'UGRD', 'V': 'VGRD', 'Z': 'HGT', 'Q': 'SPFH'}[v]}:{lev} mb"
             else:
-                key = NO_HIRES_MSL if (name == "msl" and self.m in HIRES) else (NO_BY[name].get(self.m) if name in NO_BY else NO.get(name))
+                key = NO_HIRES_MSL[self.m] if (name == "msl" and self.m in HIRES) else (NO_BY[name].get(self.m) if name in NO_BY else NO.get(name))
                 if key is None: raise KeyError(name)
             src = self.prs if " mb" in key else self.url
             r = self._idx(key, src)
@@ -460,6 +460,28 @@ def prod_mslp500(m, c, step, R, vids, ctx):
         HS.clear_labels_near(fig, lab, mk)
         finish(fig, ax, m, c, step, v, outdir(c, "mslp500", m, v, step), "mslp500", "MSLP + 500 mb Height",
                "fill = 500 mb height  \u00b7  isobars every 4 mb"); print("ok", m, "mslp500", v, step, flush=True)
+
+
+def prod_mslpwind(m, c, step, R, vids, ctx):
+    """MSLP + 10 m Wind for HRRR / RRFS (Benjamin 10-25-26 9:26 PM), drawn as HRRR / RRFS pills on the existing "MSLP + 10 m wind"
+    combo tab (tab id aifswind; the AIFS and ECMWF 9 km pills come from aifs_maps.render_mslp). Same look: 10 m wind speed fill
+    in mph (house_style wind scale), haloed isobars every 4 mb, barbs in kt. 3 km grids: no H/L (centers are noisy), like
+    MSLP + P-type. Winds are earth-relative (Reader); MSLP is the NOAA MSLMA reduction used by the other 3 km pressure maps."""
+    la, lo, p = R.f("msl"); _, _, u = R.f("u10"); _, _, w = R.f("v10"); wc = HS.wind_cmap()
+    for v in vids:
+        LA, LO, (P, U, Vw) = TM.cut(la, lo, [p / 100.0, u, w], v)
+        hires = np.ndim(LA) == 2
+        spd = gaussian_filter(np.hypot(U, Vw) * MPH, 1.5 if hires else 1.0)
+        fig, ax, ky = TM.frame(v); f = fill(ax, LO, LA, spd, HS.WIND_LEVELS, wc, "max")
+        HS.outlines(ax, cf, res="10m" if v == "wa" else "50m")
+        lab, mk = isobars_hl(fig, ax, LA, LO, P, v)
+        barbs(fig, ax, LO, LA, U, Vw, v)
+        HS.hbar(fig, f, HS.WIND_TICKS, "10 m wind (mph)", ky)
+        HS.clear_labels_near(fig, lab, mk)
+        lo_, hi_ = np.nanpercentile(spd, [0.5, 99.5])
+        finish(fig, ax, m, c, step, v, outdir(c, "aifswind", m, v, step), "aifswind", "MSLP + 10 m Wind",
+               f"isobars every 4 mb  \u00b7  barbs in kt  \u00b7  up to {hi_:.0f} mph in view", town=(LA, LO, spd))
+        print("ok", m, "aifswind", v, step, flush=True)
 
 
 def ptype_fields(m, R):
@@ -899,6 +921,8 @@ PRODUCTS = {   # name: (function, models, global views, high-res views)
     "t300": (prod_aloft(300), ("ifs", "aifs", "hrrr"), G_NAPNW, H_PNW),
     "td2m": (prod_td2m, ("ifs", "hrrr", "rrfs"), G_PNWTWA, H_PNWWA),
     "mslpptype": (prod_mslpptype, ("ifs", "hrrr", "rrfs"), G_PNWWA, ("wa",)),
+    # 10-25-26: HRRR / RRFS pills on the "MSLP + 10 m wind" combo tab (ECMWF 9 km and AIFS come from gfs_maps / aifs_maps)
+    "aifswind": (prod_mslpwind, ("hrrr", "rrfs"), (), H_PNWWA),
     "snowkuch": (prod_snowkuch, ("ifs", "hrrr"), ("pnw",), H_PNW),
     "snow10": (prod_snow10, ("ifs", "hrrr", "rrfs"), ("pnw",), H_PNW),
     "snowk24": (prod_snowk24, ("ifs", "hrrr"), G_PNWWA, H_PNWWA),
