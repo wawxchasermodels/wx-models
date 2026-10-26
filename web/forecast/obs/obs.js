@@ -3,13 +3,15 @@
      Canada  Environment and Climate Change Canada, MSC GeoMet OGC API "swob-realtime" (Open Government Licence - Canada)
      US      NOAA/NWS ASOS + AWOS via the Iowa Environmental Mesonet currents API
    Layers (toggle chips, any combination; choice kept in localStorage "obsLayers", or "#...&l=plot,hi" in the URL):
-     Station plot   current temperature (deg F), gust (mph), wind barb (kt)        -> numbers left of the circle
+     Station plot   current temperature (deg F), gust (mph), wind barb (kt)        -> numbers left of the station point
      High / Low     today's max / min temperature since local midnight at the station -> joins the left column
-     Peak gust      today's peak gust since local midnight (mph)                    -> right of the circle
+     Peak gust      today's peak gust since local midnight (mph)                    -> right of the station point
      Wind chill / heat index   NWS formulas from the current ob (only where they apply) -> right column
      MSLP           station sea-level pressure (hPa) plus a Barnes-analysed isobar overlay
    "Today" in the US comes from IEM's per-station daily summary (station's own local calendar day); in Canada it is
    built in the browser from the hourly SWOB reports since local midnight (fetched only when a daily layer is on).
+   No station dot is drawn: the wind barb starts at the station point (a ring marks calm wind) and the numbers hug it;
+   with no barb or ring, a single number column is centred on the station point instead.
    Declutter by zoom, airports/official first.
    Self-contained module: obs/obs.js + obs/obs.css + obs/basemap.json. It builds its own markup inside a mount element.
      On the forecast site:  <div id="obs-root"> inside the Observations tab pane; forecast.js calls Obs.show() / Obs.hide().
@@ -342,13 +344,13 @@ const Obs = (() => {
 
   /* ---- style: our own dark slate look ---- */
   const C = { water: "#0e1825", land: "#343c47", lake: "#0e1825", coast: "#62788b", state: "rgba(214,222,232,.20)", border: "rgba(238,229,210,.62)",
-    barb: "#cfe3ee", dot: "#e9eef3", dot2: "#9fb0bf", gust: "#ff5ec4", halo: "rgba(9,14,22,.92)", city: "#efe9de", cityDot: "#f0e6d2", town: "#c2bbb0", townDot: "#b5ad9f", region: "rgba(205,214,226,.26)",
+    barb: "#cfe3ee", gust: "#ff5ec4", halo: "rgba(9,14,22,.92)", city: "#efe9de", cityDot: "#f0e6d2", town: "#c2bbb0", townDot: "#b5ad9f", region: "rgba(205,214,226,.26)",
     iso: "rgba(127,224,181,.62)", isoCase: "rgba(9,14,22,.45)" };
   const KC = Object.fromEntries(LAYERS.map((l) => [l.id, l.sw]));   // number colours by kind
   KC.wc = LAYERS[4].sw; KC.hx = LAYERS[4].sw2; KC.p = KC.mslp; KC.g = "#ff5ec4";
   const tempColor = (t) => (Math.round(t) <= 32 ? "#8fd3ff" : "#ffffff");   // white; light blue at or below freezing
   const TOWN_FONT = "500 11px 'Outfit', system-ui, sans-serif", ISO_FONT = "600 12px 'IBM Plex Mono', ui-monospace, monospace";
-  const Z = 1.5;   // station-plot scale (text, circle, barb, spacing all scale together)
+  const Z = 1.5;   // station-plot scale (text, barb, ring, spacing all scale together)
   // station numbers: NF halves them on phone-sized screens (same breakpoint as obs.css, max-width 640px); desktop NF = 1
   const PHONE_NF = 0.5, phoneMQ = window.matchMedia ? window.matchMedia("(max-width: 640px)") : null;
   let NF = 1, FONT, FONT_S;   // FONT_S is used when a station shows 3+ numbers
@@ -472,7 +474,7 @@ const Obs = (() => {
     if (s.ws < 2.5 || s.wd == null) return { calm: true, lines: [], flags: [] };
     const a = s.wd * D - S.P.n * (s.lon * D - S.P.L0);     // grid north differs from true north on a conic map
     const ux = Math.sin(a), uy = -Math.cos(a);                // staff points toward where the wind comes FROM
-    const L = 24 * Z, r0 = 3.5 * Z, ex = px + ux * (L + r0), ey = py + uy * (L + r0), bx = px + ux * r0, by = py + uy * r0;
+    const L = 27.5 * Z, ex = px + ux * L, ey = py + uy * L, bx = px, by = py;   // staff starts right at the station (no dot)
     const fx = -uy, fy = ux;                                  // clockwise of the staff = northern-hemisphere side (as MetPy/matplotlib)
     const FL = 10 * Z, step = 3.6 * Z, lines = [[bx, by, ex, ey]], flags = [];
     const at = (o) => [ex - ux * o, ey - uy * o];
@@ -543,11 +545,11 @@ const Obs = (() => {
     let inView = 0;
     const tryStation = (s) => {
       const px = sx(s.x), py = sy(s.y);
-      const rs = [[px - 4 * Z, py - 4 * Z, px + 4 * Z, py + 4 * Z]];
+      const rs = [[px - 3 * Z, py - 3 * Z, px + 3 * Z, py + 3 * Z]];   // keep the bare station point clear
       const [L, R] = linesFor(s);
       const bg = plot ? barbGeom(s, px, py) : null, barbBoxes = [];
       if (bg) {
-        if (bg.calm) barbBoxes.push([px - 6 * Z, py - 6 * Z, px + 6 * Z, py + 6 * Z]);
+        if (bg.calm) barbBoxes.push([px - 7.5 * Z, py - 7.5 * Z, px + 7.5 * Z, py + 7.5 * Z]);
         // barbs are thin diagonals: reserve small boxes sampled along every stroke instead of one coarse bounding box
         for (const l of [...bg.lines, ...bg.flags]) for (let i = 0; i + 3 < l.length; i += 2) {
           const n = Math.max(1, Math.ceil(Math.hypot(l[i + 2] - l[i], l[i + 3] - l[i + 1]) / 5));
@@ -555,9 +557,9 @@ const Obs = (() => {
         }
       }
       rs.push(...barbBoxes);
-      // numbers sit LEFT of the circle (temp over gust); if the barb points left, slide them
+      // numbers sit LEFT of the station point (temp over gust); if the barb points left, slide them
       // below or above it, and only as a last resort put them on the right
-      const lab = numbers(g, L, R, px, py, barbBoxes);
+      const lab = numbers(g, L, R, px, py, barbBoxes, bg && bg.calm, !bg);
       if (lab) rs.push(...lab.rects); else if (L.length || R.length) return;
       const prs = rs.map((r) => pad(r, M));
       if (!B.fits(prs)) return;
@@ -636,26 +638,29 @@ const Obs = (() => {
     g.shadowColor = "transparent"; g.shadowBlur = 0; g.shadowOffsetX = 0; g.shadowOffsetY = 0;
   }
 
-  // lay out the number columns beside a station circle: left column (temperatures, current gust) prefers the LEFT and the
+  // lay out the number columns beside a station point: left column (temperatures, current gust) prefers the LEFT and the
   // right column (pressure, feels-like, peak gust) prefers the RIGHT; each slides below/above a barb in its way and only as a
   // last resort swaps sides. Returns draw items and the rectangles they cover, or null if there is no room.
-  // With only the station plot on this is exactly the original layout (temp over gust, left of the circle).
-  function numbers(g, L, R, px, py, avoid) {
+  // With only the station plot on this is exactly the original layout (temp over gust, left of the station point).
+  // bare = nothing else marks the station (no barb, no calm ring): a lone column is then centred on the station point.
+  function numbers(g, L, R, px, py, avoid, calm, bare) {
     if (!L.length && !R.length) return null;
     const small = L.length + R.length > 2, font = small ? FONT_S : FONT;
-    const asc = (small ? 8.8 : 10) * Z * NF, gap = 2 * Z * NF, off = 7 * Z;
+    const asc = (small ? 8.8 : 10) * Z * NF, gap = 2 * Z * NF, off = (calm ? 8.5 : 4.5) * Z;   // no station dot, so the numbers sit close (just outside a calm ring)
     g.font = font;
     const hits = (rects, others) => rects.some((r) => others.some((o) => r[0] < o[2] && r[2] > o[0] && r[1] < o[3] && r[3] > o[1]));
+    const lone = bare && (!L.length || !R.length);
     const column = (lines, pref, others) => {
       if (!lines.length) return { items: [], rects: [] };
       for (const ln of lines) ln.tw = g.measureText(ln.txt).width;
       const H = lines.length * asc + (lines.length - 1) * gap, sgn = pref === "r" ? -1 : 1, flip = pref === "r" ? "l" : "r";
       const cands = [[px + sgn * off, py - H / 2, pref], [px + sgn * off, py + 3 * Z, pref], [px + sgn * off, py - H - 3 * Z, pref],
         [px + sgn * off, py + 10 * Z, pref], [px + sgn * off, py - H - 10 * Z, pref], [px - sgn * off, py - H / 2, flip]];
+      if (lone) cands.unshift([px, py - H / 2, "c"]);
       for (const [ax, top, side] of cands) {
         const items = [], rects = [];
         lines.forEach((ln, i) => {
-          const base = top + asc + i * (asc + gap), x0 = side === "r" ? ax - ln.tw : ax;
+          const base = top + asc + i * (asc + gap), x0 = side === "r" ? ax - ln.tw : side === "c" ? ax - ln.tw / 2 : ax;
           items.push({ text: ln.txt, x: x0, y: base, font, kind: ln.kind });
           rects.push([x0 - 1, base - asc - 1, x0 + ln.tw + 1, base + 2]);
         });
@@ -664,7 +669,7 @@ const Obs = (() => {
       return null;
     };
     const a = column(L, "r", avoid); if (!a) return null;
-    const b = column(R, "l", [...avoid, ...a.rects, [px - 4 * Z, py - 4 * Z, px + 4 * Z, py + 4 * Z]]); if (!b) return null;
+    const b = column(R, "l", [...avoid, ...a.rects, [px - 3 * Z, py - 3 * Z, px + 3 * Z, py + 3 * Z]]); if (!b) return null;
     return { items: [...a.items, ...b.items], rects: [...a.rects, ...b.rects] };
   }
 
@@ -676,9 +681,11 @@ const Obs = (() => {
       g.beginPath(); for (const [a, b, c2, d2] of bg.lines) { g.moveTo(a, b); g.lineTo(c2, d2); } g.stroke();
       g.fillStyle = C.barb; for (const f of bg.flags) { g.beginPath(); g.moveTo(f[0], f[1]); g.lineTo(f[2], f[3]); g.lineTo(f[4], f[5]); g.closePath(); g.fill(); }
     }
-    g.fillStyle = s.kind === 0 ? C.dot : C.dot2; g.strokeStyle = C.halo; g.lineWidth = 1.2 * Z;
-    g.beginPath(); g.arc(px, py, (s.kind === 0 ? 3 : 2.5) * Z, 0, 7); g.fill(); g.stroke();
-    if (bg && bg.calm) { g.strokeStyle = C.barb; g.lineWidth = 1.4 * Z; g.beginPath(); g.arc(px, py, 6 * Z, 0, 7); g.stroke(); }
+    // no station dot (owner's call); a calm-wind ring keeps its dark casing so it reads like the barbs
+    if (bg && bg.calm) {
+      g.strokeStyle = C.halo; g.lineWidth = 3 * Z; g.beginPath(); g.arc(px, py, 6 * Z, 0, 7); g.stroke();
+      g.strokeStyle = C.barb; g.lineWidth = 1.4 * Z; g.beginPath(); g.arc(px, py, 6 * Z, 0, 7); g.stroke();
+    }
   }
 
   /* ---- status / tooltip ---- */
@@ -826,7 +833,7 @@ const Obs = (() => {
         <div class="loader" id="obs-loader" hidden>Loading stations…</div>
       </div>
       <div class="obs-foot"><button type="button" class="obs-dl" id="dl-obs">Download image</button><button type="button" class="obs-dl" id="obs-refresh">Refresh</button><span id="obs-status"></span></div>
-      <p class="obs-hint">Scroll or pinch to zoom, drag to pan, tap a station for details. Turn layers on and off with the buttons above the map; they combine, and the sample number on each button is its colour on the map. Temperatures (high, current, low) and the current gust sit left of each station, pressure, wind chill / heat index and peak gust sit right of it. More stations appear as you zoom in; airports and official stations are shown first. Updates every 10 minutes.</p>
+      <p class="obs-hint">Scroll or pinch to zoom, drag to pan, tap a station for details. Turn layers on and off with the buttons above the map; they combine, and the sample number on each button is its colour on the map. Temperatures (high, current, low) and the current gust sit left of each station, pressure, wind chill / heat index and peak gust sit right of it. Each wind barb starts at the station's location, a ring means calm wind, and a station with no wind report has its numbers centred on it. More stations appear as you zoom in; airports and official stations are shown first. Updates every 10 minutes.</p>
       <p class="obs-credit">Observations: latest report in the past 90 minutes, checked against nearby stations. High, low and peak gust are for today since local midnight at each station: US values are the Iowa Environmental Mesonet daily summary for the station's own local day, Canadian values are built from the hourly reports since local midnight. Peak gust is the highest reported gust (US) or highest hourly peak wind (Canada); a station that reported no gust today shows none. Wind chill and heat index use the NWS formulas on the current reading. MSLP isobars are an automatic analysis of the station values, drawn only where stations are close enough. Canada: Environment and Climate Change Canada, MSC surface weather observations (SWOB). Contains information licensed under the <a href="https://open.canada.ca/en/open-government-licence-canada">Open Government Licence &ndash; Canada</a>. United States: NOAA/NWS ASOS and AWOS stations via the <a href="https://mesonet.agron.iastate.edu/">Iowa Environmental Mesonet</a>. Basemap: Natural Earth (public domain). Town names: <a href="https://www.geonames.org/">GeoNames</a>, licensed under <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>.</p>`;
     S.root = el; S.onChange = opts.onChange || null; wire(); S.inited = true;
   }
