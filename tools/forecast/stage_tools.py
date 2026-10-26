@@ -266,7 +266,7 @@ def merge_tree(src, dst):
     for root, _, files in os.walk(src):
         rel = os.path.relpath(root, src); os.makedirs(os.path.join(dst, rel), exist_ok=True)
         for f in files:
-            shutil.copy2(os.path.join(root, f), os.path.join(dst, rel, f))
+            shutil.move(os.path.join(root, f), os.path.join(dst, rel, f))   # move, not copy: keeps runner disk use low
 
 
 def prune_old_cycles(batch):
@@ -338,6 +338,8 @@ def cmd_collect(a):
                 merge_tree(s, batch)
             else:
                 meteo_parts.append(s)
+        if kind == "maps":
+            shutil.rmtree(d, ignore_errors=True)   # merged into the batch; free the disk before the next download
         print(f"carried {kind} {p} from run {rid}: {len(subs)} artifact(s)")
     if a.meteo_cur and os.path.isdir(a.meteo_cur):
         meteo_parts += [os.path.join(a.meteo_cur, s) for s in sorted(os.listdir(a.meteo_cur))]

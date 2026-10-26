@@ -59,6 +59,10 @@ jobs:
       SITE_BATCH: ${{ github.workspace }}/.site_batch
       SITE_DIR: ${{ github.workspace }}/web/forecast
     steps:
+      - name: Free runner disk (staged deploys carry two runs of HRRR/AIFS; 10-26-26 s2 hit "disk quota exceeded")
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost || true
+          df -h / /tmp | tee -a "$GITHUB_STEP_SUMMARY"
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
