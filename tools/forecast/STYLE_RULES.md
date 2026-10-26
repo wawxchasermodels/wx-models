@@ -177,3 +177,9 @@ These rules apply to every model product: AIFS, GFS, GEFS, ECMWF/EPS, HRRR, RRFS
   on upper-air maps in any view (temp_maps.UPPER_AIR_TABS: t925, t850, t700, t500, t300, mslp500, pw, pwanom, ivt, w850, w500,
   w250, thick, t850anom; menu_maps.finish skips towns(), render_t850 no longer calls it). Ground-level tabs keep labels/numbers.
 - HRRR / RRFS nearest-point KD-tree cached per cropped grid (temp_maps._grid_tree), built once in menu_maps.prewarm.
+
+## State lines (Benjamin 10-25-26 10:28 PM: "we gotta make the state lines thicker")
+- State / province lines 0.5 -> 0.75 pt (+50%) on every model map (house_style.STATE_LW; all views: NA, PNW, PNW high-res,
+  PNW tight, Washington). Same dark line over the same white halo (+1.4 pt). Coast 1.0 pt and country borders 0.9 pt unchanged;
+  country borders are never thinner than state lines (COUNTRY_LW = max(0.9, STATE_LW)). HS_STATE_LW=<pt> overrides for samples.
+  The Washington tab maps (tools/wa_maps, separate renderer, state lines already 4.2 px) are not affected.
