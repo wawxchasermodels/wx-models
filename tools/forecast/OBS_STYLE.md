@@ -16,7 +16,7 @@ Rebuild the basemap with `python tools/forecast/obs_basemap.py`.
   rotated for grid convergence. Checked against matplotlib/MetPy (`qa/qa_barbs.py`).
 - Markers are 1.5x the original size (constant `Z = 1.5` in obs.js scales text, circle, barb and spacing together).
 - Phone-sized screens (max-width 640px, same breakpoint as obs.css): station numbers are half size (`PHONE_NF = 0.5`:
-  20 px -> 9.75 px, 3+ number font 17 px -> 8.5 px, quarter-px rounding; halo, shadow and line spacing scale with them).
+  20 px -> 9.75 px, 3+ number font 17 px -> 8.75 px, quarter-px rounding; halo, shadow and line spacing scale with them).
   Circles, barbs, station spacing and isobar labels keep their size. Desktop unchanged.
 - No legend box on the map. Meaning is explained in the hint text, the credits and the tap-for-details box.
 
