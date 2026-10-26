@@ -153,7 +153,7 @@ EPS = [  # id, label, status, note  (ECMWF ENS open data 0.25 deg, 50 members, C
     ("eps_qpf24_members", "Member View & Mean: 24-Hour QPF", D, "tp"),
     ("eps_qpf_members", "Member View & Mean: Total QPF", D, "tp"),
     ("eps_snow24_members", "Member View & Mean: 24-Hour Snow", D, "sf"),
-    ("eps_snow_members", "Member View & Mean: Total Snow", D, "sf"),
+    ("eps_snow_members", "Member View & Mean: Total Snow", D, "sf x 10, member grid + spread, to 360 h"),
     ("eps_tcc_members", "Member View & Mean: Cloud Cover", D, "tcc"),
     ("eps_gust_members", "Member View & Mean: 6-hr Max Gust", D, "10fg"),
     ("eps_mucape_members", "Member View & Mean: MUCAPE", D, "mucape"),

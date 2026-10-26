@@ -56,3 +56,13 @@ The WA shard job is off (it runs only when the repo variable `WA_SHARDS` is `on`
   About 390 files.
 - Fixes: the mslp job now restores the 500 mb climatology (needed by the ECMWF 9 km 500 mb anomaly from PR #20); RRFS
   sea-level pressure is read from MSLET (the RRFS 2dfld file has no MSLMA, so RRFS MSLP + P-type had no frames).
+
+## Total snow member meteogram (10-25-26, sample for review)
+- `eps_snow_members` (Member View & Mean: Total Snow) is now our own ensemble snow chart (`tools/forecast/snow_ens.py`), same
+  product id and file, so no new files: a grid with one row per ENS member (1 at top), the run-total snow at 10:1 printed in each
+  12 h column on the site's teal-to-wine snow ramp, a CTRL row (control run; the open-data ENS file has snowfall for the 50 members
+  only, so it says "not available" until ECMWF adds it), a MEAN row and the % of members at or above 1 / 3 / 6 / 12 in; under it a
+  spread chart on the same columns (10-90% and 25-75% member ranges, median, mean, control when present).
+- Source: ECMWF ENS open data 0.25 deg, `sf` (snowfall, m of water equivalent) x 10 = 10:1 snow. Runs to 360 h (`METEO_SNOW_HOURS`,
+  default 360): the EPS meteogram job still runs other charts to 240 h and fetches only `sf` for 246-360 h (about 20 extra steps,
+  about 9 MB each).
