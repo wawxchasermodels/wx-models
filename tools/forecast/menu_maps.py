@@ -915,7 +915,9 @@ PRODUCTS = {   # name: (function, models, global views, high-res views)
     "ir": (prod_ir, ("hrrr", "rrfs"), ("pnw",), H_PNW),
     "vis": (prod_vis, ("hrrr", "rrfs"), G_PNWWA, ("wa",)),   # no visibility field in ECMWF open data, so 3 km models only now
     "fog": (prod_fog, ("ifs", "hrrr", "rrfs"), G_PNWTWA, ("wa",)),
-    "qpf": (prod_qpf, ("ifs", "aifs", "hrrr", "rrfs"), ("pnw",), H_PNW),
+    # 10-25-26 (Benjamin): Washington + Pacific NW tight views for ECMWF 9 km, Washington for HRRR/RRFS (no tight frame on
+    # 3 km grids), replacing the archived WA Rain shards. AIFS keeps Pacific NW only (QPF_PNW_ONLY below).
+    "qpf": (prod_qpf, ("ifs", "aifs", "hrrr", "rrfs"), G_PNWTWA, H_PNWWA),
 }
 # AIFS upper air: no Washington view (already true: t700-t300 have no WA view); t925 drops WA for AIFS below.
 
@@ -948,6 +950,7 @@ STATEFUL = {"peakgust", "qpf"}   # products whose function also advances a runni
 def vids_of(m, p, views):
     fn, _, gv, hv = PRODUCTS[p]; vids = views_for(m, views, gv, hv)
     if m == "aifs" and p.startswith("t") and p not in ("td2m",): vids = [v for v in vids if v != "wa"]
+    if m == "aifs" and p == "qpf": vids = [v for v in vids if v == "pnw"]   # QPF_PNW_ONLY
     return vids
 
 
@@ -1191,6 +1194,7 @@ if __name__ == "__main__":
         for p in prods:
             fn, _, gv, hv = PRODUCTS[p]; vids = views_for(m, a.views.split(","), gv, hv)
             if m == "aifs" and p.startswith("t") and p not in ("td2m",): vids = [v for v in vids if v != "wa"]
+            if m == "aifs" and p == "qpf": vids = [v for v in vids if v == "pnw"]   # QPF_PNW_ONLY
             k = 0
             for s in render:
                 if p in ("snowkuch", "snow10", "frzr", "qpf"): k += len(acc_windows(m, s))
