@@ -1129,6 +1129,7 @@ def prewarm(m, R, vids):
         if grid is not None:
             try:
                 LA, LO, _ = TM.cut(grid[0], grid[1], [], v); proj_xy(ax, LO, LA)
+                if np.ndim(LO) == 2 and v in ("wa", *TM.REGION_TOWNS): TM._grid_tree(LA, LO)   # town-number lookups, shared by forked workers
                 if FAST_VEC and np.ndim(LO) == 2: thin_vectors(ax, LO, LA, np.zeros(LO.shape), np.zeros(LO.shape), 4, 4)
             except Exception: pass
         fig.canvas.draw(); plt.close(fig)

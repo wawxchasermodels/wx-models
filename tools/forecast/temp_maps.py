@@ -288,15 +288,28 @@ def ecmwf_orog(m, c):
 PASS_COLOR, PASS_NAME_SIZE, PASS_NUM_SIZE = "#3b2a5c", 8.0, 9.5   # deep plum, small italic name: reads as "not a town"
 
 
+_TREES = {}
+
+
+def _grid_tree(LA, LO):
+    """KD-tree of a 2-D (Lambert) lat/lon grid, cached per grid (shape + corner points): the same cropped HRRR / RRFS grid is
+    used by every product of a view, and menu_maps.prewarm builds it once in the parent so forked workers inherit it."""
+    la, lo = np.asarray(LA, float), np.asarray(LO, float)
+    key = (la.shape, la[0, 0], la[-1, -1], lo[0, 0], lo[-1, -1], la[0, -1], lo[-1, 0])
+    if key not in _TREES:
+        from scipy.spatial import cKDTree
+        if len(_TREES) > 8: _TREES.clear()
+        lo = (lo + 180) % 360 - 180; k = np.cos(np.deg2rad(np.nanmean(la)))
+        _TREES[key] = (cKDTree(np.column_stack([la.ravel(), lo.ravel() * k])), k)
+    return _TREES[key]
+
+
 def town_values(LA, LO, F, pts):
     """Model value at each (lat, lon) point. Regular lat/lon grids (ECMWF): bilinear. 2-D Lambert grids (HRRR/RRFS 3 km):
     nearest grid point. NaN where the point is off the grid or touches a missing value."""
     F = np.asarray(F, float); out = []
     if np.ndim(LA) == 2:
-        from scipy.spatial import cKDTree
-        la, lo = np.asarray(LA, float), np.asarray(LO, float)
-        lo = (lo + 180) % 360 - 180; k = np.cos(np.deg2rad(np.nanmean(la)))
-        tree = cKDTree(np.column_stack([la.ravel(), lo.ravel() * k]))
+        tree, k = _grid_tree(LA, LO)
         for pla, plo in pts:
             d, i = tree.query([pla, ((plo + 180) % 360 - 180) * k])
             out.append(F.ravel()[i] if d < 0.06 else np.nan)   # 0.06 deg ~ 6 km: farther means off the 3 km grid
@@ -390,9 +403,9 @@ def towns(ax, vid, field=None, fmt=fmt_int, pass_corr=None):
     Each town tries its preferred side, then the other sides; the whole "Name 54" group must clear every other label, every
     town dot and the frame. If it cannot, the number goes under the name; if that fails too the number is dropped (logged),
     and a name that cannot be placed at all is dropped (logged).
-    Pacific NW views (REGION_TOWNS): names only, tiered by population (region_places), no numbers.
+    Pacific NW views (REGION_TOWNS): tiered by population (region_places); with a field, the same numbers (region_towns).
     Returns the text artists (so isobar labels can be cleared around them) and stores the sampled values on ax.town_values."""
-    if vid in REGION_TOWNS and os.environ.get("REGION_TOWNS", "1") != "0": return region_towns(ax, vid)
+    if vid in REGION_TOWNS and os.environ.get("REGION_TOWNS", "1") != "0": return region_towns(ax, vid, field, fmt)
     if vid != "wa": return []
     ax.apply_aspect()   # cartopy fixes the map's aspect only at draw time: lay labels out on the final axes box, not the slot
     pc = ccrs.PlateCarree(); tr = pc._as_mpl_transform(ax); arts = []
@@ -437,13 +450,26 @@ def towns(ax, vid, field=None, fmt=fmt_int, pass_corr=None):
     return arts
 
 
-def region_towns(ax, vid):
-    """City names on the Pacific NW frames: small dot + name, tiered (region_places). Skips any label without room."""
+REGION_NUM_SIZE = 9.5   # bold value next to the city name on the Pacific NW frames (a bit smaller than the WA view's 10.5)
+
+
+def region_towns(ax, vid, field=None, fmt=fmt_int):
+    """City names on the Pacific NW frames: small dot + name, tiered (region_places).
+    field = (LA, LO, F) in map units adds the model value at the city point, same numbers and formats as the Washington view
+    (Benjamin 10-25-26 10:08 PM: "dropping more towns is fine"). With numbers on, each city tries "Name 54" inline (preferred
+    side, other sides, diagonal nudges), then the number centered under the name; if neither fits, the city is dropped (no
+    name-only fallback; logged). A city whose value is missing (off the model grid) keeps its name only (logged).
+    Without a field (upper air, products without town numbers) it is names only, as before."""
     ax.apply_aspect()   # see towns()
     pc = ccrs.PlateCarree(); tr = pc._as_mpl_transform(ax); arts = []
     fig = ax.figure; r = fig.canvas.get_renderer(); pt = 72.0 / fig.dpi; axbb = ax.get_window_extent(r)
-    dots, labels, skipped, size = [], [], [], {1: 9.5, 2: 8.5, 3: 8.0}
-    for name, la, lo, t in region_places(vid):
+    dots, labels, skipped, nonum, size = [], [], [], [], {1: 9.5, 2: 8.5, 3: 8.0}
+    places = region_places(vid)
+    nums_on = field is not None and os.environ.get("TOWN_NUMBERS", "1") != "0"   # TOWN_NUMBERS=0 turns the numbers off
+    vals = town_values(*field, [(la, lo) for _, la, lo, _ in places]) if nums_on and places else [np.nan] * len(places)
+    if nums_on: ax.town_values = {}
+    placed = 0
+    for (name, la, lo, t), v in zip(places, vals):
         x, y = tr.transform((lo, la))
         if not axbb.contains(x, y): continue
         dot = matplotlib.transforms.Bbox([[x - 3, y - 3], [x + 3, y + 3]])
@@ -452,14 +478,34 @@ def region_towns(ax, vid):
         nm = ax.annotate(name, (lo, la), xycoords=tr, xytext=(0, 0), textcoords="offset points", ha="left", va="center",
                          color="#1b1d22", fontproperties=HS.font(700 if t == 1 else 600, size.get(t, 8.0)),
                          path_effects=HS.halo("white", 2.4), zorder=7)
-        nw = nm.get_window_extent(r).width * pt
+        s_ = fmt(v) if nums_on else None
+        n = None if s_ is None else ax.annotate(s_, (lo, la), xycoords=tr, xytext=(0, 0), textcoords="offset points", ha="left",
+                                               va="center", color=TOWN_NUM_COLOR, fontproperties=HS.font(800, REGION_NUM_SIZE),
+                                               path_effects=HS.halo("white", TOWN_NUM_HALO), zorder=7.5)
+        nw = nm.get_window_extent(r).width * pt; vw = 0 if n is None else n.get_window_extent(r).width * pt
         side = next((t_[3] for t_ in WA_TOWNS if t_[0] == name), "r")   # same preferred side as on the Washington view
-        bbs = place_label([(nm, 0)], 0, x, y, _cands(side, nw), [b.padded(2.5) for b in labels] + [b.padded(2.0) for b in dots + [dot]], axbb, r, pt)
-        if bbs is None: nm.remove(); skipped.append(name); continue
+        taken = [b.padded(2.5) for b in labels] + [b.padded(2.0) for b in dots + [dot]]
+        if n is not None:
+            bbs = place_label([(nm, 0), (n, nw + 3.0)], 0, x, y, _cands(side, nw + 3.0 + vw), taken, axbb, r, pt)   # "Name 54"
+            if bbs is None:   # number centered under the name
+                for gx, gy in _cands(side, nw):
+                    nm.xyann = (gx, gy); n.xyann = (gx + (nw - vw) / 2, gy - 10)
+                    bb2 = [nm.get_window_extent(r), n.get_window_extent(r)]
+                    if not any(_hits(b, taken) for b in bb2) and all(axbb.contains(b.x0, b.y0) and axbb.contains(b.x1, b.y1) for b in bb2):
+                        bbs = bb2; break
+            if bbs is None: nm.remove(); n.remove(); skipped.append(name); continue   # no name-only fallback: drop the city
+        else:
+            if nums_on: nonum.append(name)
+            bbs = place_label([(nm, 0)], 0, x, y, _cands(side, nw), taken, axbb, r, pt)
+            if bbs is None: nm.remove(); skipped.append(name); continue
         ax.plot(lo, la, "o", ms=3.2 if t > 1 else 3.8, mfc="#1b1d22", mec="white", mew=0.9, transform=pc, zorder=7)
-        labels += bbs; dots.append(dot); arts.append(nm)
-    print(f"{vid} towns: {len(arts)} placed, {len(skipped)} skipped for room" + (f" ({', '.join(skipped)})" if skipped else ""), flush=True)
-    ax.region_town_names = [a.get_text() for a in arts]
+        labels += bbs; dots.append(dot); arts += [nm] + ([n] if n is not None else []); placed += 1
+        if n is not None: ax.town_values[name] = float(v)
+    print(f"{vid} towns{' with numbers' if nums_on else ''}: {placed} placed, {len(skipped)} dropped for room"
+          + (f" ({', '.join(skipped)})" if skipped else "")
+          + (f"; no model value, name only: {', '.join(nonum)}" if nonum else ""), flush=True)
+    ax.region_town_names = [a.get_text() for a in arts if a.get_text() in {p[0] for p in places}]
+    ax.region_towns_dropped = skipped
     return arts
 
 

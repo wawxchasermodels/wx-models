@@ -168,3 +168,10 @@ These rules apply to every model product: AIFS, GFS, GEFS, ECMWF/EPS, HRRR, RRFS
   frame, then tier 2 (60k+) and tier 3 (15k+ pnwhr, 20k+ pnwt) by population; at most 60 (pnwhr) / 55 (pnwt) tried; labels
   without room are skipped and counted in the log. Duplicate names in a frame keep the bigger place. REGION_TOWNS=0 = off.
 - NA and the big PNW frame (upper air) stay without towns. Labels only: no new views or files.
+- Pacific NW numbers (Benjamin 10-25-26 10:08 PM, "dropping more towns is fine"): on pnwhr / pnwt maps that carry town numbers
+  on the Washington view (gusts, feels-like, 2 m temp / anomaly, dewpoint, 10 m wind, precip, snow, ice, visibility), each city
+  gets the same number in the same format ("Seattle 54", bold 9.5 pt), read at the city point (bilinear on ECMWF lat/lon grids,
+  nearest 3 km point on HRRR / RRFS). Same priority order; "Name 54" inline, then the number under the name; if neither fits
+  the city is dropped (never name only; logged with the drop list). Missing value (off grid) = name only (logged). Upper-air
+  frames stay names only. Typical: pnwhr 52-53 of 60 placed, pnwt 35-38 of 55. TOWN_NUMBERS=0 turns numbers off everywhere.
+- HRRR / RRFS nearest-point KD-tree cached per cropped grid (temp_maps._grid_tree), built once in menu_maps.prewarm.
