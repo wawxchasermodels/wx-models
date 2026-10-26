@@ -1,6 +1,6 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
-const S = { m: null, tab: "", period: "", view: "", model: "", keepEnd: "", i: 0, playing: 0, msec: "", town: "", prod: "" };
+const S = { m: null, tab: "", period: "", view: "", model: "", run: 0, keepEnd: "", i: 0, playing: 0, msec: "", town: "", prod: "" };
 const TZ = "America/Los_Angeles";
 const PREF_PERIOD = ["24h", "6h", "step", "12h", "48h", "total", "max24h", "max12h", "max6h", "daily"];
 const INSTANT_TABS = new Set(["gusts", "waves", "aifs500", "aifsmslp", "aifswind", "t2m", "t2manom", "t850", "gust10", "feels", "td2m", "t925", "t700", "t500", "t300", "mslpptype", "ivt", "pw", "pwanom", "w850", "w500", "w250", "thick", "tcc", "ir", "vis", "fog", "elows", "e500"]);
@@ -19,8 +19,19 @@ function btn(label, onClick, attrs = {}) {
 }
 const tabObj = (id = S.tab) => S.m.tabs.find((t) => t.id === id);
 const allFrames = (t = tabObj(), p = S.period, v = S.view) => (t.frames[`${p}/${v}`] || []);
-const frames = (t = tabObj(), p = S.period, v = S.view, m = S.model) =>
-  allFrames(t, p, v).filter((f) => !m || (f.model || "") === m);
+// Two-run models (HRRR, AIFS; 10-25-26): manifest.runs lists the runs on the site, newest first; frames carry `cycle`.
+// S.run = 0 newest / 1 previous. A tab that only has one of the runs for this model shows that run (no toggle).
+const siteRuns = (m) => (S.m && S.m.runs && S.m.runs[m]) || [];
+const runsOf = (t, m = S.model) => {
+  const all = siteRuns(m); if (all.length < 2) return [];
+  const have = new Set(Object.values(t.frames).flat().filter((f) => (f.model || "") === m && f.cycle).map((f) => f.cycle));
+  return all.filter((r) => have.has(r.cycle));
+};
+const runCycle = (t, m = S.model) => { const rs = runsOf(t, m); return rs.length ? (rs[S.run] || rs[0]).cycle : ""; };
+const frames = (t = tabObj(), p = S.period, v = S.view, m = S.model) => {
+  const rc = m ? runCycle(t, m) : "";
+  return allFrames(t, p, v).filter((f) => (!m || (f.model || "") === m) && (!rc || f.cycle === rc));
+};
 const modelsOf = (t) => [...new Set(Object.values(t.frames).flat().map((f) => f.model || "").filter(Boolean))];
 const modelList = (t) => t.models ? [...t.models, ...modelsOf(t).filter((m) => !t.models.includes(m))] : modelsOf(t);
 const groupOf = (t) => t.group || t.id;
@@ -44,7 +55,7 @@ function nearestIndex() {
 function writeHash() {
   const q = S.tab === "obs" ? { t: "obs", v: (typeof Obs !== "undefined" && Obs.viewId()) || "" } : S.tab === "meteograms"
     ? { t: S.tab, s: S.msec, w: S.town, p: S.prod }
-    : { t: S.tab, m: S.model, p: S.period, v: S.view, e: (frames()[S.i] || {}).end || "" };
+    : { t: S.tab, m: S.model, ...(runsOf(tabObj()).length > 1 ? { r: String(S.run) } : {}), p: S.period, v: S.view, e: (frames()[S.i] || {}).end || "" };
   history.replaceState(null, "", "#" + new URLSearchParams(q));
 }
 
@@ -216,6 +227,14 @@ function renderMaps() {
   const ms = modelList(t);
   $("ctl-models").hidden = ms.length < 2 && !(t.models && t.models.length);   // a declared model list always shows its pill(s)
   pills($("models"), ms.map((m) => ({ id: m, label: m })), S.model, (m) => { S.model = m; }, (m) => modelHas(t, m));
+  // Run toggle (two-run models HRRR/AIFS) only where this tab has both runs: older run left, newest right ("12Z | 18Z"),
+  // newest picked by default; the valid time is kept when switching runs (remember() + nearestIndex())
+  const rs = runsOf(t);
+  $("ctl-runs").hidden = rs.length < 2;
+  if (rs.length > 1) {
+    pills($("runs"), rs.map((r, j) => ({ id: j, label: r.label })).reverse(), Math.min(S.run, rs.length - 1), (j) => { S.run = j; }, () => true);
+    [...$("runs").children].forEach((b, k) => { const r = rs[rs.length - 1 - k]; b.title = `${r.run}${k === rs.length - 1 ? " (newest)" : ""}`; });
+  }
   const note = ms.length > 1 && S.m.modelNotes ? S.m.modelNotes[S.model] : "";
   $("model-note").hidden = !note; $("model-note").textContent = note || "";
   $("ctl-periods").hidden = t.periods.length < 2;
@@ -440,6 +459,7 @@ async function boot() {
   else {
     if (!tabObj()) S.tab = first;
     S.period = q.get("p") || ""; S.view = q.get("v") || ""; S.model = q.get("m") || ""; S.keepEnd = q.get("e") || "";
+    S.run = q.get("r") === "1" ? 1 : 0;
   }
   pickDefaults(); render();
 }

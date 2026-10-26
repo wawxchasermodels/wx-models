@@ -3,6 +3,11 @@
 
 Four stages per 00Z/12Z cycle publish each model group as soon as its data is out:
   s1 HRRR | s2 RRFS + GFS | s3 AIFS + EPS/AIFS ENS maps + EPS meteograms | s4 ECMWF 9 km (IFS 0.1 deg)
+Two-run models (10-25-26, Benjamin: "Keep 2 hrrr runs at any given time, have a toggle", then the same for AIFS): HRRR and
+AIFS keep their two newest runs on the site. The state's `hrrr_prev` / `aifs_prev` groups carry the run before the current
+one, and the deploy keeps the two newest cycles of every HRRR / AIFS product; every other product keeps only its newest.
+Their 18Z runs add no deploys: they ride along with the first stage run after their data is out (RIDERS), normally
+HRRR 18Z (f48 out about 19:47 UTC) with the 12Z s3 run and AIFS 18Z (240 h out about 00:55 UTC) with the 00Z s1 run.
 Each stage renders only its groups, then deploys the whole site with the other groups carried forward from the
 artifacts of the runs that last built them. Which run built which group is kept in a small `site-state` artifact
 (JSON) uploaded after every successful deploy; the newest one is found through the artifacts API.
@@ -29,6 +34,28 @@ PATTERNS = {"hrrr": ["hires-hrrr-maps", "menu-hrrr-*", "menu-reuse-hrrr"],
             "ens": ["ens-*"],
             "ifs": ["mslp-maps", "temp-maps", "menu-ifs-*", "menu-reuse-ifs"]}
 GROUP_METEO = {"hrrr": "hrrr", "rrfs": "rrfs", "ens": "eps"}   # meteogram source carried with each group
+# two-run models (10-25-26): the run before the current one, carried as its own group (maps only, no meteograms)
+PREV = {"hrrr": "hrrr_prev", "aifs": "aifs_prev"}
+KEEP_RUNS = {"hrrr": 2, "aifs": 2}   # cycles kept on the site per two-run model (every other product: 1)
+AIFS_DIRS = {"aifs500", "aifsmslp", "aifswind"}   # aifs_maps.py folders (no model suffix); other AIFS folders end in -aifs
+CYCLE_HOURS = {s_: (0, 12) for s_ in STAGES}   # stage cycles; the 18Z runs come in as riders below
+
+
+def run_model(prod):
+    """Two-run model of a product folder (<cycle>/<prod>/...), or None."""
+    if prod.endswith("-hrrr"):
+        return "hrrr"
+    if prod.endswith("-aifs") or prod in AIFS_DIRS:
+        return "aifs"
+    return None
+
+
+# 18Z riders: rendered inside whichever stage run comes first after their last file is out (never in the stage that owns
+# the group). No extra deploys. 06Z is left out (Benjamin: 00Z/12Z/18Z).
+RIDERS = {"hrrr": {"hour": 18, "ready": ["https://noaa-hrrr-bdp-pds.s3.amazonaws.com/hrrr.{d}/conus/hrrr.t{h:02d}z.wrfsfcf48.grib2.idx"],
+                   "products": "hrrr,menu", "menu": "hrrr"},
+          "aifs": {"hour": 18, "ready": ["https://data.ecmwf.int/forecasts/{d}/{h:02d}z/aifs-single/0p25/oper/{d}{h:02d}0000-240h-oper-fc.index"],
+                   "products": "aifs,temps,menu", "menu": "aifs"}}
 E = "https://data.ecmwf.int/forecasts/{d}/{h:02d}z/"
 READY = {   # last file of each stage's models; a stage is ready for cycle c when every one answers
     "s1": ["https://noaa-hrrr-bdp-pds.s3.amazonaws.com/hrrr.{d}/conus/hrrr.t{h:02d}z.wrfsfcf48.grib2.idx"],
@@ -74,15 +101,47 @@ def exists(url):
         return False
 
 
-def ready_cycle(stage, now=None, back=3):
-    """Newest 00Z/12Z cycle whose last files for this stage are all out (checks the last `back` cycles)."""
-    now = now or dt.datetime.now(UTC)
-    c = now.replace(minute=0, second=0, microsecond=0, hour=12 if now.hour >= 12 else 0)
-    for _ in range(back):
-        if all(exists(u.format(d=f"{c:%Y%m%d}", h=c.hour)) for u in READY[stage]):
+def cycles_back(stage, now=None, back=3):
+    """The last `back` cycles this stage accepts (CYCLE_HOURS), newest first."""
+    now = (now or dt.datetime.now(UTC)).replace(minute=0, second=0, microsecond=0)
+    out, c = [], now
+    while len(out) < back:
+        if c.hour in CYCLE_HOURS[stage]:
+            out.append(c)
+        c -= dt.timedelta(hours=1)
+    return out
+
+
+def ready_cycle(stage, now=None, back=3, check=None):
+    """Newest accepted cycle (00Z/12Z; s1 also 18Z) whose last files for this stage are all out (checks the last `back`)."""
+    check = check or exists
+    for c in cycles_back(stage, now, back):
+        if all(check(u.format(d=f"{c:%Y%m%d}", h=c.hour)) for u in READY[stage]):
             return f"{c:%Y%m%d%H}"
-        c -= dt.timedelta(hours=12)
     return ""
+
+
+def riders_due(stage, st, now=None, check=None):
+    """{group: 18Z cycle} for the two-run models whose newest 18Z run is out and newer than the one the site holds."""
+    check = check or exists
+    now = (now or dt.datetime.now(UTC)).replace(minute=0, second=0, microsecond=0)
+    due = {}
+    for g, r in RIDERS.items():
+        if g in GROUPS[stage]:
+            continue
+        have = ((st.get("groups") or {}).get(g) or {}).get("cycle", "")
+        c = now.replace(hour=r["hour"]) if now.hour >= r["hour"] else (now - dt.timedelta(days=1)).replace(hour=r["hour"])
+        for c in (c, c - dt.timedelta(days=1)):
+            cyc = f"{c:%Y%m%d%H}"
+            if cyc <= have:
+                break
+            if all(check(u.format(d=f"{c:%Y%m%d}", h=c.hour)) for u in r["ready"]):
+                due[g] = cyc; break
+    return due
+
+
+def cycle_ok(stage, cycle):
+    return bool(re.fullmatch(r"\d{10}", cycle or "")) and int(cycle[-2:]) in CYCLE_HOURS[stage]
 
 
 def latest_state():
@@ -110,25 +169,62 @@ def seed_state(run_id):
                            "meteo": [[rid, "meteograms"]] if g in GROUP_METEO else [], "cycle": ""} for g in PATTERNS}}
 
 
+def rotate_prev(st, prev, g, new_cycle):
+    """Two-run groups (PREV): when group g moves to a new cycle, its old record becomes g's previous run (maps only).
+    A rerun of the same cycle keeps the previous run as it was. st = new state (changed in place), prev = old state."""
+    pg = PREV.get(g)
+    if not pg:
+        return
+    old = (prev.get("groups") or {}).get(g) or {}
+    keep = (prev.get("groups") or {}).get(pg)
+    if old.get("items") and old.get("cycle") and old.get("cycle") != new_cycle:
+        st["groups"][pg] = {"items": old["items"], "meteo": [], "cycle": old["cycle"], "at": old.get("at", "")}
+        print(f"{pg}: now {old['cycle']} (was {g})")
+    elif keep and keep.get("cycle") and keep.get("cycle") != new_cycle:
+        st["groups"][pg] = keep
+    else:
+        st["groups"].pop(pg, None)
+
+
 def run_artifacts(run_id):
     r = sh("gh", "api", f"repos/{repo()}/actions/runs/{run_id}/artifacts?per_page=100")
     return {a["name"] for a in json.loads(r.stdout).get("artifacts", []) if not a.get("expired")}
 
 
 # ---------------------------------------------------------------------------------------------------------- plan
+def staged_live(st, now=None, hours=36):
+    """True when the last deploy was a stage run within `hours` (staged builds are running)."""
+    try:
+        t = dt.datetime.fromisoformat(st.get("updated", ""))
+    except ValueError:
+        return False
+    return st.get("stage") in STAGES and (now or dt.datetime.now(UTC)) - t < dt.timedelta(hours=hours)
+
+
 def cmd_plan(a):
     stage = a.stage or BACKUP.get(a.schedule, "all")   # schedule: backup stage cron, or the 21:50 full build
     if stage == "all":
-        out(stage="all", go="true", cycle="", pin="12" if a.event == "schedule" else "", products=os.environ.get("PRODUCTS", ""),
-            menu_models="", meteo_srcs="[]", carry="[]", min_files="0", prev_state="{}", stage_patterns="")
+        go = "true"
+        if a.event == "schedule":
+            # the 21:50 full build is pinned to 12Z: once staged builds run (the last deploy was a stage run in the last 36 h)
+            # it would redraw HRRR at 12Z over the 18Z run and reseed the site state, so the fallback stands down by itself
+            _, st = latest_state()
+            if st and staged_live(st):
+                print(f"::notice::staged builds are live (last deploy {st.get('stage')} {st.get('updated')}); "
+                      "the 21:50 full-build fallback does nothing")
+                go = "false"
+        out(stage="all", go=go, cycle="", pin="12" if a.event == "schedule" else "", products=os.environ.get("PRODUCTS", "") if go == "true" else "",
+            menu_models="", meteo_srcs="[]", carry="[]", min_files="0", prev_state="{}", stage_patterns="",
+            riders={}, hrrr_cycle="", aifs_cycle="", menu_cycles={})
         return
     if stage not in STAGES:
         sys.exit(f"unknown stage {stage}")
     cycle = a.cycle or ready_cycle(stage)
-    if not re.fullmatch(r"\d{8}(00|12)", cycle or ""):
-        print(f"::notice::{stage}: no complete 00Z/12Z run found yet; nothing to do")
+    if not cycle_ok(stage, cycle):
+        hrs = "/".join(f"{h:02d}Z" for h in CYCLE_HOURS[stage])
+        print(f"::notice::{stage}: no complete {hrs} run found yet (or cycle {cycle!r} is not one of them); nothing to do")
         out(stage=stage, go="false", cycle="", pin="", products="", menu_models="", meteo_srcs="[]", carry="[]", min_files="0",
-            prev_state="{}", stage_patterns="")
+            prev_state="{}", stage_patterns="", riders={}, hrrr_cycle="", aifs_cycle="", menu_cycles={})
         return
     rid, st = latest_state()
     if a.seed_run:
@@ -150,9 +246,16 @@ def cmd_plan(a):
     min_files = int(st.get("files_main", 0) * MIN_FRACTION)
     print(f"stage {stage} cycle {cycle}; carried from state run {rid}: " +
           ", ".join(f"{c['group']}<-{sorted({i[0] for i in c['items']})}" for c in carry) + f"; min main files {min_files}")
-    pats = "{" + ",".join(p for g in GROUPS[stage] for p in PATTERNS[g]) + "}"
-    out(stage=stage, go=go, cycle=cycle, pin=cycle[-2:], products=PRODUCTS[stage] if go == "true" else "", menu_models=MENU[stage],
-        meteo_srcs=METEO[stage] if go == "true" else [], carry=carry, min_files=str(min_files), prev_state=st, stage_patterns=pats)
+    riders = riders_due(stage, st) if go == "true" else {}
+    if riders:
+        print(f"riders (18Z runs of two-run models, no extra deploy): {riders}")
+    groups = GROUPS[stage] + list(riders)
+    pats = "{" + ",".join(p for g in groups for p in PATTERNS[g]) + "}"
+    prods = ",".join(dict.fromkeys(",".join([PRODUCTS[stage]] + [RIDERS[g]["products"] for g in riders]).split(",")))
+    menus = ",".join(dict.fromkeys([MENU[stage]] + [RIDERS[g]["menu"] for g in riders]))
+    out(stage=stage, go=go, cycle=cycle, pin=cycle[-2:], products=prods if go == "true" else "", menu_models=menus,
+        meteo_srcs=METEO[stage] if go == "true" else [], carry=carry, min_files=str(min_files), prev_state=st, stage_patterns=pats,
+        riders=riders, hrrr_cycle=riders.get("hrrr", ""), aifs_cycle=riders.get("aifs", ""), menu_cycles=riders)
 
 
 # ------------------------------------------------------------------------------------------------------- collect
@@ -164,17 +267,28 @@ def merge_tree(src, dst):
 
 
 def prune_old_cycles(batch):
-    """Keep only the newest cycle of each product dir (<cycle>/<product>/...), so carried and new runs never mix."""
-    newest = {}
+    """Keep only the newest cycle of each product dir (<cycle>/<product>/...), so carried and new runs never mix.
+    Two-run models (KEEP_RUNS: HRRR, AIFS): keep the two newest cycles of that model as a whole (one shared pair for all
+    its products, so the run toggle never offers a third run); a product missing from the newest run keeps its older one."""
+    dirs = []
     for d in glob.glob(f"{batch}/*/*/"):
         cyc, prod = d.rstrip("/").split("/")[-2:]
-        if re.fullmatch(r"\d{10}", cyc) and cyc > newest.get(prod, ""):
-            newest[prod] = cyc
+        if re.fullmatch(r"\d{10}", cyc):
+            dirs.append((d, cyc, prod))
+    newest, model_cycles = {}, {}
+    for d, cyc, prod in dirs:
+        newest[prod] = max(cyc, newest.get(prod, ""))
+        mdl = run_model(prod)
+        if mdl:
+            model_cycles.setdefault(mdl, set()).add(cyc)
+    keep = {suf: set(sorted(cs, reverse=True)[:KEEP_RUNS[suf]]) for suf, cs in model_cycles.items()}
     n = 0
-    for d in glob.glob(f"{batch}/*/*/"):
-        cyc, prod = d.rstrip("/").split("/")[-2:]
-        if re.fullmatch(r"\d{10}", cyc) and cyc != newest[prod]:
+    for d, cyc, prod in dirs:
+        mdl = run_model(prod)
+        if (cyc not in keep[mdl]) if mdl else (cyc != newest[prod]):
             shutil.rmtree(d); n += 1
+    for suf, cs in keep.items():
+        print(f"two-run model {suf}: keeping cycles {sorted(cs, reverse=True)}")
     for d in glob.glob(f"{batch}/*/"):
         if not os.listdir(d):
             os.rmdir(d)
@@ -242,10 +356,14 @@ def cmd_state(a):
             rec["items"] = [i for i in rec["items"] if match(i[1])]
             rec["meteo"] = [i for i in rec["meteo"] if match(i[1])]
             rec["cycle"] = a.cycle
+        # two-run HRRR: a full build deploys one HRRR run and carries nothing, so no previous run is recorded; the next s1
+        # run makes it the previous run (rotate_prev)
         st["stages"] = {s_: a.cycle for s_ in STAGES}
     else:
+        prev_copy = json.loads(json.dumps(prev))
         st = prev; st.pop("seeded_from", None)
-        for g in GROUPS[a.stage]:
+        riders = json.loads(a.riders or "{}")
+        for g, gcyc in [(g, a.cycle) for g in GROUPS[a.stage]] + list(riders.items()):   # riders: 18Z runs of two-run models
             old = st["groups"].get(g, {"items": [], "meteo": []})
             items = [[run_id, p] if match(p) else None for p in PATTERNS[g]]
             items = [i for i in items if i] + [i for i in old["items"] if not match(i[1])]   # failed jobs: keep the older run
@@ -253,7 +371,11 @@ def cmd_state(a):
             src = GROUP_METEO.get(g)
             if src in METEO[a.stage] and match(f"meteo-{src}"):
                 meteo = [[run_id, f"meteo-{src}"]]
-            st["groups"][g] = {"items": items, "meteo": meteo, "cycle": a.cycle, "at": now}
+            if any(i[0] == run_id for i in items):
+                rotate_prev(st, prev_copy, g, gcyc)   # two-run groups: the old run becomes the previous run
+            else:
+                gcyc = old.get("cycle", "")   # nothing new from this run (failed job): the group keeps its cycle
+            st["groups"][g] = {"items": items, "meteo": meteo, "cycle": gcyc, "at": now}
             print(f"{g}: new {[i[1] for i in items if i[0] == run_id]}, kept {[i for i in items if i[0] != run_id]}")
         st.setdefault("stages", {})[a.stage] = a.cycle
     st.update(files_main=int(a.files_main or 0), files_meteo=int(a.files_meteo or 0), updated=now, run_id=run_id, stage=a.stage)
@@ -297,6 +419,7 @@ def main():
     p.add_argument("--meteo-cur", default=""); p.add_argument("--meteo-dst", default="web/forecast/meteograms")
     p = sp.add_parser("state"); p.add_argument("--stage", required=True); p.add_argument("--cycle", default="")
     p.add_argument("--prev-state", default="{}"); p.add_argument("--files-main", default="0"); p.add_argument("--files-meteo", default="0")
+    p.add_argument("--riders", default="{}")
     p.add_argument("--out", default="site-state.json")
     p = sp.add_parser("poll"); p.add_argument("--dry-run", action="store_true"); p.add_argument("--ref", default="main")
     a = ap.parse_args()

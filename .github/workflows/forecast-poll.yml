@@ -4,6 +4,7 @@
 #   s1 HRRR (HRRR f48 out about 01:47 / 13:47 UTC)        s2 RRFS + GFS (GFS f240 about 04:38 / 16:37 UTC)
 #   s3 AIFS + EPS/AIFS ENS maps + EPS meteograms (about 07:40 / 19:40 UTC)   s4 ECMWF 9 km (about 09:34 / 21:34 UTC)
 # The backup crons in forecast-site.yml start a stage only if the poller has not published it.
+# HRRR 18Z and AIFS 18Z (two-run models) need no poll of their own: they ride along with the next stage run (stage_tools.py RIDERS).
 # To stop: comment out the schedule below (or disable this workflow in the Actions tab). Rollback: web/forecast/README.md.
 name: Forecast poll
 

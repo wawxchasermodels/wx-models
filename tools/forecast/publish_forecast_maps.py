@@ -11,7 +11,9 @@ Sources:
     folder name + run.json); skipped when unset or with --no-adhoc.
   * $SITE_DIR/meteograms/made.json (meteograms.py).
 Only frames whose window ends within --max-age-hours of now (default 36) are kept; for each tab/period/view
-the newest run wins. Images are written as web JPEGs (long side 1600 px) under forecast/maps/.
+the newest run wins, except for the two-run models (MULTI_RUN, HRRR and AIFS): their two newest runs are both kept, each frame
+carries its `cycle`, and manifest `runs` lists them newest first for the viewer's run toggle.
+Images are written as web JPEGs (long side 1600 px) under forecast/maps/.
 No secrets live here; uploading is done by the workflow, not by this script.
 """
 import argparse, datetime as dt, glob, hashlib, json, os, re, shutil, subprocess, sys
@@ -31,6 +33,17 @@ METEO_BASE = os.environ.get("METEO_BASE", "meteograms/")
 
 def meteo_src(src):
     return METEO_BASE + src[len("meteograms/"):] if src.startswith("meteograms/") else src
+
+
+# models whose two newest runs are both published (10-25-26, Benjamin: "Keep 2 hrrr runs at any given time, have a toggle",
+# then the same for ECMWF AIFS single)
+MULTI_RUN = {"HRRR": 2, "AIFS": 2}
+
+
+def run_toggle_labels(cycles):
+    """Run toggle pills: '18Z', '12Z' (UTC run hour, as in the map headers); with the date when two runs share an hour."""
+    hrs = [c[8:10] for c in cycles]
+    return [f"{c[8:10]}Z" + (f" {int(c[4:6])}-{int(c[6:8])}" if hrs.count(c[8:10]) > 1 else "") for c in cycles]
 
 
 def run_label(model, cycle):
@@ -307,14 +320,23 @@ def main():
         if info["end"] < cutoff:
             continue
         k = (info["tab"], info["period"], info["view"], info["end"].isoformat(), info.get("model", ""))
+        if info.get("model") in MULTI_RUN:
+            k += (info.get("cycle", ""),)   # two-run model: each run keeps its own frame for the same time
         if k not in best or mt > best[k][1]:
             best[k] = (info, mt, p)
+    # two-run models: only their N newest cycles (the deploy prunes to 2 already; this guards full builds and local runs)
+    runs = {}
+    for m, n in MULTI_RUN.items():
+        cs = sorted({k[5] for k in best if k[4] == m and re.fullmatch(r"\d{10}", k[5])}, reverse=True)[:n]
+        runs[m] = cs
+        for k in [k for k in best if k[4] == m and k[5] not in cs]:
+            del best[k]
     maps_dir = os.path.join(SITE, "maps")
     shutil.rmtree(maps_dir, ignore_errors=True)
     tabs_out = []; todo = []   # (frame, (src, dst)): web copies are made in parallel below (speed: one process per core)
     for t in TABS:
         frames = {}
-        for (tab, period, view, _, _m), (info, mt, p) in sorted(best.items(), key=lambda kv: kv[0]):
+        for (tab, period, view, _, _m, *_c), (info, mt, p) in sorted(best.items(), key=lambda kv: kv[0]):
             if tab != t["id"]:
                 continue
             if view not in {i for i, _ in t["views"]} or period not in {i for i, _ in t["periods"]}:
@@ -324,6 +346,8 @@ def main():
             fr = {"src": rel, "label": label(info["start"], info["end"], period), "run": info["run"],
                   "model": info.get("model", ""), "start": info["start"].isoformat(), "end": info["end"].isoformat(),
                   "init": init_iso(info), "w": 0, "h": 0}
+            if info.get("model") in MULTI_RUN:
+                fr["cycle"] = info.get("cycle", "")   # run toggle (forecast.js)
             todo.append((fr, (p, os.path.join(SITE, rel))))
             frames.setdefault(f"{period}/{view}", []).append(fr)
         for v in frames.values():
@@ -362,6 +386,9 @@ def main():
         "generated_label": now.strftime("%-I:%M %p PT %-m-%-d-%y"),
         "tabs": tabs_out,
         "modelNotes": MODEL_NOTES,
+        # two-run models, newest first: the viewer shows a Run toggle when a tab has more than one of them
+        "runs": {m: [{"cycle": c, "label": lb, "run": run_label(m, c)} for c, lb in zip(cs, run_toggle_labels(cs))]
+                 for m, cs in runs.items() if cs},
         "meteograms": {"towns": [{"id": i, "label": l} for i, l in TOWNS],
                        "sections": [sec("eps", "ECMWF EPS", "ECMWF open data, CC BY 4.0", EPS),
                                     sec("hrrr", "HRRR", "NOAA HRRR, public domain", HRRR),
@@ -369,6 +396,8 @@ def main():
     }
     json.dump(manifest, open(os.path.join(SITE, "manifest.json"), "w"), indent=1)
     n = sum(len(v) for t in tabs_out for v in t["frames"].values())
+    for m, cs in runs.items():
+        print(f"{m} runs on the site: {cs}")
     print(f"manifest: {n} map frames, {sum(len(p['images']) for s in manifest['meteograms']['sections'] for p in s['products'])} meteograms")
 
 if __name__ == "__main__":
