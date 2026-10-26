@@ -68,7 +68,9 @@ def main():
     ap.add_argument("--speedup", type=float, default=1.0, help="expected per-job speedup used when sizing chunks (1 = size at old speed)")
     a = ap.parse_args()
     ms = [m for m in a.models.split(",") if m in ("ifs", "aifs", "hrrr", "rrfs")]; ts = [t for t in a.tiers.split(",") if t in "ABC" and t]
-    cyc = {m: (latest_long(m) if m in LONG else a.global_cycle) for m in ms}
+    # staged builds: explicit cycles for 18Z riders of two-run models (stage_tools.py RIDERS), e.g. {"hrrr": "2026102618"}
+    over = json.loads(os.environ.get("MENU_CYCLES") or "{}")
+    cyc = {m: over.get(m) or (latest_long(m) if m in LONG else a.global_cycle) for m in ms}
     state = {}
     if a.state and os.path.exists(a.state):
         try: state = json.load(open(a.state))

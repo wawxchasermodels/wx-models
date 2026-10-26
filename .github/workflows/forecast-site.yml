@@ -88,7 +88,13 @@ on:
   # backup crons start a stage only if it was not published yet (plan job checks the site state). UTC; PDT = UTC-7, PST = UTC-8.
   #   s1 HRRR 02:00/14:00 (7:00 PM / 7:00 AM PDT)  s2 RRFS+GFS 04:50/16:50 (9:50 PM / 9:50 AM)
   #   s3 AIFS+ens 07:50/19:50 (12:50 AM / 12:50 PM)  s4 ECMWF 9 km 09:50/21:50 (2:50 AM / 2:50 PM)
-  # The 21:50 full build stays as a fallback until the first scheduled staged cycle completes, then it is removed.
+  # Two-run HRRR + AIFS (10-25-26): the site keeps the 2 newest runs of each (run toggle). Their 18Z runs add no deploys and
+  # no crons: they ride along with the first stage run after their data is out (stage_tools.py RIDERS), normally
+  # HRRR 18Z (f48 about 19:47 UTC) with the 12Z s3 run (or s4 if s3 started first), AIFS 18Z (240 h about 00:55 UTC) with
+  # the 00Z s1 run. Deploys stay at about 434 a month.
+  # The 21:50 full build stays as a fallback until the first scheduled staged cycle completes, then it is removed. Until then
+  # it stands down by itself whenever the last deploy was a stage run in the last 36 h (stage_tools.py plan), so it can
+  # never redraw HRRR at 12Z over the 18Z run or reseed the site state under the staged builds.
   schedule:
     - cron: "50 21 * * *"
     # - cron: "0 2,14 * * *"     # STAGED BACKUP s1 (enabled only after the manual staged test cycle passes)
@@ -146,6 +152,9 @@ jobs:
       min_files: ${{ steps.st.outputs.min_files }}
       prev_state: ${{ steps.st.outputs.prev_state }}
       stage_patterns: ${{ steps.st.outputs.stage_patterns }}
+      riders: ${{ steps.st.outputs.riders }}
+      hrrr_cycle: ${{ steps.st.outputs.hrrr_cycle }}
+      aifs_cycle: ${{ steps.st.outputs.aifs_cycle }}
     permissions:
       contents: read
       actions: read     # list the saved menu-map caches (incremental rendering); staged builds: read the site state
@@ -203,6 +212,7 @@ jobs:
           WX_CYCLE_HOUR: ${{ steps.st.outputs.pin }}
           MENU_MODELS: ${{ steps.st.outputs.menu_models || github.event.inputs.menu_models }}
           MENU_TIERS: ${{ github.event.inputs.menu_tiers }}
+          MENU_CYCLES: ${{ steps.st.outputs.menu_cycles }}   # 18Z riders (two-run HRRR/AIFS): their own cycle
           MENU_OPTS: ${{ github.event.inputs.menu_opts || 'incremental=on,chunk_min=20,waves=on' }}
           CYCLE: ${{ steps.p.outputs.cycle }}
         run: |
@@ -311,8 +321,8 @@ jobs:
             python tools/forecast/make_clim.py /tmp/hgt.nc .clim/ncep_hgt500_mon_ltm_1991_2020.npz
           fi
           cp .clim/ncep_hgt500_mon_ltm_1991_2020.npz .site_batch/clim/
-      - name: AIFS 500 mb anomaly, MSLP, MSLP + 10 m wind (every 6 h to 240 h)
-        run: python tools/forecast/aifs_maps.py --hours 240 --every 6 --views na,pnw,pnwt
+      - name: AIFS 500 mb anomaly, MSLP, MSLP + 10 m wind (every 6 h to 240 h; aifs_cycle = 18Z rider, else newest/pinned)
+        run: python tools/forecast/aifs_maps.py --cycle "${{ needs.plan.outputs.aifs_cycle }}" --hours 240 --every 6 --views na,pnw,pnwt
       - name: Keep only the site files
         run: rm -rf .site_batch/clim
       - uses: actions/upload-artifact@v4
@@ -433,11 +443,11 @@ jobs:
           fi
           cp .clim/ncep_t2m_6h_ltm_1991_2020.npz .site_batch/clim/
       - name: ECMWF IFS 2 m temp, 2 m anomaly, 850 mb temp/wind (every 6 h to 240 h)
-        if: needs.plan.outputs.stage != 's3'   # stage s3 = AIFS temps only; s4 = IFS temps only
+        if: needs.plan.outputs.stage == 'all' || needs.plan.outputs.stage == 's4'   # s3 and the AIFS 18Z rider = AIFS temps only
         run: python tools/forecast/temp_maps.py --model ifs --cycle "${{ needs.plan.outputs.cycle }}" --hours 240 --every 6 --views na,pnw,pnwt,wa --products t2m,t2manom,t850
       - name: AIFS 2 m temp, 2 m anomaly, 850 mb temp/wind (every 6 h to 240 h)
-        if: needs.plan.outputs.stage != 's4'
-        run: python tools/forecast/temp_maps.py --model aifs --cycle "${{ needs.plan.outputs.cycle }}" --hours 240 --every 6 --views na,pnw,pnwt,wa --products t2m,t2manom,t850
+        if: needs.plan.outputs.stage == 'all' || needs.plan.outputs.stage == 's3' || needs.plan.outputs.aifs_cycle != ''
+        run: python tools/forecast/temp_maps.py --model aifs --cycle "${{ needs.plan.outputs.aifs_cycle || needs.plan.outputs.cycle }}" --hours 240 --every 6 --views na,pnw,pnwt,wa --products t2m,t2manom,t850
       - name: Keep only the site files
         run: rm -rf .site_batch/clim
       - uses: actions/upload-artifact@v4
@@ -470,8 +480,8 @@ jobs:
           echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true" | sudo debconf-set-selections
           sudo apt-get update -qq && sudo apt-get install -y -qq ttf-mscorefonts-installer libcairo2
           test -f /usr/share/fonts/truetype/msttcorefonts/Impact.ttf
-      - name: HRRR 2 m temp + 850 mb temp/wind (latest full 48 h run, hourly)
-        run: python tools/forecast/temp_maps.py --model hrrr --hours 48 --every 1
+      - name: HRRR 2 m temp + 850 mb temp/wind (latest full 48 h run, hourly; hrrr_cycle = 18Z rider)
+        run: python tools/forecast/temp_maps.py --model hrrr --cycle "${{ needs.plan.outputs.hrrr_cycle }}" --hours 48 --every 1
       - uses: actions/upload-artifact@v4
         with:
           name: hires-hrrr-maps
@@ -740,7 +750,7 @@ jobs:
 
   meteograms:
     needs: [plan, start-w3]
-    if: needs.plan.outputs.stage == 'all' && (contains(needs.plan.outputs.products, 'eps') || contains(needs.plan.outputs.products, 'hrrr') || contains(needs.plan.outputs.products, 'rrfs'))
+    if: needs.plan.outputs.stage == 'all' && needs.plan.outputs.go == 'true' && (contains(needs.plan.outputs.products, 'eps') || contains(needs.plan.outputs.products, 'hrrr') || contains(needs.plan.outputs.products, 'rrfs'))
     runs-on: ubuntu-latest
     timeout-minutes: 300
     env:
@@ -836,7 +846,7 @@ jobs:
   # Wave 4: menu heavy extras (IVT, upper winds, PW, thickness, cloud, IR, vis, fog)
   deploy-w1:
     needs: [plan, gfs, mslp, hires-hrrr]
-    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.stage == 'all' && needs.plan.outputs.waves == 'on' && (needs.gfs.result == 'success' || needs.mslp.result == 'success' || needs.hires-hrrr.result == 'success') }}
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.stage == 'all' && needs.plan.outputs.go == 'true' && needs.plan.outputs.waves == 'on' && (needs.gfs.result == 'success' || needs.mslp.result == 'success' || needs.hires-hrrr.result == 'success') }}
     uses: ./.github/workflows/forecast-deploy.yml
     secrets: inherit
     with:
@@ -847,7 +857,7 @@ jobs:
 
   deploy-w2:
     needs: [plan, deploy-w1, aifs, temps, hires-rrfs, wa-maps]
-    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.stage == 'all' && needs.plan.outputs.waves == 'on' && (needs.aifs.result == 'success' || needs.temps.result == 'success' || needs.hires-rrfs.result == 'success' || needs.wa-maps.result == 'success') }}
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.stage == 'all' && needs.plan.outputs.go == 'true' && needs.plan.outputs.waves == 'on' && (needs.aifs.result == 'success' || needs.temps.result == 'success' || needs.hires-rrfs.result == 'success' || needs.wa-maps.result == 'success') }}
     uses: ./.github/workflows/forecast-deploy.yml
     secrets: inherit
     with:
@@ -858,7 +868,7 @@ jobs:
 
   deploy-w3:
     needs: [plan, deploy-w2, menu-w3, menu-reuse, ens, meteograms]
-    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.stage == 'all' && needs.plan.outputs.waves == 'on' && (needs.menu-w3.result == 'success' || needs.menu-reuse.result == 'success' || needs.ens.result == 'success' || needs.meteograms.result == 'success') }}
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.stage == 'all' && needs.plan.outputs.go == 'true' && needs.plan.outputs.waves == 'on' && (needs.menu-w3.result == 'success' || needs.menu-reuse.result == 'success' || needs.ens.result == 'success' || needs.meteograms.result == 'success') }}
     uses: ./.github/workflows/forecast-deploy.yml
     secrets: inherit
     with:
@@ -869,7 +879,7 @@ jobs:
 
   deploy-w4:
     needs: [plan, deploy-w3, menu-w4]
-    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.stage == 'all' && (needs.plan.outputs.waves != 'on' || needs.menu-w4.result == 'success') }}
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.stage == 'all' && needs.plan.outputs.go == 'true' && (needs.plan.outputs.waves != 'on' || needs.menu-w4.result == 'success') }}
     uses: ./.github/workflows/forecast-deploy.yml
     secrets: inherit
     with:
@@ -911,7 +921,8 @@ jobs:
           CYCLE: ${{ needs.plan.outputs.stage != 'all' && needs.plan.outputs.stage_cycle || needs.plan.outputs.cycle }}
           FILES_MAIN: ${{ needs.deploy-stage.outputs.files_main || needs.deploy-w4.outputs.files_main }}
           FILES_METEO: ${{ needs.deploy-stage.outputs.files_meteo || needs.deploy-w4.outputs.files_meteo }}
-        run: python3 tools/forecast/stage_tools.py state --stage "$STAGE" --cycle "$CYCLE" --prev-state "$PREV" --files-main "$FILES_MAIN" --files-meteo "$FILES_METEO"
+          RIDERS: ${{ needs.plan.outputs.riders }}
+        run: python3 tools/forecast/stage_tools.py state --stage "$STAGE" --cycle "$CYCLE" --prev-state "$PREV" --files-main "$FILES_MAIN" --files-meteo "$FILES_METEO" --riders "$RIDERS"
       - uses: actions/upload-artifact@v4
         with:
           name: site-state
