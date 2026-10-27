@@ -20,6 +20,19 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import aifs_maps as AM
 import menu_maps as MM
 import temp_maps as TM
+import time, urllib.error
+
+
+def _wait_gfs(c, s, tries=20):
+    """10-27-26: NOAA's bucket posts GFS hours out of order (f240 can land before f222/f234), so the stage ready check
+    on f240 can pass with a straggler still missing and its 404 killed the whole job (00Z and 12Z 10-26/27). Wait up to
+    20 min for this step's index before reading it; other errors fall through to the normal read."""
+    u = MM.GFS.format(d=f"{c:%Y%m%d}", h=c.hour, s=s) + ".idx"
+    for k in range(tries):
+        try: TM.get(u, (0, 10)); return
+        except urllib.error.HTTPError as e:
+            if e.code != 404: return
+        print(f"GFS f{s:03d} not posted yet, waiting 60 s ({k + 1}/{tries})", flush=True); time.sleep(60)
 
 
 def _k(lat):
@@ -41,6 +54,7 @@ if __name__ == "__main__":
     steps = [int(x) for x in a.steps.split(",")] if a.steps else list(range(0, min(a.hours, 240) + 1, a.every))
     views = [v for v in a.views.split(",") if v in AM.VIEWS]; tot = 0
     for s in steps:
+        if M == "gfs": _wait_gfs(c, s)
         R = MM.Reader(M, c, s); vt = f"{c + dt.timedelta(hours=s):%Y%m%d%H}"
         try:
             if "z500" in a.products:
