@@ -27,7 +27,7 @@ async function boot() {
                                    document.fonts.load("800 20px Montserrat"), document.fonts.load("500 12px Montserrat")]);
   S.man = man;
   // runs: "model/cycle", newest first per model; models in a fixed order
-  const order = ["hrrr", "rrfs", "nbm", "gfs", "ifs", "aifs", "eps"].filter(m => S.man.models[m] && (S.man.runs[m] || []).length);
+  const order = ["hrrr", "rrfs", "nbm", "gfs", "ifs", "aifs", "eps", "aens"].filter(m => S.man.models[m] && (S.man.runs[m] || []).length);
   const all = []; for (const m of order) for (const c of [...S.man.runs[m]].reverse()) all.push(`${m}/${c}`);
   const qr = Q.get("run"), qm = Q.get("model");
   S.run = all.includes(qr) ? qr : (all.find(r => qm && r.startsWith(qm + "/")) || all[0]);

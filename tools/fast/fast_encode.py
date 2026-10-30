@@ -32,13 +32,18 @@ MODELS = {   # grid "lcc" = HRRR 3 km, "ll" = 0.25 deg global (lat 90 -> -90, lo
     # ECMWF ENS (EPS) 0.25 open data, 50 perturbed members (no control in the open files), 00/12Z to 360 h. Mean/spread/probability
     # computed here from the members (the open em/es file only appears once the whole run is out). 10-30-26 (Benjamin's saved order).
     "eps":  dict(grid="ll", views=GLOBAL_VIEWS, cycles=(0, 12), steps=list(range(6, 361, 6)), keep=2, grid_from="ifs"),
+    # AIFS ensemble (stage 4): 50 members, 00/12Z, 6-hourly to 360 h; 2 m temp + 500 mb height (z / g), same products as "eps"
+    "aens": dict(grid="ll", views=GLOBAL_VIEWS, cycles=(0, 12), steps=list(range(6, 361, 6)), keep=2, grid_from="ifs"),
 }
-MINFO = {"nbm": dict(name="NOAA NBM", site="NBM", res="2.5 km", noaa=True),
+MINFO = {"aens": dict(name="ECMWF AIFS Ensemble", site="AIFS ENS", res="0.25\u00b0 \u00b7 50 members", credit_as="aifs"),
+         "nbm": dict(name="NOAA NBM", site="NBM", res="2.5 km", noaa=True),
          "eps": dict(name="ECMWF Ensemble", site="ECMWF EPS", res="0.25\u00b0 \u00b7 50 members", credit_as="ifs")}
 def minfo(m):
     import menu_maps as M
     return MINFO.get(m) or M.MODELS[m]
 EPS_URL = "https://data.ecmwf.int/forecasts/{d}/{h:02d}z/ifs/0p25/enfo/{d}{h:02d}0000-{s}h-enfo-ef"
+AENS_URL = "https://data.ecmwf.int/forecasts/{d}/{h:02d}z/aifs-ens/0p25/enfo/{d}{h:02d}0000-{s}h-enfo-pf"
+ENS_SRC = {"eps": (EPS_URL, "gh", 1.0), "aens": (AENS_URL, "z", 1 / 9.80665)}   # 500 mb height: IFS ENS gh (m), AIFS ENS z (m2/s2)
 
 NBM_URL = "https://noaa-nbm-grib2-pds.s3.amazonaws.com/blend.{d}/{h:02d}/core/blend.t{h:02d}z.core.f{s:03d}.co.grib2"
 class NbmReader:
@@ -87,15 +92,15 @@ class EpsReader:
     """ECMWF ENS step: downloads the 50 member messages of 2t and 500 mb gh (HTTP ranges, ~36 MB) and keeps running sums only
     (memory stays at a few full grids). f() returns the ensemble mean like menu_maps.Reader.f; extra() the spread/probability."""
     st = _NoSt()
-    def __init__(self, c, s):
+    def __init__(self, c, s, kind="eps"):
         import temp_maps as TM, eccodes as ec
         from concurrent.futures import ThreadPoolExecutor
         self.c, self.s, self.bytes = c, s, 0
-        base = EPS_URL.format(d=f"{c:%Y%m%d}", h=c.hour, s=s)
+        url, zp, zs = ENS_SRC[kind]; base = url.format(d=f"{c:%Y%m%d}", h=c.hour, s=s)
         idx = [json.loads(l) for l in TM.get(base + ".index").decode().splitlines()]
-        want = [x for x in idx if x.get("type") in ("pf", "cf") and (x["param"] == "2t" or (x["param"] == "gh" and x.get("levelist") == "500"))]
+        want = [x for x in idx if x.get("type") in ("pf", "cf") and (x["param"] == "2t" or (x["param"] == zp and x.get("levelist") == "500"))]
         acc = {}
-        def fetch(x): return x["param"], TM.get(base + ".grib2", (x["_offset"], x["_offset"] + x["_length"] - 1))
+        def fetch(x): return ("gh" if x["param"] == zp else x["param"]), TM.get(base + ".grib2", (x["_offset"], x["_offset"] + x["_length"] - 1))
         with ThreadPoolExecutor(8) as ex:
             for par, blob in ex.map(fetch, want):
                 self.bytes += len(blob); g = ec.codes_new_from_message(blob)
@@ -104,7 +109,7 @@ class EpsReader:
                 v = ec.codes_get_values(g).reshape(nj, ni).astype(np.float64); ec.codes_release(g)
                 if not hasattr(self, "lat"):
                     self.lat = la0 - d * np.arange(nj); lon = (lo0 + d * np.arange(ni) + 180) % 360 - 180; self.o = np.argsort(lon); self.lon = lon[self.o]
-                v = v[:, self.o]
+                v = v[:, self.o] * (zs if par == "gh" else 1.0)
                 a = acc.setdefault(par, dict(n=0, s=np.zeros_like(v), q=np.zeros_like(v), c=np.zeros_like(v)))
                 a["n"] += 1; a["s"] += v; a["q"] += v * v
                 if par == "2t": a["c"] += v <= 273.15
@@ -123,7 +128,7 @@ class EpsReader:
         raise KeyError(name)
 def _ens(name):
     def g(R, m):
-        if m != "eps": raise KeyError(name)
+        if m not in ("eps", "aens"): raise KeyError(name)
         return R.extra(name)
     return g
 
@@ -245,7 +250,7 @@ def step_job(args):
     c = dt.datetime.strptime(c_str, "%Y%m%d%H").replace(tzinfo=dt.timezone.utc)
     i0, i1, j0, j1 = crop; t = time.time(); ranges, sizes, q = {}, {}, {}
     _patch_models(M)
-    try: R = EpsReader(c, s) if m == "eps" else NbmReader(c, s) if m == "nbm" else M.Reader(m, c, s)
+    try: R = EpsReader(c, s, m) if m in ("eps", "aens") else NbmReader(c, s) if m == "nbm" else M.Reader(m, c, s)
     except Exception as e: return s, None, str(e), 0, 0
     for name, (get, units) in (NBM_FIELDS if m == "nbm" else FIELDS).items():
         try: a = get(R, m)
@@ -605,7 +610,7 @@ def static(m, out, views_only=None):
                          **table(HS.ANOM_LEVELS, CM["z500anom"], "both"),
                          isobars=dict(field="z500", scale=0.1, every=6, sigma=1.5, color="#101114", lw=1.25, halo=2.4),
                          extra="vs 1991-2020 NCEP/NCAR monthly mean  \u00b7  heights every 6 dam  \u00b7  {lo} to {hi} m in view", pct=[0.5, 99.5],
-                         towns="names", clim="z500", only=("gfs", "ifs", "aifs", "eps")),
+                         towns="names", clim="z500", only=("gfs", "ifs", "aifs", "eps", "aens")),
         # stage 2 (browser-only): precip in the last 1/6/24 h and MSLP + 6 h precip (differences of the run total in the browser)
         "qpf1": dict(title="1 h Precipitation", fields=["apcp"], window=1, fill="window", key="Precip (in)", ticks=[0.01, 0.05, 0.1, 0.25, 0.5, 1, 2], tickfmt=True,
                      **table(HS.RAIN_LEVELS, CM["qpf"], "max"), extra="liquid equivalent in the hour ending at the valid time  \u00b7  max {hi} in in view",
@@ -676,7 +681,7 @@ def static(m, out, views_only=None):
                               freeze=32, extra="NBM highest temperature in the 12 h ending at the valid time  \u00b7  {lo} to {hi}\u00b0F in view", pct=[0.5, 99.5])
         prods["nmint"] = dict(title="12 h Low Temperature", fields=["mint"], key="Temp (\u00b0F)", ticks=HS.TEMP_TICKS, **table(HS.TEMP_LEVELS, CM["t2m"], "both"),
                               freeze=32, extra="NBM lowest temperature in the 12 h ending at the valid time  \u00b7  {lo} to {hi}\u00b0F in view", pct=[0.5, 99.5])
-    if m == "eps":   # ensemble: mean versions of the shared products plus spread / probability maps
+    if m in ("eps", "aens"):   # ensemble: mean versions of the shared products plus spread / probability maps
         prods = {k: prods[k] for k in ("t2m", "t2ma", "z500anom")}
         prods["t2ma"]["title"] = "2 m Temperature Anomaly (ens. mean)"
         prods["t2m"]["title"] = "2 m Temperature (ens. mean)"; prods["t2m"]["extra"] = "mean of 50 members  \u00b7  " + prods["t2m"]["extra"]
