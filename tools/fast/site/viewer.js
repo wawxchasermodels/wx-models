@@ -51,7 +51,7 @@ async function boot() {
   placeSteps(); addEventListener("resize", fitPhone); window.visualViewport && visualViewport.addEventListener("resize", fitPhone); (mq.addEventListener ? mq.addEventListener("change", placeSteps) : mq.addListener(placeSteps));
   setupPointer(); $("share") && ($("share").onclick = share); $("save") && ($("save").onclick = saveImage);
   $("prod").onchange = e => { S.prod = e.target.value; draw(); };
-  $("view").onchange = e => { S.view = e.target.value; draw(); };
+  $("view").onchange = e => { S.view = e.target.value; resetZoom(); draw(); };
   const sl = $("step"), endDrag = () => { if (S.dragging) { S.dragging = false; draw(); } };
   sl.addEventListener("pointerdown", () => { S.dragging = true; });
   sl.addEventListener("touchstart", () => { S.dragging = true; }, { passive: true });
@@ -356,15 +356,62 @@ function readout(ev) {
   tip.textContent = s; tip.hidden = false;
   const wr = $("wrap").getBoundingClientRect(); tip.style.left = (ev.clientX - wr.left + 14) + "px"; tip.style.top = (ev.clientY - wr.top - 30) + "px";
 }
+// Zoomable map (Benjamin's saved order): wheel / trackpad pinch / two-finger pinch zooms (1-6x) at the pointer, drag pans
+// when zoomed, double-click / double-tap or the "Reset zoom" button resets. At 1x a one-finger swipe still steps hours and a
+// tap reads the value. The zoom is a CSS transform of the drawn map, so it costs no redraw and survives hour/product changes.
+const Z = { k: 1, x: 0, y: 0 };
+function applyZoom() {
+  const cv = $("map"), w = cv.offsetWidth, h = cv.offsetHeight;
+  Z.k = Math.min(6, Math.max(1, Z.k)); if (Z.k <= 1.001) { Z.k = 1; Z.x = 0; Z.y = 0; }
+  Z.x = Math.min(0, Math.max(w * (1 - Z.k), Z.x)); Z.y = Math.min(0, Math.max(h * (1 - Z.k), Z.y));
+  cv.style.transform = Z.k === 1 ? "" : `translate(${Z.x}px,${Z.y}px) scale(${Z.k})`;
+  const b = $("zreset"); if (b) b.hidden = Z.k === 1;
+}
+function resetZoom() { Z.k = 1; Z.x = 0; Z.y = 0; applyZoom(); }
+function zoomAt(cx, cy, k2) {   // keep the map point under (cx, cy) fixed
+  const cv = $("map"), r = cv.getBoundingClientRect(), l0 = r.left - Z.x, t0 = r.top - Z.y;
+  const px = (cx - l0 - Z.x) / Z.k, py = (cy - t0 - Z.y) / Z.k; k2 = Math.min(6, Math.max(1, k2));
+  Z.x = cx - l0 - px * k2; Z.y = cy - t0 - py * k2; Z.k = k2; applyZoom();
+}
 function setupPointer() {
-  const cv = $("map"); let down = null;
-  cv.addEventListener("pointermove", e => { if (e.pointerType === "mouse") readout(e); });
-  cv.addEventListener("pointerleave", () => { if ($("tip")) $("tip").hidden = true; });
-  cv.addEventListener("pointerdown", e => { down = { x: e.clientX, y: e.clientY, t: performance.now() }; });
-  cv.addEventListener("pointerup", e => {
-    if (!down) return; const dx = e.clientX - down.x, dy = e.clientY - down.y; down = null;
-    if (Math.abs(dx) > 40 && Math.abs(dx) > 1.5 * Math.abs(dy)) go(dx < 0 ? 1 : -1); else readout(e);
+  const cv = $("map"), P = new Map(); let down = null, pinch = null, lastTap = 0, moved = false;
+  cv.style.transformOrigin = "0 0";
+  const wr = $("wrap"); wr.style.overflow = "hidden";
+  if (!$("zreset")) { const b = document.createElement("button"); b.id = "zreset"; b.type = "button"; b.textContent = "Reset zoom"; b.hidden = true; b.onclick = resetZoom; wr.appendChild(b); }
+  cv.addEventListener("wheel", e => { e.preventDefault(); zoomAt(e.clientX, e.clientY, Z.k * Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0015))); }, { passive: false });
+  cv.addEventListener("dblclick", e => { e.preventDefault(); if (Z.k > 1) resetZoom(); else zoomAt(e.clientX, e.clientY, 2.5); });
+  cv.addEventListener("pointermove", e => {
+    if (e.pointerType === "mouse" && !P.size) readout(e);
+    if (!P.has(e.pointerId)) return; const p0 = P.get(e.pointerId); P.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (P.size >= 2 && pinch) {
+      const [a, b] = [...P.values()], d = Math.hypot(a.x - b.x, a.y - b.y), mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+      zoomAt(pinch.mx, pinch.my, pinch.k * d / pinch.d); Z.x += mx - pinch.mx; Z.y += my - pinch.my; pinch.mx = mx; pinch.my = my; pinch.k = Z.k; pinch.d = d; applyZoom();
+      moved = true; if ($("tip")) $("tip").hidden = true;
+    } else if (P.size === 1 && Z.k > 1 && down) {
+      Z.x += e.clientX - p0.x; Z.y += e.clientY - p0.y; applyZoom();
+      if (Math.hypot(e.clientX - down.x, e.clientY - down.y) > 6) { moved = true; if ($("tip")) $("tip").hidden = true; }
+    }
   });
+  cv.addEventListener("pointerleave", () => { if ($("tip")) $("tip").hidden = true; });
+  cv.addEventListener("pointerdown", e => {
+    P.set(e.pointerId, { x: e.clientX, y: e.clientY }); try { cv.setPointerCapture(e.pointerId); } catch (_) {}
+    if (P.size === 1) { down = { x: e.clientX, y: e.clientY, t: performance.now() }; moved = false; }
+    if (P.size === 2) { const [a, b] = [...P.values()]; pinch = { d: Math.max(10, Math.hypot(a.x - b.x, a.y - b.y)), k: Z.k, mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2 }; down = null; moved = true; }
+  });
+  const up = e => {
+    P.delete(e.pointerId); if (P.size < 2) pinch = null;
+    if (!down || P.size) { if (!P.size) down = null; return; }
+    const dx = e.clientX - down.x, dy = e.clientY - down.y, d0 = down; down = null;
+    if (e.type === "pointercancel" || moved) return;
+    if (Z.k === 1 && Math.abs(dx) > 40 && Math.abs(dx) > 1.5 * Math.abs(dy)) { go(dx < 0 ? 1 : -1); return; }
+    if (e.pointerType !== "mouse") {   // double-tap: zoom in 2.5x there, or reset when zoomed
+      const now = performance.now(); if (now - lastTap < 300) { lastTap = 0; if (Z.k > 1) resetZoom(); else zoomAt(e.clientX, e.clientY, 2.5); return; }
+      lastTap = now;
+    }
+    readout(e);
+  };
+  cv.addEventListener("pointerup", up); cv.addEventListener("pointercancel", up);
+  addEventListener("resize", applyZoom);
 }
 // "Save image" (Benjamin 10-29-26 7:48 PM): the map exactly as drawn (base, data, towns, key, title/time; no controls)
 // as a PNG at the map's full size. Phones: share sheet with the file (iOS "Save Image"); no file sharing: long-press view

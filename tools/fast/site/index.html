@@ -21,7 +21,8 @@ html,body{overscroll-behavior:none}
 #step::-moz-range-thumb{width:22px;height:22px;border-radius:50%;background:#2f8cff;border:3px solid #f4f2ee}
 #stat{color:#a7abb3;font-size:12px;min-width:260px}
 #wrap{position:relative;flex:1 1 auto;min-height:0;display:flex;align-items:center;justify-content:center;padding:4px;box-sizing:border-box}
-canvas{display:block;width:auto;height:auto;max-width:100%;max-height:100%;touch-action:pinch-zoom}
+canvas{display:block;width:auto;height:auto;max-width:100%;max-height:100%;touch-action:none;will-change:transform}
+#zreset{position:absolute;right:10px;top:10px;z-index:2;background:#262931ee;color:#f4f2ee;border:1px solid #7d828c;border-radius:6px;padding:5px 10px;font:inherit;font-size:13px;cursor:pointer}
 #tip{position:absolute;pointer-events:none;background:#1d2027ee;color:#fff;border:1px solid #7d828c;border-radius:6px;padding:3px 8px;font-weight:700;font-size:14px;white-space:nowrap}
 @media (max-width:1500px){#stat{display:none}}
 @media (max-width:700px){#wrap{align-items:flex-start}}
