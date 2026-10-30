@@ -13,12 +13,67 @@ const img = src => new Promise((ok, no) => { const im = new Image(); im.onload =
 
 function fitPhone() {   // phones: map as large as fits between the menus and the slider bar, placed right under the menus
   const cv = $("map"); if (!cv) return;
-  if (!document.body.classList.contains("phone") || !cv.width) { cv.style.width = cv.style.height = ""; return; }
+  const LW = cv._lw || cv.width, LH = cv._lh || cv.height;   // logical (figure px) size; the bitmap can be LW x RS (sharpMap)
+  cv.style.maxWidth = `min(100%, ${LW}px)`; cv.style.maxHeight = document.body.classList.contains("phone") ? "none" : `min(100%, ${LH}px)`;
+  if (!document.body.classList.contains("phone") || !cv.width) { cv.style.width = cv.style.height = ""; schedSharp(); return; }
   const wr = $("wrap"), cs = getComputedStyle(wr), padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight), padY = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
   const vh = window.visualViewport ? visualViewport.height : innerHeight;
   const availW = document.documentElement.clientWidth - padX, availH = vh - $("bar").offsetHeight - $("dock").offsetHeight - padY;
-  const k = Math.max(0.05, Math.min(availW / cv.width, availH / cv.height));
-  cv.style.width = Math.floor(cv.width * k) + "px"; cv.style.height = Math.floor(cv.height * k) + "px";
+  const k = Math.max(0.05, Math.min(availW / LW, availH / LH));
+  cv.style.width = Math.floor(LW * k) + "px"; cv.style.height = Math.floor(LH * k) + "px"; schedSharp();
+}
+// 10-30 4:50 PM (Benjamin: "the model images look super low res on the phone"): the map bitmap was always the figure size
+// (1600 px wide, encoder dpi 100; the old site's PNGs are 150 dpi = 2400 px), and the in-page zoom is a CSS scale of that
+// bitmap, so a 2.5x double-tap on a 3x iPhone stretched 1600 px over ~2900 screen px (soft text, lines and color edges).
+// Now the bitmap follows the screen: RS = shown size x devicePixelRatio x zoom / figure size (1 .. 3, at most 12 MP, steps
+// of 0.25). Lines, barbs, H/L, numbers and header text are drawn at RS; the color fill is binned at RS from the same values
+// (sharp band edges); the fixed layers (borders, town names, color key) are 1600 px PNGs scaled up smoothly. RS = 1 (phone
+// unzoomed, ordinary desktop) draws exactly as before. A new RS is applied ~200 ms after zooming stops; while the slider is
+// dragged the RS in use is kept and the fill is the light half-res one; the full sharp frame comes when the finger lifts.
+function wantRS(LW, LH) {
+  const cv = $("map"); if (!cv || !LW || Q.get("rs1")) return 1;
+  const shown = cv.offsetWidth || LW, want = shown * (window.devicePixelRatio || 1) * (Z.k || 1) / LW;
+  const cap = Math.min(3, Math.sqrt(12e6 / (LW * LH)));
+  return Math.max(1, Math.min(cap, Math.ceil(want * 4 - 0.2) / 4));
+}
+let sharpTimer = null;
+function schedSharp() {
+  clearTimeout(sharpTimer); sharpTimer = setTimeout(() => { const cv = $("map");
+    if (cv && cv._lw && window.__drawn && !S.dragging && wantRS(cv._lw, cv._lh) !== (cv._rs || 1)) draw(); }, 200);
+}
+function sizeMap(cv, V, keepRS) {   // bitmap = figure px x RS; context transform = RS, so all drawing stays in figure px
+  const [LW, LH] = V.fig, rs = keepRS && cv._lw === LW && cv._lh === LH ? (cv._rs || 1) : wantRS(LW, LH);
+  const bw = Math.round(LW * rs), bh = Math.round(LH * rs), relayout = cv._lw !== LW || cv._lh !== LH;
+  if (cv.width !== bw || cv.height !== bh) { cv.width = bw; cv.height = bh; }
+  cv._lw = LW; cv._lh = LH; cv._rs = rs; if (relayout) fitPhone();
+  const ctx = cv.getContext("2d"); ctx.setTransform(rs, 0, 0, rs, 0, 0); ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
+  return ctx;
+}
+function fillSharp(ctx, st, vals, pal, mins, nn, rs) {   // fill binned at RS from the figure-px values (bilinear; precip type nearest)
+  const W = st.W, H = st.H, X0 = Math.round(st.x0 * rs), Y0 = Math.round(st.y0 * rs);
+  const w2 = Math.round((st.x0 + W) * rs) - X0, h2 = Math.round((st.y0 + H) * rs) - Y0, sx = W / w2, sy = H / h2;
+  const im = new ImageData(w2, h2), o32 = new Uint32Array(im.data.buffer), le = new Uint8Array(new Uint32Array([1]).buffer)[0] === 1;
+  const pk = c => c ? (le ? (255 << 24 | c[2] << 16 | c[1] << 8 | c[0]) >>> 0 : (c[0] << 24 | c[1] << 16 | c[2] << 8 | 255) >>> 0) : 0;
+  const cols = pal.cols.map(pk), under = pk(pal.under), over = pk(pal.over);
+  const CX = new Int32Array(w2), TX = new Float32Array(w2);
+  for (let x = 0; x < w2; x++) { const fx = Math.min(W - 1, Math.max(0, (x + 0.5) * sx - 0.5)), c0 = Math.min(W - 2, fx | 0); CX[x] = c0; TX[x] = fx - c0; }
+  const lo = mins === undefined ? -Infinity : mins;
+  for (let y = 0; y < h2; y++) {
+    const fy = Math.min(H - 1, Math.max(0, (y + 0.5) * sy - 0.5)), r0 = Math.min(H - 2, fy | 0), ty = fy - r0, row = r0 * W, q0 = y * w2;
+    let lastK = -1, a = 0, b = 0, c = 0, d = 0;
+    for (let x = 0; x < w2; x++) {
+      const k = row + CX[x], tx = TX[x];
+      if (k !== lastK) { a = vals[k]; b = vals[k + 1]; c = vals[k + W]; d = vals[k + W + 1]; lastK = k; }
+      let v;
+      if (nn) v = tx >= 0.5 ? (ty >= 0.5 ? d : b) : (ty >= 0.5 ? c : a);
+      else { v = (a + (b - a) * tx) * (1 - ty) + (c + (d - c) * tx) * ty;
+             if (v !== v) v = tx >= 0.5 ? (ty >= 0.5 ? d : b) : (ty >= 0.5 ? c : a); }
+      if (!(v >= lo)) continue;   // NaN or below the shown minimum
+      o32[q0 + x] = v < pal.L0 ? under : v >= pal.Lend ? over : cols[bin(pal, v)];
+    }
+  }
+  const tmp = new OffscreenCanvas(w2, h2); tmp.getContext("2d").putImageData(im, 0, 0);
+  ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(tmp, X0, Y0); ctx.restore();
 }
 async function boot() {
   if (Q.get("bare")) document.body.classList.add("bare");
@@ -311,16 +366,15 @@ async function render(lite) {
     if (seq !== drawSeq) return;
     if (!String(e && e.message).startsWith("nodata:")) throw e;
     S.derived.delete(`${run}/${pid}/${f}`);
-    const V = VIEWS()[vid], cv = $("map"), st2 = await viewStatic(vid); if (cv.width !== V.fig[0]) { cv.width = V.fig[0]; cv.height = V.fig[1]; fitPhone(); }
-    const ctx = cv.getContext("2d"); ctx.fillStyle = S.man.style.BG; ctx.fillRect(0, 0, cv.width, cv.height); ctx.drawImage(st2.base, 0, 0, cv.width, cv.height);
+    const V = VIEWS()[vid], cv = $("map"), st2 = await viewStatic(vid);
+    const ctx = sizeMap(cv, V, lite), [LW, LH] = V.fig; ctx.fillStyle = S.man.style.BG; ctx.fillRect(0, 0, LW, LH); ctx.drawImage(st2.base, 0, 0, LW, LH);
     header(ctx, V, PRODS()[pid].title, step.valid_line, `${S.runs[run].runline}  \u00b7  ${V.label}  \u00b7  not in this model run at this hour`, step.badge);
     S.cur = null; window.__drawn = `${pid}/${vid}/${f}`; return;
   }
   if (seq !== drawSeq) return;
   const t1 = performance.now();
   const V = VIEWS()[vid], P = PRODS()[pid], cv = $("map");
-  if (cv.width !== V.fig[0] || cv.height !== V.fig[1]) { cv.width = V.fig[0]; cv.height = V.fig[1]; fitPhone(); }
-  const ctx = cv.getContext("2d"); ctx.fillStyle = S.man.style.BG; ctx.fillRect(0, 0, cv.width, cv.height);
+  const ctx = sizeMap(cv, V, lite), [LW, LH] = V.fig, rs = cv._rs; ctx.fillStyle = S.man.style.BG; ctx.fillRect(0, 0, LW, LH);
   // 1. color fill: value -> bin color, exactly the site's bins (contourf + BoundaryNorm)
   const smp = P.fill === "prt" ? sampleNN : sample;
   const pal = palette(pid), mins = P.min_show, im = ctx.createImageData(st.W, st.H), o = im.data, F = D.fill, n = st.W * st.H;
@@ -333,15 +387,17 @@ async function render(lite) {
       for (let dy = 0; dy < 2 && y + dy < H; dy++) for (let dx = 0; dx < 2 && x + dx < W; dx++) {
         const kk = k + dy * W + dx; vals[kk] = v; if (!c) continue; const q = kk * 4; o[q] = c[0]; o[q + 1] = c[1]; o[q + 2] = c[2]; o[q + 3] = 255; }
     }
-  } else for (let k = 0; k < n; k++) {
+  } else if (rs > 1 && !S.timer) for (let k = 0; k < n; k++) vals[k] = smp(st, F, k);
+  else for (let k = 0; k < n; k++) {
     const v = smp(st, F, k); vals[k] = v; if (v !== v || (mins !== undefined && v < mins)) continue;
     let c; if (v < pal.L0) c = pal.under; else if (v >= pal.Lend) c = pal.over; else c = pal.cols[bin(pal, v)];
     if (!c) continue; const q = k * 4; o[q] = c[0]; o[q + 1] = c[1]; o[q + 2] = c[2]; o[q + 3] = 255;
   }
-  const tmp = new OffscreenCanvas(st.W, st.H); tmp.getContext("2d").putImageData(im, 0, 0); ctx.drawImage(tmp, st.x0, st.y0);
+  if (rs > 1 && !lite && !S.timer) fillSharp(ctx, st, vals, pal, mins, P.fill === "prt", rs);
+  else { const tmp = new OffscreenCanvas(st.W, st.H); tmp.getContext("2d").putImageData(im, 0, 0); ctx.drawImage(tmp, st.x0, st.y0); }
   const t2 = performance.now();
   // 2. borders/coast/frame + header box (static layer)
-  ctx.drawImage(st.base, 0, 0, cv.width, cv.height);
+  ctx.drawImage(st.base, 0, 0, LW, LH);
   // 3. product lines
   ctx.save(); ctx.beginPath(); ctx.rect(st.x0, st.y0, st.W, st.H); ctx.clip();
   if (P.freeze !== undefined) {
@@ -357,15 +413,15 @@ async function render(lite) {
   ctx.restore();
   // 4. towns (dots + names static) and live numbers
   const tmode = P.towns || "numbers";
-  if (st.towns && tmode !== "none") ctx.drawImage(st.towns, 0, 0, cv.width, cv.height);
+  if (st.towns && tmode !== "none") ctx.drawImage(st.towns, 0, 0, LW, LH);
   if (st.towns && tmode === "numbers") for (const t of V.towns) {
     if (!(t.fi >= 0 && t.fj >= 0 && t.fi < D.h - 1 && t.fj < D.w - 1)) continue;
     let v = sampleRC(D.fill, D.w, t.fi, t.fj); if (!isFinite(v)) continue;   // HRRR: integer = nearest 3 km point; global: bilinear at the pin
     if (pid === "t2m" && t.t2m_corr !== undefined) v += t.t2m_corr;          // pass summit height correction (temp_maps)
-    haloText(ctx, fmtVal(P, v), t.x * cv.width, t.y * cv.height, `800 ${pt(t.size)}px Montserrat`, t.color, pt(3.0), "left", "middle");
+    haloText(ctx, fmtVal(P, v), t.x * LW, t.y * LH, `800 ${pt(t.size)}px Montserrat`, t.color, pt(3.0), "left", "middle");
   }
   // 5. key + header text
-  ctx.drawImage(key, 0, 0, cv.width, cv.height);
+  ctx.drawImage(key, 0, 0, LW, LH);
   const [r0, r1, c0, c1] = V.cut;                                            // same rows/cols temp_maps.cut() keeps
   if (!D.pct) D.pct = {};
   if (!D.pct[vid]) { const a = new Float32Array(Math.ceil((r1 - r0) / 2) * Math.ceil((c1 - c0) / 2)); let n = 0;   // every 2nd cell
@@ -378,7 +434,7 @@ async function render(lite) {
   S.cur = { st, D, vals, P, pid, V, run, f };
   S.last = { data_ms: t1 - t0, fill_ms: t2 - t1, overlay_ms: t3 - t2, total_ms: t3 - t0 };
   $("stat").textContent = `F+${f}  data ${S.last.data_ms.toFixed(0)} ms · fill ${S.last.fill_ms.toFixed(0)} ms · lines/labels ${S.last.overlay_ms.toFixed(0)} ms`;
-  window.__drawn = `${pid}/${vid}/${f}` + (lite ? "~" : "");
+  window.__drawn = `${pid}/${vid}/${f}` + (lite ? "~" : ""); window.__rs = rs;
   if (lite) return;
   // iOS Safari throws after 100 history.replaceState calls in 10 s: update the URL once things settle
   clearTimeout(urlTimer); urlTimer = setTimeout(() => { const u = new URL(location); u.searchParams.set("prod", pid); u.searchParams.set("view", vid);
@@ -407,7 +463,7 @@ const UNITS = { ivt: " kg/m/s", fog: "", waves: " ft", wavemax: " ft", ehigh: "\
 // value under the cursor / tap (item 1) and swipe to step (item 6)
 function readout(ev) {
   const C = S.cur, tip = $("tip"); if (!C || !tip) return;
-  const cv = $("map"), r = cv.getBoundingClientRect(), X = (ev.clientX - r.left) * cv.width / r.width, Y = (ev.clientY - r.top) * cv.height / r.height;
+  const cv = $("map"), r = cv.getBoundingClientRect(), LW = cv._lw || cv.width, LH = cv._lh || cv.height, X = (ev.clientX - r.left) * LW / r.width, Y = (ev.clientY - r.top) * LH / r.height;
   const x = Math.round(X - C.st.x0), y = Math.round(Y - C.st.y0);
   if (x < 0 || y < 0 || x >= C.st.W || y >= C.st.H) { tip.hidden = true; return; }
   const k = y * C.st.W + x; let v = C.vals[k]; if (!isFinite(v)) { tip.hidden = true; return; }
@@ -429,6 +485,7 @@ function applyZoom() {
   Z.x = Math.min(0, Math.max(w * (1 - Z.k), Z.x)); Z.y = Math.min(0, Math.max(h * (1 - Z.k), Z.y));
   cv.style.transform = Z.k === 1 ? "" : `translate(${Z.x}px,${Z.y}px) scale(${Z.k})`;
   const b = $("zreset"); if (b) b.hidden = Z.k === 1;
+  schedSharp();
 }
 function resetZoom() { Z.k = 1; Z.x = 0; Z.y = 0; applyZoom(); }
 function zoomAt(cx, cy, k2) {   // keep the map point under (cx, cy) fixed
