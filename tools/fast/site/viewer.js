@@ -50,6 +50,7 @@ async function boot() {
   };
   placeSteps(); addEventListener("resize", fitPhone); window.visualViewport && visualViewport.addEventListener("resize", fitPhone); (mq.addEventListener ? mq.addEventListener("change", placeSteps) : mq.addListener(placeSteps));
   setupPointer(); $("share") && ($("share").onclick = share); $("save") && ($("save").onclick = saveImage);
+  $("mgbtn") && ($("mgbtn").onclick = () => mgOpen("town")); $("pfbtn") && ($("pfbtn").onclick = () => mgOpen("pass"));
   $("prod").onchange = e => { S.prod = e.target.value; draw(); };
   $("view").onchange = e => { S.view = e.target.value; resetZoom(); draw(); };
   const sl = $("step"), endDrag = () => { if (S.dragging) { S.dragging = false; draw(); } };
@@ -60,8 +61,9 @@ async function boot() {
   $("prev").onclick = () => go(-1); $("next").onclick = () => go(1);
   $("play").onclick = () => { if (S.timer) { clearInterval(S.timer); S.timer = null; $("play").textContent = "Play"; }
                               else { S.timer = setInterval(() => go(1, true), 250); $("play").textContent = "Stop"; } };
-  addEventListener("keydown", e => { if (e.key === "ArrowRight") go(1); if (e.key === "ArrowLeft") go(-1); });
+  addEventListener("keydown", e => { if (e.key === "Escape") mgClose(); if (MG.open) return; if (e.key === "ArrowRight") go(1); if (e.key === "ArrowLeft") go(-1); });
   await draw();
+  if (Q.get("mg")) mgOpen(Q.get("mg") === "pass" ? "pass" : "town");
   window.__ready = true;
   if (Q.get("bench")) bench();
 }
@@ -597,6 +599,164 @@ function barb(ctx, X, Y, wx, wy, sp, L) {
 }
 
 // ---------------------------------------------------------------- bench (headless): cold first frame, then scrubbing from cache
+// ---- Stage 5 (10-30): meteograms + Pass Forecaster. The runner samples every town / pass slot at full precision each step
+// (single/pts_fFFF.json, order = run.json "points"), so a meteogram is ~1 small JSON per step, never map images.
+const MG = { open: null, town: Q.get("town") || "Seattle", run: null, cache: new Map() };
+const PTZ = "America/Los_Angeles";
+const fmtPT = (iso, o) => new Intl.DateTimeFormat("en-US", Object.assign({ timeZone: PTZ }, o)).format(new Date(iso));
+function mgRuns() {   // newest run of each model that carries town points
+  const order = ["hrrr", "rrfs", "nbm", "gfs", "ifs", "aifs", "eps", "aens"], out = [];
+  for (const m of order) for (const c of [...(S.man.runs[m] || [])].reverse()) { const r = `${m}/${c}`; if (S.runs[r] && !S.runs[r].points) continue; out.push(r); break; }
+  return out;
+}
+async function mgSeries(r) {   // {points, steps:[{f, valid}], v: {field: [[town values] per step]}}
+  if (MG.cache.has(r)) return MG.cache.get(r);
+  const p = (async () => {
+    const R_ = await loadRun(r); if (!R_.points) return null;
+    const st = R_.steps, out = new Array(st.length); let k = 0;
+    const one = async () => { while (k < st.length) { const i = k++; const f = String(st[i].f).padStart(3, "0");
+      try { out[i] = await (await fetch(`${DATA}runs/${r}/single/pts_f${f}.json`)).json(); } catch (e) { out[i] = null; } } };
+    await Promise.all(Array.from({ length: 8 }, one));
+    const ok = st.map((s, i) => [s, out[i]]).filter(x => x[1]);
+    return { points: R_.points, steps: ok.map(x => x[0]), d: ok.map(x => x[1]) };
+  })();
+  MG.cache.set(r, p); return p;
+}
+function mgTown(D, name) {   // per-step values of one town; derived wind / increments / snow
+  const i = D.points.findIndex(p => p.n === name); if (i < 0) return null;
+  const P = D.points[i], col = k => D.d.map(o => (o[k] ? o[k][i] : null)), has = k => D.d.some(o => o[k] && o[k][i] != null);
+  const T = { P, f: D.steps.map(s => s.f), t: D.steps.map(s => s.valid) };
+  if (has("t2m")) T.t2m = col("t2m").map(v => v == null ? v : v + (P.c || 0));
+  if (has("t2sd")) T.t2sd = col("t2sd"); if (has("p32")) T.p32 = col("p32");
+  if (has("u10")) { const u = col("u10"), v = col("v10"); T.wind = u.map((x, k) => x == null ? null : Math.hypot(x, v[k]) * 2.23694 / 1.94384); T.wdir = u.map((x, k) => x == null ? null : (Math.atan2(-x, -v[k]) * 180 / Math.PI + 360) % 360); }
+  if (has("gust")) T.gust = col("gust"); if (has("tcc")) T.tcc = col("tcc"); if (has("mslp")) T.mslp = col("mslp"); if (has("frz")) T.frz = col("frz");
+  const inc = a => a.map((x, k) => x == null ? null : Math.max(0, k ? x - (a[k - 1] ?? 0) : x));   // run totals -> per-step amounts
+  if (has("apcp")) T.pcp = inc(col("apcp")); else if (has("nq1")) T.pcp = col("nq1").map((x, k) => (T.f[k] <= 36 ? x : null)), T.pcp6 = col("nq6");
+  if (has("asnow")) T.snow = inc(col("asnow"));
+  else if (has("ns6")) T.snow6 = col("ns6");
+  else if (T.pcp && T.t2m) { T.snow = T.pcp.map((x, k) => x == null ? null : (T.t2m[k] <= 33 ? x * 10 : 0)); T.snowEst = true; }
+  if (has("dsnod")) T.dsnod = col("dsnod");
+  return T;
+}
+const sumWin = (T, a, f0, f1) => { if (!a) return null; let s = 0, n = 0; T.f.forEach((f, k) => { if (f > f0 && f <= f1 && a[k] != null) { s += a[k]; n++; } }); return n ? s : null; };
+const sum6 = (T, a, f0, f1) => { if (!a) return null; let s = 0, n = 0; T.f.forEach((f, k) => { if (f % 6 === 0 && f > f0 && f <= f1 && a[k] != null) { s += a[k]; n++; } }); return n ? s : null; };
+const snowWin = (T, f0, f1) => T.snow ? sumWin(T, T.snow, f0, f1) : sum6(T, T.snow6, f0, f1);
+const pcpWin = (T, f0, f1) => T.pcp6 ? sum6(T, T.pcp6, f0, f1) : sumWin(T, T.pcp, f0, f1);
+const ext = (T, a, f0, f1, fn) => { if (!a) return null; const v = a.filter((x, k) => x != null && T.f[k] > f0 && T.f[k] <= f1); return v.length ? fn(...v) : null; };
+
+function mgOpen(kind) {
+  mgClose(); MG.open = kind; MG.run = S.runs[S.run] && S.runs[S.run].points ? S.run : (mgRuns()[0] || S.run);
+  const o = document.createElement("div"); o.id = "mg";
+  o.innerHTML = `<div class="mg-top"><b>${kind === "pass" ? "Pass Forecaster" : "Meteogram"}</b>
+    <label>Model <select id="mgrun"></select></label>${kind === "pass" ? "" : `<label>Place <select id="mgtown"></select></label>`}
+    <button type="button" id="mgx">Close</button></div><div id="mgbody"><div class="mg-msg">Loading\u2026</div></div>`;
+  document.body.appendChild(o); $("mgx").onclick = mgClose;
+  const runLabel = r => { const [m, c] = r.split("/"); return `${S.man.models[m].site} ${c.slice(8)}Z ${c.slice(4, 6)}-${c.slice(6, 8)}`; };
+  const rs = mgRuns(); if (!rs.includes(MG.run)) rs.unshift(MG.run);
+  fill($("mgrun"), rs.map(r => [r, runLabel(r)]), MG.run);
+  $("mgrun").onchange = e => { MG.run = e.target.value; mgDraw(); };
+  if ($("mgtown")) $("mgtown").onchange = e => { MG.town = e.target.value; mgDraw(); };
+  addEventListener("resize", mgResize); mgDraw();
+}
+function mgClose() { const o = $("mg"); if (o) o.remove(); MG.open = null; removeEventListener("resize", mgResize); }
+let mgT = null; function mgResize() { clearTimeout(mgT); mgT = setTimeout(() => MG.open && mgDraw(), 150); }
+async function mgDraw() {
+  const body = $("mgbody"), D = await mgSeries(MG.run); if (!MG.open) return;
+  if (!D) { body.innerHTML = `<div class="mg-msg">This run was made before town forecasts were added. Pick a newer run.</div>`; return; }
+  if (MG.open === "pass") return passTable(body, D);
+  const sel = $("mgtown"), towns = D.points.filter(p => p.k !== "pass"), passes = D.points.filter(p => p.k === "pass");
+  if (!D.points.some(p => p.n === MG.town)) MG.town = (D.points.find(p => p.n === "Seattle") || D.points[0]).n;
+  sel.innerHTML = [["Towns (A\u2013Z)", towns], ["Mountain passes (A\u2013Z)", passes]].filter(g => g[1].length).map(([l, a]) =>
+    `<optgroup label="${l}">` + a.map(p => `<option${p.n === MG.town ? " selected" : ""}>${p.n}</option>`).join("") + "</optgroup>").join("");
+  const T = mgTown(D, MG.town); body.innerHTML = `<canvas id="mgc"></canvas>`; mgChart($("mgc"), T, body);
+}
+function mgChart(cv, T, box) {
+  const dpr = Math.min(2, devicePixelRatio || 1), W = box.clientWidth, H = Math.max(420, box.clientHeight - 4);
+  cv.width = W * dpr; cv.height = H * dpr; cv.style.width = W + "px"; cv.style.height = H + "px";
+  const c = cv.getContext("2d"); c.scale(dpr, dpr); c.fillStyle = "#15171c"; c.fillRect(0, 0, W, H);
+  const [m] = MG.run.split("/"), site = S.man.models[m].site, small = W < 600;
+  const L = small ? 38 : 52, Rm = small ? 34 : 50, top = small ? 46 : 52, bot = 34, n = T.f.length;
+  const panels = [["temp", 3], ["wind", 2], ["pcp", 2], ["cloud", 1]].filter(([k]) => k === "temp" ? T.t2m : k === "wind" ? (T.wind || T.gust) : k === "pcp" ? (T.pcp || T.snow || T.snow6 || T.pcp6) : T.tcc);
+  const wsum = panels.reduce((a, p) => a + p[1], 0), gap = 18, ph = (H - top - bot - gap * (panels.length - 1)) / wsum;
+  const t0 = Date.parse(T.t[0]), t1 = Date.parse(T.t[n - 1]), X = iso => L + (Date.parse(iso) - t0) / Math.max(1, t1 - t0) * (W - L - Rm);
+  c.font = `800 ${small ? 14 : 17}px Montserrat`; c.fillStyle = "#f4f2ee"; c.textBaseline = "top";
+  c.fillText(`${MG.town}${T.P.k === "pass" ? " (pass)" : ""} \u2013 ${site} ${MG.run.split("/")[1].slice(8)}Z`, L, 8);
+  c.font = `500 ${small ? 10 : 12}px Montserrat`; c.fillStyle = "#a7abb3";
+  c.fillText(`Times are Pacific. ${T.P.c !== undefined ? "Temperature corrected to pass summit height. " : ""}${T.snowEst ? "Snow estimated 10:1 where 2 m temp \u2264 33\u00b0F." : ""}`, L, small ? 26 : 30);
+  let y = top;
+  const days = []; for (let k = 0; k < n; k++) { const d = fmtPT(T.t[k], { weekday: "short", month: "numeric", day: "numeric" }); if (!days.length || days[days.length - 1].d !== d) days.push({ d, k }); }
+  for (const [kind, wt] of panels) {
+    const h = wt * ph, y0 = y, y1 = y + h; y += h + gap;
+    c.fillStyle = "#1d2027"; c.fillRect(L, y0, W - L - Rm, h);
+    c.strokeStyle = "#2c3039"; c.lineWidth = 1; for (const dd of days) { const x = X(T.t[dd.k]); c.beginPath(); c.moveTo(x, y0); c.lineTo(x, y1); c.stroke(); }
+    const scale = (lo, hi) => v => y1 - (v - lo) / (hi - lo || 1) * h;
+    const axis = (lo, hi, sc, unit, right, color) => { c.font = `500 ${small ? 9 : 11}px Montserrat`; c.fillStyle = color || "#a7abb3"; c.textBaseline = "middle"; c.textAlign = right ? "left" : "right";
+      const stp = niceStep((hi - lo) / 4); for (let v = Math.ceil(lo / stp) * stp; v <= hi + 1e-9; v += stp) { const yy = sc(v); if (!right) { c.strokeStyle = "#2c3039"; c.beginPath(); c.moveTo(L, yy); c.lineTo(W - Rm, yy); c.stroke(); }
+        c.fillText(+v.toFixed(2) + unit, right ? W - Rm + 4 : L - 4, yy); } c.textAlign = "left"; };
+    const line = (a, sc, color, lw, dash) => { c.strokeStyle = color; c.lineWidth = lw; c.setLineDash(dash || []); c.beginPath(); let on = false;
+      a.forEach((v, k) => { if (v == null) { on = false; return; } const xx = X(T.t[k]), yy = sc(v); on ? c.lineTo(xx, yy) : c.moveTo(xx, yy); on = true; }); c.stroke(); c.setLineDash([]); };
+    const label = (s, color, dx) => { c.font = `700 ${small ? 10 : 12}px Montserrat`; c.fillStyle = color; c.textBaseline = "top"; c.fillText(s, L + 6 + (dx || 0), y0 + 4); return c.measureText(s).width + 14; };
+    const bars = (a, sc, color, wfrac) => { c.fillStyle = color; const bw = Math.max(1.5, (W - L - Rm) / n * (wfrac || 0.7)); a.forEach((v, k) => { if (v == null || v <= 0) return; const xx = X(T.t[k]); c.fillRect(xx - bw / 2, sc(v), bw, y1 - sc(v)); }); };
+    if (kind === "temp") {
+      const a = T.t2m.filter(v => v != null), sd = T.t2sd;
+      let lo = Math.min(...a, 32), hi = Math.max(...a, 32); if (sd) { lo = Math.min(lo, ...T.t2m.map((v, k) => v - (sd[k] || 0))); hi = Math.max(hi, ...T.t2m.map((v, k) => v + (sd[k] || 0))); }
+      lo = Math.floor(lo / 5) * 5 - 2; hi = Math.ceil(hi / 5) * 5 + 2; const sc = scale(lo, hi); axis(lo, hi, sc, "\u00b0");
+      if (sd) { c.fillStyle = "#e0484d33"; c.beginPath(); T.t2m.forEach((v, k) => { const xx = X(T.t[k]); k ? c.lineTo(xx, sc(v + sd[k])) : c.moveTo(xx, sc(v + sd[k])); });
+        for (let k = n - 1; k >= 0; k--) c.lineTo(X(T.t[k]), sc(T.t2m[k] - sd[k])); c.fill(); }
+      line(T.t2m.map(() => 32), sc, "#5aa9ff", 1.5, [6, 4]); line(T.t2m, sc, "#ff5a5f", 2.5);
+      let dx = label(sd ? "Temperature \u00b0F (ens. mean, shading = \u00b11 spread)" : "Temperature \u00b0F", "#ff8a8e"); label("32\u00b0F", "#5aa9ff", dx);
+      if (T.p32) { const s2 = scale(0, 100); line(T.p32, s2, "#7fd1ff", 1.5, [2, 3]); axis(0, 100, s2, "%", true, "#7fd1ff"); label("chance \u2264 32\u00b0F", "#7fd1ff", dx + 60); }
+      const mx = [], mn = []; // daily hi/lo labels
+      for (const dd of days) { const ks = T.t.map((t, k) => k).filter(k => fmtPT(T.t[k], { weekday: "short", month: "numeric", day: "numeric" }) === dd.d && T.t2m[k] != null);
+        if (ks.length < 3) continue; const kH = ks.reduce((a, b) => T.t2m[b] > T.t2m[a] ? b : a), kL = ks.reduce((a, b) => T.t2m[b] < T.t2m[a] ? b : a);
+        c.font = `800 ${small ? 10 : 12}px Montserrat`; c.textAlign = "center"; c.fillStyle = "#ffb0b2"; c.textBaseline = "bottom"; c.fillText(Math.round(T.t2m[kH]), X(T.t[kH]), sc(T.t2m[kH]) - 3);
+        c.fillStyle = "#9fd0ff"; c.textBaseline = "top"; c.fillText(Math.round(T.t2m[kL]), X(T.t[kL]), sc(T.t2m[kL]) + 3); c.textAlign = "left"; }
+    } else if (kind === "wind") {
+      const a = [...(T.wind || []), ...(T.gust || [])].filter(v => v != null), hi = Math.max(10, Math.ceil(Math.max(...a) / 10) * 10), sc = scale(0, hi); axis(0, hi, sc, "");
+      if (T.gust) line(T.gust, sc, "#ffb347", 2); if (T.wind) line(T.wind, sc, "#7fd1ff", 2);
+      let dx = 0; if (T.wind) dx += label("Wind mph", "#7fd1ff"); if (T.gust) label("Gusts mph", "#ffb347", dx);
+      if (T.wdir) { const every = Math.max(1, Math.ceil(n / ((W - L - Rm) / 26))); c.fillStyle = "#cfd3da"; for (let k = 0; k < n; k += every) { if (T.wdir[k] == null) continue;
+        const xx = X(T.t[k]), yy = y1 - 9, r = (T.wdir[k] + 180) * Math.PI / 180; c.save(); c.translate(xx, yy); c.rotate(r); c.beginPath(); c.moveTo(0, -6); c.lineTo(3.5, 4); c.lineTo(-3.5, 4); c.closePath(); c.fill(); c.restore(); } }
+    } else if (kind === "pcp") {
+      const pc = T.pcp6 && !T.pcp ? null : T.pcp, sn = T.snow || null, sn6 = T.snow6 || null, p6 = T.pcp6 || null;
+      const hiP = Math.max(0.1, ...(pc || []).filter(v => v != null), ...(p6 || []).filter(v => v != null)), scP = scale(0, niceStep(hiP) * Math.ceil(hiP / niceStep(hiP)));
+      const anySnow = (sn || sn6 || []).some(v => v > 0.05), hiS = Math.max(1, ...(sn || sn6 || []).filter(v => v != null)), topS = niceStep(hiS) * Math.ceil(hiS / niceStep(hiS)), scS = scale(0, topS);
+      const pTop = niceStep(hiP) * Math.ceil(hiP / niceStep(hiP)); axis(0, pTop, scP, "\u2033", false, "#6fd38a");
+      if (p6 && T.pcp) bars(p6.map((v, k) => T.f[k] % 6 === 0 && T.f[k] > 36 ? v : null), scP, "#3ea95888", 2.2);
+      if (pc) bars(pc, scP, "#3ea958"); else if (p6) bars(p6.map((v, k) => T.f[k] % 6 === 0 ? v : null), scP, "#3ea958", 2.2);
+      if (anySnow) { axis(0, topS, scS, "\u2033", true, "#d9ecff"); if (sn) line(sn.reduce((acc, v, k) => (acc.push((acc[k - 1] || 0) + (v || 0)), acc), []), scS, "#d9ecff", 2);
+        else { let s = 0; line(sn6.map((v, k) => T.f[k] % 6 === 0 ? (s += v || 0) : null), scS, "#d9ecff", 2); } }
+      const tot = pc ? pc.reduce((a, v) => a + (v || 0), 0) : sum6(T, p6, -1, 1e9) || 0;
+      let dx = label(`Precip per ${pc ? (T.f[1] - T.f[0] || 1) + " h" : "6 h"} (total ${tot.toFixed(2)}\u2033)`, "#6fd38a");
+      if (anySnow) { const ts = (sn || []).reduce((a, v) => a + (v || 0), 0) || sum6(T, sn6, -1, 1e9) || 0; label(`Snow running total ${ts.toFixed(1)}\u2033${T.snowEst ? " (est.)" : ""}`, "#d9ecff", dx); }
+    } else {
+      const sc = scale(0, 100); c.fillStyle = "#9aa3b2"; c.beginPath(); c.moveTo(X(T.t[0]), y1); T.tcc.forEach((v, k) => c.lineTo(X(T.t[k]), sc(v || 0))); c.lineTo(X(T.t[n - 1]), y1); c.closePath(); c.globalAlpha = 0.55; c.fill(); c.globalAlpha = 1;
+      axis(0, 100, sc, "%"); label("Cloud cover", "#cfd3da");
+    }
+  }
+  // time axis (Pacific)
+  c.font = `600 ${small ? 9 : 11}px Montserrat`; c.fillStyle = "#cfd3da"; c.textBaseline = "top"; c.textAlign = "center";
+  const yb = H - bot + 4; for (let k = 0; k < days.length; k++) { const xa = X(T.t[days[k].k]), xb = k + 1 < days.length ? X(T.t[days[k + 1].k]) : W - Rm; if (xb - xa > (small ? 34 : 50)) c.fillText(days[k].d, (xa + xb) / 2, yb + 13); }
+  const hrs = n > 60 ? [0, 12] : n > 24 ? [0, 6, 12, 18] : null;
+  let lastX = -1e9; T.t.forEach((t, k) => { if (X(t) - lastX < (small ? 30 : 40)) return; const hh = +fmtPT(t, { hour: "numeric", hourCycle: "h23" }); if (hrs ? hrs.includes(hh) && (k === 0 || +fmtPT(T.t[k - 1], { hour: "numeric", hourCycle: "h23" }) !== hh) : k % Math.max(1, Math.ceil(n / 12)) === 0)
+    { c.fillText(fmtPT(t, { hour: "numeric" }).replace(" ", "").toLowerCase(), X(t), yb); lastX = X(t); } });
+  c.textAlign = "left";
+}
+function niceStep(x) { const p = Math.pow(10, Math.floor(Math.log10(x || 1))), r = x / p; return (r <= 1 ? 1 : r <= 2 ? 2 : r <= 2.5 ? 2.5 : r <= 5 ? 5 : 10) * p; }
+function passTable(body, D) {
+  const passes = D.points.filter(p => p.k === "pass"); if (!passes.length) { body.innerHTML = `<div class="mg-msg">No passes in this model's views.</div>`; return; }
+  const T0 = mgTown(D, passes[0].n), fmax = T0.f[T0.f.length - 1], wins = [[0, 24], [24, 48], [48, 72]].filter(w => fmax > w[0]).map(([a, b]) => [a, Math.min(b, fmax)]);
+  const f1 = x => x == null ? "\u2013" : x.toFixed(1), f2 = x => x == null ? "\u2013" : x.toFixed(2), r0 = x => x == null ? "\u2013" : Math.round(x);
+  const hdr = wins.map(([a, b]) => `${fmtPT(new Date(Date.parse(T0.t[0]) + (a - T0.f[0]) * 36e5).toISOString(), { weekday: "short", hour: "numeric" })}\u2013${fmtPT(new Date(Date.parse(T0.t[0]) + (b - T0.f[0]) * 36e5).toISOString(), { weekday: "short", hour: "numeric" })}`);
+  const span = Math.min(fmax, 48);
+  let h = `<div class="mg-note">Run start ${fmtPT(new Date(Date.parse(T0.t[0]) - T0.f[0] * 36e5).toISOString(), { weekday: "short", month: "numeric", day: "numeric", hour: "numeric" })} PT. Temperatures corrected to summit height. ${T0.snowEst ? "Snow estimated 10:1 where 2 m temp \u2264 33\u00b0F. " : ""}Tap a pass for its meteogram.</div>
+  <div class="mg-scroll"><table class="pf"><thead><tr><th>Pass</th>${wins.map((w, k) => `<th>Snow \u2033<br><small>${hdr[k]}</small></th>`).join("")}<th>Precip \u2033<br><small>first ${span} h</small></th><th>Low \u00b0F<br><small>first ${span} h</small></th><th>High \u00b0F<br><small>first ${span} h</small></th><th>Max gust<br><small>mph, ${span} h</small></th>${T0.frz ? `<th>Freezing lvl<br><small>lowest ft</small></th>` : ""}</tr></thead><tbody>`;
+  for (const p of passes) { const T = mgTown(D, p.n), sn = wins.map(([a, b]) => snowWin(T, a, b));
+    const col = x => x == null ? "" : x >= 12 ? ' class="s3"' : x >= 6 ? ' class="s2"' : x >= 1 ? ' class="s1"' : "";
+    h += `<tr data-n="${p.n}"><td>${p.n}</td>${sn.map(x => `<td${col(x)}>${f1(x)}</td>`).join("")}<td>${f2(pcpWin(T, -1, span))}</td><td>${r0(ext(T, T.t2m, -1, span, Math.min))}</td><td>${r0(ext(T, T.t2m, -1, span, Math.max))}</td><td>${r0(ext(T, T.gust, -1, span, Math.max))}</td>${T0.frz ? `<td>${r0(ext(T, T.frz, -1, span, Math.min))}</td>` : ""}</tr>`; }
+  body.innerHTML = h + "</tbody></table></div>";
+  body.querySelectorAll("tr[data-n]").forEach(tr => tr.onclick = () => { MG.town = tr.dataset.n; const r = MG.run; mgOpen("town"); MG.run = r; $("mgrun").value = r; mgDraw(); });
+}
 async function bench() {
   const out = { first: S.last };
   await new Promise(r => setTimeout(r, 4000));   // let the preloader fill the cache

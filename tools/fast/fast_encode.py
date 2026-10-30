@@ -243,8 +243,25 @@ def rng(a):
 def roll_ll(v):   # 0.25 deg global: lon -180..179.75 -> 0..359.75
     return np.roll(v, -720, axis=1) if v.shape[1] == 1440 else v
 
+PT_FIELDS = ("t2m", "gust", "u10", "v10", "mslp", "apcp", "asnow", "tcc", "frz", "dsnod", "refc", "t850", "mucape",
+             "nq1", "nq6", "ns6", "tstm", "maxt", "mint", "t2sd", "p32")
+def town_points(man, m):
+    """Every town / pass slot of the model's views (deduped by name, A-Z): meteogram and Pass Forecaster sample points."""
+    pts = {}
+    for vid, V in man["models"][m]["views"].items():
+        for t in V.get("towns", []):
+            if t["name"] not in pts: pts[t["name"]] = dict(n=t["name"], k=t["kind"], fi=t["fi"], fj=t["fj"], **({"c": round(t["t2m_corr"], 2)} if "t2m_corr" in t else {}))
+    return sorted(pts.values(), key=lambda p: (p["n"].lower()))
+def sample_pts(a, P):
+    """Bilinear sample of a cropped grid at fractional (fi, fj) points (nearest grid point already applied for 3 km grids)."""
+    fi = np.clip(np.array([p["fi"] for p in P], float), 0, a.shape[0] - 1.001); fj = np.clip(np.array([p["fj"] for p in P], float), 0, a.shape[1] - 1.001)
+    i, j = np.floor(fi).astype(int), np.floor(fj).astype(int); di, dj = fi - i, fj - j
+    v = a[i, j] * (1 - di) * (1 - dj) + a[i + 1, j] * di * (1 - dj) + a[i, j + 1] * (1 - di) * dj + a[i + 1, j + 1] * di * dj
+    return [None if not np.isfinite(x) else round(float(x), 2) for x in v]
+
 def step_job(args):
-    m, c_str, s, crop, out = args
+    m, c_str, s, crop, out, P = args if len(args) == 6 else (*args, None)
+    ptv = {}
     import menu_maps as M
     from PIL import Image
     c = dt.datetime.strptime(c_str, "%Y%m%d%H").replace(tzinfo=dt.timezone.utc)
@@ -266,6 +283,7 @@ def step_job(args):
             bad = ~np.isfinite(a)
             if bad.any():
                 w = gaussian_filter((~bad).astype(float), 1.5); a = np.where(bad, gaussian_filter(np.where(bad, 0, a), 1.5) / np.maximum(w, 1e-6), a)
+        if P and name in PT_FIELDS: ptv[name] = sample_pts(a, P)
         a = np.where(np.isfinite(a), a, np.nanmin(a))
         ranges[name] = rng(a); q[name] = q8(a, *ranges[name])
     packs = {}
@@ -279,6 +297,8 @@ def step_job(args):
     for name, a8 in q.items():
         p = f"{out}/single/{name}_f{s:03d}.png"; Image.fromarray(a8, "L").save(p, optimize=True); sizes[name] = os.path.getsize(p)
     ranges["_packs"] = packs
+    if ptv:   # town / pass values for meteograms (one small JSON per step, order = run.json "points")
+        p = f"{out}/single/pts_f{s:03d}.json"; json.dump(ptv, open(p, "w"), separators=(",", ":")); sizes["pts"] = os.path.getsize(p)
     return s, sizes, ranges, getattr(R, "bytes", 0), time.time() - t
 
 # ------------------------------------------------------------------------------------------------ climatology
@@ -754,7 +774,8 @@ def steps(m, cycle, want, out, workers, only_missing=True, deadline=None):
     from concurrent.futures import ProcessPoolExecutor
     PT = TM.PT; done = {}; new = []
     with ProcessPoolExecutor(workers) as ex:
-        for s, sizes, ranges, nb, tt in ex.map(step_job, [(m, cycle, s, crop, rd) for s in todo]):
+        P = town_points(man, m)
+        for s, sizes, ranges, nb, tt in ex.map(step_job, [(m, cycle, s, crop, rd, P) for s in todo]):
             if sizes is None or "t2m" not in (ranges or {}): print(f"{m} f{s:03d} not ready ({str(ranges)[:80]})", flush=True); continue
             done[s] = ranges; new.append(s); print(f"{m} f{s:03d} {len(ranges)} fields {sum(sizes.values())/1e3:.0f} KB grib {nb/1e6:.1f} MB {tt:.1f} s", flush=True)
             if deadline and time.time() > deadline: break
@@ -773,7 +794,8 @@ def steps(m, cycle, want, out, workers, only_missing=True, deadline=None):
     MM = minfo(m)
     run = dict(model=m, cycle=cycle, init=c.isoformat(), base=f"runs/{m}/{cycle}", fields=fields, grid=dict(ny=i1 - i0, nx=j1 - j0),
                runline=f"{MM['name']} {MM['res']} {c:%HZ} run {c.astimezone(PT):%-m-%-d-%y (%-I %p PT)}", steps=ordered,
-               complete=len(ordered) == len(want), expected=len(want), file="single/{name}_f{f:03d}.png")
+               complete=len(ordered) == len(want), expected=len(want), file="single/{name}_f{f:03d}.png",
+               points=[{k: v for k, v in p_.items() if k in ("n", "k", "c")} for p_ in town_points(man, m)], pts_file="single/pts_f{f:03d}.json")
     json.dump(run, open(rj, "w"), indent=1)
     return run, new
 

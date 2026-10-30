@@ -74,13 +74,15 @@ def main():
             for s in want:
                 if s in old: ordered.append(old[s])
                 else: break
+            for k_ in ("points", "pts_file"):
+                if k_ in json.load(open(f"{rd}/run.json")): full[k_] = json.load(open(f"{rd}/run.json"))[k_]
             full.update(steps=ordered, fields=sorted({k for x in ordered for k in x["ranges"]}), complete=len(ordered) == len(want), expected=len(want))
             json.dump(full, open(f"{rd}/run.json", "w"), indent=1); r0 = full
             if not new: break
-            files = [f"runs/{m}/{cyc}/single/{f}" for f in os.listdir(f"{rd}/single") if any(f.endswith(f"_f{s:03d}.png") for s in new)]
+            files = [f"runs/{m}/{cyc}/single/{f}" for f in os.listdir(f"{rd}/single") if any(f.endswith(f"_f{s:03d}.png") or f.endswith(f"_f{s:03d}.json") for s in new)]
             if not a.dry_run:
                 from concurrent.futures import ThreadPoolExecutor
-                with ThreadPoolExecutor(16) as ex: list(ex.map(lambda k: s3.upload_file(f"{D}/{k}", BUCKET, k, ExtraArgs={"ContentType": "image/png"}), files))
+                with ThreadPoolExecutor(16) as ex: list(ex.map(lambda k: s3.upload_file(f"{D}/{k}", BUCKET, k, ExtraArgs={"ContentType": "application/json" if k.endswith(".json") else "image/png"}), files))
                 s3.upload_file(f"{rd}/run.json", BUCKET, key, ExtraArgs={"ContentType": "application/json"})
                 publish_manifest(s3, D, m)
             print(f"{m} {cyc}: uploaded {len(files)} files, {len(ordered)}/{len(want)} steps live", flush=True)
