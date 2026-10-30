@@ -165,15 +165,38 @@ async function productFields(run, pid, f) {
   const p = (async () => {
     const F = {}; for (const n of P.fields) F[n] = await getField(run, n, f);
     const g = F[P.fields[0]]; const out = { w: g.w, h: g.h, raw: F };
-    if (pid === "aifswind") {
-      const u = F.u10.v, v = F.v10.v, sp = new Float32Array(u.length);
-      for (let k = 0; k < u.length; k++) sp[k] = Math.hypot(u[k], v[k]) * (2.23694 / 1.94384);   // kt -> mph
-      out.fill = blur(sp, g.w, g.h, P.spd_sigma); out.iso = blur(F.mslp.v, g.w, g.h, P.isobars.sigma);
+    if (P.fill === "wspd") {   // wind speed from u/v (kt); MSLP + 10 m wind shows mph, upper-level winds kt
+      const [un, vn] = P.wind || ["u10", "v10"], u = F[un].v, v = F[vn].v, sp = new Float32Array(u.length), mul = P.spd_mult ?? (2.23694 / 1.94384);
+      for (let k = 0; k < u.length; k++) sp[k] = Math.hypot(u[k], v[k]) * mul;
+      out.fill = blur(sp, g.w, g.h, P.spd_sigma);
+    } else if (P.fill === "z500anom") {   // height minus the 1991-2020 monthly mean, blended between months like aifs_maps.clim_at
+      const C = await climAt(run, P.clim, S.runs[run].steps.find(x => x.f === f).valid), z = F.z500.v, o = new Float32Array(z.length);
+      for (let k = 0; k < z.length; k++) o[k] = z[k] - C[k]; out.fill = blur(o, g.w, g.h, 1.0);
     } else if (P.fill === "snowlvl") { const a = F.frz.v, o = new Float32Array(a.length); for (let k = 0; k < a.length; k++) o[k] = Math.max(0, a[k] - 1000); out.fill = o; }
     else out.fill = F[P.fill] ? F[P.fill].v : g.v;
+    if (P.isobars) { const I = P.isobars, src = F[I.field || "mslp"].v, sc = I.scale || 1, a = new Float32Array(src.length);
+      for (let k = 0; k < a.length; k++) a[k] = src[k] * sc; out.iso = blur(a, g.w, g.h, I.sigma); }
     return out;
   })();
   S.derived.set(key, p); return p;
+}
+
+const climCache = new Map();
+async function climMonth(m, varn, k) {   // static 16-bit (R*256+G) monthly mean on the model's cropped grid
+  const key = `${m}/${varn}/${k}`; if (climCache.has(key)) return climCache.get(key);
+  const p = (async () => {
+    const C = S.man.models[m].clim[varn], I = await getPixels(DATA + C.files[k] + SV()), [lo, hi] = C.ranges[k], n = I.w * I.h, o = new Float32Array(n);
+    for (let i = 0; i < n; i++) o[i] = lo + (I.px[i * 4] * 256 + I.px[i * 4 + 1]) / 65535 * (hi - lo);
+    return o;
+  })();
+  climCache.set(key, p); return p;
+}
+async function climAt(run, varn, validIso) {
+  const m = run.split("/")[0], v = new Date(validIso), mo = v.getUTCMonth(), mid = Date.UTC(v.getUTCFullYear(), mo, 15);
+  const m2 = (mo + (v.getTime() >= mid ? 1 : -1) + 12) % 12, w = Math.min(1, Math.abs(v.getTime() - mid) / (30.4 * 86400e3));
+  const [a, b] = await Promise.all([climMonth(m, varn, mo), climMonth(m, varn, m2)]), o = new Float32Array(a.length);
+  for (let i = 0; i < a.length; i++) o[i] = (1 - w) * a[i] + w * b[i];
+  return o;
 }
 
 // ---------------------------------------------------------------- drawing
@@ -308,7 +331,7 @@ function fmtVal(P, v) {   // temp_maps fmt_int / fmt_vis
   if (P.fmt === "vis") return v >= 7 ? "7+" : v < 3 ? v.toFixed(1) : v.toFixed(0);
   return String(Math.round(v));
 }
-const UNITS = { mucape: " J/kg", sbcape: " J/kg", ltng: " /km\u00b2/5 min", ltgp: " in", t2m: "\u00b0F", gust10: " mph", aifswind: " mph", t850: "\u00b0C", t700: "\u00b0C", tcc: "%", vis: " mi", ir: "\u00b0C",
+const UNITS = { w500: " kt", w250: " kt", z500anom: " m", mucape: " J/kg", sbcape: " J/kg", ltng: " /km\u00b2/5 min", ltgp: " in", t2m: "\u00b0F", gust10: " mph", aifswind: " mph", t850: "\u00b0C", t700: "\u00b0C", tcc: "%", vis: " mi", ir: "\u00b0C",
                 refc: " dBZ", qpf: " in", snow: " in", frz: " ft", snowlvl: " ft" };
 // value under the cursor / tap (item 1) and swipe to step (item 6)
 function readout(ev) {
@@ -318,7 +341,7 @@ function readout(ev) {
   if (x < 0 || y < 0 || x >= C.st.W || y >= C.st.H) { tip.hidden = true; return; }
   const k = y * C.st.W + x; let v = C.vals[k]; if (!isFinite(v)) { tip.hidden = true; return; }
   let s = (C.P.fmt ? fmtVal(C.P, v) : C.P.dec ? v.toFixed(C.P.dec) : String(Math.round(v))) + (UNITS[C.pid] || "");
-  if (C.pid === "aifswind") { const m = sample(C.st, C.D.iso, k); if (isFinite(m)) s += ` \u00b7 ${m.toFixed(1)} mb`; }
+  if (C.D.iso && C.P.isobars) { const m = sample(C.st, C.D.iso, k); if (isFinite(m)) s += C.pid === "aifswind" ? ` \u00b7 ${m.toFixed(1)} mb` : ` \u00b7 ${Math.round(m)} dam`; }
   tip.textContent = s; tip.hidden = false;
   const wr = $("wrap").getBoundingClientRect(); tip.style.left = (ev.clientX - wr.left + 14) + "px"; tip.style.top = (ev.clientY - wr.top - 30) + "px";
 }
@@ -475,7 +498,7 @@ function drawIsobars(ctx, st, D, P) {
 
 function drawBarbs(ctx, st, D, P, V) {   // matplotlib barbs (length 5.6 pt, 5 kt rounding, flags 50 / barbs 10 / half 5)
   const B = P.barbs, nx = V.barbs_across, ny = Math.max(4, Math.round(nx * st.H / st.W)), Lp = B.length * 3.21 * S.man.dpi / 72;   // matplotlib barb units: 5.6 -> 25 px at 100 dpi (measured)
-  const u = D.raw.u10.v, v = D.raw.v10.v;
+  const u = D.raw[B.u || "u10"].v, v = D.raw[B.v || "v10"].v;
   ctx.strokeStyle = B.color; ctx.fillStyle = B.color; ctx.lineWidth = pt(B.lw); ctx.lineJoin = "miter";
   const L = V, lutA = st.lut;
   for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {

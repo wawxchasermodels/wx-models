@@ -95,11 +95,14 @@ FIELDS = {   # name: (getter, units)
     "sbcape": (_raw("CAPE:surface", lambda v: v), "J/kg"),
     "ltng": (_raw("LTNG:entire atmosphere", lambda v: np.clip(v, 0, None)), "fl/km2/5min"),
     "ltgp": (_ltgp, "in"),
+    # 10-30 (Benjamin): 500 mb wind (AIFS and every model), 250 mb jet, 500 mb heights (for the height anomaly)
+    "u500": (_f("U:500", lambda v: v * 1.94384), "kt"), "v500": (_f("V:500", lambda v: v * 1.94384), "kt"), "z500": (_f("Z:500", lambda z: z), "m"),
+    "u250": (_f("U:250", lambda v: v * 1.94384), "kt"), "v250": (_f("V:250", lambda v: v * 1.94384), "kt"), "z250": (_f("Z:250", lambda z: z), "m"),
 }
 # Packing (R2 write budget): fields used together share one RGB PNG (one channel each). A field not in a pack is its own
 # grayscale PNG. run.json "packs" maps field -> [file name, channel]; the viewer reads either layout.
 PACKS = {"wind": ("mslp", "u10", "v10"), "aloft": ("t850", "t700", "frz"), "accum": ("apcp", "asnow", "ltgp"),
-         "conv": ("mucape", "sbcape", "ltng"), "sky": ("tcc", "vis", "ir")}
+         "conv": ("mucape", "sbcape", "ltng"), "sky": ("tcc", "vis", "ir"), "w500": ("u500", "v500", "z500"), "w250": ("u250", "v250", "z250")}
 
 def q8(a, lo, hi): return np.clip(np.rint((a - lo) / (hi - lo) * 255), 0, 255).astype(np.uint8)
 def rng(a):
@@ -144,6 +147,28 @@ def step_job(args):
         p = f"{out}/single/{name}_f{s:03d}.png"; Image.fromarray(a8, "L").save(p, optimize=True); sizes[name] = os.path.getsize(p)
     ranges["_packs"] = packs
     return s, sizes, ranges, getattr(R, "bytes", 0), time.time() - t
+
+# ------------------------------------------------------------------------------------------------ climatology
+CLIM_NPZ = {"z500": "ncep_hgt500_mon_ltm_1991_2020.npz"}
+def clim_static(m, out, i0, i1, j0, j1, var="z500"):
+    """Monthly 1991-2020 NCEP/NCAR R1 mean of `var` (m) on the model's cropped 0.25 deg grid, one 16-bit-in-RGB PNG per month
+    (value = lo + (R*256+G)/65535*(hi-lo)). Shared by every 0.25 deg global model (same grid). The viewer blends the two
+    months around the valid time exactly like aifs_maps.clim_at (monthly means centred on the 15th)."""
+    from PIL import Image
+    from scipy.interpolate import RegularGridInterpolator
+    src = next(p for p in (os.environ.get("WX_CLIM_DIR", ""), os.path.join(HERE, "clim"), "/workspace/wx-models-site/fast_deploy/clim")
+               if p and os.path.exists(os.path.join(p, CLIM_NPZ[var])))
+    z = np.load(os.path.join(src, CLIM_NPZ[var])); h, cl, co = z["hgt"], z["lat"], z["lon"]
+    lat = 90.0 - 0.25 * np.arange(721)[i0:i1]; lon = (0.25 * np.arange(1440))[j0:j1]   # rolled grid: lon 0..360
+    LA, LO = np.meshgrid(lat, lon % 360, indexing="ij"); files, ranges = [], []
+    for k in range(12):
+        f = np.concatenate([h[k], h[k][:, :1]], 1); it = RegularGridInterpolator((cl[::-1], np.append(co, 360.0)), f[::-1])
+        a = it(np.stack([LA, LO], -1)); lo, hi = float(np.floor(a.min())), float(np.ceil(a.max()))
+        q = np.clip(np.rint((a - lo) / (hi - lo) * 65535), 0, 65535).astype(np.uint32)
+        rgb = np.zeros(a.shape + (3,), np.uint8); rgb[..., 0] = q >> 8; rgb[..., 1] = q & 255
+        fn = f"static/clim_{var}_{m}_m{k + 1:02d}.png"; Image.fromarray(rgb, "RGB").save(f"{out}/{fn}", optimize=True)
+        files.append(fn); ranges.append([lo, hi])
+    return dict(files=files, ranges=ranges, units="m", source="NCEP/NCAR Reanalysis 1 1991-2020 monthly mean (NOAA PSL)")
 
 # ------------------------------------------------------------------------------------------------ static
 def extra_views(TM, ccrs):
@@ -190,7 +215,12 @@ def model_grid(m):
     """(la2d, lo2d, orog_ft or None, kind) on the model's own grid (lo2d in -180..180 for lcc, 0..360 for ll)."""
     import menu_maps as M
     c = latest_published(m) or (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=12)).replace(hour=0, minute=0, second=0, microsecond=0)
-    R = M.Reader(m, c, MODELS[m]["steps"][0]); la, lo, _ = R.f("t2m"); la, lo = np.asarray(la, float), np.asarray(lo, float)
+    for _ in range(4):   # the newest cycle may not be posted yet: fall back one cycle at a time
+        try: R = M.Reader(m, c, MODELS[m]["steps"][0]); la, lo, _ = R.f("t2m"); break
+        except Exception:
+            c -= dt.timedelta(hours=6)
+            while c.hour not in MODELS[m]["cycles"]: c -= dt.timedelta(hours=6)
+    la, lo = np.asarray(la, float), np.asarray(lo, float)
     try: oro = np.asarray(R.f("orog")[2], float) * 3.28084
     except Exception: oro = None
     if MODELS[m]["grid"] == "ll":
@@ -330,6 +360,8 @@ def static(m, out, views_only=None):
     LTGP_L = [0.01, 0.05, 0.1, 0.25, 0.5, 0.75, 1, 1.5, 2]
     LTGP_C = ["#e6dcf5", "#c3a6ec", "#9b6fe0", "#f2e34b", "#f4a43a", "#e8692f", "#d43f3a", "#8c1450"]   # 8 bands, no blends
     LTGP_A = [(0.01, "#e6dcf5"), (0.05, "#c3a6ec"), (0.1, "#9b6fe0"), (0.25, "#f2e34b"), (0.5, "#f4a43a"), (1, "#e2462f"), (2, "#8c1450")]
+    JET_L = list(M.JET_LEVELS); W5_L = list(M.W500_LEVELS)
+    CM.update(w500=M.ramp(M.W500_LEVELS, M.W500_ANCH), w250=M.ramp(M.JET_LEVELS, M.JET_ANCH), z500anom=HS.anom_cmap())
     CM.update(mucape=M.ramp(CAPE_L, CAPE_A), sbcape=M.ramp(CAPE_L, CAPE_A), ltng=M.ramp(LTNG_L, LTNG_A), ltgp=HS.cmap(LTGP_C, LTGP_C[0], LTGP_C[-1]))
     prods = {
         "t2m": dict(title="2 m Temperature", fields=["t2m"], key="Temp (\u00b0F)", ticks=HS.TEMP_TICKS, **table(HS.TEMP_LEVELS, CM["t2m"], "both"),
@@ -376,11 +408,27 @@ def static(m, out, views_only=None):
                      tickfmt=True, **table(LTGP_L, CM["ltgp"], "max"),
                      extra="PROXY, not flash density: ECMWF has no free lightning field  \u00b7  6 h convective precip (3 h at F+3) where MUCAPE \u2265 100",
                      pct=[0, 99.9], dec=2, fmt="in2", towns="names", only=("ifs",)),
+        "w500": dict(title="500 mb Wind", fields=["u500", "v500", "z500"], fill="wspd", wind=["u500", "v500"], spd_mult=1.0, key="Wind (kt)",
+                     ticks=list(range(20, 151, 10)), tickfmt=True, **table(W5_L, CM["w500"], "max"), spd_sigma=2.0 if m == "hrrr" else 0.8,
+                     isobars=dict(field="z500", scale=0.1, every=6, sigma=7.0 if m == "hrrr" else 1.5, color="#101114", lw=1.1, halo=2.6),
+                     barbs=dict(u="u500", v="v500", color=HS.BARB_COLOR, length=HS.BARB_LENGTH, lw=HS.BARB_LW),
+                     extra="speed in kt  \u00b7  shaded from 20 kt  \u00b7  heights every 6 dam  \u00b7  up to {hi} kt in view", pct=[0.5, 99.9], towns="names"),
+        "w250": dict(title="250 mb Wind (jet)", fields=["u250", "v250", "z250"], fill="wspd", wind=["u250", "v250"], spd_mult=1.0, key="Wind (kt)",
+                     ticks=list(range(50, 201, 25)), tickfmt=True, **table(JET_L, CM["w250"], "max"), spd_sigma=2.0 if m == "hrrr" else 0.8,
+                     isobars=dict(field="z250", scale=0.1, every=12, sigma=7.0 if m == "hrrr" else 1.5, color="#101114", lw=1.1, halo=2.6),
+                     barbs=dict(u="u250", v="v250", color=HS.BARB_COLOR, length=HS.BARB_LENGTH, lw=HS.BARB_LW),
+                     extra="speed in kt  \u00b7  shaded from 50 kt  \u00b7  heights every 12 dam  \u00b7  up to {hi} kt in view", pct=[0.5, 99.9], towns="names"),
+        "z500anom": dict(title="500 mb Height Anomaly", fields=["z500"], fill="z500anom", key="Anomaly (m)", ticks=HS.ANOM_TICKS, tickfmt=True,
+                         **table(HS.ANOM_LEVELS, CM["z500anom"], "both"),
+                         isobars=dict(field="z500", scale=0.1, every=6, sigma=1.5, color="#101114", lw=1.25, halo=2.4),
+                         extra="vs 1991-2020 NCEP/NCAR monthly mean  \u00b7  heights every 6 dam  \u00b7  {lo} to {hi} m in view", pct=[0.5, 99.5],
+                         towns="names", clim="z500", only=("gfs", "ifs", "aifs")),
     }
     prods = {k: v for k, v in prods.items() if m in v.pop("only", (m,))}
     prods["vis"]["over"] = None
     for k in ("mucape", "sbcape", "ltng", "ltgp"):
         if k in prods: prods[k]["min_show"] = prods[k]["levels"][0]
+    for k in ("w500", "w250"): prods[k]["under"] = "#f4f5f7"   # light below the first level so barbs and height lines stay readable
     for k in ("qpf", "snow", "refc"): prods[k]["min_show"] = prods[k]["levels"][0]   # blank below the first level (like the site)
     for pid, P in prods.items():
         P.setdefault("fill", P["fields"][0]); tk0 = list(P["ticks"])
@@ -401,10 +449,12 @@ def static(m, out, views_only=None):
             HS.credit(fig, TM.CREDIT_NOAA if (pid == "t2m" and m in NOAA) else M.credit(m))
             sizes[f"key_{m}_{pid}_{vid}"] = save(fig, f"{out}/{fn}")
         P["ticks"] = [float(t) for t in tk0]
+    clim = {}
+    if MD["grid"] == "ll": clim["z500"] = clim_static(m, out, i0, i1, j0, j1)
     mp = f"{out}/manifest.json"; man = json.load(open(mp)) if os.path.exists(mp) else {}
     man.update(dpi=DPI, style=dict(BG=HS.BG, INK=HS.INK, MUTED=HS.MUTED, ACCENT=HS.ACCENT))
     man.setdefault("models", {})[m] = dict(name=M.MODELS[m]["name"], site=M.MODELS[m]["site"], res=M.MODELS[m]["res"], grid=MD["grid"],
-                                          crop=[i0, i1, j0, j1], views=views, products=prods)
+                                          crop=[i0, i1, j0, j1], views=views, products=prods, clim=clim)
     man.setdefault("runs", {}).setdefault(m, [])
     json.dump(man, open(mp, "w"), indent=1)
     print(f"{m} static done, crop {[i0, i1, j0, j1]}", flush=True)
