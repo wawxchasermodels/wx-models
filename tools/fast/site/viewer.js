@@ -169,9 +169,14 @@ async function productFields(run, pid, f) {
       const [un, vn] = P.wind || ["u10", "v10"], u = F[un].v, v = F[vn].v, sp = new Float32Array(u.length), mul = P.spd_mult ?? (2.23694 / 1.94384);
       for (let k = 0; k < u.length; k++) sp[k] = Math.hypot(u[k], v[k]) * mul;
       out.fill = blur(sp, g.w, g.h, P.spd_sigma);
-    } else if (P.fill === "z500anom") {   // height minus the 1991-2020 monthly mean, blended between months like aifs_maps.clim_at
-      const C = await climAt(run, P.clim, S.runs[run].steps.find(x => x.f === f).valid), z = F.z500.v, o = new Float32Array(z.length);
-      for (let k = 0; k < z.length; k++) o[k] = z[k] - C[k]; out.fill = blur(o, g.w, g.h, 1.0);
+    } else if (P.clim) {   // anomaly: field minus the 1991-2020 normal at the valid time (static climatology, see climAt)
+      const fld = P.anom || "z500", C = await climAt(run, P.clim, S.runs[run].steps.find(x => x.f === f).valid), z = F[fld].v, o = new Float32Array(z.length);
+      for (let k = 0; k < z.length; k++) o[k] = z[k] - C[k]; out.fill = fld === "z500" ? blur(o, g.w, g.h, 1.0) : o;
+    } else if (P.window) {   // precip in the last N hours = run total now minus run total N hours ago (stage 2, browser-only)
+      const a = F.apcp.v, prev = f - P.window;
+      if (prev < 0 || (prev > 0 && !S.runs[run].steps.find(x => x.f === prev))) throw new Error("nodata:apcp");
+      if (prev === 0) out.fill = a;
+      else { const b = (await getField(run, "apcp", prev)).v, o = new Float32Array(a.length); for (let k = 0; k < a.length; k++) o[k] = Math.max(0, a[k] - b[k]); out.fill = o; }
     } else if (P.fill === "snowlvl") { const a = F.frz.v, o = new Float32Array(a.length); for (let k = 0; k < a.length; k++) o[k] = Math.max(0, a[k] - 1000); out.fill = o; }
     else out.fill = F[P.fill] ? F[P.fill].v : g.v;
     if (P.isobars) { const I = P.isobars, src = F[I.field || "mslp"].v, sc = I.scale || 1, a = new Float32Array(src.length);
@@ -191,11 +196,17 @@ async function climMonth(m, varn, k) {   // static 16-bit (R*256+G) monthly mean
   })();
   climCache.set(key, p); return p;
 }
-async function climAt(run, varn, validIso) {
-  const m = run.split("/")[0], v = new Date(validIso), mo = v.getUTCMonth(), mid = Date.UTC(v.getUTCFullYear(), mo, 15);
+async function climAt(run, varn, validIso) {   // months blended like aifs_maps.clim_at; t2m also between 00/06/12/18Z
+  const m = run.split("/")[0], C = S.man.models[m].clim[varn], v = new Date(validIso), mo = v.getUTCMonth(), mid = Date.UTC(v.getUTCFullYear(), mo, 15);
   const m2 = (mo + (v.getTime() >= mid ? 1 : -1) + 12) % 12, w = Math.min(1, Math.abs(v.getTime() - mid) / (30.4 * 86400e3));
-  const [a, b] = await Promise.all([climMonth(m, varn, mo), climMonth(m, varn, m2)]), o = new Float32Array(a.length);
-  for (let i = 0; i < a.length; i++) o[i] = (1 - w) * a[i] + w * b[i];
+  let parts = [[mo, 1 - w], [m2, w]];
+  if (C.hours) {
+    const hx = (v.getUTCHours() + v.getUTCMinutes() / 60) / 6, h0 = Math.floor(hx) % 4, h1 = (h0 + 1) % 4, wh = hx - Math.floor(hx);
+    parts = parts.flatMap(([k, wk]) => [[k * 4 + h0, wk * (1 - wh)], [k * 4 + h1, wk * wh]]);
+  }
+  parts = parts.filter(p => p[1] > 1e-6);
+  const arrs = await Promise.all(parts.map(p => climMonth(m, varn, p[0]))), o = new Float32Array(arrs[0].length);
+  arrs.forEach((a, j) => { const wj = parts[j][1]; for (let i = 0; i < a.length; i++) o[i] += wj * a[i]; });
   return o;
 }
 
@@ -331,7 +342,7 @@ function fmtVal(P, v) {   // temp_maps fmt_int / fmt_vis
   if (P.fmt === "vis") return v >= 7 ? "7+" : v < 3 ? v.toFixed(1) : v.toFixed(0);
   return String(Math.round(v));
 }
-const UNITS = { et2sd: "\u00b0F", ep32: "%", ez500: " m", w500: " kt", w250: " kt", z500anom: " m", mucape: " J/kg", sbcape: " J/kg", ltng: " /km\u00b2/5 min", ltgp: " in", t2m: "\u00b0F", gust10: " mph", aifswind: " mph", t850: "\u00b0C", t700: "\u00b0C", tcc: "%", vis: " mi", ir: "\u00b0C",
+const UNITS = { qpf1: " in", qpf6: " in", qpf24: " in", mslpqpf: " in", t2ma: "\u00b0F", t850a: "\u00b0C", et2sd: "\u00b0F", ep32: "%", ez500: " m", w500: " kt", w250: " kt", z500anom: " m", mucape: " J/kg", sbcape: " J/kg", ltng: " /km\u00b2/5 min", ltgp: " in", t2m: "\u00b0F", gust10: " mph", aifswind: " mph", t850: "\u00b0C", t700: "\u00b0C", tcc: "%", vis: " mi", ir: "\u00b0C",
                 refc: " dBZ", qpf: " in", snow: " in", frz: " ft", snowlvl: " ft" };
 // value under the cursor / tap (item 1) and swipe to step (item 6)
 function readout(ev) {

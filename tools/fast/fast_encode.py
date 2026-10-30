@@ -206,26 +206,47 @@ def step_job(args):
     return s, sizes, ranges, getattr(R, "bytes", 0), time.time() - t
 
 # ------------------------------------------------------------------------------------------------ climatology
-CLIM_NPZ = {"z500": "ncep_hgt500_mon_ltm_1991_2020.npz"}
-def clim_static(m, out, i0, i1, j0, j1, var="z500"):
-    """Monthly 1991-2020 NCEP/NCAR R1 mean of `var` (m) on the model's cropped 0.25 deg grid, one 16-bit-in-RGB PNG per month
-    (value = lo + (R*256+G)/65535*(hi-lo)). Shared by every 0.25 deg global model (same grid). The viewer blends the two
-    months around the valid time exactly like aifs_maps.clim_at (monthly means centred on the 15th)."""
+CLIM_NPZ = {"z500": ("ncep_hgt500_mon_ltm_1991_2020.npz", "hgt"), "t850": ("ncep_t850_mon_ltm_1991_2020.npz", "t850"),
+            "t2m": ("ncep_t2m_6h_ltm_1991_2020.npz", "t2m")}
+CLIM_UNITS = {"z500": "m", "t850": "C", "t2m": "F"}
+def _clim_src(fn):
+    return next(p for p in (os.environ.get("WX_CLIM_DIR", ""), os.path.join(HERE, "clim"), "/workspace/wx-models-site/fast_deploy/clim")
+                if p and os.path.exists(os.path.join(p, fn)))
+def clim_static(m, out, LA, LO, var="z500", oro_m=None):
+    """1991-2020 NCEP/NCAR R1 normals of `var` on the model's cropped grid (LA, LO 2-D, any grid kind), one 16-bit-in-RGB PNG
+    per slot (value = lo + (R*256+G)/65535*(hi-lo)). z500, t850: 12 monthly means (the viewer blends the two months around the
+    valid time like aifs_maps.clim_at). t2m: 12 months x 4 valid hours (00/06/12/18Z) from the 6-hourly normals (PSL stamp + 6 h,
+    as temp_maps.clim_t2m), moved to model terrain with 6.5 C/km like temp_maps.clim_t2m, in F; the viewer blends months and hours."""
     from PIL import Image
     from scipy.interpolate import RegularGridInterpolator
-    src = next(p for p in (os.environ.get("WX_CLIM_DIR", ""), os.path.join(HERE, "clim"), "/workspace/wx-models-site/fast_deploy/clim")
-               if p and os.path.exists(os.path.join(p, CLIM_NPZ[var])))
-    z = np.load(os.path.join(src, CLIM_NPZ[var])); h, cl, co = z["hgt"], z["lat"], z["lon"]
-    lat = 90.0 - 0.25 * np.arange(721)[i0:i1]; lon = (0.25 * np.arange(1440))[j0:j1]   # rolled grid: lon 0..360
-    LA, LO = np.meshgrid(lat, lon % 360, indexing="ij"); files, ranges = [], []
-    for k in range(12):
-        f = np.concatenate([h[k], h[k][:, :1]], 1); it = RegularGridInterpolator((cl[::-1], np.append(co, 360.0)), f[::-1])
-        a = it(np.stack([LA, LO], -1)); lo, hi = float(np.floor(a.min())), float(np.ceil(a.max()))
+    fn, key = CLIM_NPZ[var]; z = np.load(os.path.join(_clim_src(fn), fn)); h, cl, co = z[key].astype("f4"), z["lat"], z["lon"]
+    pts = np.stack([np.asarray(LA, float), np.asarray(LO, float) % 360], -1)
+    wrap = co[-1] - co[0] > 350
+    def it(f):
+        if wrap: f = np.concatenate([f, f[:, :1]], 1); xs = np.append(co, co[0] + 360.0)
+        else: xs = co
+        return RegularGridInterpolator((cl[::-1], xs), f[::-1], bounds_error=False, fill_value=None)(pts)
+    slots = []
+    if var == "t2m":
+        vt = dt.datetime(2001, 1, 1) + dt.timedelta(hours=6) + np.arange(h.shape[0]) * dt.timedelta(hours=6)   # valid times (non-leap year)
+        mon = np.array([t.month for t in vt]); hr = np.array([t.hour for t in vt])
+        zfix = None if oro_m is None else -0.0065 * (oro_m - it(z["zs"]))
+        for k in range(12):
+            for hh in (0, 6, 12, 18):
+                c = it(h[(mon == k + 1) & (hr == hh)].mean(0))
+                if zfix is not None: c = c + zfix
+                slots.append(c * 1.8 + 32)
+    else: slots = [it(h[k]) for k in range(12)]
+    files, ranges = [], []
+    for k, a in enumerate(slots):
+        lo, hi = float(np.floor(a.min())), float(np.ceil(a.max())); hi = max(hi, lo + 1)
         q = np.clip(np.rint((a - lo) / (hi - lo) * 65535), 0, 65535).astype(np.uint32)
         rgb = np.zeros(a.shape + (3,), np.uint8); rgb[..., 0] = q >> 8; rgb[..., 1] = q & 255
-        fn = f"static/clim_{var}_{m}_m{k + 1:02d}.png"; Image.fromarray(rgb, "RGB").save(f"{out}/{fn}", optimize=True)
-        files.append(fn); ranges.append([lo, hi])
-    return dict(files=files, ranges=ranges, units="m", source="NCEP/NCAR Reanalysis 1 1991-2020 monthly mean (NOAA PSL)")
+        f_ = f"static/clim_{var}_{m}_{k:02d}.png"; Image.fromarray(rgb, "RGB").save(f"{out}/{f_}", optimize=True)
+        files.append(f_); ranges.append([lo, hi])
+    d = dict(files=files, ranges=ranges, units=CLIM_UNITS[var], source="NCEP/NCAR Reanalysis 1 1991-2020 (NOAA PSL)")
+    if var == "t2m": d["hours"] = [0, 6, 12, 18]
+    return d
 
 # ------------------------------------------------------------------------------------------------ static
 def extra_views(TM, ccrs):
@@ -420,6 +441,9 @@ def static(m, out, views_only=None):
     LTGP_C = ["#e6dcf5", "#c3a6ec", "#9b6fe0", "#f2e34b", "#f4a43a", "#e8692f", "#d43f3a", "#8c1450"]   # 8 bands, no blends
     LTGP_A = [(0.01, "#e6dcf5"), (0.05, "#c3a6ec"), (0.1, "#9b6fe0"), (0.25, "#f2e34b"), (0.5, "#f4a43a"), (1, "#e2462f"), (2, "#8c1450")]
     JET_L = list(M.JET_LEVELS); W5_L = list(M.W500_LEVELS)
+    CM.update(qpf1=CM["qpf"], qpf6=CM["qpf"], qpf24=CM["qpf"], mslpqpf=CM["qpf"])
+    T8A_L = np.arange(-15, 16, 1)
+    CM.update(t2ma=TM.t2a_cmap(), t850a=HS.cmap([HS._anom_color(27.0 * x) for x in (T8A_L[:-1] + T8A_L[1:]) / 2.0], HS.ANOM_UNDER, HS.ANOM_OVER))
     CM.update(w500=M.ramp(M.W500_LEVELS, M.W500_ANCH), w250=M.ramp(M.JET_LEVELS, M.JET_ANCH), z500anom=HS.anom_cmap())
     CM.update(mucape=M.ramp(CAPE_L, CAPE_A), sbcape=M.ramp(CAPE_L, CAPE_A), ltng=M.ramp(LTNG_L, LTNG_A), ltgp=HS.cmap(LTGP_C, LTGP_C[0], LTGP_C[-1]))
     prods = {
@@ -482,10 +506,35 @@ def static(m, out, views_only=None):
                          isobars=dict(field="z500", scale=0.1, every=6, sigma=1.5, color="#101114", lw=1.25, halo=2.4),
                          extra="vs 1991-2020 NCEP/NCAR monthly mean  \u00b7  heights every 6 dam  \u00b7  {lo} to {hi} m in view", pct=[0.5, 99.5],
                          towns="names", clim="z500", only=("gfs", "ifs", "aifs", "eps")),
+        # stage 2 (browser-only): precip in the last 1/6/24 h and MSLP + 6 h precip (differences of the run total in the browser)
+        "qpf1": dict(title="1 h Precipitation", fields=["apcp"], window=1, fill="window", key="Precip (in)", ticks=[0.01, 0.05, 0.1, 0.25, 0.5, 1, 2], tickfmt=True,
+                     **table(HS.RAIN_LEVELS, CM["qpf"], "max"), extra="liquid equivalent in the hour ending at the valid time  \u00b7  max {hi} in in view",
+                     pct=[0, 100], dec=2, fmt="in2", only=("hrrr",)),
+        "qpf6": dict(title="6 h Precipitation", fields=["apcp"], window=6, fill="window", key="Precip (in)", ticks=[0.1, 0.5, 1, 2, 3, 4, 6], tickfmt=True,
+                     **table(HS.RAIN_LEVELS, CM["qpf"], "max"), extra="liquid equivalent in the 6 h ending at the valid time  \u00b7  max {hi} in in view",
+                     pct=[0, 100], dec=2, fmt="in2", only=("hrrr", "gfs", "ifs", "aifs")),
+        "qpf24": dict(title="24 h Precipitation", fields=["apcp"], window=24, fill="window", key="Precip (in)", ticks=[0.1, 0.5, 1, 2, 3, 4, 6, 8], tickfmt=True,
+                      **table(HS.RAIN_LEVELS, CM["qpf"], "max"), extra="liquid equivalent in the 24 h ending at the valid time  \u00b7  max {hi} in in view",
+                      pct=[0, 100], dec=2, fmt="in2", only=("hrrr", "gfs", "ifs", "aifs")),
+        "mslpqpf": dict(title="MSLP + 6 h Precipitation", fields=["apcp", "mslp"], window=6, fill="window", key="6 h precip (in)",
+                        ticks=[0.1, 0.5, 1, 2, 3, 4, 6], tickfmt=True, **table(HS.RAIN_LEVELS, CM["qpf"], "max"),
+                        isobars=dict(field="mslp", every=4, sigma=6.0 if m == "hrrr" else 1.0, color=HS.ISOBAR_COLOR, lw=HS.ISOBAR_LW, halo=HS.ISOBAR_HALO),
+                        extra="isobars every 4 mb  \u00b7  precip in the 6 h ending at the valid time  \u00b7  max {hi} in in view",
+                        pct=[0, 100], dec=2, fmt="in2", towns="names", only=("hrrr", "gfs", "ifs", "aifs")),
+        # stage 2 (browser-only): anomalies vs 1991-2020 normals (static climatology, value = field - normal in the browser)
+        "t2ma": dict(title="2 m Temperature Anomaly", fields=["t2m"], fill="anom", anom="t2m", clim="t2m", key="Anomaly (\u00b0F)", ticks=list(TM.T2A_TICKS),
+                     tickfmt=True, **table(TM.T2A_LEVELS, CM["t2ma"], "both"),
+                     extra="vs 1991-2020 normal for the date and hour (NCEP/NCAR, adjusted to model terrain)  \u00b7  {lo} to {hi}\u00b0F in view",
+                     pct=[0.5, 99.5]),
+        "t850a": dict(title="850 mb Temperature Anomaly", fields=["t850"], fill="anom", anom="t850", clim="t850", key="Anomaly (\u00b0C)",
+                      ticks=list(range(-15, 16, 3)), tickfmt=True, **table(T8A_L, CM["t850a"], "both"),
+                      extra="vs 1991-2020 NCEP/NCAR monthly normal  \u00b7  {lo} to {hi}\u00b0C in view", pct=[0.5, 99.5], towns="none",
+                      only=("hrrr", "gfs", "ifs", "aifs")),
     }
     prods = {k: v for k, v in prods.items() if m in v.pop("only", (m,))}
     if m == "eps":   # ensemble: mean versions of the shared products plus spread / probability maps
-        prods = {k: prods[k] for k in ("t2m", "z500anom")}
+        prods = {k: prods[k] for k in ("t2m", "t2ma", "z500anom")}
+        prods["t2ma"]["title"] = "2 m Temperature Anomaly (ens. mean)"
         prods["t2m"]["title"] = "2 m Temperature (ens. mean)"; prods["t2m"]["extra"] = "mean of 50 members  \u00b7  " + prods["t2m"]["extra"]
         prods["z500anom"]["title"] = "500 mb Height Anomaly (ens. mean)"
         SD_L = list(range(0, 13)); SD_A = [(0, "#f7fbff"), (2, "#c6dbef"), (4, "#6baed6"), (6, "#fdd49e"), (8, "#fc8d59"), (12, "#b30000")]
@@ -507,7 +556,8 @@ def static(m, out, views_only=None):
     if "ep32" in prods: prods["ep32"]["min_show"] = 5
     for k in ("w500", "w250"):
         if k in prods: prods[k]["under"] = "#f4f5f7"   # light below the first level so barbs and height lines stay readable
-    for k in ("qpf", "snow", "refc"):
+    if "mslpqpf" in prods: prods["mslpqpf"]["under"] = "#f4f5f7"   # light background so the dark isobars read (no blanking)
+    for k in ("qpf", "snow", "refc", "qpf1", "qpf6", "qpf24"):
         if k in prods: prods[k]["min_show"] = prods[k]["levels"][0]   # blank below the first level (like the site)
     for pid, P in prods.items():
         P.setdefault("fill", P["fields"][0]); tk0 = list(P["ticks"])
@@ -529,7 +579,8 @@ def static(m, out, views_only=None):
             sizes[f"key_{m}_{pid}_{vid}"] = save(fig, f"{out}/{fn}")
         P["ticks"] = [float(t) for t in tk0]
     clim = {}
-    if MD["grid"] == "ll": clim["z500"] = clim_static(m, out, i0, i1, j0, j1)
+    for var in sorted({P["clim"] for P in prods.values() if P.get("clim")}):
+        clim[var] = clim_static(m, out, crop_la, crop_lo, var, None if oro is None else oro[i0:i1, j0:j1] / 3.28084)
     mp = f"{out}/manifest.json"; man = json.load(open(mp)) if os.path.exists(mp) else {}
     man.update(dpi=DPI, style=dict(BG=HS.BG, INK=HS.INK, MUTED=HS.MUTED, ACCENT=HS.ACCENT))
     MI = minfo(m)
