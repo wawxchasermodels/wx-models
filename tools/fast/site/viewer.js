@@ -184,12 +184,14 @@ async function productFields(run, pid, f) {
     } else if (P.clim) {   // anomaly: field minus the 1991-2020 normal at the valid time (static climatology, see climAt)
       const fld = P.anom || "z500", C = await climAt(run, P.clim, S.runs[run].steps.find(x => x.f === f).valid), z = F[fld].v, o = new Float32Array(z.length);
       for (let k = 0; k < z.length; k++) o[k] = z[k] - C[k]; out.fill = fld === "z500" ? blur(o, g.w, g.h, 1.0) : o;
-    } else if (P.window && P.wmax) {   // highest value over the steps in the last N hours (incl. this one)
+    } else if (P.window && (P.wmax || P.wsum)) {   // highest value over the steps in the last N hours (incl. this one)
       const fld = P.wfield || P.fields[0], fs = S.runs[run].steps.map(x => x.f).filter(x => x > f - P.window && x <= f);
       if (f - P.window < 0 && !P.sofar) throw new Error(`nodata:${fld}`);
       const arrs = await Promise.all(fs.map(x => getField(run, fld, x).then(r => r.v, () => null))), ok = arrs.filter(Boolean);
       if (!ok.length) throw new Error(`nodata:${fld}`);
-      const o = new Float32Array(ok[0]); for (const a of ok.slice(1)) for (let k = 0; k < o.length; k++) if (a[k] > o[k]) o[k] = a[k];
+      const o = new Float32Array(ok[0]);
+      if (P.wsum) { for (const a of ok.slice(1)) for (let k = 0; k < o.length; k++) o[k] += a[k]; }   // per-interval amounts -> total
+      else for (const a of ok.slice(1)) for (let k = 0; k < o.length; k++) if (a[k] > o[k]) o[k] = a[k];
       out.fill = o;
     } else if (P.window) {   // amount in the last N hours = run total now minus run total N hours ago (stage 2, browser-only)
       const fld = P.wfield || "apcp", a = F[fld].v, prev = f - P.window;
@@ -721,6 +723,7 @@ function mgTown(D, name) {   // per-step values of one town; derived wind / incr
   else if (has("ns6")) T.snow6 = col("ns6");
   else if (T.pcp && T.t2m) { T.snow = T.pcp.map((x, k) => x == null ? null : (T.t2m[k] <= 33 ? x * 10 : 0)); T.snowEst = true; }
   if (has("dsnod")) T.dsnod = col("dsnod");
+  if (has("kinc")) T.kuch = col("kinc");
   return T;
 }
 const sumWin = (T, a, f0, f1) => { if (!a) return null; let s = 0, n = 0; T.f.forEach((f, k) => { if (f > f0 && f <= f1 && a[k] != null) { s += a[k]; n++; } }); return n ? s : null; };
@@ -835,10 +838,10 @@ function passTable(body, D) {
   const hdr = wins.map(([a, b]) => `${fmtPT(new Date(Date.parse(T0.t[0]) + (a - T0.f[0]) * 36e5).toISOString(), { weekday: "short", hour: "numeric" })}\u2013${fmtPT(new Date(Date.parse(T0.t[0]) + (b - T0.f[0]) * 36e5).toISOString(), { weekday: "short", hour: "numeric" })}`);
   const span = Math.min(fmax, 48);
   let h = `<div class="mg-note">Run start ${fmtPT(new Date(Date.parse(T0.t[0]) - T0.f[0] * 36e5).toISOString(), { weekday: "short", month: "numeric", day: "numeric", hour: "numeric" })} PT. Temperatures corrected to summit height. ${T0.snowEst ? "Snow estimated 10:1 where 2 m temp \u2264 33\u00b0F. " : ""}Tap a pass for its meteogram.</div>
-  <div class="mg-scroll"><table class="pf"><thead><tr><th>Pass</th>${wins.map((w, k) => `<th>Snow \u2033<br><small>${hdr[k]}</small></th>`).join("")}<th>Precip \u2033<br><small>first ${span} h</small></th><th>Low \u00b0F<br><small>first ${span} h</small></th><th>High \u00b0F<br><small>first ${span} h</small></th><th>Max gust<br><small>mph, ${span} h</small></th>${T0.frz ? `<th>Freezing lvl<br><small>lowest ft</small></th>` : ""}</tr></thead><tbody>`;
+  <div class="mg-scroll"><table class="pf"><thead><tr><th>Pass</th>${wins.map((w, k) => `<th>Snow \u2033<br><small>${hdr[k]}</small></th>`).join("")}${T0.kuch ? wins.map((w, k) => `<th>Kuchera \u2033<br><small>${hdr[k]}</small></th>`).join("") : ""}<th>Precip \u2033<br><small>first ${span} h</small></th><th>Low \u00b0F<br><small>first ${span} h</small></th><th>High \u00b0F<br><small>first ${span} h</small></th><th>Max gust<br><small>mph, ${span} h</small></th>${T0.frz ? `<th>Freezing lvl<br><small>lowest ft</small></th>` : ""}</tr></thead><tbody>`;
   for (const p of passes) { const T = mgTown(D, p.n), sn = wins.map(([a, b]) => snowWin(T, a, b));
     const col = x => x == null ? "" : x >= 12 ? ' class="s3"' : x >= 6 ? ' class="s2"' : x >= 1 ? ' class="s1"' : "";
-    h += `<tr data-n="${p.n}"><td>${p.n}</td>${sn.map(x => `<td${col(x)}>${f1(x)}</td>`).join("")}<td>${f2(pcpWin(T, -1, span))}</td><td>${r0(ext(T, T.t2m, -1, span, Math.min))}</td><td>${r0(ext(T, T.t2m, -1, span, Math.max))}</td><td>${r0(ext(T, T.gust, -1, span, Math.max))}</td>${T0.frz ? `<td>${r0(ext(T, T.frz, -1, span, Math.min))}</td>` : ""}</tr>`; }
+    h += `<tr data-n="${p.n}"><td>${p.n}</td>${sn.map(x => `<td${col(x)}>${f1(x)}</td>`).join("")}${T0.kuch ? wins.map(([a, b]) => { const x = sumWin(T, T.kuch, a, b); return `<td${col(x)}>${f1(x)}</td>`; }).join("") : ""}<td>${f2(pcpWin(T, -1, span))}</td><td>${r0(ext(T, T.t2m, -1, span, Math.min))}</td><td>${r0(ext(T, T.t2m, -1, span, Math.max))}</td><td>${r0(ext(T, T.gust, -1, span, Math.max))}</td>${T0.frz ? `<td>${r0(ext(T, T.frz, -1, span, Math.min))}</td>` : ""}</tr>`; }
   body.innerHTML = h + "</tbody></table></div>";
   body.querySelectorAll("tr[data-n]").forEach(tr => tr.onclick = () => { MG.town = tr.dataset.n; const r = MG.run; mgOpen("town"); MG.run = r; $("mgrun").value = r; mgDraw(); });
 }

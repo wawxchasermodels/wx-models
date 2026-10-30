@@ -236,8 +236,44 @@ def _ltng(R, m):
     if m == "rrfs": return np.clip(np.asarray(R._idx("LTNG:entire atmosphere", R.url, (f"{R.s - 1}-{R.s} hour max fcst",))[2], float), 0, None)   # hourly max
     raise KeyError("ltng")
 def _asnow(R, m):
+    if m == "ifs": return np.clip(_ec("sf")(R, m), 0, None) * 393.701   # ECMWF snowfall (m water) at 10:1, run total
     if m not in ("hrrr", "rrfs"): raise KeyError("asnow")
     return np.asarray(R.acc0("ASNOW:surface")[2], float) / 0.0254
+def _prev_step(m, c, s):
+    st = [0] + [x for x in steps_for(m, c.hour) if x < s]; return st[-1]
+def _inc(R, m, what):
+    """Water (in) that fell in this output interval: run total now minus at the previous step. what: "tp" (all precip) or "sf" (ECMWF snow water)."""
+    k = f"_inc_{what}"
+    if k in R.cache: return R.cache[k]
+    import menu_maps as M, temp_maps as TM
+    s0 = _prev_step(m, R.c, R.s)
+    if m in NOAA:
+        now = np.asarray(R.acc0("APCP:surface")[2], float) / 25.4
+        prev = 0.0 if s0 == 0 else np.asarray(M.Reader(m, R.c, s0).acc0("APCP:surface")[2], float) / 25.4
+    else:
+        now = np.asarray(R.st.field(what)[2], float) * 39.3701
+        prev = 0.0 if s0 == 0 else np.asarray(TM.Step(m, R.c, s0).field(what)[2], float) * 39.3701
+    R.cache[k] = r = np.clip(now - prev, 0, None); return r
+def _tmax_col(R, m):   # warmest of 2 m, 925, 850, 700 and 500 mb (K), for the Kuchera ratio
+    t = np.asarray(R.f("t2m")[2], float)
+    for lev in (925, 850, 700, 500): t = np.maximum(t, np.asarray(R.f(f"T:{lev}")[2], float))
+    return t
+def _kinc(R, m):
+    """Kuchera snowfall (in) in this output interval: snow water x ratio, ratio = 12 + (271.16 - Tmax) (x2 below 271.16 K), Tmax =
+    warmest of 2 m / 925 / 850 / 700 / 500 mb. Snow water: ECMWF sf; NOAA precip where the categorical snow flag is set.
+    (old site: Kuchera snow; Benjamin: Kuchera for the Cascade passes)"""
+    if m not in ("hrrr", "rrfs", "gfs", "ifs"): raise KeyError("kinc")
+    if m == "ifs": swe = _inc(R, m, "sf")
+    else: swe = _inc(R, m, "tp") * (np.asarray(R._idx(M_NO("csnow"), R.url)[2], float) > 0.5)
+    tm = _tmax_col(R, m); d = 271.16 - tm
+    ratio = np.clip(np.where(d > 0, 12 + 2 * d, 12 + d), 0, 40)
+    return swe * ratio
+def _fzinc(R, m):
+    """Freezing rain (in of water) in this output interval: precip where the type is freezing rain / drizzle."""
+    if m not in ("hrrr", "rrfs", "gfs", "ifs"): raise KeyError("fzinc")
+    if m in NOAA: fz = np.asarray(R._idx(M_NO("cfrzr"), R.url)[2], float) > 0.5
+    else: fz = np.isin(np.rint(np.asarray(R.f("ptype")[2], float)), (3, 12))
+    return _inc(R, m, "tp") * fz
 def _tcc(R, m):
     t = np.asarray(R.f("tcc")[2], float); return np.clip(t * 100.0 if np.nanmax(t) <= 1.01 else t, 0, 100)
 def _ir(R, m):
@@ -329,6 +365,7 @@ FIELDS = {   # name: (getter, units)
     "d2m": (_f("td2m", lambda k: (k - 273.15) * 1.8 + 32), "F"),
     "pw": (_f("pwat", lambda v: v / 25.4), "in"),
     "prt": (_prt, "code"),
+    "kinc": (_kinc, "in"), "fzinc": (_fzinc, "in"),
     # ECMWF ENS (model "eps" only)
     "t2sd": (_ens("t2sd"), "F"), "p32": (_ens("p32"), "%"), "z5sd": (_ens("z5sd"), "m"),
 }
@@ -343,10 +380,10 @@ PACKS = {"wind": ("mslp", "u10", "v10"), "aloft": ("t850", "t700", "frz"), "accu
          "e2t": ("t2m", "t2sd", "p32"), "e500": ("z500", "z5sd"), "eqp": ("apcp", "apcp90", "asnow"), "eqs": ("asnow90", "gust", "gust90"),
          "emsl": ("mslp", "t850", "lowp"), "ecape": ("mucape", "pcape"),
          "w850": ("u850", "v850", "t925"), "w925": ("u925", "v925", "z1000"), "w700": ("u700", "v700", "t500"), "w300": ("u300", "v300", "t300"),
-         "moist": ("d2m", "pw", "prt"),
+         "moist": ("d2m", "pw", "prt"), "kfz": ("kinc", "fzinc"),
          "nbm1": ("t2m", "gust", "tcc"), "nbm2": ("nq1", "nq6", "ns6"), "nbm3": ("tstm", "maxt", "mint")}
 
-SQRT_FIELDS = {"apcp", "asnow", "apcp90", "asnow90", "nq1", "nq6", "ns6", "ltgp"}
+SQRT_FIELDS = {"apcp", "asnow", "apcp90", "asnow90", "nq1", "nq6", "ns6", "ltgp", "kinc", "fzinc"}
 def q8(a, lo, hi): return np.clip(np.rint((a - lo) / (hi - lo) * 255), 0, 255).astype(np.uint8)
 def rng(a):
     lo, hi = float(np.floor(np.nanmin(a))), float(np.ceil(np.nanmax(a))); return lo, max(hi, lo + 1)
@@ -354,7 +391,7 @@ def rng(a):
 def roll_ll(v):   # 0.25 deg global: lon -180..179.75 -> 0..359.75
     return np.roll(v, -720, axis=1) if v.shape[1] == 1440 else v
 
-PT_FIELDS = ("d2m", "pw", "gust", "u10", "v10", "mslp", "apcp", "asnow", "tcc", "frz", "dsnod", "refc", "t850", "mucape",
+PT_FIELDS = ("t2m", "d2m", "pw", "kinc", "fzinc", "gust", "u10", "v10", "mslp", "apcp", "asnow", "tcc", "frz", "dsnod", "refc", "t850", "mucape",
              "nq1", "nq6", "ns6", "tstm", "maxt", "mint", "t2sd", "p32")
 def town_points(man, m):
     """Every town / pass slot of the model's views (deduped by name, A-Z): meteogram and Pass Forecaster sample points."""
@@ -703,6 +740,8 @@ def static(m, out, views_only=None):
     PP_L = [0, 10, 25, 50, 75, 90, 110, 125, 150, 200, 300, 400]
     PP_C = ["#7f4a10", "#a6611a", "#c58a3c", "#dfc27d", "#f1e3c0", "#f5f5f5", "#c7e9c0", "#a1d99b", "#41ab5d", "#1f78b4", "#3a4fb0"]
     CM.update(qpfa=HS.cmap(PA_C, "#3d2004", "#00391f"), qpfpct=HS.cmap(PP_C, PP_C[0], "#5b2a9c"))
+    FZ_L = [0.01, 0.05, 0.1, 0.15, 0.25, 0.35, 0.5, 0.75, 1.0, 1.5]
+    CM.update(kuchera=CM["snow"], kuch24=CM["snow"], fzra=M.ramp(FZ_L, [(0.01, "#f3e6fb"), (0.1, "#c49de3"), (0.25, "#8e59c8"), (0.5, "#c51b7d"), (1.0, "#6d0f46"), (1.5, "#2b0f1f")]))
     T5_L = list(range(-50, 1, 1)); T3_L = list(range(-70, -19, 1)); W8_L = list(range(10, 91, 5)); TH_L = list(range(498, 601, 3)); SLP_L = list(range(960, 1051, 2))
     PW_L = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.75, 0.9, 1.0, 1.25, 1.5, 1.75, 2.0, 2.5]; PWA_L = [-1.2, -1, -0.8, -0.6, -0.4, -0.2, -0.1, 0.1, 0.2, 0.4, 0.6, 0.8, 1, 1.2]
     PT_L = []; PT_C = []
@@ -842,6 +881,18 @@ def static(m, out, views_only=None):
                        ticks=[0, 25, 50, 75, 100, 150, 200, 300, 400], tickfmt=True, **table(PP_L, CM["qpfpct"], "max"),
                        extra="precip since the run started as a share of the 1991-2020 normal for those days (from 48 h on; normal floored at 0.05 in)  \u00b7  up to {hi}% in view",
                        pct=[0.5, 99.5], towns="names", only=("hrrr", "rrfs", "gfs", "ifs", "aifs", "eps", "aens")),
+        "kuchera": dict(title="Snowfall Total (Kuchera)", fields=["kinc"], window=9999, sofar=True, wsum=True, wfield="kinc", fill="window", key="Snow (in)",
+                        ticks=[0.1, 1, 3, 6, 10, 15, 24, 36, 48], tickfmt=True, **table(M.SNOW_LEVELS, CM["snow"], "max"),
+                        extra="snow water x Kuchera ratio (warmest of 2 m to 500 mb)  \u00b7  since the run started  \u00b7  max {hi} in in view",
+                        pct=[0, 100], dec=1, fmt="in1", only=("hrrr", "rrfs", "gfs", "ifs")),
+        "kuch24": dict(title="24 h Snowfall (Kuchera)", fields=["kinc"], window=24, wsum=True, wfield="kinc", fill="window", key="Snow (in)",
+                       ticks=[0.1, 1, 3, 6, 10, 15, 24], tickfmt=True, **table(M.SNOW_LEVELS, CM["snow"], "max"),
+                       extra="Kuchera snow in the 24 h ending at the valid time  \u00b7  max {hi} in in view", pct=[0, 100], dec=1, fmt="in1",
+                       only=("hrrr", "rrfs", "gfs", "ifs")),
+        "fzra": dict(title="Freezing Rain Total", fields=["fzinc"], window=9999, sofar=True, wsum=True, wfield="fzinc", fill="window", key="Ice (in, liquid)",
+                     ticks=[0.01, 0.05, 0.1, 0.25, 0.5, 0.75, 1], tickfmt=True, **table(FZ_L, CM["fzra"], "max"),
+                     extra="precip that fell as freezing rain / drizzle since the run started (liquid amount)  \u00b7  max {hi} in in view",
+                     pct=[0, 100], dec=2, fmt="in2", only=("hrrr", "rrfs", "gfs", "ifs")),
         # 10-30 parity with the old site's model menus (global models; HRRR/RRFS get them too where the fields exist)
         "d2m": dict(title="2 m Dewpoint", fields=["d2m"], key="Dewpoint (\u00b0F)", ticks=HS.TEMP_TICKS, **table(HS.TEMP_LEVELS, CM["t2m"], "both"),
                     extra="{lo} to {hi}\u00b0F in view", pct=[0.5, 99.5], only=("hrrr", "rrfs", "gfs", "ifs", "aifs")),
@@ -977,6 +1028,9 @@ def static(m, out, views_only=None):
     if "ntstm" in prods: prods["ntstm"]["min_show"] = 10
     if "ptype" in prods: prods["ptype"]["under"] = "#f4f5f7"
     for k in ("nqpf1", "nqpf6", "nsnow6"):
+        if k in prods: prods[k]["min_show"] = prods[k]["levels"][0]
+    if m == "ifs" and "snow" in prods: prods["snow"]["extra"] = "ECMWF snowfall water x 10 (10:1)  \u00b7  since the run started  \u00b7  max {hi} in in view"
+    for k in ("kuchera", "kuch24", "fzra"):
         if k in prods: prods[k]["min_show"] = prods[k]["levels"][0]
     for k in ("qpf", "snow", "refc", "qpf1", "qpf3", "qpf6", "qpf12", "qpf24", "qpf48", "snow1", "snow6", "ltng6"):
         if k in prods: prods[k]["min_show"] = prods[k]["levels"][0]   # blank below the first level (like the site)
