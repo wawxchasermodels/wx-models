@@ -284,8 +284,12 @@ function sampleRC(F, w, fi, fj) {
 }
 
 // 10-29 8:45 PM (Benjamin: phone slider "a little janky"): redraws are coalesced to one per animation frame and never
-// overlap; while the slider is being dragged the map is drawn in a lighter mode (fill at half resolution, no contour /
-// isobar / barb lines, URL not touched), then once at full quality when the finger lifts.
+// overlap; while the slider is being dragged the map is drawn in a lighter mode (fill at half resolution, URL not touched),
+// then once at full quality when the finger lifts.
+// 10-30 4:10 PM (Benjamin: "pressure lines disappear when scrubbing on the phone"): the lighter mode used to drop every
+// line layer, so isobars / heights / H-L vanished while the finger was down. Lines now stay on while dragging: isobar and
+// H/L geometry is cached per frame (GEO), isobars sample only the contour grid (same lines, ~16x fewer samples), the
+// freezing line uses a 4 px grid while dragging.
 let rafOn = false; S.waiters = [];
 function draw() {
   return new Promise(res => { S.waiters.push(res); if (!rafOn) { rafOn = true; requestAnimationFrame(pump); } });
@@ -340,15 +344,16 @@ async function render(lite) {
   ctx.drawImage(st.base, 0, 0, cv.width, cv.height);
   // 3. product lines
   ctx.save(); ctx.beginPath(); ctx.rect(st.x0, st.y0, st.W, st.H); ctx.clip();
-  if (!lite && P.freeze !== undefined) {
-    const lines = contour(st, vals, P.freeze, 3);
+  if (P.freeze !== undefined) {
+    const lines = contour(st, vals, P.freeze, lite ? 4 : 3);   // lite: 4 px grid = only exact (even-pixel) samples
     strokeLines(ctx, lines, "#ffffff", pt(3.0), [pt(3.7 * P.freeze_lw), pt(1.6 * P.freeze_lw)]);   // matplotlib halo: 3 pt stroke, dashed with the line
     strokeLines(ctx, lines, P.freeze_color, pt(P.freeze_lw), [pt(3.7 * P.freeze_lw), pt(1.6 * P.freeze_lw)]);
   }
-  if (!lite && P.isobars) drawIsobars(ctx, st, D, P);
-  if (!lite && P.barbs) drawBarbs(ctx, st, D, P, V);
-  if (!lite && (P.lows || P.spag)) drawEns(ctx, st, D, P, V);
-  if (!lite && P.hl) drawHL(ctx, st, D, V);
+  const gk = `${run}/${pid}/${vid}/${f}`;
+  if (P.isobars) drawIsobars(ctx, st, D, P, gk);
+  if (P.barbs) drawBarbs(ctx, st, D, P, V);
+  if (P.lows || P.spag) drawEns(ctx, st, D, P, V, gk);
+  if (P.hl) drawHL(ctx, st, D, V, gk);
   ctx.restore();
   // 4. towns (dots + names static) and live numbers
   const tmode = P.towns || "numbers";
@@ -529,10 +534,22 @@ function header(ctx, V, title, valid, sub, badge) {   // house_style.header, tex
   ctx.fillStyle = S.man.style.MUTED; ctx.font = `600 ${pt(10.5)}px Montserrat`; ctx.fillText(badge[1], cx, Y(top - bh * 0.80));
 }
 
-// marching squares on panel pixels (every s px), segments joined into polylines (canvas coords)
-function contour(st, vals, level, s) {
+// per-frame line geometry (isobars, H/L, ensemble height lines), so scrubbing back and forth redraws lines for free
+const GEO = new Map();
+function geo(key, make) {
+  if (GEO.has(key)) { const v = GEO.get(key); GEO.delete(key); GEO.set(key, v); return v; }
+  const v = make(); GEO.set(key, v); if (GEO.size > 160) GEO.delete(GEO.keys().next().value); return v;
+}
+// contour grid: panel pixels every s px (what contour() reads)
+function cgrid(st, s, at) {
   const W = st.W, H = st.H, nx = Math.floor((W - 1) / s) + 1, ny = Math.floor((H - 1) / s) + 1, g = new Float32Array(nx * ny);
-  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) g[j * nx + i] = vals[(j * s) * W + i * s];
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) g[j * nx + i] = at((j * s) * W + i * s);
+  return { g, nx, ny, s };
+}
+// marching squares on panel pixels (every s px), segments joined into polylines (canvas coords)
+function contour(st, vals, level, s) { return contourG(st, cgrid(st, s, k => vals[k]), level); }
+function contourG(st, G, level) {
+  const { g, nx, ny, s } = G;
   const segs = [];
   const P = (i, j) => [st.x0 + i * s, st.y0 + j * s];
   const lerp = (a, b, va, vb) => { const t = (level - va) / (vb - va); return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]; };
@@ -573,14 +590,18 @@ function strokeLines(ctx, lines, color, lw, dash) {
   ctx.stroke(); ctx.setLineDash([]);
 }
 
-function drawIsobars(ctx, st, D, P) {
-  const I = P.isobars, n = st.W * st.H, iso = new Float32Array(n);
+function drawIsobars(ctx, st, D, P, gk) {
+  const I = P.isobars, { all, labels } = geo(`iso/${gk}`, () => isoGeom(ctx, st, D, I));
+  paintIsobars(ctx, I, all, labels);
+}
+function isoGeom(ctx, st, D, I) {
+  const G = cgrid(st, 4, k => sample(st, D.iso, k)), iso = G.g;   // only the 4 px points contour() reads: same lines
   let lo = Infinity, hi = -Infinity;
-  for (let k = 0; k < n; k++) { const v = sample(st, D.iso, k); iso[k] = v; if (v < lo) lo = v; if (v > hi) hi = v; }
+  for (let k = 0; k < iso.length; k++) { const v = iso[k]; if (v < lo) lo = v; if (v > hi) hi = v; }
   const labels = [], all = [];
-  ctx.font = `700 ${pt(10)}px Montserrat`;
+  ctx.save(); ctx.font = `700 ${pt(10)}px Montserrat`;
   for (let L = Math.ceil(lo / I.every) * I.every; L <= hi; L += I.every) {
-    const lines = contour(st, iso, L, 4); all.push(lines);
+    const lines = contourG(st, G, L); all.push(lines);
     for (const l of lines) {   // one label per ~600 px of line, inline (line cut under the label)
       let len = 0; const cum = [0]; for (let k = 1; k < l.length; k++) { len += Math.hypot(l[k][0] - l[k - 1][0], l[k][1] - l[k - 1][1]); cum.push(len); }
       if (len < 160) continue;
@@ -595,6 +616,10 @@ function drawIsobars(ctx, st, D, P) {
       }
     }
   }
+  ctx.restore();
+  return { all, labels };
+}
+function paintIsobars(ctx, I, all, labels) {
   ctx.save();   // clip out label boxes so lines break under the numbers (matplotlib clabel inline)
   ctx.beginPath(); ctx.rect(0, 0, ctx.canvas.width, ctx.canvas.height);
   for (const b of labels) {
@@ -677,20 +702,27 @@ function gridInv(V, st, fi, fj, guess) {   // [fi, fj] -> panel px, or null when
   if (x < -300 || y < -300 || x > st.W + 300 || y > st.H + 300) return null;
   return [x, y];
 }
-function drawHL(ctx, st, D, V) {   // H / L centres: extremes of smoothed MSLP over a ~ 1/12-panel window, labelled with the pressure
+function drawHL(ctx, st, D, V, gk) {   // H / L centres: extremes of smoothed MSLP over a ~ 1/12-panel window, labelled with the pressure
+  const out = geo(`hl/${gk}`, () => hlGeom(D));
+  paintHL(ctx, st, V, out);
+}
+function hlGeom(D) {
   const w = D.w, h = D.h, a = D.iso, r = Math.max(4, Math.round(Math.min(w, h) / 14)), out = [];
   for (let i = r; i < h - r; i += 2) for (let j = r; j < w - r; j += 2) {
     const v = a[i * w + j]; let mx = true, mn = true;
     for (let di = -r; di <= r && (mx || mn); di += 2) for (let dj = -r; dj <= r; dj += 2) { const q = a[(i + di) * w + j + dj]; if (q > v) mx = false; if (q < v) mn = false; }
     if (mx || mn) out.push([i, j, v, mx]);
   }
+  return out;
+}
+function paintHL(ctx, st, V, out) {
   ctx.textAlign = "center"; ctx.textBaseline = "middle";
   for (const [i, j, v, hi] of out) { const p = gridInv(V, st, i, j, null); if (!p || p[0] < 8 || p[1] < 8 || p[0] > st.W - 8 || p[1] > st.H - 8) continue;
     const X = st.x0 + p[0], Y = st.y0 + p[1];
     haloText(ctx, hi ? "H" : "L", X, Y - pt(5), `900 ${pt(19)}px Montserrat`, hi ? "#1f4fd1" : "#d1261f", pt(3.2), "center", "middle");
     haloText(ctx, String(Math.round(v)), X, Y + pt(9), `800 ${pt(9)}px Montserrat`, hi ? "#1f4fd1" : "#d1261f", pt(2.6), "center", "middle"); }
 }
-function drawEns(ctx, st, D, P, V) {
+function drawEns(ctx, st, D, P, V, gk) {
   const E = D.ens; if (!E) return;
   if (P.spag) {
     for (const [L, col] of [["5520", "#2b6cd6"], ["5760", "#d63a2b"]]) {
@@ -700,8 +732,9 @@ function drawEns(ctx, st, D, P, V) {
           if (!p) { on = false; g = null; continue; } g = p; const X = st.x0 + p[0], Y = st.y0 + p[1]; on ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); on = true; } }
       ctx.stroke(); ctx.globalAlpha = 1;
     }
-    const z = D.raw.z500 && D.raw.z500.v; if (z) { const n = st.W * st.H, vals = new Float32Array(n), zb = blur(z, D.w, D.h, 1.0); for (let k = 0; k < n; k++) vals[k] = sample(st, zb, k);
-      for (const L of [5520, 5760]) { const lines = contour(st, vals, L, 3); strokeLines(ctx, lines, "#ffffff", pt(3.4), null); strokeLines(ctx, lines, "#101114", pt(1.8), null); } }
+    const z = D.raw.z500 && D.raw.z500.v; if (z) {
+      const zl = geo(`spag/${gk}`, () => { const zb = blur(z, D.w, D.h, 1.0), G = cgrid(st, 3, k => sample(st, zb, k)); return [5520, 5760].map(L => contourG(st, G, L)); });
+      for (const lines of zl) { strokeLines(ctx, lines, "#ffffff", pt(3.4), null); strokeLines(ctx, lines, "#101114", pt(1.8), null); } }
   }
   if (P.lows) {
     const col = mb => mb <= 970 ? "#4b0f6b" : mb <= 980 ? "#b3123c" : mb <= 990 ? "#e8692f" : mb <= 1000 ? "#f2c12e" : "#8a919c";
