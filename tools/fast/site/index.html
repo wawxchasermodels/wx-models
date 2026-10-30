@@ -51,6 +51,12 @@ body.phone canvas{max-height:none}
 #mg .mg-top{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:8px 12px;background:#1d2027;border-bottom:1px solid #2c3039}
 #mg select,#mg button{background:#262931;color:#f4f2ee;border:1px solid #7d828c;border-radius:6px;padding:5px 8px;font:inherit;touch-action:manipulation}
 #mg #mgx{margin-left:auto}
+#obsov{position:fixed;inset:0;z-index:15;background:#15171c;display:flex;flex-direction:column}
+#obsov .mg-top{display:flex;gap:10px;align-items:center;padding:8px 12px;background:#1d2027;border-bottom:1px solid #2c3039}
+#obsov button{background:#262931;color:#f4f2ee;border:1px solid #7d828c;border-radius:6px;padding:5px 8px;font:inherit}
+#obsov #obsx{margin-left:auto}
+#obsov #obs-root{flex:1;min-height:0;position:relative}
+#obsov[hidden]{display:none}
 #pfbtn .sm{display:none}@media (max-width:700px){#pfbtn .lg{display:none}#pfbtn .sm{display:inline}}
 #mgbody{flex:1;min-height:0;overflow:auto;padding:4px 8px calc(8px + env(safe-area-inset-bottom))}
 #mgbody canvas{display:block}
@@ -75,6 +81,7 @@ table.pf td.s1{background:#1f3b5c}table.pf td.s2{background:#2a5d96}table.pf td.
   <button id="share">Share</button>
   <button id="mgbtn" title="Hour-by-hour forecast for a town or pass">Meteogram</button>
   <button id="pfbtn" title="Snow, temperature and wind for every mountain pass"><span class="lg">Pass Forecaster</span><span class="sm">Passes</span></button>
+  <button id="obsbtn" title="Live station observations (NWS / Environment Canada)"><span class="lg">Observations</span><span class="sm">Obs</span></button>
   <span id="stat"></span>
 </div>
 <div id="wrap"><canvas id="map"></canvas><div id="tip" hidden></div></div>

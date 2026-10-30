@@ -2,6 +2,7 @@
 # Build the hidden fast page (branch "fast" of Pages project wx-forecast-maps; data comes from R2 via functions/d)
 set -e; cd "$(dirname "$0")"; SRC=site
 rm -rf public; mkdir -p public/fonts
+mkdir -p public/obs; OBS=${OBS_SRC:-../../web/forecast/obs}; cp $OBS/obs.js $OBS/obs.css $OBS/basemap.json public/obs/   # live obs module (read-only copy of the old site's)
 cp $SRC/viewer.js public/; cp $SRC/fonts/Montserrat-sub.woff2 public/fonts/
 sed -e 's#<script src="viewer.js"></script>#<script>window.WX_DATA="/d/"</script><script src="viewer.js"></script>#' \
     -e 's#,url(fonts/Montserrat.ttf) format("truetype")##' \

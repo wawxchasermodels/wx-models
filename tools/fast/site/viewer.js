@@ -50,6 +50,7 @@ async function boot() {
   };
   placeSteps(); addEventListener("resize", fitPhone); window.visualViewport && visualViewport.addEventListener("resize", fitPhone); (mq.addEventListener ? mq.addEventListener("change", placeSteps) : mq.addListener(placeSteps));
   setupPointer(); $("share") && ($("share").onclick = share); $("save") && ($("save").onclick = saveImage);
+  $("obsbtn") && ($("obsbtn").onclick = obsOpen);
   $("mgbtn") && ($("mgbtn").onclick = () => mgOpen("town")); $("pfbtn") && ($("pfbtn").onclick = () => mgOpen("pass"));
   $("prod").onchange = e => { S.prod = e.target.value; draw(); };
   $("view").onchange = e => { S.view = e.target.value; resetZoom(); draw(); };
@@ -63,6 +64,7 @@ async function boot() {
                               else { S.timer = setInterval(() => go(1, true), 250); $("play").textContent = "Stop"; } };
   addEventListener("keydown", e => { if (e.key === "Escape") mgClose(); if (MG.open) return; if (e.key === "ArrowRight") go(1); if (e.key === "ArrowLeft") go(-1); });
   await draw();
+  if (Q.get("obs")) obsOpen();
   if (Q.get("mg")) mgOpen(Q.get("mg") === "pass" ? "pass" : "town");
   window.__ready = true;
   if (Q.get("bench")) bench();
@@ -878,3 +880,19 @@ async function bench() {
 function showErr(e) { const p = document.createElement("pre"); p.id = "err"; p.style.color = "#f88"; p.textContent = String(e && e.stack || e); document.body.appendChild(p); }
 addEventListener("error", e => showErr(e.error || e.message)); addEventListener("unhandledrejection", e => showErr(e.reason));
 boot();
+
+// ---- Observations (old site's live obs module, unchanged: browser-drawn from NWS/IEM + Environment Canada, loaded on first open)
+let obsLoad = null;
+function obsOpen() {
+  if (!$("obsov")) {
+    const o = document.createElement("div"); o.id = "obsov"; o.hidden = true;
+    o.innerHTML = `<div class="mg-top"><b>Observations</b><button type="button" id="obsx">Close</button></div><div id="obs-root"></div>`;
+    document.body.appendChild(o); $("obsx").onclick = () => { $("obsov").hidden = true; if (window.Obs) Obs.hide(); };
+  }
+  $("obsov").hidden = false;
+  obsLoad = obsLoad || new Promise((ok, bad) => {
+    const l = document.createElement("link"); l.rel = "stylesheet"; l.href = "obs/obs.css"; document.head.appendChild(l);
+    const sc = document.createElement("script"); sc.src = "obs/obs.js"; sc.onload = ok; sc.onerror = bad; document.body.appendChild(sc);
+  });
+  obsLoad.then(() => Obs.show(), () => { $("obs-root").textContent = "Observations could not load."; obsLoad = null; });
+}
