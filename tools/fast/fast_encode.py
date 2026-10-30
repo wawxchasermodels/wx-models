@@ -94,13 +94,21 @@ ENS_EXTRA = {"tp": ("tp", None, "p90", 39.3701, 0), "sf": ("sf", None, "p90", 39
              "msl": ("msl", None, "ms", 0.01, 0), "t850": ("t", "850", "ms", 1.0, -273.15), "mucape": ("mucape", None, "pc", 1.0, 0),
              # old site "EPS lows / highs" = ENS mean of member extremes: 2 m max/min over the last 3 h (to 144 h) or 6 h (after), deg F
              "mx2t": (("mx2t3", "mx2t6"), None, "m", 1.8, -459.67), "mn2t": (("mn2t3", "mn2t6"), None, "m", 1.8, -459.67)}
+# 10-30 meteograms page: per-member values at these places (old site's 22 meteogram towns + passes + a few more), one small
+# mem_fFFF.json per ensemble step -> plumes / member views drawn in the browser. Names = run.json "points" names.
+MEM_POINTS = ("Seattle", "Tacoma", "Everett", "Arlington", "Bellingham", "Olympia", "Portland", "Port Angeles", "Forks", "Aberdeen",
+              "Ocean Shores", "Spokane", "Yakima", "Wenatchee", "Tri-Cities", "Walla Walla", "Moses Lake", "Ellensburg", "Pullman", "Omak",
+              "Bellevue", "Granite Falls", "Mount Vernon", "Leavenworth", "North Bend", "Enumclaw", "Longview", "Centralia", "Port Townsend",
+              "Sequim", "Chelan", "Winthrop", "Colville", "Packwood", "Skykomish", "Goldendale", "Shelton", "Monroe",
+              "Snoqualmie", "Stevens", "White", "Blewett", "Chinook", "Satus", "Sherman", "Wauconda", "Disautel")
+MEM_SCALE = {"2t": 10, "tp": 100, "sf": 10, "10fg": 1, "mx2t": 1, "mn2t": 1, "t850": 10, "gh": 1, "msl": 10, "mucape": 1}   # stored as ints (value * scale)
 SPAG_LEVELS = (5520, 5760)   # 552 / 576 dam member lines (trough / ridge)
 class EpsReader:
     """ECMWF ENS / AIFS ENS step: downloads the 50 member messages (HTTP ranges) and keeps running sums for 2 m temp and 500 mb
     height, plus (stage 4 extras) precip / snow / gust mean + 90th percentile, MSLP and 850 mb temp means, MUCAPE chance >= 500,
     member low centres and 500 mb member lines (spaghetti) on the model's cropped grid. f() = ensemble mean, extra() = the rest."""
     st = _NoSt()
-    def __init__(self, c, s, kind="eps", crop=None):
+    def __init__(self, c, s, kind="eps", crop=None, P=None):
         import temp_maps as TM, eccodes as ec
         from concurrent.futures import ThreadPoolExecutor
         self.c, self.s, self.bytes, self.crop = c, s, 0, crop
@@ -116,7 +124,13 @@ class EpsReader:
             if not hasattr(self, "lat"):
                 self.lat = la0 - d * np.arange(nj); lon = (lo0 + d * np.arange(ni) + 180) % 360 - 180; self.o = np.argsort(lon); self.lon = lon[self.o]
             return v[:, self.o]
-        acc = {}; self.X = {}
+        acc = {}; self.X = {}; self.M = {}
+        MP = [p for p in (P or []) if p["n"] in MEM_POINTS] if crop else []   # member values at these places (meteograms page)
+        self.mem_names = [p["n"] for p in MP]
+        def memo(par, a):   # a: cropped member field -> one int per place
+            if not MP: return
+            try: self.M.setdefault(par, []).append([None if v is None else int(round(v * MEM_SCALE[par])) for v in sample_pts(a, MP)])
+            except Exception as e: print(f"{kind} f{s:03d} members {par}: {str(e)[:80]}", flush=True)
         core = [x for x in mem if x["param"] == "2t" or (x["param"] == zp and x.get("levelist") == "500")]
         gh_members = []
         with ThreadPoolExecutor(8) as ex:
@@ -126,6 +140,7 @@ class EpsReader:
                 a["n"] += 1; a["s"] += v; a["q"] += v * v
                 if par == "2t": a["c"] += v <= 273.15
                 if par == "gh" and crop: gh_members.append(self._crop(v).astype(np.float32))
+                if MP: memo(par, self._crop(v * (1.8 if par == "2t" else 1.0) - (459.67 if par == "2t" else 0.0)))   # 2 m temp in deg F
             if len(acc) < 2 or min(a["n"] for a in acc.values()) < 40: raise RuntimeError(f"eps f{s}: only {[(k, a['n']) for k, a in acc.items()]} members")
             self.n = acc["2t"]["n"]; self.A = acc
             if not crop: return
@@ -137,6 +152,8 @@ class EpsReader:
                 try: st = np.stack([self._crop(decode(blob) * sc + off).astype(np.float32) for x, blob in ex.map(fetch, xs)])
                 except Exception as e: print(f"{kind} f{s:03d} {name}: {str(e)[:100]}", flush=True); continue
                 if name in ("tp", "sf"): st = np.clip(st, 0, None)
+                if MP and name in MEM_SCALE:
+                    for a_ in st: memo(name, a_)
                 self.X[name] = st.mean(0)
                 if kind_ == "p90": self.X[name + "90"] = np.percentile(st, 90, axis=0)
                 if kind_ == "pc": self.X[name + "p"] = (st >= 500).mean(0) * 100
@@ -463,7 +480,7 @@ def step_job(args):
     c = dt.datetime.strptime(c_str, "%Y%m%d%H").replace(tzinfo=dt.timezone.utc)
     i0, i1, j0, j1 = crop; t = time.time(); ranges, sizes, q = {}, {}, {}
     _patch_models(M)
-    try: R = EpsReader(c, s, m, crop) if m in ("eps", "aens") else NbmReader(c, s) if m == "nbm" else M.Reader(m, c, s)
+    try: R = EpsReader(c, s, m, crop, P) if m in ("eps", "aens") else NbmReader(c, s) if m == "nbm" else M.Reader(m, c, s)
     except Exception as e: return s, None, str(e), 0, 0
     for name, (get, units) in (NBM_FIELDS if m == "nbm" else dict(FIELDS, **ENS_FIELDS) if m in ("eps", "aens") else FIELDS).items():
         try: a = get(R, m)
@@ -501,6 +518,9 @@ def step_job(args):
     if getattr(R, "lows", None) is not None or getattr(R, "spag", None):   # ensemble member low centres + 500 mb member lines
         p = f"{out}/single/ens_f{s:03d}.json"; json.dump(dict(n=R.n, lows=getattr(R, "lows", []), spag=getattr(R, "spag", {})), open(p, "w"), separators=(",", ":"))
         sizes["ens"] = os.path.getsize(p)
+    if getattr(R, "M", None):   # ensemble members at MEM_POINTS: {"n": [places], "s": {field: scale}, "v": {field: [[place values] per member]}}
+        p = f"{out}/single/mem_f{s:03d}.json"; json.dump(dict(n=R.mem_names, s={k: MEM_SCALE[k] for k in R.M}, v=R.M), open(p, "w"), separators=(",", ":"))
+        sizes["mem"] = os.path.getsize(p)
     if ptv:   # town / pass values for meteograms (one small JSON per step, order = run.json "points")
         p = f"{out}/single/pts_f{s:03d}.json"; json.dump(ptv, open(p, "w"), separators=(",", ":")); sizes["pts"] = os.path.getsize(p)
     return s, sizes, ranges, getattr(R, "bytes", 0), time.time() - t
