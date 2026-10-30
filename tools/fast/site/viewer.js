@@ -173,7 +173,7 @@ async function productFields(run, pid, f) {
     if (P.fill === "wspd") {   // wind speed from u/v (kt); MSLP + 10 m wind shows mph, upper-level winds kt
       const [un, vn] = P.wind || ["u10", "v10"], u = F[un].v, v = F[vn].v, sp = new Float32Array(u.length), mul = P.spd_mult ?? (2.23694 / 1.94384);
       for (let k = 0; k < u.length; k++) sp[k] = Math.hypot(u[k], v[k]) * mul;
-      out.fill = blur(sp, g.w, g.h, P.spd_sigma);
+      out.fill = blur(sp, g.w, g.h, P.spd_sigma ?? 1.0);
     } else if (P.anom === "pr") {   // precip since the run started vs the 1991-2020 normal for the same days (mm/day normals)
       const R_ = S.runs[run], t0 = Date.parse(R_.init), hrs = f, a = F.apcp.v, o = new Float32Array(a.length), N = new Float32Array(a.length);
       if (P.fill === "ppct" && f < 48) throw new Error("nodata:apcp");

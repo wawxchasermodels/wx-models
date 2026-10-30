@@ -1018,7 +1018,7 @@ def static(m, out, views_only=None):
         "t300w": dict(title="300 mb Temperature + Wind", fields=["t300", "u300", "v300"], fill="t300", key="300 mb temp (\u00b0C)", ticks=list(range(-70, -19, 5)), tickfmt=True,
                       **table(T3_L, CM["t300w"], "both"), barbs=dict(u="u300", v="v300", color=HS.BARB_COLOR, length=HS.BARB_LENGTH, lw=HS.BARB_LW),
                       extra="barbs in kt  \u00b7  {lo} to {hi}\u00b0C in view", pct=[0.5, 99.5], towns="none", only=("hrrr", "rrfs", "gfs", "ifs", "aifs")),
-        "w850": dict(title="850 mb Wind", fields=["u850", "v850"], fill="wspd", wind=["u850", "v850"], spd_mult=1.0, key="Wind (kt)", ticks=[10, 20, 30, 40, 50, 60, 70, 80],
+        "w850": dict(title="850 mb Wind", fields=["u850", "v850"], fill="wspd", wind=["u850", "v850"], spd_mult=1.0, spd_sigma=1.0, key="Wind (kt)", ticks=[10, 20, 30, 40, 50, 60, 70, 80],
                      tickfmt=True, **table(W8_L, CM["w850"], "max"), barbs=dict(u="u850", v="v850", color=HS.BARB_COLOR, length=HS.BARB_LENGTH, lw=HS.BARB_LW),
                      extra="barbs in kt  \u00b7  up to {hi} kt in view", pct=[1, 99.9], towns="none", only=("hrrr", "rrfs", "gfs", "ifs", "aifs")),
         "thick": dict(title="1000-500 mb Thickness + MSLP", fields=["z500", "z1000", "mslp"], fill="thick", key="Thickness (dam)", ticks=list(range(498, 601, 12)), tickfmt=True,
