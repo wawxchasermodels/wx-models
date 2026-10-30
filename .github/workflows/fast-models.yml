@@ -1,6 +1,6 @@
 # Fast-style model data -> R2 bucket wx-models-data (read by the hidden fast page, Pages branch "fast" of wx-forecast-maps,
 # behind Cloudflare Access). Separate from the live site: this job never deploys Pages and never touches forecast-*.yml.
-# Every 15 min: newest HRRR, RRFS, GFS, ECMWF 0.25 and AIFS cycles (00/06/12/18Z) and ECMWF ENS (00/12Z), only the hours that are out and not yet in R2
+# Every 15 min: newest HRRR, RRFS, NBM, GFS, ECMWF 0.25 and AIFS cycles (00/06/12/18Z) and ECMWF ENS (00/12Z), only the hours that are out and not yet in R2
 # (progressive). One job per model runs in parallel; manifest.json is updated with an ETag check so jobs never clash.
 # Keeps the newest 2 runs per model (+ newest 00/12Z ECMWF run). If a job runs out of time with hours still to do, the
 # job re-dispatches the workflow (duplicates collapse into GitHub's one pending run) (GitHub schedules are throttled, so this keeps a run from stalling for an hour).
@@ -11,8 +11,8 @@ on:
   workflow_dispatch:
     inputs:
       models:
-        description: "comma list: hrrr,rrfs,gfs,ifs,aifs,eps"
-        default: "hrrr,rrfs,gfs,ifs,aifs,eps"
+        description: "comma list: hrrr,rrfs,nbm,gfs,ifs,aifs,eps"
+        default: "hrrr,rrfs,nbm,gfs,ifs,aifs,eps"
       minutes:
         description: "time budget per model job"
         default: "40"
@@ -28,13 +28,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        model: [hrrr, rrfs, gfs, ifs, aifs, eps]
+        model: [hrrr, rrfs, nbm, gfs, ifs, aifs, eps]
     permissions:
       contents: read
       actions: write   # only for the re-dispatch step below
     env:
       WX_CACHE: ${{ github.workspace }}/.wx_cache
-      ON: ${{ contains(format(',{0},', inputs.models || 'hrrr,rrfs,gfs,ifs,aifs,eps'), format(',{0},', matrix.model)) }}
+      ON: ${{ contains(format(',{0},', inputs.models || 'hrrr,rrfs,nbm,gfs,ifs,aifs,eps'), format(',{0},', matrix.model)) }}
     steps:
       - uses: actions/checkout@v4
         if: env.ON == 'true'
