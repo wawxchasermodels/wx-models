@@ -15,9 +15,9 @@ for p in (os.environ.get("WX_FORECAST_TOOLS"), os.path.join(HERE, "..", "forecas
 
 DPI = 100; STRIDE = 8
 HRRR_LCC = dict(central_longitude=-97.5, central_latitude=38.5, standard_parallels=(38.5, 38.5))
-GLOBAL_VIEWS = ("wa", "wwa", "ewa", "passes", "pnwt", "pnw", "na")
+GLOBAL_VIEWS = ("puget", "wa", "wwa", "ewa", "passes", "pnwt", "pnw", "na")
 MODELS = {   # grid "lcc" = HRRR 3 km, "ll" = 0.25 deg global (lat 90 -> -90, lon rolled to 0..360)
-    "hrrr": dict(grid="lcc", views=("wa", "wwa", "ewa", "passes", "pnwhr"), cycles=(0, 6, 12, 18), steps=list(range(1, 49)), keep=2),
+    "hrrr": dict(grid="lcc", views=("puget", "wa", "wwa", "ewa", "passes", "pnwhr"), cycles=(0, 6, 12, 18), steps=list(range(1, 49)), keep=2),
     # 06/18Z added 10-29-26 7:24 PM (Benjamin). Checked on data.ecmwf.int / NOAA 10-29 18Z: GFS 06/18Z go to 384 h like 00/12Z;
     # ECMWF 0.25 06/18Z only to 144 h (3-hourly); AIFS 06/18Z to 360 h (6-hourly) like 00/12Z.
     "gfs":  dict(grid="ll", views=GLOBAL_VIEWS, cycles=(0, 6, 12, 18), steps=list(range(3, 361, 3)), keep=2),
@@ -260,11 +260,25 @@ def extra_views(TM, ccrs):
         V0 = TM.VIEWS["pnwhr"]; l0, l1, a0, a1 = V0["ll"]; b0, b1, c0, c1 = V0["box"]
         TM.VIEWS["pnwhr"] = dict(V0, proj=ccrs.LambertConformal(central_longitude=-120 + dlon, central_latitude=45.5 + dlat, standard_parallels=(42, 49)),
                                  ll=(l0 + dlon, l1 + dlon, a0 + dlat, a1 + dlat), box=(b0 + dlon, b1 + dlon, c0 + dlat, c1 + dlat), fast_shift=True)
+    # Puget Sound close-up (Benjamin's saved order 10-29): Olympia to Everett, Olympics' east slopes to the Cascade foothills
+    TM.VIEWS.setdefault("puget", dict(label="Puget Sound", size=(16, 15), proj=lcc(-122.45), ll=(-123.65, -121.25, 46.95, 48.25), box=(-124.3, -120.6, 46.5, 48.7)))
     TM.VIEWS.setdefault("passes", dict(label="Cascade Passes", size=(16, 15), proj=lcc(-121.2), ll=(-123.9, -118.5, 46.2, 49.05), box=(-125, -117.5, 45.4, 49.8)))
-WA_LIKE = ("wa", "wwa", "ewa", "passes")
+WA_LIKE = ("wa", "wwa", "ewa", "passes", "puget")
 # Extra towns for the zoomed Western / Eastern Washington frames (Benjamin 10-29-26 7:26 PM: "more town labels").
 # Appended after the site's own WA_TOWNS, so the site's placement code keeps its towns first and drops extras that collide.
 EXTRA_TOWNS = {
+    "puget": [("Lynnwood", 47.821, -122.315, "r"), ("Edmonds", 47.811, -122.377, "l"), ("Mukilteo", 47.945, -122.304, "l"),
+              ("Marysville", 48.052, -122.177, "r"), ("Lake Stevens", 48.015, -122.064, "r"), ("Snohomish", 47.913, -122.098, "r"),
+              ("Bothell", 47.762, -122.205, "r"), ("Kirkland", 47.681, -122.209, "l"), ("Redmond", 47.674, -122.121, "r"),
+              ("Bellevue", 47.610, -122.201, "r"), ("Issaquah", 47.530, -122.033, "r"), ("Renton", 47.483, -122.217, "r"),
+              ("Kent", 47.381, -122.235, "r"), ("Federal Way", 47.322, -122.313, "l"), ("Auburn", 47.307, -122.228, "r"),
+              ("Puyallup", 47.185, -122.293, "r"), ("Lakewood", 47.172, -122.518, "l"), ("Gig Harbor", 47.329, -122.580, "l"),
+              ("Port Orchard", 47.540, -122.636, "l"), ("Bremerton", 47.567, -122.633, "l"), ("Poulsbo", 47.736, -122.646, "l"),
+              ("Kingston", 47.799, -122.498, "r"), ("Bainbridge Is.", 47.626, -122.521, "r"), ("Lacey", 47.034, -122.823, "r"),
+              ("Yelm", 46.942, -122.606, "r"), ("Enumclaw", 47.204, -121.991, "r"), ("North Bend", 47.496, -121.787, "r"),
+              ("Duvall", 47.742, -121.986, "r"), ("Monroe", 47.856, -121.971, "r"), ("Granite Falls", 48.084, -121.968, "r"),
+              ("Belfair", 47.451, -122.827, "l"), ("Quilcene", 47.823, -122.876, "r"), ("Stanwood", 48.241, -122.370, "r"),
+              ("Coupeville", 48.220, -122.686, "l"), ("Port Ludlow", 47.925, -122.684, "r")],
     "wwa": [("Lynden", 48.946, -122.452, "r"), ("Ferndale", 48.847, -122.591, "l"), ("Anacortes", 48.512, -122.613, "l"),
             ("Burlington", 48.476, -122.325, "r"), ("Sedro-Woolley", 48.504, -122.236, "r"), ("Concrete", 48.539, -121.749, "r"),
             ("Darrington", 48.255, -121.602, "r"), ("Coupeville", 48.220, -122.686, "l"), ("Friday Harbor", 48.534, -123.017, "l"),
