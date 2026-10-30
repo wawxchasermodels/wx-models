@@ -24,7 +24,61 @@ MODELS = {   # grid "lcc" = HRRR 3 km, "ll" = 0.25 deg global (lat 90 -> -90, lo
     "ifs":  dict(grid="ll", views=GLOBAL_VIEWS, cycles=(0, 6, 12, 18), steps=list(range(3, 145, 3)) + list(range(150, 361, 6)),
                  steps_short=list(range(3, 145, 3)), short_cycles=(6, 18), keep=2, keep_long=True),
     "aifs": dict(grid="ll", views=GLOBAL_VIEWS, cycles=(0, 6, 12, 18), steps=list(range(6, 361, 6)), keep=2),
+    # ECMWF ENS (EPS) 0.25 open data, 50 perturbed members (no control in the open files), 00/12Z to 360 h. Mean/spread/probability
+    # computed here from the members (the open em/es file only appears once the whole run is out). 10-30-26 (Benjamin's saved order).
+    "eps":  dict(grid="ll", views=GLOBAL_VIEWS, cycles=(0, 12), steps=list(range(6, 361, 6)), keep=2, grid_from="ifs"),
 }
+MINFO = {"eps": dict(name="ECMWF Ensemble", site="ECMWF EPS", res="0.25\u00b0 \u00b7 50 members", credit_as="ifs")}
+def minfo(m):
+    import menu_maps as M
+    return MINFO.get(m) or M.MODELS[m]
+EPS_URL = "https://data.ecmwf.int/forecasts/{d}/{h:02d}z/ifs/0p25/enfo/{d}{h:02d}0000-{s}h-enfo-ef"
+
+class _NoSt:
+    def field(self, *a, **k): raise StopIteration
+class EpsReader:
+    """ECMWF ENS step: downloads the 50 member messages of 2t and 500 mb gh (HTTP ranges, ~36 MB) and keeps running sums only
+    (memory stays at a few full grids). f() returns the ensemble mean like menu_maps.Reader.f; extra() the spread/probability."""
+    st = _NoSt()
+    def __init__(self, c, s):
+        import temp_maps as TM, eccodes as ec
+        from concurrent.futures import ThreadPoolExecutor
+        self.c, self.s, self.bytes = c, s, 0
+        base = EPS_URL.format(d=f"{c:%Y%m%d}", h=c.hour, s=s)
+        idx = [json.loads(l) for l in TM.get(base + ".index").decode().splitlines()]
+        want = [x for x in idx if x.get("type") in ("pf", "cf") and (x["param"] == "2t" or (x["param"] == "gh" and x.get("levelist") == "500"))]
+        acc = {}
+        def fetch(x): return x["param"], TM.get(base + ".grib2", (x["_offset"], x["_offset"] + x["_length"] - 1))
+        with ThreadPoolExecutor(8) as ex:
+            for par, blob in ex.map(fetch, want):
+                self.bytes += len(blob); g = ec.codes_new_from_message(blob)
+                ni, nj = ec.codes_get(g, "Ni"), ec.codes_get(g, "Nj")
+                la0, lo0, d = ec.codes_get(g, "latitudeOfFirstGridPointInDegrees"), ec.codes_get(g, "longitudeOfFirstGridPointInDegrees"), ec.codes_get(g, "iDirectionIncrementInDegrees")
+                v = ec.codes_get_values(g).reshape(nj, ni).astype(np.float64); ec.codes_release(g)
+                if not hasattr(self, "lat"):
+                    self.lat = la0 - d * np.arange(nj); lon = (lo0 + d * np.arange(ni) + 180) % 360 - 180; self.o = np.argsort(lon); self.lon = lon[self.o]
+                v = v[:, self.o]
+                a = acc.setdefault(par, dict(n=0, s=np.zeros_like(v), q=np.zeros_like(v), c=np.zeros_like(v)))
+                a["n"] += 1; a["s"] += v; a["q"] += v * v
+                if par == "2t": a["c"] += v <= 273.15
+        if len(acc) < 2 or min(a["n"] for a in acc.values()) < 40: raise RuntimeError(f"eps f{s}: only {[(k, a['n']) for k, a in acc.items()]} members")
+        self.n = acc["2t"]["n"]; self.A = acc
+    def _mean(self, p): a = self.A[p]; return a["s"] / a["n"]
+    def _sd(self, p): a = self.A[p]; mu = a["s"] / a["n"]; return np.sqrt(np.clip(a["q"] / a["n"] - mu * mu, 0, None))
+    def f(self, name):
+        if name == "t2m": return self.lat, self.lon, self._mean("2t")
+        if name == "Z:500": return self.lat, self.lon, self._mean("gh")
+        raise KeyError(name)
+    def extra(self, name):
+        if name == "t2sd": return self._sd("2t") * 1.8
+        if name == "p32": return self.A["2t"]["c"] / self.n * 100.0
+        if name == "z5sd": return self._sd("gh")
+        raise KeyError(name)
+def _ens(name):
+    def g(R, m):
+        if m != "eps": raise KeyError(name)
+        return R.extra(name)
+    return g
 
 def steps_for(m, hour):
     """Forecast hours a cycle of model m carries (ECMWF 0.25 06/18Z stop at 144 h)."""
@@ -98,11 +152,14 @@ FIELDS = {   # name: (getter, units)
     # 10-30 (Benjamin): 500 mb wind (AIFS and every model), 250 mb jet, 500 mb heights (for the height anomaly)
     "u500": (_f("U:500", lambda v: v * 1.94384), "kt"), "v500": (_f("V:500", lambda v: v * 1.94384), "kt"), "z500": (_f("Z:500", lambda z: z), "m"),
     "u250": (_f("U:250", lambda v: v * 1.94384), "kt"), "v250": (_f("V:250", lambda v: v * 1.94384), "kt"), "z250": (_f("Z:250", lambda z: z), "m"),
+    # ECMWF ENS (model "eps" only)
+    "t2sd": (_ens("t2sd"), "F"), "p32": (_ens("p32"), "%"), "z5sd": (_ens("z5sd"), "m"),
 }
 # Packing (R2 write budget): fields used together share one RGB PNG (one channel each). A field not in a pack is its own
 # grayscale PNG. run.json "packs" maps field -> [file name, channel]; the viewer reads either layout.
 PACKS = {"wind": ("mslp", "u10", "v10"), "aloft": ("t850", "t700", "frz"), "accum": ("apcp", "asnow", "ltgp"),
-         "conv": ("mucape", "sbcape", "ltng"), "sky": ("tcc", "vis", "ir"), "w500": ("u500", "v500", "z500"), "w250": ("u250", "v250", "z250")}
+         "conv": ("mucape", "sbcape", "ltng"), "sky": ("tcc", "vis", "ir"), "w500": ("u500", "v500", "z500"), "w250": ("u250", "v250", "z250"),
+         "e2t": ("t2m", "t2sd", "p32"), "e500": ("z500", "z5sd")}
 
 def q8(a, lo, hi): return np.clip(np.rint((a - lo) / (hi - lo) * 255), 0, 255).astype(np.uint8)
 def rng(a):
@@ -117,7 +174,7 @@ def step_job(args):
     from PIL import Image
     c = dt.datetime.strptime(c_str, "%Y%m%d%H").replace(tzinfo=dt.timezone.utc)
     i0, i1, j0, j1 = crop; t = time.time(); ranges, sizes, q = {}, {}, {}
-    try: R = M.Reader(m, c, s)
+    try: R = EpsReader(c, s) if m == "eps" else M.Reader(m, c, s)
     except Exception as e: return s, None, str(e), 0, 0
     for name, (get, units) in FIELDS.items():
         try: a = get(R, m)
@@ -214,6 +271,8 @@ EXTRA_TOWNS = {
 def model_grid(m):
     """(la2d, lo2d, orog_ft or None, kind) on the model's own grid (lo2d in -180..180 for lcc, 0..360 for ll)."""
     import menu_maps as M
+    if MODELS[m].get("grid_from"):   # same 0.25 grid as another model
+        la, lo, oro = model_grid(MODELS[m]["grid_from"]); return la, lo, oro
     c = latest_published(m) or (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=12)).replace(hour=0, minute=0, second=0, microsecond=0)
     for _ in range(4):   # the newest cycle may not be posted yet: fall back one cycle at a time
         try: R = M.Reader(m, c, MODELS[m]["steps"][0]); la, lo, _ = R.f("t2m"); break
@@ -367,7 +426,7 @@ def static(m, out, views_only=None):
         "t2m": dict(title="2 m Temperature", fields=["t2m"], key="Temp (\u00b0F)", ticks=HS.TEMP_TICKS, **table(HS.TEMP_LEVELS, CM["t2m"], "both"),
                     freeze=32, extra="32\u00b0F line dashed  \u00b7  {lo} to {hi}\u00b0F in view", pct=[0.5, 99.5]),
         "gust10": dict(title="10 m Wind Gusts", fields=["gust"], key="Gust (mph)", ticks=HS.WIND_TICKS, **table(HS.WIND_LEVELS, CM["gust10"], "max"),
-                       extra=M.gust_note(m) + "  \u00b7  up to {hi} mph in view", pct=[1, 99.9]),
+                       extra=(M.gust_note(m) if m in M.MODELS else "") + "  \u00b7  up to {hi} mph in view", pct=[1, 99.9]),
         "aifswind": dict(title="MSLP + 10 m Wind", fields=["mslp", "u10", "v10"], fill="wspd", key="10 m wind (mph)", ticks=HS.WIND_TICKS,
                          **table(HS.WIND_LEVELS, CM["aifswind"], "max"), spd_sigma=1.5, isobars=dict(every=4, sigma=6.0 if m == "hrrr" else 1.0,
                          color=HS.ISOBAR_COLOR, lw=HS.ISOBAR_LW, halo=HS.ISOBAR_HALO), barbs=dict(color=HS.BARB_COLOR, length=HS.BARB_LENGTH, lw=HS.BARB_LW),
@@ -422,14 +481,34 @@ def static(m, out, views_only=None):
                          **table(HS.ANOM_LEVELS, CM["z500anom"], "both"),
                          isobars=dict(field="z500", scale=0.1, every=6, sigma=1.5, color="#101114", lw=1.25, halo=2.4),
                          extra="vs 1991-2020 NCEP/NCAR monthly mean  \u00b7  heights every 6 dam  \u00b7  {lo} to {hi} m in view", pct=[0.5, 99.5],
-                         towns="names", clim="z500", only=("gfs", "ifs", "aifs")),
+                         towns="names", clim="z500", only=("gfs", "ifs", "aifs", "eps")),
     }
     prods = {k: v for k, v in prods.items() if m in v.pop("only", (m,))}
-    prods["vis"]["over"] = None
+    if m == "eps":   # ensemble: mean versions of the shared products plus spread / probability maps
+        prods = {k: prods[k] for k in ("t2m", "z500anom")}
+        prods["t2m"]["title"] = "2 m Temperature (ens. mean)"; prods["t2m"]["extra"] = "mean of 50 members  \u00b7  " + prods["t2m"]["extra"]
+        prods["z500anom"]["title"] = "500 mb Height Anomaly (ens. mean)"
+        SD_L = list(range(0, 13)); SD_A = [(0, "#f7fbff"), (2, "#c6dbef"), (4, "#6baed6"), (6, "#fdd49e"), (8, "#fc8d59"), (12, "#b30000")]
+        P_L = [5, 10, 20, 30, 40, 50, 60, 70, 80, 90, 95, 100]; P_A = [(5, "#e8f1fb"), (30, "#8fbfe8"), (50, "#3b82d1"), (70, "#2a4fb0"), (90, "#5b2a9c"), (100, "#2b0f52")]
+        Z_L = list(range(0, 161, 10)); Z_A = [(0, "#f7f7f7"), (20, "#d9ecd0"), (40, "#9fd27a"), (60, "#f2e34b"), (90, "#f4a43a"), (120, "#e2462f"), (160, "#8c1450")]
+        CM.update(et2sd=M.ramp(SD_L, SD_A), ep32=M.ramp(P_L, P_A), ez500=M.ramp(Z_L, Z_A))
+        prods["et2sd"] = dict(title="2 m Temperature Spread", fields=["t2sd"], key="Spread (\u00b0F)", ticks=[0, 2, 4, 6, 8, 10, 12], tickfmt=True,
+                              **table(SD_L, CM["et2sd"], "max"), extra="standard deviation of 50 members  \u00b7  higher = less certain  \u00b7  up to {hi}\u00b0F in view",
+                              pct=[0.5, 99.5], dec=1)
+        prods["ep32"] = dict(title="Chance of Freezing (2 m)", fields=["p32"], key="Freezing (%)", ticks=[5, 10, 20, 30, 50, 70, 90, 100], tickfmt=True,
+                             **table(P_L, CM["ep32"], "neither"), extra="share of the 50 members with 2 m temp at or below 32\u00b0F", pct=[0, 100])
+        prods["ez500"] = dict(title="500 mb Height Mean + Spread", fields=["z500", "z5sd"], fill="z5sd", key="Spread (m)", ticks=[0, 20, 40, 60, 80, 100, 120, 140, 160],
+                              tickfmt=True, **table(Z_L, CM["ez500"], "max"),
+                              isobars=dict(field="z500", scale=0.1, every=6, sigma=1.5, color="#101114", lw=1.25, halo=2.4),
+                              extra="lines = mean height every 6 dam  \u00b7  colors = spread of 50 members  \u00b7  up to {hi} m in view", pct=[0.5, 99.5], towns="names")
+    if "vis" in prods: prods["vis"]["over"] = None
     for k in ("mucape", "sbcape", "ltng", "ltgp"):
         if k in prods: prods[k]["min_show"] = prods[k]["levels"][0]
-    for k in ("w500", "w250"): prods[k]["under"] = "#f4f5f7"   # light below the first level so barbs and height lines stay readable
-    for k in ("qpf", "snow", "refc"): prods[k]["min_show"] = prods[k]["levels"][0]   # blank below the first level (like the site)
+    if "ep32" in prods: prods["ep32"]["min_show"] = 5
+    for k in ("w500", "w250"):
+        if k in prods: prods[k]["under"] = "#f4f5f7"   # light below the first level so barbs and height lines stay readable
+    for k in ("qpf", "snow", "refc"):
+        if k in prods: prods[k]["min_show"] = prods[k]["levels"][0]   # blank below the first level (like the site)
     for pid, P in prods.items():
         P.setdefault("fill", P["fields"][0]); tk0 = list(P["ticks"])
         P.update(freeze_color=HS.FREEZE_COLOR, freeze_lw=HS.FREEZE_LW) if "freeze" in P else None
@@ -446,14 +525,15 @@ def static(m, out, views_only=None):
                 cb = HS.hbar(fig, cs, [], P["key"], ky); cb.set_ticks(P["ticks"])
                 cb.ax.set_xticklabels([f"{t:g}" for t in P["ticks"]], fontproperties=HS.font(700, 13))
             else: HS.hbar(fig, cs, tk0, P["key"], ky)
-            HS.credit(fig, TM.CREDIT_NOAA if (pid == "t2m" and m in NOAA) else M.credit(m))
+            HS.credit(fig, TM.CREDIT_NOAA if (pid == "t2m" and m in NOAA) else (M.credit(m) if m in M.MODELS else TM.CREDIT.format(name=minfo(m)["name"])))
             sizes[f"key_{m}_{pid}_{vid}"] = save(fig, f"{out}/{fn}")
         P["ticks"] = [float(t) for t in tk0]
     clim = {}
     if MD["grid"] == "ll": clim["z500"] = clim_static(m, out, i0, i1, j0, j1)
     mp = f"{out}/manifest.json"; man = json.load(open(mp)) if os.path.exists(mp) else {}
     man.update(dpi=DPI, style=dict(BG=HS.BG, INK=HS.INK, MUTED=HS.MUTED, ACCENT=HS.ACCENT))
-    man.setdefault("models", {})[m] = dict(name=M.MODELS[m]["name"], site=M.MODELS[m]["site"], res=M.MODELS[m]["res"], grid=MD["grid"],
+    MI = minfo(m)
+    man.setdefault("models", {})[m] = dict(name=MI["name"], site=MI["site"], res=MI["res"], grid=MD["grid"],
                                           crop=[i0, i1, j0, j1], views=views, products=prods, clim=clim)
     man.setdefault("runs", {}).setdefault(m, [])
     json.dump(man, open(mp, "w"), indent=1)
@@ -487,7 +567,7 @@ def steps(m, cycle, want, out, workers, only_missing=True, deadline=None):
         if s in meta: ordered.append(meta[s])
         else: break
     fields = sorted({k for s_ in ordered for k in s_["ranges"]})
-    MM = M.MODELS[m]
+    MM = minfo(m)
     run = dict(model=m, cycle=cycle, init=c.isoformat(), base=f"runs/{m}/{cycle}", fields=fields, grid=dict(ny=i1 - i0, nx=j1 - j0),
                runline=f"{MM['name']} {MM['res']} {c:%HZ} run {c.astimezone(PT):%-m-%-d-%y (%-I %p PT)}", steps=ordered,
                complete=len(ordered) == len(want), expected=len(want), file="single/{name}_f{f:03d}.png")

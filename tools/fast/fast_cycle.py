@@ -14,6 +14,7 @@ def avail(m, c, s):
     import temp_maps as TM, menu_maps as M
     try:
         if m in FE.NOAA: u = M.MODELS[m]["url"].format(d=f"{c:%Y%m%d}", h=c.hour, s=s) + ".idx"
+        elif m == "eps": u = FE.EPS_URL.format(d=f"{c:%Y%m%d}", h=c.hour, s=s) + ".index"
         else: u = TM.MODELS[m]["url"]["sfc"].format(d=f"{c:%Y%m%d}", h=c.hour, s=s) + ".index"
         TM.get(u, (0, 10)); return True
     except Exception: return False
