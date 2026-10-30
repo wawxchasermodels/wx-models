@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>WX Models fast maps (preview)</title>
 <link rel="preload" href="fonts/Montserrat-sub.woff2" as="font" type="font/woff2" crossorigin>
 <style>
@@ -29,6 +29,15 @@ canvas{display:block;width:auto;height:auto;max-width:100%;max-height:100%;touch
 @media (max-width:700px){#bar input[type=range]{min-width:100%;order:9;height:28px}}
 @media (max-height:500px) and (min-width:701px){#bar label{font-size:0}#bar label select{font-size:12px}#bar input[type=range]{min-width:120px}}
 body.bare #bar{display:none}
+/* 10-29 9:01 PM (Benjamin): on phones the hour slider + step buttons sit UNDER the map (thumb no longer covers it);
+   the map hugs the slider at the bottom of the screen, menus stay on top. Desktop unchanged. viewer.js moves #stepctl. */
+#stepctl{display:contents}
+#dock{display:none}
+body.phone #dock{flex:0 0 auto;display:flex;gap:8px;align-items:center;padding:6px 10px calc(8px + env(safe-area-inset-bottom));background:#1d2027;border-top:1px solid #2c3039}
+body.phone #dock #stepctl{display:flex;gap:8px;align-items:center;flex:1;min-width:0}
+body.phone #dock button{background:#262931;color:#f4f2ee;border:1px solid #7d828c;border-radius:6px;padding:6px 12px;font:inherit;touch-action:manipulation}
+body.phone #dock #step{flex:1;min-width:0;order:0;height:36px}
+body.phone #wrap{align-items:flex-end}
 #saveview{position:fixed;inset:0;z-index:20;background:#000e;display:flex;flex-direction:column}
 #saveview .sv-top{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:8px 12px;background:#1d2027;font-size:13px}
 #saveview .sv-top span{flex:1}
@@ -40,12 +49,13 @@ body.bare #bar{display:none}
   <label>Runs <select id="run" aria-label="Runs"></select></label>
   <label>Product <select id="prod"></select></label>
   <label>View <select id="view"></select></label>
-  <button id="prev">&lsaquo;</button><button id="play">Play</button><button id="next">&rsaquo;</button>
-  <input id="step" type="range" min="0" max="0" value="0">
+  <span id="stepctl"><button id="prev">&lsaquo;</button><button id="play">Play</button><button id="next">&rsaquo;</button>
+  <input id="step" type="range" min="0" max="0" value="0"></span>
   <button id="save" title="Save this map as a picture">Save image</button>
   <button id="share">Share</button>
   <span id="stat"></span>
 </div>
 <div id="wrap"><canvas id="map"></canvas><div id="tip" hidden></div></div>
+<div id="dock"></div>
 <script src="viewer.js"></script>
 </body></html>

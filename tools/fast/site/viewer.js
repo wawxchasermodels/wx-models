@@ -33,6 +33,12 @@ async function boot() {
     const vt = Date.parse(S.runs[S.run].steps[S.i].valid); S.run = e.target.value; await loadRun(S.run); setLists();
     const st = S.runs[S.run].steps; let b = 0; st.forEach((x, k) => { if (Math.abs(Date.parse(x.valid) - vt) < Math.abs(Date.parse(st[b].valid) - vt)) b = k; });
     S.i = b; $("step").value = b; draw(); };
+  // phones: hour slider under the map (Benjamin 10-29 9:01 PM)
+  const mq = matchMedia("(max-width: 700px), (max-height: 500px)"), placeSteps = () => {
+    const ph = mq.matches; document.body.classList.toggle("phone", ph);
+    const c = $("stepctl"), dest = ph ? $("dock") : $("bar"); if (c.parentNode !== dest) { if (ph) dest.appendChild(c); else dest.insertBefore(c, $("save")); }
+  };
+  placeSteps(); (mq.addEventListener ? mq.addEventListener("change", placeSteps) : mq.addListener(placeSteps));
   setupPointer(); $("share") && ($("share").onclick = share); $("save") && ($("save").onclick = saveImage);
   $("prod").onchange = e => { S.prod = e.target.value; draw(); };
   $("view").onchange = e => { S.view = e.target.value; draw(); };
