@@ -383,7 +383,7 @@ function renderMeteo() {
       { "aria-pressed": String(s.id === S.msec), class: has ? "" : "none" }));
   }
   const town = $("town"); town.replaceChildren();
-  for (const t of ms.towns) {
+  for (const t of [...ms.towns].sort((a, b) => a.label.localeCompare(b.label))) {   // A to Z (Benjamin 10-27-26)
     const n = sec.products.filter((p) => p.images && p.images[t.id]).length;
     town.add(new Option(t.label + (n ? "" : " (not generated yet)"), t.id));
   }

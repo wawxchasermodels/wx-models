@@ -105,13 +105,16 @@ select { min-height: 44px; border-radius: 6px; }
 .hint { margin: 8px 0 0; font-size: 13px; color: var(--muted); }
 
 /* meteograms */
-.prodpick { display: none; }
-.meteo-grid { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 18px; align-items: start; }
+.prodpick { display: flex; }   /* product picker is a dropdown on every screen size, so the chart starts right under the controls */
+/* Meteogram chart sits in the same spot and size as the map windows (Benjamin 10-27-26): one full-width column,
+   products in the Product dropdown (the old side list stays in the page, hidden). */
+.meteo-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; align-items: start; }
 .stage.meteo { background: #1d1e22; min-height: 360px; }
 .stage.meteo:has(img:not([hidden])) { min-height: 0; }
-.prodlist { list-style: none; margin: 14px 0 0; padding: 0; background: var(--panel); box-shadow: var(--shadow); max-height: 82vh; overflow-y: auto; }
+.prodlist { display: none; list-style: none; margin: 14px 0 0; padding: 0; flex-wrap: wrap; gap: 6px; }
+.prodlist li { margin: 0; }
 .prodlist li button {
-  width: 100%; text-align: left; border: 0; border-bottom: 1px solid var(--rule); background: transparent; min-height: 44px;
+  text-align: left; border: 1px solid var(--rule); background: var(--panel); min-height: 36px; border-radius: 999px; padding: 4px 12px;
   text-transform: none; letter-spacing: 0; font-size: 14px; display: flex; justify-content: space-between; gap: 8px; align-items: center;
 }
 .prodlist li button[aria-current="true"] { background: var(--ink); color: #fff; box-shadow: inset 4px 0 0 var(--verm); }
