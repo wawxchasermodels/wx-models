@@ -172,11 +172,18 @@ async function productFields(run, pid, f) {
     } else if (P.clim) {   // anomaly: field minus the 1991-2020 normal at the valid time (static climatology, see climAt)
       const fld = P.anom || "z500", C = await climAt(run, P.clim, S.runs[run].steps.find(x => x.f === f).valid), z = F[fld].v, o = new Float32Array(z.length);
       for (let k = 0; k < z.length; k++) o[k] = z[k] - C[k]; out.fill = fld === "z500" ? blur(o, g.w, g.h, 1.0) : o;
-    } else if (P.window) {   // precip in the last N hours = run total now minus run total N hours ago (stage 2, browser-only)
-      const a = F.apcp.v, prev = f - P.window;
-      if (prev < 0 || (prev > 0 && !S.runs[run].steps.find(x => x.f === prev))) throw new Error("nodata:apcp");
+    } else if (P.window && P.wmax) {   // highest value over the steps in the last N hours (incl. this one)
+      const fld = P.wfield || P.fields[0], fs = S.runs[run].steps.map(x => x.f).filter(x => x > f - P.window && x <= f);
+      if (f - P.window < 0) throw new Error(`nodata:${fld}`);
+      const arrs = await Promise.all(fs.map(x => getField(run, fld, x).then(r => r.v, () => null))), ok = arrs.filter(Boolean);
+      if (!ok.length) throw new Error(`nodata:${fld}`);
+      const o = new Float32Array(ok[0]); for (const a of ok.slice(1)) for (let k = 0; k < o.length; k++) if (a[k] > o[k]) o[k] = a[k];
+      out.fill = o;
+    } else if (P.window) {   // amount in the last N hours = run total now minus run total N hours ago (stage 2, browser-only)
+      const fld = P.wfield || "apcp", a = F[fld].v, prev = f - P.window;
+      if (prev < 0 || (prev > 0 && !S.runs[run].steps.find(x => x.f === prev))) throw new Error(`nodata:${fld}`);
       if (prev === 0) out.fill = a;
-      else { const b = (await getField(run, "apcp", prev)).v, o = new Float32Array(a.length); for (let k = 0; k < a.length; k++) o[k] = Math.max(0, a[k] - b[k]); out.fill = o; }
+      else { const b = (await getField(run, fld, prev)).v, o = new Float32Array(a.length); for (let k = 0; k < a.length; k++) o[k] = Math.max(0, a[k] - b[k]); out.fill = o; }
     } else if (P.fill === "snowlvl") { const a = F.frz.v, o = new Float32Array(a.length); for (let k = 0; k < a.length; k++) o[k] = Math.max(0, a[k] - 1000); out.fill = o; }
     else out.fill = F[P.fill] ? F[P.fill].v : g.v;
     if (P.isobars) { const I = P.isobars, src = F[I.field || "mslp"].v, sc = I.scale || 1, a = new Float32Array(src.length);
@@ -337,12 +344,13 @@ function preload(run, pid, i) {   // next 6 steps first, then the rest of the ru
 
 function fmtVal(P, v) {   // temp_maps fmt_int / fmt_vis
   if (P.fmt === "in2") return v < 0.005 ? "0" : v.toFixed(2);
+  if (P.fmt === "in1s") return Math.abs(v) < 0.05 ? "0" : (v > 0 ? "+" : "") + (Math.abs(v) < 10 ? v.toFixed(1) : v.toFixed(0));
   if (P.fmt === "in1") return v < 0.05 ? "0" : v < 10 ? v.toFixed(1) : v.toFixed(0);
   if (P.fmt === "ft100") return String(Math.round(v / 100) * 100);
   if (P.fmt === "vis") return v >= 7 ? "7+" : v < 3 ? v.toFixed(1) : v.toFixed(0);
   return String(Math.round(v));
 }
-const UNITS = { qpf1: " in", qpf6: " in", qpf24: " in", mslpqpf: " in", t2ma: "\u00b0F", t850a: "\u00b0C", et2sd: "\u00b0F", ep32: "%", ez500: " m", w500: " kt", w250: " kt", z500anom: " m", mucape: " J/kg", sbcape: " J/kg", ltng: " /km\u00b2/5 min", ltgp: " in", t2m: "\u00b0F", gust10: " mph", aifswind: " mph", t850: "\u00b0C", t700: "\u00b0C", tcc: "%", vis: " mi", ir: "\u00b0C",
+const UNITS = { dsnod: " in", qpf3: " in", qpf12: " in", qpf48: " in", snow1: " in", snow6: " in", gust6: " mph", ltng6: " /km\u00b2/5 min", qpf1: " in", qpf6: " in", qpf24: " in", mslpqpf: " in", t2ma: "\u00b0F", t850a: "\u00b0C", et2sd: "\u00b0F", ep32: "%", ez500: " m", w500: " kt", w250: " kt", z500anom: " m", mucape: " J/kg", sbcape: " J/kg", ltng: " /km\u00b2/5 min", ltgp: " in", t2m: "\u00b0F", gust10: " mph", aifswind: " mph", t850: "\u00b0C", t700: "\u00b0C", tcc: "%", vis: " mi", ir: "\u00b0C",
                 refc: " dBZ", qpf: " in", snow: " in", frz: " ft", snowlvl: " ft" };
 // value under the cursor / tap (item 1) and swipe to step (item 6)
 function readout(ev) {

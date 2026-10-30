@@ -129,6 +129,15 @@ def _ltgp(R, m):
         except Exception as e: raise RuntimeError(f"cp f{s0}: {e}")
     return np.where(_ec("mucape")(R, m) >= 100, np.clip(cp, 0, None) * 1000 / 25.4, 0.0)
 
+def _dsnod(R, m):
+    """HRRR snow depth change since the run started (in): model snow depth now minus at F+0, so melt and settling count
+    (Benjamin 10-26: melt-aware snow depth change for the Cascade pass view)."""
+    if m != "hrrr": raise KeyError("dsnod")
+    import menu_maps as M
+    a = np.asarray(R._idx("SNOD:surface", R.url)[2], float)
+    R0 = M.Reader(m, R.c, 0); b = np.asarray(R0._idx("SNOD:surface", R0.url)[2], float)
+    return np.clip((a - b) * 39.3701, -60, 60)
+
 FIELDS = {   # name: (getter, units)
     "t2m":  (_f("t2m", lambda k: (k - 273.15) * 1.8 + 32), "F"),
     "gust": (_gust, "mph"),
@@ -152,6 +161,7 @@ FIELDS = {   # name: (getter, units)
     # 10-30 (Benjamin): 500 mb wind (AIFS and every model), 250 mb jet, 500 mb heights (for the height anomaly)
     "u500": (_f("U:500", lambda v: v * 1.94384), "kt"), "v500": (_f("V:500", lambda v: v * 1.94384), "kt"), "z500": (_f("Z:500", lambda z: z), "m"),
     "u250": (_f("U:250", lambda v: v * 1.94384), "kt"), "v250": (_f("V:250", lambda v: v * 1.94384), "kt"), "z250": (_f("Z:250", lambda z: z), "m"),
+    "dsnod": (_dsnod, "in"),
     # ECMWF ENS (model "eps" only)
     "t2sd": (_ens("t2sd"), "F"), "p32": (_ens("p32"), "%"), "z5sd": (_ens("z5sd"), "m"),
 }
@@ -455,11 +465,17 @@ def static(m, out, views_only=None):
     LTGP_C = ["#e6dcf5", "#c3a6ec", "#9b6fe0", "#f2e34b", "#f4a43a", "#e8692f", "#d43f3a", "#8c1450"]   # 8 bands, no blends
     LTGP_A = [(0.01, "#e6dcf5"), (0.05, "#c3a6ec"), (0.1, "#9b6fe0"), (0.25, "#f2e34b"), (0.5, "#f4a43a"), (1, "#e2462f"), (2, "#8c1450")]
     JET_L = list(M.JET_LEVELS); W5_L = list(M.W500_LEVELS)
-    CM.update(qpf1=CM["qpf"], qpf6=CM["qpf"], qpf24=CM["qpf"], mslpqpf=CM["qpf"])
+    CM.update(qpf1=CM["qpf"], qpf3=CM["qpf"], qpf6=CM["qpf"], qpf12=CM["qpf"], qpf24=CM["qpf"], qpf48=CM["qpf"], mslpqpf=CM["qpf"],
+              snow1=CM["snow"], snow6=CM["snow"], gust6=CM["gust10"])
     T8A_L = np.arange(-15, 16, 1)
     CM.update(t2ma=TM.t2a_cmap(), t850a=HS.cmap([HS._anom_color(27.0 * x) for x in (T8A_L[:-1] + T8A_L[1:]) / 2.0], HS.ANOM_UNDER, HS.ANOM_OVER))
     CM.update(w500=M.ramp(M.W500_LEVELS, M.W500_ANCH), w250=M.ramp(M.JET_LEVELS, M.JET_ANCH), z500anom=HS.anom_cmap())
     CM.update(mucape=M.ramp(CAPE_L, CAPE_A), sbcape=M.ramp(CAPE_L, CAPE_A), ltng=M.ramp(LTNG_L, LTNG_A), ltgp=HS.cmap(LTGP_C, LTGP_C[0], LTGP_C[-1]))
+    CM["ltng6"] = CM["ltng"]
+    DS_L = [-36, -24, -18, -12, -8, -6, -4, -2, -1, -0.5, 0.5, 1, 2, 4, 6, 8, 12, 18, 24, 36]
+    DS_C = ["#5c3310", "#7a4a1d", "#94622e", "#ad7c43", "#c4975e", "#d6b07c", "#e4c89c", "#efdcbf", "#f6ece0", "#f4f5f7",
+            "#e3eefa", "#c6dbef", "#9ecae1", "#6baed6", "#4292c6", "#2171b5", "#3a4fb0", "#5b2a9c", "#3d0f6b"]
+    CM["dsnod"] = HS.cmap(DS_C, DS_C[0], DS_C[-1])
     prods = {
         "t2m": dict(title="2 m Temperature", fields=["t2m"], key="Temp (\u00b0F)", ticks=HS.TEMP_TICKS, **table(HS.TEMP_LEVELS, CM["t2m"], "both"),
                     freeze=32, extra="32\u00b0F line dashed  \u00b7  {lo} to {hi}\u00b0F in view", pct=[0.5, 99.5]),
@@ -530,11 +546,35 @@ def static(m, out, views_only=None):
         "qpf24": dict(title="24 h Precipitation", fields=["apcp"], window=24, fill="window", key="Precip (in)", ticks=[0.1, 0.5, 1, 2, 3, 4, 6, 8], tickfmt=True,
                       **table(HS.RAIN_LEVELS, CM["qpf"], "max"), extra="liquid equivalent in the 24 h ending at the valid time  \u00b7  max {hi} in in view",
                       pct=[0, 100], dec=2, fmt="in2", only=("hrrr", "gfs", "ifs", "aifs")),
+        "qpf3": dict(title="3 h Precipitation", fields=["apcp"], window=3, fill="window", key="Precip (in)", ticks=[0.1, 0.25, 0.5, 1, 2, 3], tickfmt=True,
+                     **table(HS.RAIN_LEVELS, CM["qpf"], "max"), extra="liquid equivalent in the 3 h ending at the valid time  \u00b7  max {hi} in in view",
+                     pct=[0, 100], dec=2, fmt="in2", only=("hrrr", "gfs", "ifs")),
+        "qpf12": dict(title="12 h Precipitation", fields=["apcp"], window=12, fill="window", key="Precip (in)", ticks=[0.1, 0.5, 1, 2, 3, 4, 6], tickfmt=True,
+                     **table(HS.RAIN_LEVELS, CM["qpf"], "max"), extra="liquid equivalent in the 12 h ending at the valid time  \u00b7  max {hi} in in view",
+                     pct=[0, 100], dec=2, fmt="in2", only=("hrrr", "gfs", "ifs", "aifs")),
+        "qpf48": dict(title="48 h Precipitation", fields=["apcp"], window=48, fill="window", key="Precip (in)", ticks=[0.1, 0.5, 1, 2, 4, 6, 8, 10], tickfmt=True,
+                     **table(HS.RAIN_LEVELS, CM["qpf"], "max"), extra="liquid equivalent in the 48 h ending at the valid time  \u00b7  max {hi} in in view",
+                     pct=[0, 100], dec=2, fmt="in2", only=("hrrr", "gfs", "ifs", "aifs")),
         "mslpqpf": dict(title="MSLP + 6 h Precipitation", fields=["apcp", "mslp"], window=6, fill="window", key="6 h precip (in)",
                         ticks=[0.1, 0.5, 1, 2, 3, 4, 6], tickfmt=True, **table(HS.RAIN_LEVELS, CM["qpf"], "max"),
                         isobars=dict(field="mslp", every=4, sigma=6.0 if m == "hrrr" else 1.0, color=HS.ISOBAR_COLOR, lw=HS.ISOBAR_LW, halo=HS.ISOBAR_HALO),
                         extra="isobars every 4 mb  \u00b7  precip in the 6 h ending at the valid time  \u00b7  max {hi} in in view",
                         pct=[0, 100], dec=2, fmt="in2", towns="names", only=("hrrr", "gfs", "ifs", "aifs")),
+        "snow1": dict(title="1 h Snowfall (rate)", fields=["asnow"], window=1, wfield="asnow", fill="window", key="Snow (in)", ticks=[0.1, 0.5, 1, 2, 3, 4], tickfmt=True,
+                      **table(M.SNOW_LEVELS, CM["snow"], "max"), extra="HRRR snowfall in the hour ending at the valid time (model snow density)  \u00b7  max {hi} in in view",
+                      pct=[0, 100], dec=1, fmt="in1", only=("hrrr",)),
+        "snow6": dict(title="6 h Snowfall", fields=["asnow"], window=6, wfield="asnow", fill="window", key="Snow (in)", ticks=[0.1, 1, 3, 6, 10, 15, 24], tickfmt=True,
+                      **table(M.SNOW_LEVELS, CM["snow"], "max"), extra="HRRR snowfall in the 6 h ending at the valid time (model snow density)  \u00b7  max {hi} in in view",
+                      pct=[0, 100], dec=1, fmt="in1", only=("hrrr",)),
+        "gust6": dict(title="6 h Max Wind Gust", fields=["gust"], window=6, wmax=True, wfield="gust", fill="window", key="Gust (mph)", ticks=HS.WIND_TICKS,
+                      **table(HS.WIND_LEVELS, CM["gust10"], "max"), extra="highest gust over the model hours in the 6 h ending at the valid time  \u00b7  up to {hi} mph in view",
+                      pct=[1, 99.9], only=("hrrr", "gfs", "ifs")),
+        "ltng6": dict(title="6 h Max Lightning Threat", fields=["ltng"], window=6, wmax=True, wfield="ltng", fill="window", key="Flashes per km\u00b2 per 5 min",
+                      ticks=LTNG_L, tickfmt=True, **table(LTNG_L, CM["ltng"], "max"), extra="highest hourly flash density in the 6 h ending at the valid time  \u00b7  up to {hi} in view",
+                      pct=[0, 99.9], dec=2, towns="names", only=("hrrr",)),
+        "dsnod": dict(title="Snow Depth Change", fields=["dsnod"], key="Change (in)", ticks=[-24, -12, -6, -2, 0, 2, 6, 12, 24], tickfmt=True,
+                      **table(DS_L, CM["dsnod"], "both"), extra="HRRR snow depth now minus at the start of the run (new snow, melt and settling)  \u00b7  {lo} to {hi} in in view",
+                      pct=[0.5, 99.5], dec=1, fmt="in1s", only=("hrrr",)),
         # stage 2 (browser-only): anomalies vs 1991-2020 normals (static climatology, value = field - normal in the browser)
         "t2ma": dict(title="2 m Temperature Anomaly", fields=["t2m"], fill="anom", anom="t2m", clim="t2m", key="Anomaly (\u00b0F)", ticks=list(TM.T2A_TICKS),
                      tickfmt=True, **table(TM.T2A_LEVELS, CM["t2ma"], "both"),
@@ -571,7 +611,7 @@ def static(m, out, views_only=None):
     for k in ("w500", "w250"):
         if k in prods: prods[k]["under"] = "#f4f5f7"   # light below the first level so barbs and height lines stay readable
     if "mslpqpf" in prods: prods["mslpqpf"]["under"] = "#f4f5f7"   # light background so the dark isobars read (no blanking)
-    for k in ("qpf", "snow", "refc", "qpf1", "qpf6", "qpf24"):
+    for k in ("qpf", "snow", "refc", "qpf1", "qpf3", "qpf6", "qpf12", "qpf24", "qpf48", "snow1", "snow6", "ltng6"):
         if k in prods: prods[k]["min_show"] = prods[k]["levels"][0]   # blank below the first level (like the site)
     for pid, P in prods.items():
         P.setdefault("fill", P["fields"][0]); tk0 = list(P["ticks"])
