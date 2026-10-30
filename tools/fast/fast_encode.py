@@ -18,10 +18,18 @@ HRRR_LCC = dict(central_longitude=-97.5, central_latitude=38.5, standard_paralle
 GLOBAL_VIEWS = ("wa", "wwa", "ewa", "passes", "pnwt", "pnw", "na")
 MODELS = {   # grid "lcc" = HRRR 3 km, "ll" = 0.25 deg global (lat 90 -> -90, lon rolled to 0..360)
     "hrrr": dict(grid="lcc", views=("wa", "wwa", "ewa", "passes", "pnwhr"), cycles=(0, 6, 12, 18), steps=list(range(1, 49)), keep=2),
-    "gfs":  dict(grid="ll", views=GLOBAL_VIEWS, cycles=(0, 12), steps=list(range(3, 361, 3)), keep=2),
-    "ifs":  dict(grid="ll", views=GLOBAL_VIEWS, cycles=(0, 12), steps=list(range(3, 145, 3)) + list(range(150, 361, 6)), keep=2),
-    "aifs": dict(grid="ll", views=GLOBAL_VIEWS, cycles=(0, 12), steps=list(range(6, 361, 6)), keep=2),
+    # 06/18Z added 10-29-26 7:24 PM (Benjamin). Checked on data.ecmwf.int / NOAA 10-29 18Z: GFS 06/18Z go to 384 h like 00/12Z;
+    # ECMWF 0.25 06/18Z only to 144 h (3-hourly); AIFS 06/18Z to 360 h (6-hourly) like 00/12Z.
+    "gfs":  dict(grid="ll", views=GLOBAL_VIEWS, cycles=(0, 6, 12, 18), steps=list(range(3, 361, 3)), keep=2),
+    "ifs":  dict(grid="ll", views=GLOBAL_VIEWS, cycles=(0, 6, 12, 18), steps=list(range(3, 145, 3)) + list(range(150, 361, 6)),
+                 steps_short=list(range(3, 145, 3)), short_cycles=(6, 18), keep=2, keep_long=True),
+    "aifs": dict(grid="ll", views=GLOBAL_VIEWS, cycles=(0, 6, 12, 18), steps=list(range(6, 361, 6)), keep=2),
 }
+
+def steps_for(m, hour):
+    """Forecast hours a cycle of model m carries (ECMWF 0.25 06/18Z stop at 144 h)."""
+    MD = MODELS[m]
+    return MD["steps_short"] if hour in MD.get("short_cycles", ()) else MD["steps"]
 NOAA = ("hrrr", "gfs")
 
 def _f(key, conv): return lambda R, m: conv(np.asarray(R.f(key)[2], float))
@@ -107,6 +115,32 @@ def extra_views(TM, ccrs):
                                  ll=(l0 + dlon, l1 + dlon, a0 + dlat, a1 + dlat), box=(b0 + dlon, b1 + dlon, c0 + dlat, c1 + dlat), fast_shift=True)
     TM.VIEWS.setdefault("passes", dict(label="Cascade Passes", size=(16, 15), proj=lcc(-121.2), ll=(-123.9, -118.5, 46.2, 49.05), box=(-125, -117.5, 45.4, 49.8)))
 WA_LIKE = ("wa", "wwa", "ewa", "passes")
+# Extra towns for the zoomed Western / Eastern Washington frames (Benjamin 10-29-26 7:26 PM: "more town labels").
+# Appended after the site's own WA_TOWNS, so the site's placement code keeps its towns first and drops extras that collide.
+EXTRA_TOWNS = {
+    "wwa": [("Lynden", 48.946, -122.452, "r"), ("Ferndale", 48.847, -122.591, "l"), ("Anacortes", 48.512, -122.613, "l"),
+            ("Burlington", 48.476, -122.325, "r"), ("Sedro-Woolley", 48.504, -122.236, "r"), ("Concrete", 48.539, -121.749, "r"),
+            ("Darrington", 48.255, -121.602, "r"), ("Coupeville", 48.220, -122.686, "l"), ("Friday Harbor", 48.534, -123.017, "l"),
+            ("Sequim", 48.080, -123.102, "r"), ("Marysville", 48.052, -122.177, "r"), ("Granite Falls", 48.084, -121.968, "r"),
+            ("Monroe", 47.856, -121.971, "r"), ("Skykomish", 47.709, -121.360, "r"), ("Bellevue", 47.610, -122.201, "r"),
+            ("North Bend", 47.496, -121.787, "r"), ("Renton", 47.483, -122.217, "r"), ("Bremerton", 47.567, -122.633, "l"),
+            ("Poulsbo", 47.736, -122.646, "l"), ("Enumclaw", 47.204, -121.991, "r"), ("Puyallup", 47.185, -122.293, "r"),
+            ("Eatonville", 46.867, -122.266, "r"), ("Centralia", 46.716, -122.954, "l"), ("Morton", 46.558, -122.275, "r"),
+            ("Packwood", 46.607, -121.672, "r"), ("Ocean Shores", 46.974, -124.156, "r"), ("Westport", 46.890, -124.104, "r"),
+            ("Montesano", 46.981, -123.603, "r"), ("Raymond", 46.686, -123.733, "r"), ("Kelso", 46.147, -122.908, "l"),
+            ("Battle Ground", 45.781, -122.533, "r"), ("Camas", 45.587, -122.400, "r"), ("Stevenson", 45.696, -121.884, "r"),
+            ("Hoquiam", 46.981, -123.889, "l"), ("Quilcene", 47.823, -122.876, "r"), ("Ashford", 46.758, -122.031, "r")],
+    "ewa": [("Chelan", 47.841, -120.016, "r"), ("Leavenworth", 47.596, -120.661, "l"), ("Cashmere", 47.522, -120.470, "r"),
+            ("Quincy", 47.234, -119.852, "r"), ("Ephrata", 47.318, -119.553, "r"), ("Grand Coulee", 47.939, -118.997, "r"),
+            ("Brewster", 48.096, -119.781, "r"), ("Tonasket", 48.705, -119.440, "r"), ("Republic", 48.648, -118.738, "r"),
+            ("Kettle Falls", 48.611, -118.056, "r"), ("Newport", 48.180, -117.043, "r"), ("Deer Park", 47.954, -117.477, "r"),
+            ("Davenport", 47.654, -118.150, "r"), ("Odessa", 47.333, -118.692, "r"), ("Ritzville", 47.127, -118.380, "r"),
+            ("Cheney", 47.487, -117.576, "l"), ("Othello", 46.826, -119.175, "r"), ("Connell", 46.663, -118.861, "r"),
+            ("Colfax", 46.880, -117.364, "r"), ("Dayton", 46.319, -117.972, "r"), ("Clarkston", 46.416, -117.045, "r"),
+            ("Prosser", 46.207, -119.769, "l"), ("Sunnyside", 46.324, -120.008, "r"), ("Toppenish", 46.377, -120.308, "l"),
+            ("Goldendale", 45.821, -120.822, "r"), ("Cle Elum", 47.195, -120.939, "r"), ("Coeur d'Alene", 47.678, -116.780, "r"),
+            ("Sandpoint", 48.277, -116.553, "r"), ("Moscow", 46.732, -117.000, "r"), ("Hermiston", 45.840, -119.289, "r")],
+}
 
 def model_grid(m):
     """(la2d, lo2d, orog_ft or None, kind) on the model's own grid (lo2d in -180..180 for lcc, 0..360 for ll)."""
@@ -185,7 +219,7 @@ def static(m, out, views_only=None):
         if vid in WA_LIKE and vid != "wa":   # zoomed Washington frames: the Washington town list, only places inside the frame
             l0, l1, a0, a1 = TM.VIEWS[vid]["ll"]; ins = lambda la_, lo_: a0 + 0.05 <= la_ <= a1 - 0.05 and l0 + 0.05 <= lo_ <= l1 - 0.05
             keepT, keepP = TM.WA_TOWNS, TM.WA_PASSES
-            TM.WA_TOWNS = [t for t in keepT if ins(t[1], t[2])]; TM.WA_PASSES = {k: v for k, v in keepP.items() if ins(v[1], v[2])}
+            TM.WA_TOWNS = [t for t in keepT + EXTRA_TOWNS.get(vid, []) if ins(t[1], t[2])]; TM.WA_PASSES = {k: v for k, v in keepP.items() if ins(v[1], v[2])}
             try: return TM.towns(ax, "wa", field, lambda v: None if not np.isfinite(v) else "88") or []
             finally: TM.WA_TOWNS, TM.WA_PASSES = keepT, keepP
         return TM.towns(ax, vid, field, lambda v: None if not np.isfinite(v) else "88") or []
@@ -346,7 +380,8 @@ def main():
     ap.add_argument("--workers", type=int, default=4); ap.add_argument("--all", action="store_true"); a = ap.parse_args()
     if a.cmd == "static": static(a.model, a.out, views_only=a.all)
     else:
-        want = MODELS[a.model]["steps"] if not a.steps else (lambda x, y: [s for s in MODELS[a.model]["steps"] if x <= s <= y])(*map(int, a.steps.split("-")))
+        full = steps_for(a.model, int(a.cycle[8:10]))
+        want = full if not a.steps else (lambda x, y: [s for s in full if x <= s <= y])(*map(int, a.steps.split("-")))
         run, new = steps(a.model, a.cycle, want, a.out, a.workers)
         print(f"{a.model} {a.cycle}: +{len(new)} steps, {len(run['steps'])}/{run['expected']} published, complete={run['complete']}", flush=True)
     sys.stdout.flush(); os._exit(0)

@@ -1,7 +1,9 @@
 # Fast-style model data -> R2 bucket wx-models-data (read by the hidden fast page, Pages branch "fast" of wx-forecast-maps,
 # behind Cloudflare Access). Separate from the live site: this job never deploys Pages and never touches forecast-*.yml.
-# Every 15 min: newest HRRR (00/06/12/18Z, f01-f48) and GFS / ECMWF 0.25 / AIFS (00/12Z, out to 360 h) cycles, only the
-# hours that are out and not yet in R2 (progressive). Keeps the newest 2 runs per model. Static layers come from the box.
+# Every 15 min: newest HRRR, GFS, ECMWF 0.25 and AIFS cycles (00/06/12/18Z), only the hours that are out and not yet in R2
+# (progressive). One job per model runs in parallel; manifest.json is updated with an ETag check so jobs never clash.
+# Keeps the newest 2 runs per model (+ newest 00/12Z ECMWF run). If a job runs out of time with hours still to do, the
+# job re-dispatches the workflow (duplicates collapse into GitHub's one pending run) (GitHub schedules are throttled, so this keeps a run from stalling for an hour).
 name: fast-models
 on:
   schedule:
@@ -12,7 +14,7 @@ on:
         description: "comma list: hrrr,gfs,ifs,aifs"
         default: "hrrr,gfs,ifs,aifs"
       minutes:
-        description: "time budget per run"
+        description: "time budget per model job"
         default: "40"
 concurrency:
   group: fast-models
@@ -23,21 +25,40 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      matrix:
+        model: [hrrr, gfs, ifs, aifs]
+    permissions:
+      contents: read
+      actions: write   # only for the re-dispatch step below
     env:
       WX_CACHE: ${{ github.workspace }}/.wx_cache
+      ON: ${{ contains(format(',{0},', inputs.models || 'hrrr,gfs,ifs,aifs'), format(',{0},', matrix.model)) }}
     steps:
       - uses: actions/checkout@v4
+        if: env.ON == 'true'
         with:
           sparse-checkout: tools
       - uses: actions/setup-python@v5
+        if: env.ON == 'true'
         with:
           python-version: "3.13"
           cache: pip
           cache-dependency-path: tools/requirements.txt
       - name: Python packages (same pins as the site) + boto3 for R2
+        if: env.ON == 'true'
         run: pip install -r tools/requirements.txt boto3==1.43.122
       - name: Publish new hours to R2
+        id: run
+        if: env.ON == 'true'
         env:
           CF_PAGES_KEY: ${{ secrets.CF_PAGES_KEY }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: python tools/fast/fast_cycle.py --models "${{ inputs.models || 'hrrr,gfs,ifs,aifs' }}" --minutes "${{ inputs.minutes || '40' }}" --workers 4
+        run: |
+          python tools/fast/fast_cycle.py --models "${{ matrix.model }}" --minutes "${{ inputs.minutes || '40' }}" --workers 4
+      - name: Re-dispatch (this model still had hours to do when its time budget ran out)
+        if: steps.run.outputs.more == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run fast-models.yml --repo "${{ github.repository }}" --ref "${{ github.ref_name }}"
