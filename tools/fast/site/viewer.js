@@ -36,7 +36,11 @@ async function boot() {
   setupPointer(); $("share") && ($("share").onclick = share); $("save") && ($("save").onclick = saveImage);
   $("prod").onchange = e => { S.prod = e.target.value; draw(); };
   $("view").onchange = e => { S.view = e.target.value; draw(); };
-  $("step").oninput = e => { S.i = +e.target.value; draw(); };
+  const sl = $("step"), endDrag = () => { if (S.dragging) { S.dragging = false; draw(); } };
+  sl.addEventListener("pointerdown", () => { S.dragging = true; });
+  sl.addEventListener("touchstart", () => { S.dragging = true; }, { passive: true });
+  for (const ev of ["pointerup", "pointercancel", "touchend", "touchcancel", "change"]) sl.addEventListener(ev, endDrag);
+  sl.oninput = e => { const v = +e.target.value; if (v === S.i) return; S.i = v; draw(); };
   $("prev").onclick = () => go(-1); $("next").onclick = () => go(1);
   $("play").onclick = () => { if (S.timer) { clearInterval(S.timer); S.timer = null; $("play").textContent = "Play"; }
                               else { S.timer = setInterval(() => go(1, true), 250); $("play").textContent = "Stop"; } };
@@ -178,8 +182,22 @@ function sampleRC(F, w, fi, fj) {
   return (F[r * w + c] * (1 - tx) + F[r * w + c + 1] * tx) * (1 - ty) + (F[(r + 1) * w + c] * (1 - tx) + F[(r + 1) * w + c + 1] * tx) * ty;
 }
 
-let drawSeq = 0;
-async function draw() {
+// 10-29 8:45 PM (Benjamin: phone slider "a little janky"): redraws are coalesced to one per animation frame and never
+// overlap; while the slider is being dragged the map is drawn in a lighter mode (fill at half resolution, no contour /
+// isobar / barb lines, URL not touched), then once at full quality when the finger lifts.
+let rafOn = false; S.waiters = [];
+function draw() {
+  return new Promise(res => { S.waiters.push(res); if (!rafOn) { rafOn = true; requestAnimationFrame(pump); } });
+}
+async function pump() {
+  rafOn = false;
+  if (S.busy) { S.again = true; return; }
+  S.busy = true; const ws = S.waiters; S.waiters = [];
+  try { await render(!!S.dragging); } catch (e) { showErr(e); }
+  finally { S.busy = false; ws.forEach(r => r()); if (S.again || S.waiters.length) { S.again = false; if (!rafOn) { rafOn = true; requestAnimationFrame(pump); } } }
+}
+let drawSeq = 0, urlTimer = null;
+async function render(lite) {
   const seq = ++drawSeq, t0 = performance.now();
   const run = S.run, vid = S.view, pid = S.prod, step = S.runs[run].steps[S.i], f = step.f;
   let st, D, key;
@@ -201,7 +219,15 @@ async function draw() {
   // 1. color fill: value -> bin color, exactly the site's bins (contourf + BoundaryNorm)
   const pal = palette(pid), mins = P.min_show, im = ctx.createImageData(st.W, st.H), o = im.data, F = D.fill, n = st.W * st.H;
   const vals = new Float32Array(n);
-  for (let k = 0; k < n; k++) {
+  if (lite) {   // half resolution: one sample per 2x2 block
+    const W = st.W, H = st.H;
+    for (let y = 0; y < H; y += 2) for (let x = 0; x < W; x += 2) {
+      const k = y * W + x, v = sample(st, F, k); let c = null;
+      if (!(v !== v || (mins !== undefined && v < mins))) c = v < pal.L0 ? pal.under : v >= pal.Lend ? pal.over : pal.cols[bin(pal, v)];
+      for (let dy = 0; dy < 2 && y + dy < H; dy++) for (let dx = 0; dx < 2 && x + dx < W; dx++) {
+        const kk = k + dy * W + dx; vals[kk] = v; if (!c) continue; const q = kk * 4; o[q] = c[0]; o[q + 1] = c[1]; o[q + 2] = c[2]; o[q + 3] = 255; }
+    }
+  } else for (let k = 0; k < n; k++) {
     const v = sample(st, F, k); vals[k] = v; if (v !== v || (mins !== undefined && v < mins)) continue;
     let c; if (v < pal.L0) c = pal.under; else if (v >= pal.Lend) c = pal.over; else c = pal.cols[bin(pal, v)];
     if (!c) continue; const q = k * 4; o[q] = c[0]; o[q + 1] = c[1]; o[q + 2] = c[2]; o[q + 3] = 255;
@@ -212,13 +238,13 @@ async function draw() {
   ctx.drawImage(st.base, 0, 0, cv.width, cv.height);
   // 3. product lines
   ctx.save(); ctx.beginPath(); ctx.rect(st.x0, st.y0, st.W, st.H); ctx.clip();
-  if (P.freeze !== undefined) {
+  if (!lite && P.freeze !== undefined) {
     const lines = contour(st, vals, P.freeze, 3);
     strokeLines(ctx, lines, "#ffffff", pt(3.0), [pt(3.7 * P.freeze_lw), pt(1.6 * P.freeze_lw)]);   // matplotlib halo: 3 pt stroke, dashed with the line
     strokeLines(ctx, lines, P.freeze_color, pt(P.freeze_lw), [pt(3.7 * P.freeze_lw), pt(1.6 * P.freeze_lw)]);
   }
-  if (P.isobars) drawIsobars(ctx, st, D, P);
-  if (P.barbs) drawBarbs(ctx, st, D, P, V);
+  if (!lite && P.isobars) drawIsobars(ctx, st, D, P);
+  if (!lite && P.barbs) drawBarbs(ctx, st, D, P, V);
   ctx.restore();
   // 4. towns (dots + names static) and live numbers
   const tmode = P.towns || "numbers";
@@ -243,8 +269,11 @@ async function draw() {
   S.cur = { st, D, vals, P, pid, V, run, f };
   S.last = { data_ms: t1 - t0, fill_ms: t2 - t1, overlay_ms: t3 - t2, total_ms: t3 - t0 };
   $("stat").textContent = `F+${f}  data ${S.last.data_ms.toFixed(0)} ms · fill ${S.last.fill_ms.toFixed(0)} ms · lines/labels ${S.last.overlay_ms.toFixed(0)} ms`;
-  const u = new URL(location); u.searchParams.set("prod", pid); u.searchParams.set("view", vid); u.searchParams.set("f", f); u.searchParams.set("run", run); u.searchParams.delete("model"); history.replaceState(null, "", u);
-  window.__drawn = `${pid}/${vid}/${f}`;
+  window.__drawn = `${pid}/${vid}/${f}` + (lite ? "~" : "");
+  if (lite) return;
+  // iOS Safari throws after 100 history.replaceState calls in 10 s: update the URL once things settle
+  clearTimeout(urlTimer); urlTimer = setTimeout(() => { const u = new URL(location); u.searchParams.set("prod", pid); u.searchParams.set("view", vid);
+    u.searchParams.set("f", f); u.searchParams.set("run", run); u.searchParams.delete("model"); try { history.replaceState(null, "", u); } catch (e) {} }, 400);
   preload(run, pid, S.i);
 }
 
