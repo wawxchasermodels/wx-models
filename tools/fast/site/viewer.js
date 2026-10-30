@@ -11,6 +11,15 @@ window.__S = S;
 const pt = v => v * S.man.dpi / 72;                 // points -> canvas px (same as matplotlib at the encoder dpi)
 const img = src => new Promise((ok, no) => { const im = new Image(); im.onload = () => ok(im); im.onerror = no; im.src = src; });
 
+function fitPhone() {   // phones: map as large as fits between the menus and the slider bar, placed right under the menus
+  const cv = $("map"); if (!cv) return;
+  if (!document.body.classList.contains("phone") || !cv.width) { cv.style.width = cv.style.height = ""; return; }
+  const wr = $("wrap"), cs = getComputedStyle(wr), padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight), padY = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+  const vh = window.visualViewport ? visualViewport.height : innerHeight;
+  const availW = document.documentElement.clientWidth - padX, availH = vh - $("bar").offsetHeight - $("dock").offsetHeight - padY;
+  const k = Math.max(0.05, Math.min(availW / cv.width, availH / cv.height));
+  cv.style.width = Math.floor(cv.width * k) + "px"; cv.style.height = Math.floor(cv.height * k) + "px";
+}
 async function boot() {
   if (Q.get("bare")) document.body.classList.add("bare");
   // 10-29: manifest, fonts and the shown run's run.json in parallel; other runs load when picked
@@ -37,8 +46,9 @@ async function boot() {
   const mq = matchMedia("(max-width: 700px), (max-height: 500px)"), placeSteps = () => {
     const ph = mq.matches; document.body.classList.toggle("phone", ph);
     const c = $("stepctl"), dest = ph ? $("dock") : $("bar"); if (c.parentNode !== dest) { if (ph) dest.appendChild(c); else dest.insertBefore(c, $("save")); }
+    fitPhone();
   };
-  placeSteps(); (mq.addEventListener ? mq.addEventListener("change", placeSteps) : mq.addListener(placeSteps));
+  placeSteps(); addEventListener("resize", fitPhone); window.visualViewport && visualViewport.addEventListener("resize", fitPhone); (mq.addEventListener ? mq.addEventListener("change", placeSteps) : mq.addListener(placeSteps));
   setupPointer(); $("share") && ($("share").onclick = share); $("save") && ($("save").onclick = saveImage);
   $("prod").onchange = e => { S.prod = e.target.value; draw(); };
   $("view").onchange = e => { S.view = e.target.value; draw(); };
@@ -212,7 +222,7 @@ async function render(lite) {
     if (seq !== drawSeq) return;
     if (!String(e && e.message).startsWith("nodata:")) throw e;
     S.derived.delete(`${run}/${pid}/${f}`);
-    const V = VIEWS()[vid], cv = $("map"), st2 = await viewStatic(vid); if (cv.width !== V.fig[0]) { cv.width = V.fig[0]; cv.height = V.fig[1]; }
+    const V = VIEWS()[vid], cv = $("map"), st2 = await viewStatic(vid); if (cv.width !== V.fig[0]) { cv.width = V.fig[0]; cv.height = V.fig[1]; fitPhone(); }
     const ctx = cv.getContext("2d"); ctx.fillStyle = S.man.style.BG; ctx.fillRect(0, 0, cv.width, cv.height); ctx.drawImage(st2.base, 0, 0, cv.width, cv.height);
     header(ctx, V, PRODS()[pid].title, step.valid_line, `${S.runs[run].runline}  \u00b7  ${V.label}  \u00b7  not in this model run at this hour`, step.badge);
     S.cur = null; window.__drawn = `${pid}/${vid}/${f}`; return;
@@ -220,7 +230,7 @@ async function render(lite) {
   if (seq !== drawSeq) return;
   const t1 = performance.now();
   const V = VIEWS()[vid], P = PRODS()[pid], cv = $("map");
-  if (cv.width !== V.fig[0] || cv.height !== V.fig[1]) { cv.width = V.fig[0]; cv.height = V.fig[1]; }
+  if (cv.width !== V.fig[0] || cv.height !== V.fig[1]) { cv.width = V.fig[0]; cv.height = V.fig[1]; fitPhone(); }
   const ctx = cv.getContext("2d"); ctx.fillStyle = S.man.style.BG; ctx.fillRect(0, 0, cv.width, cv.height);
   // 1. color fill: value -> bin color, exactly the site's bins (contourf + BoundaryNorm)
   const pal = palette(pid), mins = P.min_show, im = ctx.createImageData(st.W, st.H), o = im.data, F = D.fill, n = st.W * st.H;

@@ -37,7 +37,9 @@ body.phone #dock{flex:0 0 auto;display:flex;gap:8px;align-items:center;padding:6
 body.phone #dock #stepctl{display:flex;gap:8px;align-items:center;flex:1;min-width:0}
 body.phone #dock button{background:#262931;color:#f4f2ee;border:1px solid #7d828c;border-radius:6px;padding:6px 12px;font:inherit;touch-action:manipulation}
 body.phone #dock #step{flex:1;min-width:0;order:0;height:36px}
-body.phone #wrap{align-items:flex-end}
+/* 10-29 9:16 PM: stack = menus, map, slider bar; leftover space at the bottom. viewer.js fitPhone() sizes the map. */
+body.phone #wrap{flex:0 0 auto;align-items:flex-start}
+body.phone canvas{max-height:none}
 #saveview{position:fixed;inset:0;z-index:20;background:#000e;display:flex;flex-direction:column}
 #saveview .sv-top{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:8px 12px;background:#1d2027;font-size:13px}
 #saveview .sv-top span{flex:1}
