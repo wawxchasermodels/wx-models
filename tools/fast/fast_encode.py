@@ -22,6 +22,9 @@ MODELS = {   # grid "lcc" = HRRR 3 km, "ll" = 0.25 deg global (lat 90 -> -90, lo
     # ECMWF 0.25 06/18Z only to 144 h (3-hourly); AIFS 06/18Z to 360 h (6-hourly) like 00/12Z.
     # RRFS (NOAA, 3 km CONUS, operational since 2026): 00/06/12/18Z hourly to 48 h then 3-hourly to 84 h (stage 3, 10-30-26)
     "rrfs": dict(grid="lcc", views=("puget", "wa", "wwa", "ewa", "passes", "pnwhr"), cycles=(0, 6, 12, 18), steps=list(range(1, 49)) + list(range(51, 85, 3)), keep=2),
+    # NBM (NOAA National Blend, 2.5 km CONUS NDFD grid): 00/06/12/18Z, hourly to 36 h then 3-hourly to 168 h (stage 3, 10-30-26)
+    "nbm":  dict(grid="lcc", views=("puget", "wa", "wwa", "ewa", "passes", "pnwhr"), cycles=(0, 6, 12, 18), steps=list(range(1, 37)) + list(range(39, 169, 3)), keep=2,
+                 lcc=dict(central_longitude=-95.0, central_latitude=25.0, standard_parallels=(25.0, 25.0)), radius=6371200.0),
     "gfs":  dict(grid="ll", views=GLOBAL_VIEWS, cycles=(0, 6, 12, 18), steps=list(range(3, 361, 3)), keep=2),
     "ifs":  dict(grid="ll", views=GLOBAL_VIEWS, cycles=(0, 6, 12, 18), steps=list(range(3, 145, 3)) + list(range(150, 361, 6)),
                  steps_short=list(range(3, 145, 3)), short_cycles=(6, 18), keep=2, keep_long=True),
@@ -30,11 +33,53 @@ MODELS = {   # grid "lcc" = HRRR 3 km, "ll" = 0.25 deg global (lat 90 -> -90, lo
     # computed here from the members (the open em/es file only appears once the whole run is out). 10-30-26 (Benjamin's saved order).
     "eps":  dict(grid="ll", views=GLOBAL_VIEWS, cycles=(0, 12), steps=list(range(6, 361, 6)), keep=2, grid_from="ifs"),
 }
-MINFO = {"eps": dict(name="ECMWF Ensemble", site="ECMWF EPS", res="0.25\u00b0 \u00b7 50 members", credit_as="ifs")}
+MINFO = {"nbm": dict(name="NOAA NBM", site="NBM", res="2.5 km", noaa=True),
+         "eps": dict(name="ECMWF Ensemble", site="ECMWF EPS", res="0.25\u00b0 \u00b7 50 members", credit_as="ifs")}
 def minfo(m):
     import menu_maps as M
     return MINFO.get(m) or M.MODELS[m]
 EPS_URL = "https://data.ecmwf.int/forecasts/{d}/{h:02d}z/ifs/0p25/enfo/{d}{h:02d}0000-{s}h-enfo-ef"
+
+NBM_URL = "https://noaa-nbm-grib2-pds.s3.amazonaws.com/blend.{d}/{h:02d}/core/blend.t{h:02d}z.core.f{s:03d}.co.grib2"
+class NbmReader:
+    """NBM core step: exact idx-line lookups ("VAR:level:time:extra") with HTTP ranges. Values on the NDFD 2.5 km Lambert grid,
+    row 0 = south (like HRRR)."""
+    def __init__(self, c, s):
+        import temp_maps as TM
+        self.c, self.s, self.bytes = c, s, 0; self.url = NBM_URL.format(d=f"{c:%Y%m%d}", h=c.hour, s=s)
+        self.idx = TM.get(self.url + ".idx").decode().splitlines()
+    def get(self, var_level, tdesc, extra="", latlon=False):
+        import temp_maps as TM, eccodes as ec
+        for k, l in enumerate(self.idx):
+            p = l.split(":")
+            if len(p) > 6 and f"{p[3]}:{p[4]}" == var_level and p[5] == tdesc and p[6] == extra:
+                a = int(p[1]); b = int(self.idx[k + 1].split(":")[1]) - 1 if k + 1 < len(self.idx) else a + 40_000_000
+                blob = TM.get(self.url, (a, b)); self.bytes += len(blob); g = ec.codes_new_from_message(blob)
+                nx, ny = ec.codes_get(g, "Nx"), ec.codes_get(g, "Ny"); v = ec.codes_get_values(g).reshape(ny, nx)
+                alt = ec.codes_get(g, "alternativeRowScanning") == 1   # NDFD grids: every other row runs east to west
+                fix = (lambda a: np.concatenate([a[:1], a[1:]], 0)) if not alt else (lambda a: np.where((np.arange(ny) % 2 == 1)[:, None], a[:, ::-1], a))
+                v = fix(np.where(v > 9e20, np.nan, v))
+                if latlon:
+                    la = ec.codes_get_array(g, "latitudes").reshape(ny, nx); lo = ec.codes_get_array(g, "longitudes").reshape(ny, nx)   # eccodes gives these in natural order
+                    ec.codes_release(g); return la, np.where(lo > 180, lo - 360, lo), v
+                ec.codes_release(g); return v
+        raise KeyError(f"{var_level} {tdesc} {extra}")
+def _nbm(var_level, tdesc, conv, every=1, extra=""):
+    def g(R, m):
+        if R.s % every: raise KeyError(var_level)
+        return conv(R.get(var_level, tdesc(R.s), extra))
+    return g
+NBM_FIELDS = {
+    "t2m":  (_nbm("TMP:2 m above ground", lambda s: f"{s} hour fcst", lambda k: (k - 273.15) * 1.8 + 32), "F"),
+    "gust": (_nbm("GUST:10 m above ground", lambda s: f"{s} hour fcst", lambda v: v * 2.23694), "mph"),
+    "tcc":  (_nbm("TCDC:surface", lambda s: f"{s} hour fcst", lambda v: np.clip(v, 0, 100)), "%"),
+    "nq1":  (_nbm("APCP:surface", lambda s: f"{s - 1}-{s} hour acc fcst", lambda v: np.clip(v, 0, None) / 25.4), "in"),
+    "nq6":  (_nbm("APCP:surface", lambda s: f"{s - 6}-{s} hour acc fcst", lambda v: np.clip(v, 0, None) / 25.4, every=6), "in"),
+    "ns6":  (_nbm("ASNOW:surface", lambda s: f"{s - 6}-{s} hour acc fcst", lambda v: np.clip(v, 0, None) / 0.0254, every=6), "in"),
+    "tstm": (_nbm("TSTM:surface", lambda s: f"{s - 3}-{s} hour acc fcst", lambda v: np.clip(v, 0, 100), every=3, extra="probability forecast"), "%"),
+    "maxt": (_nbm("TMAX:2 m above ground", lambda s: f"{s - 12}-{s} hour max fcst", lambda k: (k - 273.15) * 1.8 + 32, every=12), "F"),
+    "mint": (_nbm("TMIN:2 m above ground", lambda s: f"{s - 12}-{s} hour min fcst", lambda k: (k - 273.15) * 1.8 + 32, every=12), "F"),
+}
 
 class _NoSt:
     def field(self, *a, **k): raise StopIteration
@@ -183,7 +228,8 @@ FIELDS = {   # name: (getter, units)
 # grayscale PNG. run.json "packs" maps field -> [file name, channel]; the viewer reads either layout.
 PACKS = {"wind": ("mslp", "u10", "v10"), "aloft": ("t850", "t700", "frz"), "accum": ("apcp", "asnow", "ltgp"),
          "conv": ("mucape", "sbcape", "ltng"), "sky": ("tcc", "vis", "ir"), "w500": ("u500", "v500", "z500"), "w250": ("u250", "v250", "z250"),
-         "e2t": ("t2m", "t2sd", "p32"), "e500": ("z500", "z5sd")}
+         "e2t": ("t2m", "t2sd", "p32"), "e500": ("z500", "z5sd"),
+         "nbm1": ("t2m", "gust", "tcc"), "nbm2": ("nq1", "nq6", "ns6"), "nbm3": ("tstm", "maxt", "mint")}
 
 def q8(a, lo, hi): return np.clip(np.rint((a - lo) / (hi - lo) * 255), 0, 255).astype(np.uint8)
 def rng(a):
@@ -199,9 +245,9 @@ def step_job(args):
     c = dt.datetime.strptime(c_str, "%Y%m%d%H").replace(tzinfo=dt.timezone.utc)
     i0, i1, j0, j1 = crop; t = time.time(); ranges, sizes, q = {}, {}, {}
     _patch_models(M)
-    try: R = EpsReader(c, s) if m == "eps" else M.Reader(m, c, s)
+    try: R = EpsReader(c, s) if m == "eps" else NbmReader(c, s) if m == "nbm" else M.Reader(m, c, s)
     except Exception as e: return s, None, str(e), 0, 0
-    for name, (get, units) in FIELDS.items():
+    for name, (get, units) in (NBM_FIELDS if m == "nbm" else FIELDS).items():
         try: a = get(R, m)
         except (KeyError, StopIteration): continue
         except Exception as e:
@@ -334,6 +380,12 @@ def model_grid(m):
     if MODELS[m].get("grid_from"):   # same 0.25 grid as another model
         la, lo, oro = model_grid(MODELS[m]["grid_from"]); return la, lo, oro
     _patch_models(M)
+    if m == "nbm":
+        c = latest_published(m)
+        for _ in range(6):
+            try: la, lo, _v = NbmReader(c, 1).get("TMP:2 m above ground", "1 hour fcst", latlon=True); return la, lo, None
+            except Exception: c -= dt.timedelta(hours=6)
+        raise RuntimeError("no NBM run found")
     c = latest_published(m) or (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=12)).replace(hour=0, minute=0, second=0, microsecond=0)
     for _ in range(4):   # the newest cycle may not be posted yet: fall back one cycle at a time
         try: R = M.Reader(m, c, MODELS[m]["steps"][0]); la, lo, _ = R.f("t2m"); break
@@ -364,8 +416,10 @@ def static(m, out, views_only=None):
     pc = ccrs.PlateCarree(); MD = MODELS[m]; vids = MD["views"]
     la, lo, oro = model_grid(m); ny_, nx_ = la.shape
     if MD["grid"] == "lcc":
-        hp = ccrs.LambertConformal(globe=ccrs.Globe(ellipse="sphere", semimajor_axis=6371229, semiminor_axis=6371229), **HRRR_LCC)
-        g = hp.transform_points(pc, lo, la); gx0, gy0 = g[0, 0, 0], g[0, 0, 1]; d = 3000.0
+        rad = MD.get("radius", 6371229.0)
+        hp = ccrs.LambertConformal(globe=ccrs.Globe(ellipse="sphere", semimajor_axis=rad, semiminor_axis=rad), **MD.get("lcc", HRRR_LCC))
+        g = hp.transform_points(pc, lo, la); gx0, gy0 = g[0, 0, 0], g[0, 0, 1]
+        d = 3000.0 if "lcc" not in MD else float(np.hypot(g[0, 1, 0] - gx0, g[0, 1, 1] - gy0))   # grid spacing (NBM 2539.7 m)
         def to_ij(LO_, LA_):
             hh = hp.transform_points(pc, LO_, LA_); return (hh[..., 1] - gy0) / d, (hh[..., 0] - gx0) / d
     else:
@@ -602,6 +656,26 @@ def static(m, out, views_only=None):
                       only=("hrrr", "rrfs", "gfs", "ifs", "aifs")),
     }
     prods = {k: v for k, v in prods.items() if m in v.pop("only", (m,))}
+    if m == "nbm":   # National Blend: its own period fields (1/6 h precip, 6 h snow, 3 h thunder, 12 h max/min)
+        prods = {k: prods[k] for k in ("t2m", "gust10", "tcc")}
+        prods["gust10"]["extra"] = "NBM gust at the valid time  \u00b7  up to {hi} mph in view"
+        TS_L = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]; TS_A = [(10, "#d9e8c3"), (20, "#9fd27a"), (40, "#f2e34b"), (60, "#f4a43a"), (80, "#e2462f"), (100, "#8c1450")]
+        CM.update(nqpf1=CM["qpf"], nqpf6=CM["qpf"], nsnow6=CM["snow"], ntstm=M.ramp(TS_L, TS_A), nmaxt=CM["t2m"], nmint=CM["t2m"])
+        prods["nqpf1"] = dict(title="1 h Precipitation", fields=["nq1"], key="Precip (in)", ticks=[0.01, 0.05, 0.1, 0.25, 0.5, 1, 2], tickfmt=True,
+                              **table(HS.RAIN_LEVELS, CM["qpf"], "max"), extra="NBM liquid equivalent in the hour ending at the valid time (to 36 h)  \u00b7  max {hi} in in view",
+                              pct=[0, 100], dec=2, fmt="in2")
+        prods["nqpf6"] = dict(title="6 h Precipitation", fields=["nq6"], key="Precip (in)", ticks=[0.1, 0.5, 1, 2, 3, 4, 6], tickfmt=True,
+                              **table(HS.RAIN_LEVELS, CM["qpf"], "max"), extra="NBM liquid equivalent in the 6 h ending at the valid time (every 6 h)  \u00b7  max {hi} in in view",
+                              pct=[0, 100], dec=2, fmt="in2")
+        prods["nsnow6"] = dict(title="6 h Snowfall", fields=["ns6"], key="Snow (in)", ticks=[0.1, 1, 3, 6, 10, 15, 24], tickfmt=True,
+                               **table(M.SNOW_LEVELS, CM["snow"], "max"), extra="NBM snowfall in the 6 h ending at the valid time (every 6 h)  \u00b7  max {hi} in in view",
+                               pct=[0, 100], dec=1, fmt="in1")
+        prods["ntstm"] = dict(title="Thunderstorm Chance (3 h)", fields=["tstm"], key="Chance (%)", ticks=TS_L, tickfmt=True,
+                              **table(TS_L, CM["ntstm"], "neither"), extra="NBM chance of thunder in the 3 h ending at the valid time (every 3 h)", pct=[0, 100], towns="names")
+        prods["nmaxt"] = dict(title="12 h High Temperature", fields=["maxt"], key="Temp (\u00b0F)", ticks=HS.TEMP_TICKS, **table(HS.TEMP_LEVELS, CM["t2m"], "both"),
+                              freeze=32, extra="NBM highest temperature in the 12 h ending at the valid time  \u00b7  {lo} to {hi}\u00b0F in view", pct=[0.5, 99.5])
+        prods["nmint"] = dict(title="12 h Low Temperature", fields=["mint"], key="Temp (\u00b0F)", ticks=HS.TEMP_TICKS, **table(HS.TEMP_LEVELS, CM["t2m"], "both"),
+                              freeze=32, extra="NBM lowest temperature in the 12 h ending at the valid time  \u00b7  {lo} to {hi}\u00b0F in view", pct=[0.5, 99.5])
     if m == "eps":   # ensemble: mean versions of the shared products plus spread / probability maps
         prods = {k: prods[k] for k in ("t2m", "t2ma", "z500anom")}
         prods["t2ma"]["title"] = "2 m Temperature Anomaly (ens. mean)"
@@ -627,6 +701,9 @@ def static(m, out, views_only=None):
     for k in ("w500", "w250"):
         if k in prods: prods[k]["under"] = "#f4f5f7"   # light below the first level so barbs and height lines stay readable
     if "mslpqpf" in prods: prods["mslpqpf"]["under"] = "#f4f5f7"   # light background so the dark isobars read (no blanking)
+    if "ntstm" in prods: prods["ntstm"]["min_show"] = 10
+    for k in ("nqpf1", "nqpf6", "nsnow6"):
+        if k in prods: prods[k]["min_show"] = prods[k]["levels"][0]
     for k in ("qpf", "snow", "refc", "qpf1", "qpf3", "qpf6", "qpf12", "qpf24", "qpf48", "snow1", "snow6", "ltng6"):
         if k in prods: prods[k]["min_show"] = prods[k]["levels"][0]   # blank below the first level (like the site)
     for pid, P in prods.items():
@@ -645,7 +722,7 @@ def static(m, out, views_only=None):
                 cb = HS.hbar(fig, cs, [], P["key"], ky); cb.set_ticks(P["ticks"])
                 cb.ax.set_xticklabels([f"{t:g}" for t in P["ticks"]], fontproperties=HS.font(700, 13))
             else: HS.hbar(fig, cs, tk0, P["key"], ky)
-            HS.credit(fig, TM.CREDIT_NOAA if (pid == "t2m" and m in NOAA) else (M.credit(m) if m in M.MODELS else TM.CREDIT.format(name=minfo(m)["name"])))
+            HS.credit(fig, TM.CREDIT_NOAA if (pid == "t2m" and m in NOAA) else (M.credit(m) if m in M.MODELS else M.credit("gfs") if minfo(m).get("noaa") else TM.CREDIT.format(name=minfo(m)["name"])))
             sizes[f"key_{m}_{pid}_{vid}"] = save(fig, f"{out}/{fn}")
         P["ticks"] = [float(t) for t in tk0]
     clim = {}
