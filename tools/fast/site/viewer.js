@@ -146,7 +146,8 @@ function getField(run, name, f) {
     const [url, ch] = fieldURL(run, name, f), I = await getPixels(url);
     const [lo, hi] = st.ranges[name], sc = (hi - lo) / 255, n = I.w * I.h, out = new Float32Array(n), px = I.px;
     // image row 0 = first (southern) grid row: the encoder writes the grid as-is
-    for (let k = 0; k < n; k++) out[k] = lo + px[k * 4 + ch] * sc;
+    if (st.ranges[name][2] === 2) { const d = hi - lo; for (let k = 0; k < n; k++) { const q = px[k * 4 + ch] / 255; out[k] = lo + q * q * d; } }   // sqrt-coded precip
+    else for (let k = 0; k < n; k++) out[k] = lo + px[k * 4 + ch] * sc;
     return { v: out, w: I.w, h: I.h, bytes: I.bytes };
   })();
   p.catch(() => S.fields.delete(key)); S.fields.set(key, p); return p;
@@ -171,12 +172,21 @@ async function productFields(run, pid, f) {
       const [un, vn] = P.wind || ["u10", "v10"], u = F[un].v, v = F[vn].v, sp = new Float32Array(u.length), mul = P.spd_mult ?? (2.23694 / 1.94384);
       for (let k = 0; k < u.length; k++) sp[k] = Math.hypot(u[k], v[k]) * mul;
       out.fill = blur(sp, g.w, g.h, P.spd_sigma);
+    } else if (P.anom === "pr") {   // precip since the run started vs the 1991-2020 normal for the same days (mm/day normals)
+      const R_ = S.runs[run], t0 = Date.parse(R_.init), hrs = f, a = F.apcp.v, o = new Float32Array(a.length), N = new Float32Array(a.length);
+      if (P.fill === "ppct" && f < 48) throw new Error("nodata:apcp");
+      const ns = Math.max(1, Math.min(6, Math.round(hrs / 48))), Cs = await Promise.all(Array.from({ length: ns }, (_, i) =>
+        climAt(run, "pr", new Date(t0 + (i + 0.5) / ns * hrs * 36e5).toISOString())));
+      for (const C of Cs) for (let k = 0; k < a.length; k++) N[k] += C[k] / ns * hrs / 24 / 25.4;   // normal (in) for the period
+      if (P.fill === "ppct") for (let k = 0; k < a.length; k++) o[k] = a[k] / Math.max(N[k], 0.05) * 100;   // normal floored at 0.05 in (very dry spots)
+      else for (let k = 0; k < a.length; k++) o[k] = a[k] - N[k];
+      out.fill = o;
     } else if (P.clim) {   // anomaly: field minus the 1991-2020 normal at the valid time (static climatology, see climAt)
       const fld = P.anom || "z500", C = await climAt(run, P.clim, S.runs[run].steps.find(x => x.f === f).valid), z = F[fld].v, o = new Float32Array(z.length);
       for (let k = 0; k < z.length; k++) o[k] = z[k] - C[k]; out.fill = fld === "z500" ? blur(o, g.w, g.h, 1.0) : o;
     } else if (P.window && P.wmax) {   // highest value over the steps in the last N hours (incl. this one)
       const fld = P.wfield || P.fields[0], fs = S.runs[run].steps.map(x => x.f).filter(x => x > f - P.window && x <= f);
-      if (f - P.window < 0) throw new Error(`nodata:${fld}`);
+      if (f - P.window < 0 && !P.sofar) throw new Error(`nodata:${fld}`);
       const arrs = await Promise.all(fs.map(x => getField(run, fld, x).then(r => r.v, () => null))), ok = arrs.filter(Boolean);
       if (!ok.length) throw new Error(`nodata:${fld}`);
       const o = new Float32Array(ok[0]); for (const a of ok.slice(1)) for (let k = 0; k < o.length; k++) if (a[k] > o[k]) o[k] = a[k];
@@ -186,6 +196,15 @@ async function productFields(run, pid, f) {
       if (prev < 0 || (prev > 0 && !S.runs[run].steps.find(x => x.f === prev))) throw new Error(`nodata:${fld}`);
       if (prev === 0) out.fill = a;
       else { const b = (await getField(run, fld, prev)).v, o = new Float32Array(a.length); for (let k = 0; k < a.length; k++) o[k] = Math.max(0, a[k] - b[k]); out.fill = o; }
+    } else if (P.fill === "feels") {   // NWS wind chill (T <= 50F, wind > 3 mph) / heat index (T >= 80F, Rothfusz), else air temp
+      const T = F.t2m.v, D_ = F.d2m.v, u = F.u10.v, v = F.v10.v, o = new Float32Array(T.length);
+      for (let k = 0; k < T.length; k++) { const t = T[k], w = Math.hypot(u[k], v[k]) * 1.15078;
+        if (t <= 50 && w > 3) { const p = Math.pow(w, 0.16); o[k] = 35.74 + 0.6215 * t - 35.75 * p + 0.4275 * t * p; }
+        else if (t >= 80) { const es = Math.exp(17.625 * ((D_[k] - 32) / 1.8) / (243.04 + (D_[k] - 32) / 1.8)), e0 = Math.exp(17.625 * ((t - 32) / 1.8) / (243.04 + (t - 32) / 1.8)), R = Math.min(100, 100 * es / e0);
+          o[k] = -42.379 + 2.04901523 * t + 10.14333127 * R - 0.22475541 * t * R - 0.00683783 * t * t - 0.05481717 * R * R + 0.00122874 * t * t * R + 0.00085282 * t * R * R - 0.00000199 * t * t * R * R; }
+        else o[k] = t; }
+      out.fill = o;
+    } else if (P.fill === "thick") { const a = F.z500.v, b = F.z1000.v, o = new Float32Array(a.length); for (let k = 0; k < a.length; k++) o[k] = (a[k] - b[k]) / 10; out.fill = blur(o, g.w, g.h, 1.0);
     } else if (P.fill === "snowlvl") { const a = F.frz.v, o = new Float32Array(a.length); for (let k = 0; k < a.length; k++) o[k] = Math.max(0, a[k] - 1000); out.fill = o; }
     else out.fill = F[P.fill] ? F[P.fill].v : g.v;
     if (P.lows || P.spag) out.ens = await fetch(`${DATA}runs/${run}/single/ens_f${String(f).padStart(3, "0")}.json`).then(r => r.ok ? r.json() : null, () => null);
@@ -233,6 +252,9 @@ function bin(pal, v) {   // index of the level band holding v (uniform: arithmet
   if (pal.uniform) return Math.min(pal.n - 1, ((v - pal.L0) / pal.dL) | 0);
   let a = 0, b = pal.L.length - 1; while (b - a > 1) { const m = (a + b) >> 1; if (v >= pal.L[m]) a = m; else b = m; } return a;
 }
+function sampleNN(st, F, k) {   // nearest grid point (categorical fields: precip type)
+  const i = st.idx[k]; if (i < 0) return NaN; return F[i + (st.wx[k] >= 0.5 ? 1 : 0) + (st.wy[k] >= 0.5 ? st.gnx : 0)];
+}
 function sample(st, F, k) {   // bilinear value at panel pixel k
   const i = st.idx[k]; if (i < 0) return NaN; const tx = st.wx[k], ty = st.wy[k], g = st.gnx;
   return (F[i] * (1 - tx) + F[i + 1] * tx) * (1 - ty) + (F[i + g] * (1 - tx) + F[i + g + 1] * tx) * ty;
@@ -277,18 +299,19 @@ async function render(lite) {
   if (cv.width !== V.fig[0] || cv.height !== V.fig[1]) { cv.width = V.fig[0]; cv.height = V.fig[1]; fitPhone(); }
   const ctx = cv.getContext("2d"); ctx.fillStyle = S.man.style.BG; ctx.fillRect(0, 0, cv.width, cv.height);
   // 1. color fill: value -> bin color, exactly the site's bins (contourf + BoundaryNorm)
+  const smp = P.fill === "prt" ? sampleNN : sample;
   const pal = palette(pid), mins = P.min_show, im = ctx.createImageData(st.W, st.H), o = im.data, F = D.fill, n = st.W * st.H;
   const vals = new Float32Array(n);
   if (lite) {   // half resolution: one sample per 2x2 block
     const W = st.W, H = st.H;
     for (let y = 0; y < H; y += 2) for (let x = 0; x < W; x += 2) {
-      const k = y * W + x, v = sample(st, F, k); let c = null;
+      const k = y * W + x, v = smp(st, F, k); let c = null;
       if (!(v !== v || (mins !== undefined && v < mins))) c = v < pal.L0 ? pal.under : v >= pal.Lend ? pal.over : pal.cols[bin(pal, v)];
       for (let dy = 0; dy < 2 && y + dy < H; dy++) for (let dx = 0; dx < 2 && x + dx < W; dx++) {
         const kk = k + dy * W + dx; vals[kk] = v; if (!c) continue; const q = kk * 4; o[q] = c[0]; o[q + 1] = c[1]; o[q + 2] = c[2]; o[q + 3] = 255; }
     }
   } else for (let k = 0; k < n; k++) {
-    const v = sample(st, F, k); vals[k] = v; if (v !== v || (mins !== undefined && v < mins)) continue;
+    const v = smp(st, F, k); vals[k] = v; if (v !== v || (mins !== undefined && v < mins)) continue;
     let c; if (v < pal.L0) c = pal.under; else if (v >= pal.Lend) c = pal.over; else c = pal.cols[bin(pal, v)];
     if (!c) continue; const q = k * 4; o[q] = c[0]; o[q + 1] = c[1]; o[q + 2] = c[2]; o[q + 3] = 255;
   }
@@ -306,6 +329,7 @@ async function render(lite) {
   if (!lite && P.isobars) drawIsobars(ctx, st, D, P);
   if (!lite && P.barbs) drawBarbs(ctx, st, D, P, V);
   if (!lite && (P.lows || P.spag)) drawEns(ctx, st, D, P, V);
+  if (!lite && P.hl) drawHL(ctx, st, D, V);
   ctx.restore();
   // 4. towns (dots + names static) and live numbers
   const tmode = P.towns || "numbers";
@@ -354,7 +378,7 @@ function fmtVal(P, v) {   // temp_maps fmt_int / fmt_vis
   if (P.fmt === "vis") return v >= 7 ? "7+" : v < 3 ? v.toFixed(1) : v.toFixed(0);
   return String(Math.round(v));
 }
-const UNITS = { eqpf90: " in", esnow: " in", esnow90: " in", egust90: " mph", epcape: "%", elows: "%", spag: " m", nqpf1: " in", nqpf6: " in", nsnow6: " in", ntstm: "%", nmaxt: "\u00b0F", nmint: "\u00b0F", dsnod: " in", qpf3: " in", qpf12: " in", qpf48: " in", snow1: " in", snow6: " in", gust6: " mph", ltng6: " /km\u00b2/5 min", qpf1: " in", qpf6: " in", qpf24: " in", mslpqpf: " in", t2ma: "\u00b0F", t850a: "\u00b0C", et2sd: "\u00b0F", ep32: "%", ez500: " m", w500: " kt", w250: " kt", z500anom: " m", mucape: " J/kg", sbcape: " J/kg", ltng: " /km\u00b2/5 min", ltgp: " in", t2m: "\u00b0F", gust10: " mph", aifswind: " mph", t850: "\u00b0C", t700: "\u00b0C", tcc: "%", vis: " mi", ir: "\u00b0C",
+const UNITS = { d2m: "\u00b0F", feels: "\u00b0F", gustmax: " mph", t925w: "\u00b0C", t850w: "\u00b0C", t700w: "\u00b0C", t500w: "\u00b0C", t300w: "\u00b0C", w850: " kt", thick: " dam", slp: " mb", pw: " in", pwa: " in", ptype: "", qpfa: " in", qpfpct: "%", eqpf90: " in", esnow: " in", esnow90: " in", egust90: " mph", epcape: "%", elows: "%", spag: " m", nqpf1: " in", nqpf6: " in", nsnow6: " in", ntstm: "%", nmaxt: "\u00b0F", nmint: "\u00b0F", dsnod: " in", qpf3: " in", qpf12: " in", qpf48: " in", snow1: " in", snow6: " in", gust6: " mph", ltng6: " /km\u00b2/5 min", qpf1: " in", qpf6: " in", qpf24: " in", mslpqpf: " in", t2ma: "\u00b0F", t850a: "\u00b0C", et2sd: "\u00b0F", ep32: "%", ez500: " m", w500: " kt", w250: " kt", z500anom: " m", mucape: " J/kg", sbcape: " J/kg", ltng: " /km\u00b2/5 min", ltgp: " in", t2m: "\u00b0F", gust10: " mph", aifswind: " mph", t850: "\u00b0C", t700: "\u00b0C", tcc: "%", vis: " mi", ir: "\u00b0C",
                 refc: " dBZ", qpf: " in", snow: " in", frz: " ft", snowlvl: " ft" };
 // value under the cursor / tap (item 1) and swipe to step (item 6)
 function readout(ev) {
@@ -364,7 +388,10 @@ function readout(ev) {
   if (x < 0 || y < 0 || x >= C.st.W || y >= C.st.H) { tip.hidden = true; return; }
   const k = y * C.st.W + x; let v = C.vals[k]; if (!isFinite(v)) { tip.hidden = true; return; }
   let s = (C.P.fmt ? fmtVal(C.P, v) : C.P.dec ? v.toFixed(C.P.dec) : String(Math.round(v))) + (UNITS[C.pid] || "");
-  if (C.D.iso && C.P.isobars) { const m = sample(C.st, C.D.iso, k); if (isFinite(m)) s += C.pid === "aifswind" ? ` \u00b7 ${m.toFixed(1)} mb` : ` \u00b7 ${Math.round(m)} dam`; }
+  if (C.pid === "ptype") { const c = Math.round(v), t = ["Rain", "Snow", "Sleet / mix", "Freezing rain"][c >> 4], b = c & 15;
+    s = c < 1 || !t || !b ? "No precip" : `${t} \u00b7 ${["", "< 0.01", "0.01-0.02", "0.02-0.05", "0.05-0.1", "0.1-0.2", "0.2-0.4", "0.4+", "0.4+"][b] || ""} in/h`; }
+  if (C.D.iso && C.P.isobars) { const m = sample(C.st, C.D.iso, k), mb = !C.P.isobars.field || C.P.isobars.field === "mslp";
+    if (isFinite(m)) s += mb ? ` \u00b7 ${m.toFixed(C.pid === "aifswind" ? 1 : 0)} mb` : ` \u00b7 ${Math.round(m)} dam`; }
   tip.textContent = s; tip.hidden = false;
   const wr = $("wrap").getBoundingClientRect(); tip.style.left = (ev.clientX - wr.left + 14) + "px"; tip.style.top = (ev.clientY - wr.top - 30) + "px";
 }
@@ -624,6 +651,19 @@ function gridInv(V, st, fi, fj, guess) {   // [fi, fj] -> panel px, or null when
   }
   if (x < -300 || y < -300 || x > st.W + 300 || y > st.H + 300) return null;
   return [x, y];
+}
+function drawHL(ctx, st, D, V) {   // H / L centres: extremes of smoothed MSLP over a ~ 1/12-panel window, labelled with the pressure
+  const w = D.w, h = D.h, a = D.iso, r = Math.max(4, Math.round(Math.min(w, h) / 14)), out = [];
+  for (let i = r; i < h - r; i += 2) for (let j = r; j < w - r; j += 2) {
+    const v = a[i * w + j]; let mx = true, mn = true;
+    for (let di = -r; di <= r && (mx || mn); di += 2) for (let dj = -r; dj <= r; dj += 2) { const q = a[(i + di) * w + j + dj]; if (q > v) mx = false; if (q < v) mn = false; }
+    if (mx || mn) out.push([i, j, v, mx]);
+  }
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  for (const [i, j, v, hi] of out) { const p = gridInv(V, st, i, j, null); if (!p || p[0] < 8 || p[1] < 8 || p[0] > st.W - 8 || p[1] > st.H - 8) continue;
+    const X = st.x0 + p[0], Y = st.y0 + p[1];
+    haloText(ctx, hi ? "H" : "L", X, Y - pt(5), `900 ${pt(19)}px Montserrat`, hi ? "#1f4fd1" : "#d1261f", pt(3.2), "center", "middle");
+    haloText(ctx, String(Math.round(v)), X, Y + pt(9), `800 ${pt(9)}px Montserrat`, hi ? "#1f4fd1" : "#d1261f", pt(2.6), "center", "middle"); }
 }
 function drawEns(ctx, st, D, P, V) {
   const E = D.ens; if (!E) return;

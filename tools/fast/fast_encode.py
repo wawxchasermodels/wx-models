@@ -269,6 +269,24 @@ def _ltgp(R, m):
         except Exception as e: raise RuntimeError(f"cp f{s0}: {e}")
     return np.where(_ec("mucape")(R, m) >= 100, np.clip(cp, 0, None) * 1000 / 25.4, 0.0)
 
+PRT_EDGES = (0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.4)   # in/h rate bins 1..8 (bin 8 = 0.4+)
+def _prt(R, m):
+    """Precip type + rate in one categorical byte: 0 = none, type * 16 + rate bin (1-8); types 0 rain, 1 snow, 2 sleet / mix,
+    3 freezing rain. ECMWF: ptype + tprate. NOAA: categorical CRAIN/CSNOW/CICEP/CFRZR + PRATE. (old site: MSLP + precip type)"""
+    if m in ("aifs", "nbm", "eps", "aens"): raise KeyError("prt")
+    rate = np.asarray(R.f("prate")[2], float) * 3600 / 25.4   # kg m-2 s-1 -> in/h
+    if m in NOAA:
+        g = lambda k: np.asarray(R._idx(M_NO(k), R.url)[2], float) > 0.5
+        typ = np.where(g("cfrzr"), 3, np.where(g("cicep"), 2, np.where(g("csnow"), 1, 0)))
+    else:   # ECMWF ptype: 1 rain, 3 freezing rain, 5 snow, 6 wet snow, 7 rain/snow mix, 8 ice pellets, 12 freezing drizzle
+        p = np.rint(np.asarray(R.f("ptype")[2], float))
+        typ = np.select([np.isin(p, (3, 12)), np.isin(p, (7, 8)), np.isin(p, (5, 6))], [3, 2, 1], 0)
+    b = np.digitize(rate, PRT_EDGES) + 1
+    return np.where(rate >= PRT_EDGES[0], typ * 16 + b, 0).astype(float)
+def M_NO(k):
+    import menu_maps as M
+    return M.NO[k]
+
 def _dsnod(R, m):
     """HRRR snow depth change since the run started (in): model snow depth now minus at F+0, so melt and settling count
     (Benjamin 10-26: melt-aware snow depth change for the Cascade pass view)."""
@@ -302,6 +320,15 @@ FIELDS = {   # name: (getter, units)
     "u500": (_f("U:500", lambda v: v * 1.94384), "kt"), "v500": (_f("V:500", lambda v: v * 1.94384), "kt"), "z500": (_f("Z:500", lambda z: z), "m"),
     "u250": (_f("U:250", lambda v: v * 1.94384), "kt"), "v250": (_f("V:250", lambda v: v * 1.94384), "kt"), "z250": (_f("Z:250", lambda z: z), "m"),
     "dsnod": (_dsnod, "in"),
+    # 10-30 parity with the old site (global models first): levels, dewpoint, PW, precip type, 1000 mb height (thickness)
+    "u850": (_f("U:850", lambda v: v * 1.94384), "kt"), "v850": (_f("V:850", lambda v: v * 1.94384), "kt"),
+    "u925": (_f("U:925", lambda v: v * 1.94384), "kt"), "v925": (_f("V:925", lambda v: v * 1.94384), "kt"), "t925": (_f("T:925", lambda k: k - 273.15), "C"),
+    "u700": (_f("U:700", lambda v: v * 1.94384), "kt"), "v700": (_f("V:700", lambda v: v * 1.94384), "kt"), "t500": (_f("T:500", lambda k: k - 273.15), "C"),
+    "u300": (_f("U:300", lambda v: v * 1.94384), "kt"), "v300": (_f("V:300", lambda v: v * 1.94384), "kt"), "t300": (_f("T:300", lambda k: k - 273.15), "C"),
+    "z1000": (_f("Z:1000", lambda z: z), "m"),
+    "d2m": (_f("td2m", lambda k: (k - 273.15) * 1.8 + 32), "F"),
+    "pw": (_f("pwat", lambda v: v / 25.4), "in"),
+    "prt": (_prt, "code"),
     # ECMWF ENS (model "eps" only)
     "t2sd": (_ens("t2sd"), "F"), "p32": (_ens("p32"), "%"), "z5sd": (_ens("z5sd"), "m"),
 }
@@ -315,8 +342,11 @@ PACKS = {"wind": ("mslp", "u10", "v10"), "aloft": ("t850", "t700", "frz"), "accu
          "conv": ("mucape", "sbcape", "ltng"), "sky": ("tcc", "vis", "ir"), "w500": ("u500", "v500", "z500"), "w250": ("u250", "v250", "z250"),
          "e2t": ("t2m", "t2sd", "p32"), "e500": ("z500", "z5sd"), "eqp": ("apcp", "apcp90", "asnow"), "eqs": ("asnow90", "gust", "gust90"),
          "emsl": ("mslp", "t850", "lowp"), "ecape": ("mucape", "pcape"),
+         "w850": ("u850", "v850", "t925"), "w925": ("u925", "v925", "z1000"), "w700": ("u700", "v700", "t500"), "w300": ("u300", "v300", "t300"),
+         "moist": ("d2m", "pw", "prt"),
          "nbm1": ("t2m", "gust", "tcc"), "nbm2": ("nq1", "nq6", "ns6"), "nbm3": ("tstm", "maxt", "mint")}
 
+SQRT_FIELDS = {"apcp", "asnow", "apcp90", "asnow90", "nq1", "nq6", "ns6", "ltgp"}
 def q8(a, lo, hi): return np.clip(np.rint((a - lo) / (hi - lo) * 255), 0, 255).astype(np.uint8)
 def rng(a):
     lo, hi = float(np.floor(np.nanmin(a))), float(np.ceil(np.nanmax(a))); return lo, max(hi, lo + 1)
@@ -324,7 +354,7 @@ def rng(a):
 def roll_ll(v):   # 0.25 deg global: lon -180..179.75 -> 0..359.75
     return np.roll(v, -720, axis=1) if v.shape[1] == 1440 else v
 
-PT_FIELDS = ("t2m", "gust", "u10", "v10", "mslp", "apcp", "asnow", "tcc", "frz", "dsnod", "refc", "t850", "mucape",
+PT_FIELDS = ("d2m", "pw", "gust", "u10", "v10", "mslp", "apcp", "asnow", "tcc", "frz", "dsnod", "refc", "t850", "mucape",
              "nq1", "nq6", "ns6", "tstm", "maxt", "mint", "t2sd", "p32")
 def town_points(man, m):
     """Every town / pass slot of the model's views (deduped by name, A-Z): meteogram and Pass Forecaster sample points."""
@@ -368,6 +398,9 @@ def step_job(args):
                 w = gaussian_filter((~bad).astype(float), 1.5); a = np.where(bad, gaussian_filter(np.where(bad, 0, a), 1.5) / np.maximum(w, 1e-6), a)
         if P and name in PT_FIELDS: ptv[name] = sample_pts(a, P)
         a = np.where(np.isfinite(a), a, np.nanmin(a))
+        if name == "prt": ranges[name] = [0.0, 255.0]; q[name] = np.clip(a, 0, 255).astype(np.uint8); continue
+        if name in SQRT_FIELDS:   # precip totals: square-root steps (fine for light amounts); viewer decodes lo + (q/255)^2 (hi - lo)
+            lo_, hi_ = rng(a); ranges[name] = [lo_, hi_, 2]; q[name] = q8(np.sqrt(np.clip((a - lo_) / (hi_ - lo_), 0, 1)), 0, 1); continue
         ranges[name] = rng(a); q[name] = q8(a, *ranges[name])
     packs = {}
     for pk, names in PACKS.items():
@@ -389,8 +422,11 @@ def step_job(args):
 
 # ------------------------------------------------------------------------------------------------ climatology
 CLIM_NPZ = {"z500": ("ncep_hgt500_mon_ltm_1991_2020.npz", "hgt"), "t850": ("ncep_t850_mon_ltm_1991_2020.npz", "t850"),
-            "t2m": ("ncep_t2m_6h_ltm_1991_2020.npz", "t2m")}
-CLIM_UNITS = {"z500": "m", "t850": "C", "t2m": "F"}
+            "t2m": ("ncep_t2m_6h_ltm_1991_2020.npz", "t2m"), "pr": ("precip_mon_ltm_1991_2020.npz", "pr"),
+            "pw": ("ncep_pw_mon_ltm_1991_2020.npz", "pw")}
+CLIM_UNITS = {"z500": "m", "t850": "C", "t2m": "F", "pr": "mm/day", "pw": "in"}
+CLIM_SOURCE = {"pr": "PRISM 1991-2020 normals (US, 4 km) + CPC Global Unified Gauge 1991-2020 (land, 0.5 deg) + GPCP v2.3 1991-2020 (ocean, 2.5 deg); "
+                     "built by clim/src/build_precip_clim.py"}
 def _clim_src(fn):
     return next(p for p in (os.environ.get("WX_CLIM_DIR", ""), os.path.join(HERE, "clim"), "/workspace/wx-models-site/fast_deploy/clim")
                 if p and os.path.exists(os.path.join(p, fn)))
@@ -404,6 +440,8 @@ def clim_static(m, out, LA, LO, var="z500", oro_m=None):
     fn, key = CLIM_NPZ[var]; z = np.load(os.path.join(_clim_src(fn), fn)); h, cl, co = z[key].astype("f4"), z["lat"], z["lon"]
     pts = np.stack([np.asarray(LA, float), np.asarray(LO, float) % 360], -1)
     wrap = co[-1] - co[0] > 350
+    if not wrap:   # regional source (precip): hold edge values outside it instead of extrapolating
+        pts[..., 0] = np.clip(pts[..., 0], cl.min(), cl.max()); pts[..., 1] = np.clip(pts[..., 1], co.min(), co.max())
     def it(f):
         if wrap: f = np.concatenate([f, f[:, :1]], 1); xs = np.append(co, co[0] + 360.0)
         else: xs = co
@@ -418,6 +456,9 @@ def clim_static(m, out, LA, LO, var="z500", oro_m=None):
                 c = it(h[(mon == k + 1) & (hr == hh)].mean(0))
                 if zfix is not None: c = c + zfix
                 slots.append(c * 1.8 + 32)
+    elif var == "pw":   # moved to model terrain with a 2.3 km water-vapor scale height (as the old site's PW anomaly)
+        zf = 1.0 if oro_m is None else np.exp(-(oro_m - it(z["zs"])) / 2300.0)
+        slots = [it(h[k]) * zf for k in range(12)]
     else: slots = [it(h[k]) for k in range(12)]
     files, ranges = [], []
     for k, a in enumerate(slots):
@@ -426,7 +467,7 @@ def clim_static(m, out, LA, LO, var="z500", oro_m=None):
         rgb = np.zeros(a.shape + (3,), np.uint8); rgb[..., 0] = q >> 8; rgb[..., 1] = q & 255
         f_ = f"static/clim_{var}_{m}_{k:02d}.png"; Image.fromarray(rgb, "RGB").save(f"{out}/{f_}", optimize=True)
         files.append(f_); ranges.append([lo, hi])
-    d = dict(files=files, ranges=ranges, units=CLIM_UNITS[var], source="NCEP/NCAR Reanalysis 1 1991-2020 (NOAA PSL)")
+    d = dict(files=files, ranges=ranges, units=CLIM_UNITS[var], source=CLIM_SOURCE.get(var, "NCEP/NCAR Reanalysis 1 1991-2020 (NOAA PSL)"))
     if var == "t2m": d["hours"] = [0, 6, 12, 18]
     return d
 
@@ -657,6 +698,33 @@ def static(m, out, views_only=None):
     DS_C = ["#5c3310", "#7a4a1d", "#94622e", "#ad7c43", "#c4975e", "#d6b07c", "#e4c89c", "#efdcbf", "#f6ece0", "#f4f5f7",
             "#e3eefa", "#c6dbef", "#9ecae1", "#6baed6", "#4292c6", "#2171b5", "#3a4fb0", "#5b2a9c", "#3d0f6b"]
     CM["dsnod"] = HS.cmap(DS_C, DS_C[0], DS_C[-1])
+    PA_L = [-4, -3, -2, -1.5, -1, -0.5, -0.25, -0.1, 0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4]
+    PA_C = ["#543005", "#7f4a10", "#a6611a", "#c58a3c", "#dfc27d", "#ecdcb6", "#f6efe0", "#f5f5f5", "#e3f2e1", "#c7e9c0", "#a1d99b", "#74c476", "#41ab5d", "#238b45", "#005a32"]
+    PP_L = [0, 10, 25, 50, 75, 90, 110, 125, 150, 200, 300, 400]
+    PP_C = ["#7f4a10", "#a6611a", "#c58a3c", "#dfc27d", "#f1e3c0", "#f5f5f5", "#c7e9c0", "#a1d99b", "#41ab5d", "#1f78b4", "#3a4fb0"]
+    CM.update(qpfa=HS.cmap(PA_C, "#3d2004", "#00391f"), qpfpct=HS.cmap(PP_C, PP_C[0], "#5b2a9c"))
+    T5_L = list(range(-50, 1, 1)); T3_L = list(range(-70, -19, 1)); W8_L = list(range(10, 91, 5)); TH_L = list(range(498, 601, 3)); SLP_L = list(range(960, 1051, 2))
+    PW_L = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.75, 0.9, 1.0, 1.25, 1.5, 1.75, 2.0, 2.5]; PWA_L = [-1.2, -1, -0.8, -0.6, -0.4, -0.2, -0.1, 0.1, 0.2, 0.4, 0.6, 0.8, 1, 1.2]
+    PT_L = []; PT_C = []
+    PT_ANCH = [["#c7e9c0", "#a1d99b", "#74c476", "#41ab5d", "#238b45", "#f2e34b", "#f4a43a", "#e2462f"],     # rain
+               ["#deebf7", "#c6dbef", "#9ecae1", "#6baed6", "#4292c6", "#2171b5", "#08519c", "#08306b"],     # snow
+               ["#fde0ef", "#fbb4d9", "#f78ac4", "#f064b0", "#de3a9a", "#c51b7d", "#9b1563", "#6d0f46"],     # sleet / mix
+               ["#efe1f6", "#dcc0ee", "#c49de3", "#a97bd6", "#8e59c8", "#7438b5", "#5a1f9a", "#3f0d73"]]     # freezing rain
+    for t_ in range(4):
+        for b_ in range(8): PT_L.append(t_ * 16 + b_ + 0.5); PT_C.append(PT_ANCH[t_][b_])
+        if t_ < 3: PT_L.append(t_ * 16 + 8.5); PT_C.append("#f4f5f7")
+    PT_L.append(3 * 16 + 8.5)
+    PT_L = sorted(set(PT_L)); PT_C = PT_C[:len(PT_L) - 1]
+    CM.update(t500w=M.ramp(T5_L, [(-50, "#2b0f52"), (-40, "#3b4cc0"), (-30, "#6baed6"), (-20, "#c6dbef"), (-12, "#fdd49e"), (-5, "#fc8d59"), (0, "#b30000")]),
+              t300w=M.ramp(T3_L, [(-70, "#2b0f52"), (-60, "#3b4cc0"), (-50, "#6baed6"), (-42, "#c6dbef"), (-35, "#fdd49e"), (-28, "#fc8d59"), (-20, "#b30000")]),
+              w850=M.ramp(W8_L, [(10, "#e8f1fb"), (25, "#8fbfe8"), (40, "#3b82d1"), (55, "#f2e34b"), (70, "#e2462f"), (90, "#8c1450")]),
+              thick=M.ramp(TH_L, [(498, "#2b0f52"), (516, "#3b4cc0"), (528, "#6baed6"), (540, "#e8f1fb"), (552, "#fdd49e"), (570, "#fc8d59"), (600, "#b30000")]),
+              slp=M.ramp(SLP_L, [(960, "#5b2a9c"), (980, "#3b82d1"), (1000, "#c6dbef"), (1012, "#f4f5f7"), (1024, "#fdd49e"), (1036, "#fc8d59"), (1050, "#b30000")]),
+              pw=M.ramp(PW_L, [(0.1, "#f6efe0"), (0.4, "#c7e9c0"), (0.75, "#41ab5d"), (1.0, "#2171b5"), (1.5, "#7438b5"), (2.5, "#c51b7d")]),
+              pwa=HS.cmap(["#7f4a10", "#a6611a", "#c58a3c", "#dfc27d", "#ecdcb6", "#f6efe0", "#f5f5f5", "#e3f2e1", "#c7e9c0", "#74c476", "#238b45", "#2171b5", "#3a4fb0"],
+                          "#543005", "#5b2a9c"),
+              ptype=HS.cmap(PT_C, PT_C[0], PT_C[-1]))
+    CM.update(d2m=CM["t2m"], feels=CM["t2m"], gustmax=CM["gust10"], t925w=CM["t850"], t850w=CM["t850"], t700w=CM["t700"])
     prods = {
         "t2m": dict(title="2 m Temperature", fields=["t2m"], key="Temp (\u00b0F)", ticks=HS.TEMP_TICKS, **table(HS.TEMP_LEVELS, CM["t2m"], "both"),
                     freeze=32, extra="32\u00b0F line dashed  \u00b7  {lo} to {hi}\u00b0F in view", pct=[0.5, 99.5]),
@@ -765,6 +833,63 @@ def static(m, out, views_only=None):
                       ticks=list(range(-15, 16, 3)), tickfmt=True, **table(T8A_L, CM["t850a"], "both"),
                       extra="vs 1991-2020 NCEP/NCAR monthly normal  \u00b7  {lo} to {hi}\u00b0C in view", pct=[0.5, 99.5], towns="none",
                       only=("hrrr", "rrfs", "gfs", "ifs", "aifs")),
+        # 10-30 (Benjamin 1:05 PM): precipitation anomaly vs 1991-2020 normals for the same days (see CLIM_SOURCE["pr"])
+        "qpfa": dict(title="Precipitation Anomaly", fields=["apcp"], fill="panom", anom="pr", clim="pr", key="Departure from normal (in)",
+                     ticks=[-3, -2, -1, -0.5, -0.25, 0.25, 0.5, 1, 2, 3], tickfmt=True, **table(PA_L, CM["qpfa"], "both"),
+                     extra="precip since the run started minus the 1991-2020 normal for those days  \u00b7  {lo} to {hi} in in view",
+                     pct=[0.5, 99.5], dec=2, fmt="in2", towns="names", only=("hrrr", "rrfs", "gfs", "ifs", "aifs", "eps", "aens")),
+        "qpfpct": dict(title="Precipitation, Percent of Normal", fields=["apcp"], fill="ppct", anom="pr", clim="pr", key="Percent of normal (%)",
+                       ticks=[0, 25, 50, 75, 100, 150, 200, 300, 400], tickfmt=True, **table(PP_L, CM["qpfpct"], "max"),
+                       extra="precip since the run started as a share of the 1991-2020 normal for those days (from 48 h on; normal floored at 0.05 in)  \u00b7  up to {hi}% in view",
+                       pct=[0.5, 99.5], towns="names", only=("hrrr", "rrfs", "gfs", "ifs", "aifs", "eps", "aens")),
+        # 10-30 parity with the old site's model menus (global models; HRRR/RRFS get them too where the fields exist)
+        "d2m": dict(title="2 m Dewpoint", fields=["d2m"], key="Dewpoint (\u00b0F)", ticks=HS.TEMP_TICKS, **table(HS.TEMP_LEVELS, CM["t2m"], "both"),
+                    extra="{lo} to {hi}\u00b0F in view", pct=[0.5, 99.5], only=("hrrr", "rrfs", "gfs", "ifs", "aifs")),
+        "feels": dict(title="Feels-Like Temperature", fields=["t2m", "d2m", "u10", "v10"], fill="feels", key="Feels like (\u00b0F)", ticks=HS.TEMP_TICKS,
+                      **table(HS.TEMP_LEVELS, CM["t2m"], "both"), freeze=32,
+                      extra="wind chill at 50\u00b0F and below, heat index at 80\u00b0F and above (NWS formulas)  \u00b7  {lo} to {hi}\u00b0F in view", pct=[0.5, 99.5],
+                      only=("hrrr", "rrfs", "gfs", "ifs", "aifs")),
+        "gustmax": dict(title="Peak Wind Gust So Far", fields=["gust"], window=9999, sofar=True, wmax=True, wfield="gust", fill="window", key="Gust (mph)",
+                        ticks=HS.WIND_TICKS, **table(HS.WIND_LEVELS, CM["gust10"], "max"),
+                        extra="highest gust at any hour since the run started  \u00b7  up to {hi} mph in view", pct=[1, 99.9], only=("hrrr", "rrfs", "gfs", "ifs")),
+        "t925w": dict(title="925 mb Temperature + Wind", fields=["t925", "u925", "v925"], fill="t925", key="925 mb temp (\u00b0C)", ticks=HS.T850_TICKS, tickfmt=True,
+                      **table(HS.T850_LEVELS, CM["t850"], "both"), freeze=0, barbs=dict(u="u925", v="v925", color=HS.BARB_COLOR, length=HS.BARB_LENGTH, lw=HS.BARB_LW),
+                      extra="0\u00b0C line dashed  \u00b7  barbs in kt  \u00b7  {lo} to {hi}\u00b0C in view", pct=[0.5, 99.5], towns="none", only=("hrrr", "rrfs", "gfs", "ifs", "aifs")),
+        "t850w": dict(title="850 mb Temperature + Wind", fields=["t850", "u850", "v850"], fill="t850", key="850 mb temp (\u00b0C)", ticks=HS.T850_TICKS, tickfmt=True,
+                      **table(HS.T850_LEVELS, CM["t850"], "both"), freeze=0, barbs=dict(u="u850", v="v850", color=HS.BARB_COLOR, length=HS.BARB_LENGTH, lw=HS.BARB_LW),
+                      extra="0\u00b0C line dashed  \u00b7  barbs in kt  \u00b7  {lo} to {hi}\u00b0C in view", pct=[0.5, 99.5], towns="none", only=("hrrr", "rrfs", "gfs", "ifs", "aifs")),
+        "t700w": dict(title="700 mb Temperature + Wind", fields=["t700", "u700", "v700"], fill="t700", key="700 mb temp (\u00b0C)", ticks=HS.T850_TICKS, tickfmt=True,
+                      **table(HS.T850_LEVELS, CM["t700"], "both"), freeze=0, barbs=dict(u="u700", v="v700", color=HS.BARB_COLOR, length=HS.BARB_LENGTH, lw=HS.BARB_LW),
+                      extra="0\u00b0C line dashed  \u00b7  barbs in kt  \u00b7  {lo} to {hi}\u00b0C in view", pct=[0.5, 99.5], towns="none", only=("hrrr", "rrfs", "gfs", "ifs", "aifs")),
+        "t500w": dict(title="500 mb Temperature + Wind", fields=["t500", "u500", "v500"], fill="t500", key="500 mb temp (\u00b0C)", ticks=list(range(-50, 1, 5)), tickfmt=True,
+                      **table(T5_L, CM["t500w"], "both"), barbs=dict(u="u500", v="v500", color=HS.BARB_COLOR, length=HS.BARB_LENGTH, lw=HS.BARB_LW),
+                      extra="barbs in kt  \u00b7  {lo} to {hi}\u00b0C in view", pct=[0.5, 99.5], towns="none", only=("hrrr", "rrfs", "gfs", "ifs", "aifs")),
+        "t300w": dict(title="300 mb Temperature + Wind", fields=["t300", "u300", "v300"], fill="t300", key="300 mb temp (\u00b0C)", ticks=list(range(-70, -19, 5)), tickfmt=True,
+                      **table(T3_L, CM["t300w"], "both"), barbs=dict(u="u300", v="v300", color=HS.BARB_COLOR, length=HS.BARB_LENGTH, lw=HS.BARB_LW),
+                      extra="barbs in kt  \u00b7  {lo} to {hi}\u00b0C in view", pct=[0.5, 99.5], towns="none", only=("hrrr", "rrfs", "gfs", "ifs", "aifs")),
+        "w850": dict(title="850 mb Wind", fields=["u850", "v850"], fill="wspd", wind=["u850", "v850"], spd_mult=1.0, key="Wind (kt)", ticks=[10, 20, 30, 40, 50, 60, 70, 80],
+                     tickfmt=True, **table(W8_L, CM["w850"], "max"), barbs=dict(u="u850", v="v850", color=HS.BARB_COLOR, length=HS.BARB_LENGTH, lw=HS.BARB_LW),
+                     extra="barbs in kt  \u00b7  up to {hi} kt in view", pct=[1, 99.9], towns="none", only=("hrrr", "rrfs", "gfs", "ifs", "aifs")),
+        "thick": dict(title="1000-500 mb Thickness + MSLP", fields=["z500", "z1000", "mslp"], fill="thick", key="Thickness (dam)", ticks=list(range(498, 601, 12)), tickfmt=True,
+                      **table(TH_L, CM["thick"], "both"), freeze=540,
+                      isobars=dict(field="mslp", every=4, sigma=6.0 if m == "hrrr" else 1.0, color=HS.ISOBAR_COLOR, lw=HS.ISOBAR_LW, halo=HS.ISOBAR_HALO),
+                      extra="540 dam line dashed (rain/snow rule of thumb)  \u00b7  isobars every 4 mb  \u00b7  {lo} to {hi} dam in view", pct=[0.5, 99.5], towns="none",
+                      only=("hrrr", "rrfs", "gfs", "ifs", "aifs")),
+        "slp": dict(title="Sea-Level Pressure", fields=["mslp"], key="MSLP (mb)", ticks=list(range(960, 1051, 10)), tickfmt=True, **table(SLP_L, CM["slp"], "both"),
+                    isobars=dict(field="mslp", every=4, sigma=6.0 if m == "hrrr" else 1.0, color=HS.ISOBAR_COLOR, lw=HS.ISOBAR_LW, halo=HS.ISOBAR_HALO), hl=True,
+                    extra="isobars every 4 mb  \u00b7  H / L = high and low centers  \u00b7  {lo} to {hi} mb in view", pct=[0.5, 99.5], towns="none",
+                    only=("hrrr", "rrfs", "gfs", "ifs", "aifs", "eps", "aens")),
+        "pw": dict(title="Precipitable Water", fields=["pw"], key="PW (in)", ticks=[0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 2.5], tickfmt=True, **table(PW_L, CM["pw"], "max"),
+                   extra="water in the whole air column  \u00b7  up to {hi} in in view", pct=[0.5, 99.5], dec=2, fmt="in2", only=("hrrr", "rrfs", "gfs", "ifs", "aifs")),
+        "pwa": dict(title="Precipitable Water Anomaly", fields=["pw"], fill="anom", anom="pw", clim="pw", key="Anomaly (in)", ticks=[-1, -0.75, -0.5, -0.25, 0, 0.25, 0.5, 0.75, 1],
+                    tickfmt=True, **table(PWA_L, CM["pwa"], "both"),
+                    extra="vs 1991-2020 NCEP/NCAR monthly normal moved to model terrain  \u00b7  {lo} to {hi} in in view", pct=[0.5, 99.5], dec=2,
+                    only=("gfs", "ifs", "aifs")),
+        "ptype": dict(title="MSLP + Precipitation Type", fields=["prt", "mslp"], fill="prt", key="Precip type (light to heavy)",
+                      ticks=[4.5, 20.5, 36.5, 52.5], tickfmt=True, **table(PT_L, CM["ptype"], "neither"),
+                      isobars=dict(field="mslp", every=4, sigma=6.0 if m == "hrrr" else 1.0, color=HS.ISOBAR_COLOR, lw=HS.ISOBAR_LW, halo=HS.ISOBAR_HALO),
+                      extra="precip type and rate at the valid time  \u00b7  isobars every 4 mb", pct=[0, 100], towns="names", ticklabels=["Rain", "Snow", "Sleet / mix", "Freezing rain"],
+                      only=("hrrr", "rrfs", "gfs", "ifs")),
     }
     ALLP = {k: dict(v) for k, v in prods.items()}   # before the per-model filter (ensemble picks shared products below)
     for v in ALLP.values(): v.pop("only", None)
@@ -790,9 +915,9 @@ def static(m, out, views_only=None):
         prods["nmint"] = dict(title="12 h Low Temperature", fields=["mint"], key="Temp (\u00b0F)", ticks=HS.TEMP_TICKS, **table(HS.TEMP_LEVELS, CM["t2m"], "both"),
                               freeze=32, extra="NBM lowest temperature in the 12 h ending at the valid time  \u00b7  {lo} to {hi}\u00b0F in view", pct=[0.5, 99.5])
     if m in ("eps", "aens"):   # ensemble: mean versions of the shared products plus spread / probability maps
-        prods = {k: ALLP[k] for k in ("t2m", "t2ma", "z500anom", "t850a", "qpf", "qpf6", "qpf24", "qpf48", "mslpqpf", "gust10", "mucape")
+        prods = {k: ALLP[k] for k in ("t2m", "t2ma", "z500anom", "t850a", "qpf", "qpf6", "qpf24", "qpf48", "mslpqpf", "gust10", "mucape", "qpfa", "qpfpct")
                  if k not in ("mucape", "gust10") or m == "eps"}   # AIFS ENS open data has no gust or CAPE
-        for k in ("t850a", "qpf", "qpf6", "qpf24", "qpf48", "mslpqpf", "gust10", "mucape"):
+        for k in ("t850a", "qpf", "qpf6", "qpf24", "qpf48", "mslpqpf", "gust10", "mucape", "qpfa", "qpfpct"):
             if k in prods: prods[k]["title"] += " (ens. mean)"; prods[k]["extra"] = "mean of 50 members  \u00b7  " + prods[k]["extra"]
         if m == "eps": prods["gust10"]["extra"] = "mean of 50 members' max gust in the 6 h ending at the valid time  \u00b7  up to {hi} mph in view"
         if m == "eps": prods["mucape"]["extra"] = "mean of 50 members  \u00b7  blank under 100 J/kg  \u00b7  up to {hi} J/kg in view"
@@ -850,6 +975,7 @@ def static(m, out, views_only=None):
         if k in prods: prods[k]["under"] = "#f4f5f7"   # light below the first level so barbs and height lines stay readable
     if "mslpqpf" in prods: prods["mslpqpf"]["under"] = "#f4f5f7"   # light background so the dark isobars read (no blanking)
     if "ntstm" in prods: prods["ntstm"]["min_show"] = 10
+    if "ptype" in prods: prods["ptype"]["under"] = "#f4f5f7"
     for k in ("nqpf1", "nqpf6", "nsnow6"):
         if k in prods: prods[k]["min_show"] = prods[k]["levels"][0]
     for k in ("qpf", "snow", "refc", "qpf1", "qpf3", "qpf6", "qpf12", "qpf24", "qpf48", "snow1", "snow6", "ltng6"):
@@ -868,7 +994,7 @@ def static(m, out, views_only=None):
             cs.set_visible(False)
             if P.get("tickfmt"):
                 cb = HS.hbar(fig, cs, [], P["key"], ky); cb.set_ticks(P["ticks"])
-                cb.ax.set_xticklabels([f"{t:g}" for t in P["ticks"]], fontproperties=HS.font(700, 13))
+                cb.ax.set_xticklabels(P.get("ticklabels") or [f"{t:g}" for t in P["ticks"]], fontproperties=HS.font(700, 13))
             else: HS.hbar(fig, cs, tk0, P["key"], ky)
             HS.credit(fig, TM.CREDIT_NOAA if (pid == "t2m" and m in NOAA) else (M.credit(m) if m in M.MODELS else M.credit("gfs") if minfo(m).get("noaa") else TM.CREDIT.format(name=minfo(m)["name"])))
             sizes[f"key_{m}_{pid}_{vid}"] = save(fig, f"{out}/{fn}")
