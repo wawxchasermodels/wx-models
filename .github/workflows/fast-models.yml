@@ -1,0 +1,43 @@
+# Fast-style model data -> R2 bucket wx-models-data (read by the hidden fast page, Pages branch "fast" of wx-forecast-maps,
+# behind Cloudflare Access). Separate from the live site: this job never deploys Pages and never touches forecast-*.yml.
+# Every 15 min: newest HRRR (00/06/12/18Z, f01-f48) and GFS / ECMWF 0.25 / AIFS (00/12Z, out to 360 h) cycles, only the
+# hours that are out and not yet in R2 (progressive). Keeps the newest 2 runs per model. Static layers come from the box.
+name: fast-models
+on:
+  schedule:
+    - cron: "7,22,37,52 * * * *"
+  workflow_dispatch:
+    inputs:
+      models:
+        description: "comma list: hrrr,gfs,ifs,aifs"
+        default: "hrrr,gfs,ifs,aifs"
+      minutes:
+        description: "time budget per run"
+        default: "40"
+concurrency:
+  group: fast-models
+  cancel-in-progress: false
+permissions:
+  contents: read
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      WX_CACHE: ${{ github.workspace }}/.wx_cache
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: tools
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: tools/requirements.txt
+      - name: Python packages (same pins as the site) + boto3 for R2
+        run: pip install -r tools/requirements.txt boto3==1.43.122
+      - name: Publish new hours to R2
+        env:
+          CF_PAGES_KEY: ${{ secrets.CF_PAGES_KEY }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: python tools/fast/fast_cycle.py --models "${{ inputs.models || 'hrrr,gfs,ifs,aifs' }}" --minutes "${{ inputs.minutes || '40' }}" --workers 4
