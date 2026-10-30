@@ -850,7 +850,7 @@ function mgOpen(kind) {
   const o = document.createElement("div"); o.id = "mg";
   o.innerHTML = `<div class="mg-top"><b>${kind === "pass" ? "Pass Forecaster" : "Meteogram"}</b>
     <label>Model <select id="mgrun"></select></label>${kind === "pass" ? "" : `<label>Place <select id="mgtown"></select></label>`}
-    <button type="button" id="mgx">Close</button></div><div id="mgbody"><div class="mg-msg">Loading\u2026</div></div>`;
+    <a id="mgpage" href="meteograms" title="Full meteograms page (old-site layout: plumes, member grids, multi-run)"><span class="lg">Meteograms page</span><span class="sm">Full page</span></a><button type="button" id="mgx">Close</button></div><div id="mgbody"><div class="mg-msg">Loading\u2026</div></div>`;
   document.body.appendChild(o); $("mgx").onclick = mgClose;
   const runLabel = r => { const [m, c] = r.split("/"); return `${S.man.models[m].site} ${c.slice(8)}Z ${c.slice(4, 6)}-${c.slice(6, 8)}`; };
   const rs = mgRuns(); if (!rs.includes(MG.run)) rs.unshift(MG.run);
@@ -869,6 +869,7 @@ async function mgDraw() {
   if (!D.points.some(p => p.n === MG.town)) MG.town = (D.points.find(p => p.n === "Seattle") || D.points[0]).n;
   sel.innerHTML = [["Towns (A\u2013Z)", towns], ["Mountain passes (A\u2013Z)", passes]].filter(g => g[1].length).map(([l, a]) =>
     `<optgroup label="${l}">` + a.map(p => `<option${p.n === MG.town ? " selected" : ""}>${p.n}</option>`).join("") + "</optgroup>").join("");
+  const pg = $("mgpage"); if (pg) pg.href = `meteograms#s=${MG.run.split("/")[0]}&w=${encodeURIComponent(MG.town)}`;
   const T = mgTown(D, MG.town); body.innerHTML = `<canvas id="mgc"></canvas>`; mgChart($("mgc"), T, body);
 }
 function mgChart(cv, T, box) {
