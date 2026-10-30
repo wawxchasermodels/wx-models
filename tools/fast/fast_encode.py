@@ -133,6 +133,7 @@ class EpsReader:
             for name, (par, lev, kind_, sc, off) in ENS_EXTRA.items():
                 xs = [x for x in mem if x["param"] in (par if isinstance(par, tuple) else (par,)) and (lev is None or x.get("levelist") == lev)]
                 if len(xs) < 40: continue
+                if kind == "aens" and name in ("tp", "sf"): sc = sc / 1000.0   # AIFS ENS precip / snow water come in kg/m2 (mm), IFS ENS in m
                 try: st = np.stack([self._crop(decode(blob) * sc + off).astype(np.float32) for x, blob in ex.map(fetch, xs)])
                 except Exception as e: print(f"{kind} f{s:03d} {name}: {str(e)[:100]}", flush=True); continue
                 if name in ("tp", "sf"): st = np.clip(st, 0, None)
@@ -1132,7 +1133,8 @@ def static(m, out, views_only=None):
         if k in prods: prods[k]["min_show"] = v if v is not None else prods[k]["levels"][0]
     for k in ("w500", "w250"):
         if k in prods: prods[k]["under"] = "#f4f5f7"   # light below the first level so barbs and height lines stay readable
-    if "mslpqpf" in prods: prods["mslpqpf"]["under"] = "#f4f5f7"   # light background so the dark isobars read (no blanking)
+    if "mslpqpf" in prods: prods["mslpqpf"]["under"] = "#f4f5f7"
+    if "w850" in prods: prods["w850"]["under"] = "#f4f5f7"   # light below 10 kt (was black)   # light background so the dark isobars read (no blanking)
     if "ntstm" in prods: prods["ntstm"]["min_show"] = 10
     for k in ("waves", "wavemax"):   # land (swh -0.5) drawn in the basemap land tone
         if k in prods: prods[k]["under"] = "#ece8df"
