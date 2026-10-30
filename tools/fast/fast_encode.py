@@ -98,6 +98,13 @@ def extra_views(TM, ccrs):
     lcc = lambda lon: ccrs.LambertConformal(central_longitude=lon, central_latitude=47.3, standard_parallels=(45, 49))
     TM.VIEWS.setdefault("wwa", dict(label="Western Washington", size=(16, 15), proj=lcc(-122.6), ll=(-126.0, -119.2, 45.5, 49.15), box=(-127.5, -117.5, 44.5, 50.2)))
     TM.VIEWS.setdefault("ewa", dict(label="Eastern Washington", size=(16, 15), proj=lcc(-118.6), ll=(-122.0, -115.2, 45.45, 49.15), box=(-123.5, -113.5, 44.5, 50.2)))
+    # Benjamin 10-29-26 7:11 PM: fast site's "Pacific NW (high-res)" frame moved ~100 mi northwest, same zoom/size
+    # (live site unchanged: this only edits the in-memory copy used by the fast encoder). 100 mi = 161 km: +71 mi N, +71 mi W at 46 N.
+    if not TM.VIEWS["pnwhr"].get("fast_shift"):
+        dlat, dlon = 113.8 / 111.2, -113.8 / (111.2 * np.cos(np.radians(46.0)))
+        V0 = TM.VIEWS["pnwhr"]; l0, l1, a0, a1 = V0["ll"]; b0, b1, c0, c1 = V0["box"]
+        TM.VIEWS["pnwhr"] = dict(V0, proj=ccrs.LambertConformal(central_longitude=-120 + dlon, central_latitude=45.5 + dlat, standard_parallels=(42, 49)),
+                                 ll=(l0 + dlon, l1 + dlon, a0 + dlat, a1 + dlat), box=(b0 + dlon, b1 + dlon, c0 + dlat, c1 + dlat), fast_shift=True)
     TM.VIEWS.setdefault("passes", dict(label="Cascade Passes", size=(16, 15), proj=lcc(-121.2), ll=(-123.9, -118.5, 46.2, 49.05), box=(-125, -117.5, 45.4, 49.8)))
 WA_LIKE = ("wa", "wwa", "ewa", "passes")
 
@@ -163,6 +170,10 @@ def static(m, out, views_only=None):
     j0 = max(0, int(np.floor(allfj[ok].min())) - 3); j1 = min(nx_, int(np.ceil(allfj[ok].max())) + 4)
     for v_ in views.values():
         a_ = v_["cut_abs"]; i0, i1, j0, j1 = min(i0, a_[0]), max(i1, a_[1]), min(j0, a_[2]), max(j1, a_[3])
+    mp0 = f"{out}/manifest.json"
+    if os.path.exists(mp0):   # keep the published crop when it is a superset (runs already in R2 stay valid)
+        oc = json.load(open(mp0)).get("models", {}).get(m, {}).get("crop")
+        if oc: i0, i1, j0, j1 = min(i0, oc[0]), max(i1, oc[1]), min(j0, oc[2]), max(j1, oc[3]); print("crop kept/extended from", oc, "->", [i0, i1, j0, j1], flush=True)
     os.makedirs(f"{out}/static", exist_ok=True)
     for vid, (fi, fj, ang) in luts.items():
         np.stack([fi - i0, fj - j0, ang], -1).astype("<f4").tofile(f"{out}/static/lut_{m}_{vid}.bin")

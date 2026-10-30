@@ -23,7 +23,10 @@ async function boot() {
   const qr = Q.get("run"), qm = Q.get("model");
   S.run = all.includes(qr) ? qr : (all.find(r => qm && r.startsWith(qm + "/")) || all[0]);
   await loadRun(S.run);
-  fill($("run"), all.map(r => { const [m, c] = r.split("/"); return [r, `${S.man.models[m].site} ${c.slice(8)}Z ${c.slice(4, 6)}-${c.slice(6, 8)}`]; }), S.run);
+  // "Runs" menu (Benjamin 10-29 7:10 PM): every available run, grouped by model, newest first; picking one keeps the valid time
+  const runLabel = r => { const [m, c] = r.split("/"); return `${S.man.models[m].site} ${c.slice(8)}Z ${c.slice(4, 6)}-${c.slice(6, 8)}`; };
+  $("run").innerHTML = order.map(m => `<optgroup label="${S.man.models[m].site}">` +
+    all.filter(r => r.startsWith(m + "/")).map(r => `<option value="${r}"${r === S.run ? " selected" : ""}>${runLabel(r)}</option>`).join("") + "</optgroup>").join("");
   setLists();
   const f0 = Q.get("f"), steps = S.runs[S.run].steps; S.i = f0 ? Math.max(0, steps.findIndex(s => s.f == +f0)) : 0; $("step").value = S.i;
   $("run").onchange = async e => {   // keep the same valid time when switching runs/models (nearest step)
@@ -43,6 +46,7 @@ async function boot() {
   if (Q.get("bench")) bench();
 }
 async function loadRun(r) { if (!S.runs[r]) S.runs[r] = await (await fetch(`${DATA}runs/${r}/run.json`, { cache: "no-cache" })).json(); return S.runs[r]; }
+const SV = () => (S.man.static_v ? `?v=${S.man.static_v}` : "");   // cache-buster for static layers (they are cached 1 day)
 const MD = () => S.man.models[S.run.split("/")[0]];
 const PRODS = () => MD().products, VIEWS = () => MD().views;
 function setLists() {   // products this run carries (all their fields present), views this model has
@@ -63,10 +67,10 @@ async function viewStatic(vid) {
   if (S.statics[sk]) return S.statics[sk];
   const V = VIEWS()[vid];
   const p = (async () => {
-    const [lut, base] = await Promise.all([fetch(DATA + V.lut).then(r => r.arrayBuffer()).then(b => new Float32Array(b)),
-                                           img(DATA + `static/base_${vid}.png`)]);
+    const [lut, base] = await Promise.all([fetch(DATA + V.lut + SV()).then(r => r.arrayBuffer()).then(b => new Float32Array(b)),
+                                           img(DATA + `static/base_${vid}.png` + SV())]);
     // towns layer is not needed for the first paint: draw without it, redraw when it lands (10-29 first-map speedup)
-    const townsP = img(DATA + `static/towns_${vid}.png`).then(im => { obj.towns = im; if (S.view === vid && window.__drawn) draw(); return im; }, () => null);
+    const townsP = img(DATA + `static/towns_${vid}.png` + SV()).then(im => { obj.towns = im; if (S.view === vid && window.__drawn) draw(); return im; }, () => null);
     // per-pixel source index + weights, made once per view from the coarse LUT (bilinear in panel px)
     const [px, py, pw, ph] = V.panel, x0 = Math.round(px), y0 = Math.round(py), W = Math.round(px + pw) - x0, H = Math.round(py + ph) - y0;
     const { nx, ny, stride } = V, G = S.runs[S.run].grid, gnx = G.nx, gny = G.ny;
@@ -89,7 +93,7 @@ async function viewStatic(vid) {
   })();
   S.statics[sk] = p; return p;
 }
-const keyImg = {}; const getKey = (pid, vid) => { const u = DATA + PRODS()[pid].keys[vid]; return keyImg[u] || (keyImg[u] = img(u)); };
+const keyImg = {}; const getKey = (pid, vid) => { const u = DATA + PRODS()[pid].keys[vid] + SV(); return keyImg[u] || (keyImg[u] = img(u)); };
 
 // ---------------------------------------------------------------- data images
 function fieldURL(run, name, f) {

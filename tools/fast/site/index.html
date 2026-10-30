@@ -1,24 +1,30 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>WX Models fast maps (HRRR preview)</title>
+<title>WX Models fast maps (preview)</title>
 <link rel="preload" href="fonts/Montserrat-sub.woff2" as="font" type="font/woff2" crossorigin>
 <style>
 @font-face{font-family:Montserrat;src:url(fonts/Montserrat-sub.woff2) format("woff2"),url(fonts/Montserrat.ttf) format("truetype");font-weight:100 900}
 html,body{margin:0;background:#15171c;color:#f4f2ee;font:14px Montserrat,system-ui,sans-serif}
-#bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:8px 12px;background:#1d2027;border-bottom:1px solid #2c3039}
+/* 10-29 7:10 PM: whole map + controls fit the window, no scrolling (Benjamin: "make the zoom on the images less") */
+html,body{height:100%;overflow:hidden}
+body{display:flex;flex-direction:column;height:100vh;height:100dvh}
+#bar{flex:0 0 auto;display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:8px 12px;background:#1d2027;border-bottom:1px solid #2c3039}
 #bar select,#bar button{background:#262931;color:#f4f2ee;border:1px solid #7d828c;border-radius:6px;padding:4px 8px;font:inherit}
 #bar input[type=range]{flex:1;min-width:200px}
 #stat{color:#a7abb3;font-size:12px;min-width:260px}
-#wrap{max-width:1600px;margin:0 auto}
-#wrap{position:relative}
-canvas{display:block;width:100%;height:auto;touch-action:pan-y}
+#wrap{position:relative;flex:1 1 auto;min-height:0;display:flex;align-items:center;justify-content:center;padding:4px;box-sizing:border-box}
+canvas{display:block;width:auto;height:auto;max-width:100%;max-height:100%;touch-action:pan-y}
 #tip{position:absolute;pointer-events:none;background:#1d2027ee;color:#fff;border:1px solid #7d828c;border-radius:6px;padding:3px 8px;font-weight:700;font-size:14px;white-space:nowrap}
-@media (max-width:700px){#bar{gap:6px;padding:6px}#bar label{font-size:12px}#bar input[type=range]{min-width:100%;order:9;height:28px}#stat{display:none}#bar button{padding:6px 12px}}
-body.bare #bar{display:none} body.bare #wrap{max-width:none}
+@media (max-width:1500px){#stat{display:none}}
+@media (max-width:700px){#wrap{align-items:flex-start}}
+@media (max-width:700px),(max-height:500px){#bar{gap:6px;padding:6px}#bar label{font-size:12px}#bar select{max-width:42vw}#bar button{padding:5px 10px}#wrap{padding:2px}}
+@media (max-width:700px){#bar input[type=range]{min-width:100%;order:9;height:28px}}
+@media (max-height:500px) and (min-width:701px){#bar label{font-size:0}#bar label select{font-size:12px}#bar input[type=range]{min-width:120px}}
+body.bare #bar{display:none}
 </style></head>
 <body>
 <div id="bar">
-  <label>Run <select id="run"></select></label>
+  <label>Runs <select id="run" aria-label="Runs"></select></label>
   <label>Product <select id="prod"></select></label>
   <label>View <select id="view"></select></label>
   <button id="prev">&lsaquo;</button><button id="play">Play</button><button id="next">&rsaquo;</button>

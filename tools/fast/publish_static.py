@@ -13,6 +13,7 @@ man = json.load(open(f"{D}/manifest.json"))
 if not a.runs_from_local:
     try: man["runs"] = json.loads(s3.get_object(Bucket=BUCKET, Key="manifest.json")["Body"].read()).get("runs", {})
     except Exception: man["runs"] = {}
+import time; man["static_v"] = time.strftime("%Y%m%d%H%M%S", time.gmtime())   # viewer cache-buster for static/
 for m in man.get("models", {}): man.setdefault("runs", {}).setdefault(m, [])
 s3.put_object(Bucket=BUCKET, Key="manifest.json", Body=json.dumps(man).encode(), ContentType="application/json")
 print(f"static {len(fs)} files; manifest models {list(man['models'])} runs { {k: v for k, v in man['runs'].items()} }")
