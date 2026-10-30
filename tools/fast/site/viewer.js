@@ -188,6 +188,7 @@ async function productFields(run, pid, f) {
       else { const b = (await getField(run, fld, prev)).v, o = new Float32Array(a.length); for (let k = 0; k < a.length; k++) o[k] = Math.max(0, a[k] - b[k]); out.fill = o; }
     } else if (P.fill === "snowlvl") { const a = F.frz.v, o = new Float32Array(a.length); for (let k = 0; k < a.length; k++) o[k] = Math.max(0, a[k] - 1000); out.fill = o; }
     else out.fill = F[P.fill] ? F[P.fill].v : g.v;
+    if (P.lows || P.spag) out.ens = await fetch(`${DATA}runs/${run}/single/ens_f${String(f).padStart(3, "0")}.json`).then(r => r.ok ? r.json() : null, () => null);
     if (P.isobars) { const I = P.isobars, src = F[I.field || "mslp"].v, sc = I.scale || 1, a = new Float32Array(src.length);
       for (let k = 0; k < a.length; k++) a[k] = src[k] * sc; out.iso = blur(a, g.w, g.h, I.sigma); }
     return out;
@@ -304,6 +305,7 @@ async function render(lite) {
   }
   if (!lite && P.isobars) drawIsobars(ctx, st, D, P);
   if (!lite && P.barbs) drawBarbs(ctx, st, D, P, V);
+  if (!lite && (P.lows || P.spag)) drawEns(ctx, st, D, P, V);
   ctx.restore();
   // 4. towns (dots + names static) and live numbers
   const tmode = P.towns || "numbers";
@@ -352,7 +354,7 @@ function fmtVal(P, v) {   // temp_maps fmt_int / fmt_vis
   if (P.fmt === "vis") return v >= 7 ? "7+" : v < 3 ? v.toFixed(1) : v.toFixed(0);
   return String(Math.round(v));
 }
-const UNITS = { nqpf1: " in", nqpf6: " in", nsnow6: " in", ntstm: "%", nmaxt: "\u00b0F", nmint: "\u00b0F", dsnod: " in", qpf3: " in", qpf12: " in", qpf48: " in", snow1: " in", snow6: " in", gust6: " mph", ltng6: " /km\u00b2/5 min", qpf1: " in", qpf6: " in", qpf24: " in", mslpqpf: " in", t2ma: "\u00b0F", t850a: "\u00b0C", et2sd: "\u00b0F", ep32: "%", ez500: " m", w500: " kt", w250: " kt", z500anom: " m", mucape: " J/kg", sbcape: " J/kg", ltng: " /km\u00b2/5 min", ltgp: " in", t2m: "\u00b0F", gust10: " mph", aifswind: " mph", t850: "\u00b0C", t700: "\u00b0C", tcc: "%", vis: " mi", ir: "\u00b0C",
+const UNITS = { eqpf90: " in", esnow: " in", esnow90: " in", egust90: " mph", epcape: "%", elows: "%", spag: " m", nqpf1: " in", nqpf6: " in", nsnow6: " in", ntstm: "%", nmaxt: "\u00b0F", nmint: "\u00b0F", dsnod: " in", qpf3: " in", qpf12: " in", qpf48: " in", snow1: " in", snow6: " in", gust6: " mph", ltng6: " /km\u00b2/5 min", qpf1: " in", qpf6: " in", qpf24: " in", mslpqpf: " in", t2ma: "\u00b0F", t850a: "\u00b0C", et2sd: "\u00b0F", ep32: "%", ez500: " m", w500: " kt", w250: " kt", z500anom: " m", mucape: " J/kg", sbcape: " J/kg", ltng: " /km\u00b2/5 min", ltgp: " in", t2m: "\u00b0F", gust10: " mph", aifswind: " mph", t850: "\u00b0C", t700: "\u00b0C", tcc: "%", vis: " mi", ir: "\u00b0C",
                 refc: " dBZ", qpf: " in", snow: " in", frz: " ft", snowlvl: " ft" };
 // value under the cursor / tap (item 1) and swipe to step (item 6)
 function readout(ev) {
@@ -599,6 +601,49 @@ function barb(ctx, X, Y, wx, wy, sp, L) {
 }
 
 // ---------------------------------------------------------------- bench (headless): cold first frame, then scrubbing from cache
+
+// ---- Stage 4 extras (10-30): ensemble member lines / low centres are shipped as cropped-grid (row, col) points; map them
+// to canvas pixels by inverting the view's LUT (panel px -> grid) with a few Newton steps from the previous point.
+function gridFwd(V, lut, x, y) {   // panel px (relative to panel) -> [fi, fj], same bilinear as viewStatic
+  const { nx, ny, stride } = V, gx = (x + 0.5) / stride, gy = (y + 0.5) / stride;
+  const i0 = Math.max(0, Math.min(nx - 2, gx | 0)), j0 = Math.max(0, Math.min(ny - 2, gy | 0)), tx = gx - i0, ty = gy - j0;
+  const a = (j0 * nx + i0) * 3, b = a + 3, c = a + nx * 3, d = c + 3;
+  return [(lut[a] * (1 - tx) + lut[b] * tx) * (1 - ty) + (lut[c] * (1 - tx) + lut[d] * tx) * ty,
+          (lut[a + 1] * (1 - tx) + lut[b + 1] * tx) * (1 - ty) + (lut[c + 1] * (1 - tx) + lut[d + 1] * tx) * ty];
+}
+function gridInv(V, st, fi, fj, guess) {   // [fi, fj] -> panel px, or null when far outside the panel
+  const lut = st.lut; let x, y;
+  if (guess) [x, y] = guess;
+  else { let best = Infinity; for (let j = 0; j < V.ny; j++) for (let i = 0; i < V.nx; i++) { const q = (j * V.nx + i) * 3, d = (lut[q] - fi) ** 2 + (lut[q + 1] - fj) ** 2;
+           if (d < best) { best = d; x = i * V.stride; y = j * V.stride; } } }
+  for (let it = 0; it < 6; it++) {
+    const f0 = gridFwd(V, lut, x, y), fx = gridFwd(V, lut, x + 1, y), fy = gridFwd(V, lut, x, y + 1);
+    const a = fx[0] - f0[0], b = fy[0] - f0[0], c = fx[1] - f0[1], d = fy[1] - f0[1], det = a * d - b * c; if (!det) break;
+    const r0 = fi - f0[0], r1 = fj - f0[1], dx = (d * r0 - b * r1) / det, dy = (-c * r0 + a * r1) / det;
+    x += Math.max(-200, Math.min(200, dx)); y += Math.max(-200, Math.min(200, dy)); if (Math.abs(dx) + Math.abs(dy) < 0.05) break;
+  }
+  if (x < -300 || y < -300 || x > st.W + 300 || y > st.H + 300) return null;
+  return [x, y];
+}
+function drawEns(ctx, st, D, P, V) {
+  const E = D.ens; if (!E) return;
+  if (P.spag) {
+    for (const [L, col] of [["5520", "#2b6cd6"], ["5760", "#d63a2b"]]) {
+      ctx.strokeStyle = col; ctx.globalAlpha = 0.7; ctx.lineWidth = pt(0.9); ctx.lineJoin = "round"; ctx.beginPath();
+      for (const ln of E.spag[L] || []) { let g = null, on = false;
+        for (let k = 1; k + 1 < ln.length; k += 2) { const p = gridInv(V, st, ln[k] / 10, ln[k + 1] / 10, g);
+          if (!p) { on = false; g = null; continue; } g = p; const X = st.x0 + p[0], Y = st.y0 + p[1]; on ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); on = true; } }
+      ctx.stroke(); ctx.globalAlpha = 1;
+    }
+    const z = D.raw.z500 && D.raw.z500.v; if (z) { const n = st.W * st.H, vals = new Float32Array(n), zb = blur(z, D.w, D.h, 1.0); for (let k = 0; k < n; k++) vals[k] = sample(st, zb, k);
+      for (const L of [5520, 5760]) { const lines = contour(st, vals, L, 3); strokeLines(ctx, lines, "#ffffff", pt(3.4), null); strokeLines(ctx, lines, "#101114", pt(1.8), null); } }
+  }
+  if (P.lows) {
+    const col = mb => mb <= 970 ? "#4b0f6b" : mb <= 980 ? "#b3123c" : mb <= 990 ? "#e8692f" : mb <= 1000 ? "#f2c12e" : "#8a919c";
+    for (const [mem, fi, fj, mb] of E.lows) { const p = gridInv(V, st, fi, fj, null); if (!p || p[0] < 0 || p[1] < 0 || p[0] > st.W || p[1] > st.H) continue;
+      ctx.beginPath(); ctx.arc(st.x0 + p[0], st.y0 + p[1], pt(3.2), 0, 2 * Math.PI); ctx.fillStyle = col(mb); ctx.fill(); ctx.lineWidth = pt(0.8); ctx.strokeStyle = "#ffffff"; ctx.stroke(); }
+  }
+}
 // ---- Stage 5 (10-30): meteograms + Pass Forecaster. The runner samples every town / pass slot at full precision each step
 // (single/pts_fFFF.json, order = run.json "points"), so a meteogram is ~1 small JSON per step, never map images.
 const MG = { open: null, town: Q.get("town") || "Seattle", run: null, cache: new Map() };

@@ -82,39 +82,94 @@ NBM_FIELDS = {
     "nq6":  (_nbm("APCP:surface", lambda s: f"{s - 6}-{s} hour acc fcst", lambda v: np.clip(v, 0, None) / 25.4, every=6), "in"),
     "ns6":  (_nbm("ASNOW:surface", lambda s: f"{s - 6}-{s} hour acc fcst", lambda v: np.clip(v, 0, None) / 0.0254, every=6), "in"),
     "tstm": (_nbm("TSTM:surface", lambda s: f"{s - 3}-{s} hour acc fcst", lambda v: np.clip(v, 0, 100), every=3, extra="probability forecast"), "%"),
-    "maxt": (_nbm("TMAX:2 m above ground", lambda s: f"{s - 12}-{s} hour max fcst", lambda k: (k - 273.15) * 1.8 + 32, every=12), "F"),
-    "mint": (_nbm("TMIN:2 m above ground", lambda s: f"{s - 12}-{s} hour min fcst", lambda k: (k - 273.15) * 1.8 + 32, every=12), "F"),
+    "maxt": (_nbm("TMAX:2 m above ground", lambda s: f"{s - 12}-{s} hour max fcst", lambda k: (k - 273.15) * 1.8 + 32), "F"),   # 12 h periods end 00Z (max) / 12Z (min)
+    "mint": (_nbm("TMIN:2 m above ground", lambda s: f"{s - 12}-{s} hour min fcst", lambda k: (k - 273.15) * 1.8 + 32), "F"),   # 12 h periods end 00Z (max) / 12Z (min)
 }
 
 class _NoSt:
     def field(self, *a, **k): raise StopIteration
+# Stage 4 extras (10-30): per-step member params beyond 2 m temp + 500 mb height. name: (param, level, kind, scale, offset)
+#   kind "ms": mean (+ sd); "p90": mean + 90th percentile; "pc": mean + chance >= threshold. Memory: one param's member stack at a time.
+ENS_EXTRA = {"tp": ("tp", None, "p90", 39.3701, 0), "sf": ("sf", None, "p90", 393.701, 0), "10fg": ("10fg", None, "p90", 2.23694, 0),
+             "msl": ("msl", None, "ms", 0.01, 0), "t850": ("t", "850", "ms", 1.0, -273.15), "mucape": ("mucape", None, "pc", 1.0, 0)}
+SPAG_LEVELS = (5520, 5760)   # 552 / 576 dam member lines (trough / ridge)
 class EpsReader:
-    """ECMWF ENS step: downloads the 50 member messages of 2t and 500 mb gh (HTTP ranges, ~36 MB) and keeps running sums only
-    (memory stays at a few full grids). f() returns the ensemble mean like menu_maps.Reader.f; extra() the spread/probability."""
+    """ECMWF ENS / AIFS ENS step: downloads the 50 member messages (HTTP ranges) and keeps running sums for 2 m temp and 500 mb
+    height, plus (stage 4 extras) precip / snow / gust mean + 90th percentile, MSLP and 850 mb temp means, MUCAPE chance >= 500,
+    member low centres and 500 mb member lines (spaghetti) on the model's cropped grid. f() = ensemble mean, extra() = the rest."""
     st = _NoSt()
-    def __init__(self, c, s, kind="eps"):
+    def __init__(self, c, s, kind="eps", crop=None):
         import temp_maps as TM, eccodes as ec
         from concurrent.futures import ThreadPoolExecutor
-        self.c, self.s, self.bytes = c, s, 0
+        self.c, self.s, self.bytes, self.crop = c, s, 0, crop
         url, zp, zs = ENS_SRC[kind]; base = url.format(d=f"{c:%Y%m%d}", h=c.hour, s=s)
         idx = [json.loads(l) for l in TM.get(base + ".index").decode().splitlines()]
-        want = [x for x in idx if x.get("type") in ("pf", "cf") and (x["param"] == "2t" or (x["param"] == zp and x.get("levelist") == "500"))]
-        acc = {}
-        def fetch(x): return ("gh" if x["param"] == zp else x["param"]), TM.get(base + ".grib2", (x["_offset"], x["_offset"] + x["_length"] - 1))
+        mem = [x for x in idx if x.get("type") in ("pf", "cf")]
+        def fetch(x): return x, TM.get(base + ".grib2", (x["_offset"], x["_offset"] + x["_length"] - 1))
+        def decode(blob):
+            self.bytes += len(blob); g = ec.codes_new_from_message(blob)
+            ni, nj = ec.codes_get(g, "Ni"), ec.codes_get(g, "Nj")
+            la0, lo0, d = ec.codes_get(g, "latitudeOfFirstGridPointInDegrees"), ec.codes_get(g, "longitudeOfFirstGridPointInDegrees"), ec.codes_get(g, "iDirectionIncrementInDegrees")
+            v = ec.codes_get_values(g).reshape(nj, ni).astype(np.float64); ec.codes_release(g)
+            if not hasattr(self, "lat"):
+                self.lat = la0 - d * np.arange(nj); lon = (lo0 + d * np.arange(ni) + 180) % 360 - 180; self.o = np.argsort(lon); self.lon = lon[self.o]
+            return v[:, self.o]
+        acc = {}; self.X = {}
+        core = [x for x in mem if x["param"] == "2t" or (x["param"] == zp and x.get("levelist") == "500")]
+        gh_members = []
         with ThreadPoolExecutor(8) as ex:
-            for par, blob in ex.map(fetch, want):
-                self.bytes += len(blob); g = ec.codes_new_from_message(blob)
-                ni, nj = ec.codes_get(g, "Ni"), ec.codes_get(g, "Nj")
-                la0, lo0, d = ec.codes_get(g, "latitudeOfFirstGridPointInDegrees"), ec.codes_get(g, "longitudeOfFirstGridPointInDegrees"), ec.codes_get(g, "iDirectionIncrementInDegrees")
-                v = ec.codes_get_values(g).reshape(nj, ni).astype(np.float64); ec.codes_release(g)
-                if not hasattr(self, "lat"):
-                    self.lat = la0 - d * np.arange(nj); lon = (lo0 + d * np.arange(ni) + 180) % 360 - 180; self.o = np.argsort(lon); self.lon = lon[self.o]
-                v = v[:, self.o] * (zs if par == "gh" else 1.0)
+            for x, blob in ex.map(fetch, core):
+                par = "gh" if x["param"] == zp else x["param"]; v = decode(blob) * (zs if par == "gh" else 1.0)
                 a = acc.setdefault(par, dict(n=0, s=np.zeros_like(v), q=np.zeros_like(v), c=np.zeros_like(v)))
                 a["n"] += 1; a["s"] += v; a["q"] += v * v
                 if par == "2t": a["c"] += v <= 273.15
-        if len(acc) < 2 or min(a["n"] for a in acc.values()) < 40: raise RuntimeError(f"eps f{s}: only {[(k, a['n']) for k, a in acc.items()]} members")
-        self.n = acc["2t"]["n"]; self.A = acc
+                if par == "gh" and crop: gh_members.append(self._crop(v).astype(np.float32))
+            if len(acc) < 2 or min(a["n"] for a in acc.values()) < 40: raise RuntimeError(f"eps f{s}: only {[(k, a['n']) for k, a in acc.items()]} members")
+            self.n = acc["2t"]["n"]; self.A = acc
+            if not crop: return
+            # extras: one param at a time (cropped member stacks, float32)
+            for name, (par, lev, kind_, sc, off) in ENS_EXTRA.items():
+                xs = [x for x in mem if x["param"] == par and (lev is None or x.get("levelist") == lev)]
+                if len(xs) < 40: continue
+                try: st = np.stack([self._crop(decode(blob) * sc + off).astype(np.float32) for x, blob in ex.map(fetch, xs)])
+                except Exception as e: print(f"{kind} f{s:03d} {name}: {str(e)[:100]}", flush=True); continue
+                if name in ("tp", "sf"): st = np.clip(st, 0, None)
+                self.X[name] = st.mean(0)
+                if kind_ == "p90": self.X[name + "90"] = np.percentile(st, 90, axis=0)
+                if kind_ == "pc": self.X[name + "p"] = (st >= 500).mean(0) * 100
+                if name == "msl": self.lows, self.X["lowp"] = self._lows(st)
+                del st
+        if gh_members: self.spag = self._spag(np.stack(gh_members)); del gh_members
+    def _crop(self, v):
+        i0, i1, j0, j1 = self.crop; return roll_ll(v)[i0:i1, j0:j1]
+    def _lows(self, st):
+        """Member low centres (local MSLP minima at least 2 mb below their 5-deg surroundings) + share of members with a centre
+        within ~300 km of each point (%). Positions are cropped-grid (row, col) like the town slots."""
+        from scipy.ndimage import gaussian_filter, minimum_filter, uniform_filter, binary_dilation
+        lows, dens = [], np.zeros(st.shape[1:], np.float32)
+        yy, xx = np.mgrid[-12:13, -24:25]; disk = (yy / 12.0) ** 2 + (xx / 24.0) ** 2 <= 1   # 3 deg lat x 6 deg lon (~300 km at 50N)
+        for k, p in enumerate(st):
+            g = gaussian_filter(p.astype(float), 1.5)
+            mn = (g == minimum_filter(g, size=21, mode="nearest")) & (uniform_filter(g, size=21, mode="nearest") - g >= 2.0) & (g < 1008)
+            mn[:3] = mn[-3:] = False; mn[:, :3] = mn[:, -3:] = False
+            r, c = np.nonzero(mn)
+            for i, j in zip(r, c): lows.append([int(k), int(i), int(j), round(float(p[i, j]), 1)])
+            if len(r): dens += binary_dilation(mn, structure=disk)
+        return lows, dens / len(st) * 100
+    def _spag(self, gh):
+        """500 mb member lines at SPAG_LEVELS, on a 2x coarser grid, simplified; vertices as (row, col) * 10 integers."""
+        import contourpy
+        from scipy.ndimage import gaussian_filter
+        out = {str(L): [] for L in SPAG_LEVELS}
+        for k, z in enumerate(gh):
+            zc = gaussian_filter(z.astype(float), 1.0)[::2, ::2]
+            gen = contourpy.contour_generator(z=zc, line_type="Separate")
+            for L in SPAG_LEVELS:
+                for ln in gen.lines(L):
+                    ln = _rdp(ln, 0.35)
+                    if len(ln) < 3: continue
+                    out[str(L)].append([k] + [int(round(v * 20)) for xy in ln for v in (xy[1], xy[0])])   # (row, col) on the full grid * 10
+        return out
     def _mean(self, p): a = self.A[p]; return a["s"] / a["n"]
     def _sd(self, p): a = self.A[p]; mu = a["s"] / a["n"]; return np.sqrt(np.clip(a["q"] / a["n"] - mu * mu, 0, None))
     def f(self, name):
@@ -126,10 +181,31 @@ class EpsReader:
         if name == "p32": return self.A["2t"]["c"] / self.n * 100.0
         if name == "z5sd": return self._sd("gh")
         raise KeyError(name)
+    def cropped(self, name):   # already on the cropped grid (no roll / crop in step_job)
+        if name not in self.X: raise KeyError(name)
+        return self.X[name]
+def _rdp(P, eps):
+    """Ramer-Douglas-Peucker line simplification (iterative)."""
+    P = np.asarray(P); n = len(P)
+    if n < 3: return P
+    keep = np.zeros(n, bool); keep[0] = keep[-1] = True; stack = [(0, n - 1)]
+    while stack:
+        a, b = stack.pop()
+        if b <= a + 1: continue
+        d = P[b] - P[a]; L = np.hypot(*d) or 1e-9; seg = P[a + 1:b] - P[a]
+        dist = np.abs(seg[:, 0] * d[1] - seg[:, 1] * d[0]) / L; k = int(np.argmax(dist))
+        if dist[k] > eps: keep[a + 1 + k] = True; stack += [(a, a + 1 + k), (a + 1 + k, b)]
+    return P[keep]
 def _ens(name):
     def g(R, m):
         if m not in ("eps", "aens"): raise KeyError(name)
         return R.extra(name)
+    return g
+class Cropped(np.ndarray): pass   # marker: getter already returned the model's cropped grid
+def _ensc(src):
+    def g(R, m):
+        if m not in ("eps", "aens"): raise KeyError(src)
+        return np.asarray(R.cropped(src)).view(Cropped)
     return g
 
 def steps_for(m, hour):
@@ -229,11 +305,16 @@ FIELDS = {   # name: (getter, units)
     # ECMWF ENS (model "eps" only)
     "t2sd": (_ens("t2sd"), "F"), "p32": (_ens("p32"), "%"), "z5sd": (_ens("z5sd"), "m"),
 }
+# ensemble-only fields (stage 4 extras): means reuse the deterministic names so the shared products / meteograms work
+ENS_FIELDS = {"apcp": (_ensc("tp"), "in"), "apcp90": (_ensc("tp90"), "in"), "asnow": (_ensc("sf"), "in"), "asnow90": (_ensc("sf90"), "in"),
+              "gust": (_ensc("10fg"), "mph"), "gust90": (_ensc("10fg90"), "mph"), "mslp": (_ensc("msl"), "mb"), "t850": (_ensc("t850"), "C"),
+              "mucape": (_ensc("mucape"), "J/kg"), "pcape": (_ensc("mucapep"), "%"), "lowp": (_ensc("lowp"), "%")}
 # Packing (R2 write budget): fields used together share one RGB PNG (one channel each). A field not in a pack is its own
 # grayscale PNG. run.json "packs" maps field -> [file name, channel]; the viewer reads either layout.
 PACKS = {"wind": ("mslp", "u10", "v10"), "aloft": ("t850", "t700", "frz"), "accum": ("apcp", "asnow", "ltgp"),
          "conv": ("mucape", "sbcape", "ltng"), "sky": ("tcc", "vis", "ir"), "w500": ("u500", "v500", "z500"), "w250": ("u250", "v250", "z250"),
-         "e2t": ("t2m", "t2sd", "p32"), "e500": ("z500", "z5sd"),
+         "e2t": ("t2m", "t2sd", "p32"), "e500": ("z500", "z5sd"), "eqp": ("apcp", "apcp90", "asnow"), "eqs": ("asnow90", "gust", "gust90"),
+         "emsl": ("mslp", "t850", "lowp"), "ecape": ("mucape", "pcape"),
          "nbm1": ("t2m", "gust", "tcc"), "nbm2": ("nq1", "nq6", "ns6"), "nbm3": ("tstm", "maxt", "mint")}
 
 def q8(a, lo, hi): return np.clip(np.rint((a - lo) / (hi - lo) * 255), 0, 255).astype(np.uint8)
@@ -267,16 +348,18 @@ def step_job(args):
     c = dt.datetime.strptime(c_str, "%Y%m%d%H").replace(tzinfo=dt.timezone.utc)
     i0, i1, j0, j1 = crop; t = time.time(); ranges, sizes, q = {}, {}, {}
     _patch_models(M)
-    try: R = EpsReader(c, s, m) if m in ("eps", "aens") else NbmReader(c, s) if m == "nbm" else M.Reader(m, c, s)
+    try: R = EpsReader(c, s, m, crop) if m in ("eps", "aens") else NbmReader(c, s) if m == "nbm" else M.Reader(m, c, s)
     except Exception as e: return s, None, str(e), 0, 0
-    for name, (get, units) in (NBM_FIELDS if m == "nbm" else FIELDS).items():
+    for name, (get, units) in (NBM_FIELDS if m == "nbm" else dict(FIELDS, **ENS_FIELDS) if m in ("eps", "aens") else FIELDS).items():
         try: a = get(R, m)
         except (KeyError, StopIteration): continue
         except Exception as e:
             if name == "t2m" or "404" in str(e): return s, None, f"{name}: {e}", 0, time.time() - t   # step (or its prs file) not out yet: retry next pass
             print(f"{m} f{s:03d} {name}: {str(e)[:120]}", flush=True); continue
-        if MODELS[m]["grid"] == "ll": a = roll_ll(a)
-        a = a[i0:i1, j0:j1]
+        if isinstance(a, Cropped): a = np.asarray(a, float)
+        else:
+            if MODELS[m]["grid"] == "ll": a = roll_ll(a)
+            a = a[i0:i1, j0:j1]
         if not np.isfinite(a).any(): continue
         if name == "ir":
             from scipy.ndimage import gaussian_filter
@@ -297,6 +380,9 @@ def step_job(args):
     for name, a8 in q.items():
         p = f"{out}/single/{name}_f{s:03d}.png"; Image.fromarray(a8, "L").save(p, optimize=True); sizes[name] = os.path.getsize(p)
     ranges["_packs"] = packs
+    if getattr(R, "lows", None) is not None or getattr(R, "spag", None):   # ensemble member low centres + 500 mb member lines
+        p = f"{out}/single/ens_f{s:03d}.json"; json.dump(dict(n=R.n, lows=getattr(R, "lows", []), spag=getattr(R, "spag", {})), open(p, "w"), separators=(",", ":"))
+        sizes["ens"] = os.path.getsize(p)
     if ptv:   # town / pass values for meteograms (one small JSON per step, order = run.json "points")
         p = f"{out}/single/pts_f{s:03d}.json"; json.dump(ptv, open(p, "w"), separators=(",", ":")); sizes["pts"] = os.path.getsize(p)
     return s, sizes, ranges, getattr(R, "bytes", 0), time.time() - t
@@ -680,6 +766,8 @@ def static(m, out, views_only=None):
                       extra="vs 1991-2020 NCEP/NCAR monthly normal  \u00b7  {lo} to {hi}\u00b0C in view", pct=[0.5, 99.5], towns="none",
                       only=("hrrr", "rrfs", "gfs", "ifs", "aifs")),
     }
+    ALLP = {k: dict(v) for k, v in prods.items()}   # before the per-model filter (ensemble picks shared products below)
+    for v in ALLP.values(): v.pop("only", None)
     prods = {k: v for k, v in prods.items() if m in v.pop("only", (m,))}
     if m == "nbm":   # National Blend: its own period fields (1/6 h precip, 6 h snow, 3 h thunder, 12 h max/min)
         prods = {k: prods[k] for k in ("t2m", "gust10", "tcc")}
@@ -702,7 +790,40 @@ def static(m, out, views_only=None):
         prods["nmint"] = dict(title="12 h Low Temperature", fields=["mint"], key="Temp (\u00b0F)", ticks=HS.TEMP_TICKS, **table(HS.TEMP_LEVELS, CM["t2m"], "both"),
                               freeze=32, extra="NBM lowest temperature in the 12 h ending at the valid time  \u00b7  {lo} to {hi}\u00b0F in view", pct=[0.5, 99.5])
     if m in ("eps", "aens"):   # ensemble: mean versions of the shared products plus spread / probability maps
-        prods = {k: prods[k] for k in ("t2m", "t2ma", "z500anom")}
+        prods = {k: ALLP[k] for k in ("t2m", "t2ma", "z500anom", "t850a", "qpf", "qpf6", "qpf24", "qpf48", "mslpqpf", "gust10", "mucape")
+                 if k not in ("mucape", "gust10") or m == "eps"}   # AIFS ENS open data has no gust or CAPE
+        for k in ("t850a", "qpf", "qpf6", "qpf24", "qpf48", "mslpqpf", "gust10", "mucape"):
+            if k in prods: prods[k]["title"] += " (ens. mean)"; prods[k]["extra"] = "mean of 50 members  \u00b7  " + prods[k]["extra"]
+        if m == "eps": prods["gust10"]["extra"] = "mean of 50 members' max gust in the 6 h ending at the valid time  \u00b7  up to {hi} mph in view"
+        if m == "eps": prods["mucape"]["extra"] = "mean of 50 members  \u00b7  blank under 100 J/kg  \u00b7  up to {hi} J/kg in view"
+        CM.update(eqpf90=CM["qpf"], esnow=CM["snow"], esnow90=CM["snow"], egust90=CM["gust10"], epcape=None, elows=None, spag=None)
+        prods["eqpf90"] = dict(title="Precipitation Total, 90th Percentile", fields=["apcp90"], key="Precip (in)", ticks=[0.1, 0.5, 1, 2, 3, 4, 6, 8, 10, 12], tickfmt=True,
+                               **table(HS.RAIN_LEVELS, CM["qpf"], "max"), extra="reasonable high end: 5 of 50 members are wetter  \u00b7  since the run started  \u00b7  max {hi} in in view",
+                               pct=[0, 100], dec=2, fmt="in2", accum=True)
+        prods["esnow"] = dict(title="Snowfall Total (ens. mean, 10:1)", fields=["asnow"], key="Snow (in)", ticks=[0.1, 1, 3, 6, 10, 15, 24, 36, 48], tickfmt=True,
+                              **table(M.SNOW_LEVELS, CM["snow"], "max"), extra="mean of 50 members' snowfall water x 10  \u00b7  since the run started  \u00b7  max {hi} in in view",
+                              pct=[0, 100], dec=1, fmt="in1", accum=True)
+        prods["esnow90"] = dict(prods["esnow"], title="Snowfall Total, 90th Percentile (10:1)", fields=["asnow90"],
+                                extra="reasonable high end: 5 of 50 members are snowier  \u00b7  10:1  \u00b7  since the run started  \u00b7  max {hi} in in view")
+        if m == "eps": prods["egust90"] = dict(title="Wind Gusts, 90th Percentile", fields=["gust90"], key="Gust (mph)", ticks=HS.WIND_TICKS, **table(HS.WIND_LEVELS, CM["gust10"], "max"),
+                                extra="5 of 50 members gust higher (max in the 6 h ending at the valid time)  \u00b7  up to {hi} mph in view", pct=[1, 99.9])
+        PC_L = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]; CM["epcape"] = M.ramp(PC_L, [(10, "#d9e8c3"), (30, "#f2e34b"), (50, "#f4a43a"), (70, "#e2462f"), (100, "#8c1450")])
+        if m == "eps":
+            prods["epcape"] = dict(title="Chance of MUCAPE 500+ J/kg", fields=["pcape"], key="Chance (%)", ticks=PC_L, tickfmt=True, **table(PC_L, CM["epcape"], "neither"),
+                                   extra="share of the 50 members with most-unstable CAPE of 500 J/kg or more", pct=[0, 100], towns="names")
+        LP_L = [5, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
+        CM["elows"] = M.ramp(LP_L, [(5, "#eef3fb"), (20, "#bcd3f0"), (40, "#7fa7e0"), (60, "#e8a0c8"), (80, "#c2357a"), (100, "#6b0f3f")])
+        prods["elows"] = dict(title="Ensemble Low Centers", fields=["lowp", "mslp"], fill="lowp", key="Low within ~300 km (%)", ticks=[5, 10, 20, 40, 60, 80, 100], tickfmt=True,
+                              **table(LP_L, CM["elows"], "neither"),
+                              isobars=dict(field="mslp", every=4, sigma=1.0, color=HS.ISOBAR_COLOR, lw=HS.ISOBAR_LW, halo=HS.ISOBAR_HALO),
+                              lows=True, extra="dots = member lows (darker = deeper)  \u00b7  colors = % of members with a low nearby  \u00b7  lines = mean MSLP",
+                              pct=[0, 100], towns="names")
+        prods["elows"]["under"] = "#f4f5f7"
+        prods["spag"] = dict(title="500 mb Spaghetti (552 / 576 dam)", fields=["z500", "z5sd"], fill="z5sd", key="Spread (m)", ticks=[0, 20, 40, 60, 80, 100, 120, 140, 160],
+                             tickfmt=True, **table(list(range(0, 161, 10)), M.ramp(list(range(0, 161, 10)), [(0, "#ffffff"), (60, "#e9e9e9"), (160, "#a9a9a9")]), "max"),
+                             spag=True, extra="blue = each member's 552 dam line, red = 576 dam  \u00b7  black = ensemble mean  \u00b7  gray = spread",
+                             pct=[0.5, 99.5], towns="names")
+        CM["spag"] = M.ramp(list(range(0, 161, 10)), [(0, "#ffffff"), (60, "#e9e9e9"), (160, "#a9a9a9")])
         prods["t2ma"]["title"] = "2 m Temperature Anomaly (ens. mean)"
         prods["t2m"]["title"] = "2 m Temperature (ens. mean)"; prods["t2m"]["extra"] = "mean of 50 members  \u00b7  " + prods["t2m"]["extra"]
         prods["z500anom"]["title"] = "500 mb Height Anomaly (ens. mean)"
@@ -723,6 +844,8 @@ def static(m, out, views_only=None):
     for k in ("mucape", "sbcape", "ltng", "ltgp"):
         if k in prods: prods[k]["min_show"] = prods[k]["levels"][0]
     if "ep32" in prods: prods["ep32"]["min_show"] = 5
+    for k, v in (("eqpf90", None), ("esnow", None), ("esnow90", None), ("epcape", 10)):
+        if k in prods: prods[k]["min_show"] = v if v is not None else prods[k]["levels"][0]
     for k in ("w500", "w250"):
         if k in prods: prods[k]["under"] = "#f4f5f7"   # light below the first level so barbs and height lines stay readable
     if "mslpqpf" in prods: prods["mslpqpf"]["under"] = "#f4f5f7"   # light background so the dark isobars read (no blanking)
