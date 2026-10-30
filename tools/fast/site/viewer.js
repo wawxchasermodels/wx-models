@@ -815,19 +815,29 @@ async function mgDraw() {
   const T = mgTown(D, MG.town); body.innerHTML = `<canvas id="mgc"></canvas>`; mgChart($("mgc"), T, body);
 }
 function mgChart(cv, T, box) {
-  const dpr = Math.min(2, devicePixelRatio || 1), W = box.clientWidth, H = Math.max(420, box.clientHeight - 4);
+  const dpr = Math.min(2, devicePixelRatio || 1), W = box.clientWidth, sm0 = W < 600;
+  const npan = [T.t2m, T.wind || T.gust, T.pcp || T.snow || T.snow6 || T.pcp6, T.tcc].filter(Boolean).length;   // each panel has its own time axis (Benjamin 10-30)
+  const H = Math.max(sm0 ? 520 : 560, 52 + 40 * npan + (sm0 ? 52 : 60) * 8, box.clientHeight - 4);
   cv.width = W * dpr; cv.height = H * dpr; cv.style.width = W + "px"; cv.style.height = H + "px";
   const c = cv.getContext("2d"); c.scale(dpr, dpr); c.fillStyle = "#15171c"; c.fillRect(0, 0, W, H);
   const [m] = MG.run.split("/"), site = S.man.models[m].site, small = W < 600;
-  const L = small ? 38 : 52, Rm = small ? 34 : 50, top = small ? 46 : 52, bot = 34, n = T.f.length;
+  const L = small ? 38 : 52, Rm = small ? 34 : 50, top = small ? 46 : 52, bot = 34, n = T.f.length;   // bot / gap = room for the time axis under each panel
   const panels = [["temp", 3], ["wind", 2], ["pcp", 2], ["cloud", 1]].filter(([k]) => k === "temp" ? T.t2m : k === "wind" ? (T.wind || T.gust) : k === "pcp" ? (T.pcp || T.snow || T.snow6 || T.pcp6) : T.tcc);
-  const wsum = panels.reduce((a, p) => a + p[1], 0), gap = 18, ph = (H - top - bot - gap * (panels.length - 1)) / wsum;
+  const wsum = panels.reduce((a, p) => a + p[1], 0), gap = 40, ph = (H - top - bot - gap * (panels.length - 1)) / wsum;
   const t0 = Date.parse(T.t[0]), t1 = Date.parse(T.t[n - 1]), X = iso => L + (Date.parse(iso) - t0) / Math.max(1, t1 - t0) * (W - L - Rm);
   c.font = `800 ${small ? 14 : 17}px Montserrat`; c.fillStyle = "#f4f2ee"; c.textBaseline = "top";
   c.fillText(`${MG.town}${T.P.k === "pass" ? " (pass)" : ""} \u2013 ${site} ${MG.run.split("/")[1].slice(8)}Z`, L, 8);
   c.font = `500 ${small ? 10 : 12}px Montserrat`; c.fillStyle = "#a7abb3";
   c.fillText(`Times are Pacific. ${T.P.c !== undefined ? "Temperature corrected to pass summit height. " : ""}${T.snowEst ? "Snow estimated 10:1 where 2 m temp \u2264 33\u00b0F." : ""}`, L, small ? 26 : 30);
   let y = top;
+  const tAxis = yb => {   // hours row + day row (Pacific) under one panel
+    c.font = `600 ${small ? 9 : 11}px Montserrat`; c.fillStyle = "#cfd3da"; c.textBaseline = "top"; c.textAlign = "center";
+    for (let k = 0; k < days.length; k++) { const xa = X(T.t[days[k].k]), xb = k + 1 < days.length ? X(T.t[days[k + 1].k]) : W - Rm; if (xb - xa > (small ? 34 : 50)) c.fillText(days[k].d, (xa + xb) / 2, yb + 13); }
+    const hrs = n > 60 ? [0, 12] : n > 24 ? [0, 6, 12, 18] : null;
+    let lastX = -1e9; T.t.forEach((t, k) => { if (X(t) - lastX < (small ? 30 : 40)) return; const hh = +fmtPT(t, { hour: "numeric", hourCycle: "h23" }); if (hrs ? hrs.includes(hh) && (k === 0 || +fmtPT(T.t[k - 1], { hour: "numeric", hourCycle: "h23" }) !== hh) : k % Math.max(1, Math.ceil(n / 12)) === 0)
+      { c.fillText(fmtPT(t, { hour: "numeric" }).replace(" ", "").toLowerCase(), X(t), yb); lastX = X(t); } });
+    c.textAlign = "left";
+  };
   const days = []; for (let k = 0; k < n; k++) { const d = fmtPT(T.t[k], { weekday: "short", month: "numeric", day: "numeric" }); if (!days.length || days[days.length - 1].d !== d) days.push({ d, k }); }
   for (const [kind, wt] of panels) {
     const h = wt * ph, y0 = y, y1 = y + h; y += h + gap;
@@ -877,13 +887,8 @@ function mgChart(cv, T, box) {
       const sc = scale(0, 100); c.fillStyle = "#9aa3b2"; c.beginPath(); c.moveTo(X(T.t[0]), y1); T.tcc.forEach((v, k) => c.lineTo(X(T.t[k]), sc(v || 0))); c.lineTo(X(T.t[n - 1]), y1); c.closePath(); c.globalAlpha = 0.55; c.fill(); c.globalAlpha = 1;
       axis(0, 100, sc, "%"); label("Cloud cover", "#cfd3da");
     }
+    tAxis(y1 + 4);
   }
-  // time axis (Pacific)
-  c.font = `600 ${small ? 9 : 11}px Montserrat`; c.fillStyle = "#cfd3da"; c.textBaseline = "top"; c.textAlign = "center";
-  const yb = H - bot + 4; for (let k = 0; k < days.length; k++) { const xa = X(T.t[days[k].k]), xb = k + 1 < days.length ? X(T.t[days[k + 1].k]) : W - Rm; if (xb - xa > (small ? 34 : 50)) c.fillText(days[k].d, (xa + xb) / 2, yb + 13); }
-  const hrs = n > 60 ? [0, 12] : n > 24 ? [0, 6, 12, 18] : null;
-  let lastX = -1e9; T.t.forEach((t, k) => { if (X(t) - lastX < (small ? 30 : 40)) return; const hh = +fmtPT(t, { hour: "numeric", hourCycle: "h23" }); if (hrs ? hrs.includes(hh) && (k === 0 || +fmtPT(T.t[k - 1], { hour: "numeric", hourCycle: "h23" }) !== hh) : k % Math.max(1, Math.ceil(n / 12)) === 0)
-    { c.fillText(fmtPT(t, { hour: "numeric" }).replace(" ", "").toLowerCase(), X(t), yb); lastX = X(t); } });
   c.textAlign = "left";
 }
 function niceStep(x) { const p = Math.pow(10, Math.floor(Math.log10(x || 1))), r = x / p; return (r <= 1 ? 1 : r <= 2 ? 2 : r <= 2.5 ? 2.5 : r <= 5 ? 5 : 10) * p; }
