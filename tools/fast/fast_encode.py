@@ -49,9 +49,35 @@ def _tcc(R, m):
 def _ir(R, m):
     b = np.asarray(R.f("ir")[2], float) - 273.15; return np.clip(np.where(b > 60, np.nan, b), -100, 60)
 
+def _ec(*params):   # ECMWF sfc param under any of its names (10fg is 10fg3 at 93-144 h, 10fg6 elsewhere on some runs)
+    def g(R, m):
+        if m in NOAA: raise KeyError(params[0])
+        for p in params:
+            try: return np.asarray(R.st.field(p)[2], float)
+            except StopIteration: continue
+        raise KeyError(params[0])
+    return g
+def _gust(R, m):
+    if m == "ifs": return _ec("10fg", "10fg3", "10fg6")(R, m) * 2.23694
+    return np.asarray(R.f("gust")[2], float) * 2.23694
+def _mucape(R, m):   # ECMWF mucape; GFS/HRRR/RRFS most-unstable parcel = CAPE 255-0 mb above ground
+    if m in NOAA: return np.asarray(R._idx("CAPE:255-0 mb above ground", R.url)[2], float)
+    if m != "ifs": raise KeyError("mucape")
+    return _ec("mucape")(R, m)
+def _ltgp(R, m):
+    """ECMWF lightning-potential PROXY (not flash density): convective precip in the last 6 h (3 h at F+3), in inches,
+    kept only where MUCAPE >= 100 J/kg. ECMWF open data has no lightning field (checked 10-29-26)."""
+    if m != "ifs": raise KeyError("ltgp")
+    import temp_maps as TM
+    cp = _ec("cp")(R, m); s0 = R.s - 6
+    if s0 > 0:
+        try: cp = cp - np.asarray(TM.Step(m, R.c, s0).field("cp")[2], float)
+        except Exception as e: raise RuntimeError(f"cp f{s0}: {e}")
+    return np.where(_ec("mucape")(R, m) >= 100, np.clip(cp, 0, None) * 1000 / 25.4, 0.0)
+
 FIELDS = {   # name: (getter, units)
     "t2m":  (_f("t2m", lambda k: (k - 273.15) * 1.8 + 32), "F"),
-    "gust": (_f("gust", lambda v: v * 2.23694), "mph"),
+    "gust": (_gust, "mph"),
     "mslp": (_f("msl", lambda p: p / 100.0), "mb"),
     "u10":  (_f("u10", lambda v: v * 1.94384), "kt"),
     "v10":  (_f("v10", lambda v: v * 1.94384), "kt"),
@@ -64,7 +90,16 @@ FIELDS = {   # name: (getter, units)
     "frz":  (_raw("HGT:0C isotherm", lambda z: np.clip(z * 3.28084, 0, 20000)), "ft"),
     "apcp": (_apcp, "in"),
     "asnow": (_asnow, "in"),
+    # stage 1 (Benjamin 10-29-26 7:36 PM): instability + lightning
+    "mucape": (_mucape, "J/kg"),
+    "sbcape": (_raw("CAPE:surface", lambda v: v), "J/kg"),
+    "ltng": (_raw("LTNG:entire atmosphere", lambda v: np.clip(v, 0, None)), "fl/km2/5min"),
+    "ltgp": (_ltgp, "in"),
 }
+# Packing (R2 write budget): fields used together share one RGB PNG (one channel each). A field not in a pack is its own
+# grayscale PNG. run.json "packs" maps field -> [file name, channel]; the viewer reads either layout.
+PACKS = {"wind": ("mslp", "u10", "v10"), "aloft": ("t850", "t700", "frz"), "accum": ("apcp", "asnow", "ltgp"),
+         "conv": ("mucape", "sbcape", "ltng"), "sky": ("tcc", "vis", "ir")}
 
 def q8(a, lo, hi): return np.clip(np.rint((a - lo) / (hi - lo) * 255), 0, 255).astype(np.uint8)
 def rng(a):
@@ -78,7 +113,7 @@ def step_job(args):
     import menu_maps as M
     from PIL import Image
     c = dt.datetime.strptime(c_str, "%Y%m%d%H").replace(tzinfo=dt.timezone.utc)
-    i0, i1, j0, j1 = crop; t = time.time(); ranges, sizes = {}, {}
+    i0, i1, j0, j1 = crop; t = time.time(); ranges, sizes, q = {}, {}, {}
     try: R = M.Reader(m, c, s)
     except Exception as e: return s, None, str(e), 0, 0
     for name, (get, units) in FIELDS.items():
@@ -96,9 +131,18 @@ def step_job(args):
             if bad.any():
                 w = gaussian_filter((~bad).astype(float), 1.5); a = np.where(bad, gaussian_filter(np.where(bad, 0, a), 1.5) / np.maximum(w, 1e-6), a)
         a = np.where(np.isfinite(a), a, np.nanmin(a))
-        ranges[name] = rng(a)
-        p = f"{out}/single/{name}_f{s:03d}.png"
-        Image.fromarray(q8(a, *ranges[name]), "L").save(p, optimize=True); sizes[name] = os.path.getsize(p)
+        ranges[name] = rng(a); q[name] = q8(a, *ranges[name])
+    packs = {}
+    for pk, names in PACKS.items():
+        got = [n for n in names if n in q]
+        if len(got) < 2: continue
+        ch = np.zeros(q[got[0]].shape + (3,), np.uint8)
+        for k, n in enumerate(names):
+            if n in q: ch[..., k] = q.pop(n); packs[n] = [pk, k]
+        p = f"{out}/single/{pk}_f{s:03d}.png"; Image.fromarray(ch, "RGB").save(p, optimize=True); sizes[pk] = os.path.getsize(p)
+    for name, a8 in q.items():
+        p = f"{out}/single/{name}_f{s:03d}.png"; Image.fromarray(a8, "L").save(p, optimize=True); sizes[name] = os.path.getsize(p)
+    ranges["_packs"] = packs
     return s, sizes, ranges, getattr(R, "bytes", 0), time.time() - t
 
 # ------------------------------------------------------------------------------------------------ static
@@ -279,6 +323,14 @@ def static(m, out, views_only=None):
           "tcc": M.ramp(M.TCC_LEVELS, M.TCC_ANCH), "ir": M.ramp(M.IR_LEVELS, M.IR_ANCH), "vis": HS.cmap(M.VIS_COLS, M.VIS_COLS[0], (0, 0, 0, 0)),
           "refc": HS.cmap(REFC_C, REFC_C[0], REFC_C[-1]), "frz": M.ramp(FRZ_L, FRZ_A), "snowlvl": M.ramp(FRZ_L, FRZ_A),
           "qpf": HS.rain_cmap(), "snow": M.ramp(M.SNOW_LEVELS, M.SNOW_ANCH)}
+    CAPE_L = [100, 250, 500, 750, 1000, 1500, 2000, 2500, 3000, 4000, 5000]
+    CAPE_A = [(100, "#d9e8c3"), (250, "#9fd27a"), (500, "#f2e34b"), (1000, "#f4a43a"), (2000, "#e2462f"), (3000, "#b0168e"), (5000, "#5c1a8c")]
+    LTNG_L = [0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 4, 8]
+    LTNG_A = [(0.01, "#cfe3f7"), (0.1, "#7fb6ee"), (0.5, "#f2e34b"), (1, "#f4a43a"), (2, "#e2462f"), (8, "#b0168e")]
+    LTGP_L = [0.01, 0.05, 0.1, 0.25, 0.5, 0.75, 1, 1.5, 2]
+    LTGP_C = ["#e6dcf5", "#c3a6ec", "#9b6fe0", "#f2e34b", "#f4a43a", "#e8692f", "#d43f3a", "#8c1450"]   # 8 bands, no blends
+    LTGP_A = [(0.01, "#e6dcf5"), (0.05, "#c3a6ec"), (0.1, "#9b6fe0"), (0.25, "#f2e34b"), (0.5, "#f4a43a"), (1, "#e2462f"), (2, "#8c1450")]
+    CM.update(mucape=M.ramp(CAPE_L, CAPE_A), sbcape=M.ramp(CAPE_L, CAPE_A), ltng=M.ramp(LTNG_L, LTNG_A), ltgp=HS.cmap(LTGP_C, LTGP_C[0], LTGP_C[-1]))
     prods = {
         "t2m": dict(title="2 m Temperature", fields=["t2m"], key="Temp (\u00b0F)", ticks=HS.TEMP_TICKS, **table(HS.TEMP_LEVELS, CM["t2m"], "both"),
                     freeze=32, extra="32\u00b0F line dashed  \u00b7  {lo} to {hi}\u00b0F in view", pct=[0.5, 99.5]),
@@ -311,8 +363,24 @@ def static(m, out, views_only=None):
                     pct=[0, 100], dec=1, fmt="vis"),
         "ir": dict(title="Simulated IR Satellite", fields=["ir"], key="Tops (\u00b0C)", ticks=[-80, -60, -40, -20, 0, 20, 40], tickfmt=True,
                    **table(M.IR_LEVELS, CM["ir"], "both"), extra="model cloud-top temperature, 10.7 \u00b5m  \u00b7  colors = cold, high tops", pct=[0, 100], towns="names"),
+        "mucape": dict(title="Most Unstable CAPE", fields=["mucape"], key="MUCAPE (J/kg)", ticks=CAPE_L, tickfmt=True,
+                       **table(CAPE_L, CM["mucape"], "max"), extra=("ECMWF most-unstable CAPE" if m == "ifs" else "most-unstable parcel (lowest 255 mb)") +
+                       "  \u00b7  blank under 100 J/kg  \u00b7  up to {hi} J/kg in view", pct=[0, 99.9], only=("ifs", "gfs", "hrrr", "rrfs")),
+        "sbcape": dict(title="Surface-Based CAPE", fields=["sbcape"], key="SBCAPE (J/kg)", ticks=CAPE_L, tickfmt=True,
+                       **table(CAPE_L, CM["sbcape"], "max"), extra="surface parcel  \u00b7  blank under 100 J/kg  \u00b7  up to {hi} J/kg in view",
+                       pct=[0, 99.9], only=("gfs", "hrrr", "rrfs")),
+        "ltng": dict(title="Lightning Threat", fields=["ltng"], key="Flashes per km\u00b2 per 5 min", ticks=LTNG_L, tickfmt=True,
+                     **table(LTNG_L, CM["ltng"], "max"), extra="model lightning flash density  \u00b7  up to {hi} in view", pct=[0, 99.9], dec=2,
+                     towns="names", only=("hrrr", "rrfs")),
+        "ltgp": dict(title="Lightning Potential (proxy)", fields=["ltgp"], key="Conv. precip, 6 h (in)", ticks=LTGP_L,
+                     tickfmt=True, **table(LTGP_L, CM["ltgp"], "max"),
+                     extra="PROXY, not flash density: ECMWF has no free lightning field  \u00b7  6 h convective precip (3 h at F+3) where MUCAPE \u2265 100",
+                     pct=[0, 99.9], dec=2, fmt="in2", towns="names", only=("ifs",)),
     }
+    prods = {k: v for k, v in prods.items() if m in v.pop("only", (m,))}
     prods["vis"]["over"] = None
+    for k in ("mucape", "sbcape", "ltng", "ltgp"):
+        if k in prods: prods[k]["min_show"] = prods[k]["levels"][0]
     for k in ("qpf", "snow", "refc"): prods[k]["min_show"] = prods[k]["levels"][0]   # blank below the first level (like the site)
     for pid, P in prods.items():
         P.setdefault("fill", P["fields"][0]); tk0 = list(P["ticks"])
@@ -360,7 +428,9 @@ def steps(m, cycle, want, out, workers, only_missing=True, deadline=None):
     meta = {s_["f"]: s_ for s_ in (run or {}).get("steps", [])}
     for s, ranges in done.items():
         v = c + dt.timedelta(hours=s); vl = v.astimezone(PT)
+        pk = ranges.pop("_packs", {})
         meta[s] = dict(f=s, valid=v.isoformat(), valid_line=f"Valid {vl:%a %-m-%-d} \u00b7 {vl:%-I %p} PT", badge=[f"F+{s}", f"{v:%HZ %a}".upper()], ranges=ranges)
+        if pk: meta[s]["packs"] = pk
     # progressive: publish only the unbroken run of steps from the first one (no holes in the slider)
     ordered = []; 
     for s in want:

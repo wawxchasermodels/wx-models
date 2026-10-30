@@ -9,11 +9,12 @@ ap = argparse.ArgumentParser(); ap.add_argument("--data", required=True); ap.add
 s3 = client(); D = a.data.rstrip("/")
 fs = [f"static/{f}" for f in sorted(os.listdir(f"{D}/static"))]
 with ThreadPoolExecutor(16) as ex: list(ex.map(lambda k: s3.upload_file(f"{D}/{k}", BUCKET, k, ExtraArgs={"ContentType": CT.get(os.path.splitext(k)[1], "application/octet-stream")}), fs))
-man = json.load(open(f"{D}/manifest.json"))
-if not a.runs_from_local:
-    try: man["runs"] = json.loads(s3.get_object(Bucket=BUCKET, Key="manifest.json")["Body"].read()).get("runs", {})
-    except Exception: man["runs"] = {}
-import time; man["static_v"] = time.strftime("%Y%m%d%H%M%S", time.gmtime())   # viewer cache-buster for static/
-for m in man.get("models", {}): man.setdefault("runs", {}).setdefault(m, [])
-s3.put_object(Bucket=BUCKET, Key="manifest.json", Body=json.dumps(man).encode(), ContentType="application/json")
+loc = json.load(open(f"{D}/manifest.json"))
+import time; sv = time.strftime("%Y%m%d%H%M%S", time.gmtime())   # viewer cache-buster for static/
+def merge(man):   # keep the runs lists in R2 (the Actions jobs own them); ETag-checked write, see fast_cycle.update_manifest
+    runs = loc.get("runs", {}) if a.runs_from_local else man.get("runs", {})
+    man.clear(); man.update(loc); man["runs"] = dict(runs); man["static_v"] = sv
+    for m in man.get("models", {}): man["runs"].setdefault(m, [])
+from fast_cycle import update_manifest
+man = update_manifest(s3, merge)
 print(f"static {len(fs)} files; manifest models {list(man['models'])} runs { {k: v for k, v in man['runs'].items()} }")

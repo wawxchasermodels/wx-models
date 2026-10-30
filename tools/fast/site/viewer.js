@@ -33,7 +33,7 @@ async function boot() {
     const vt = Date.parse(S.runs[S.run].steps[S.i].valid); S.run = e.target.value; await loadRun(S.run); setLists();
     const st = S.runs[S.run].steps; let b = 0; st.forEach((x, k) => { if (Math.abs(Date.parse(x.valid) - vt) < Math.abs(Date.parse(st[b].valid) - vt)) b = k; });
     S.i = b; $("step").value = b; draw(); };
-  setupPointer(); $("share") && ($("share").onclick = share);
+  setupPointer(); $("share") && ($("share").onclick = share); $("save") && ($("save").onclick = saveImage);
   $("prod").onchange = e => { S.prod = e.target.value; draw(); };
   $("view").onchange = e => { S.view = e.target.value; draw(); };
   $("step").oninput = e => { S.i = +e.target.value; draw(); };
@@ -96,27 +96,38 @@ async function viewStatic(vid) {
 const keyImg = {}; const getKey = (pid, vid) => { const u = DATA + PRODS()[pid].keys[vid] + SV(); return keyImg[u] || (keyImg[u] = img(u)); };
 
 // ---------------------------------------------------------------- data images
-function fieldURL(run, name, f) {
-  const R_ = S.runs[run]; return [`${DATA}${R_.base}/` + R_.file.replace("{name}", name).replace("{f:03d}", String(f).padStart(3, "0")), 0];
+function fieldURL(run, name, f) {   // packed runs: several fields share one RGB PNG, one channel each (run.json steps[].packs)
+  const R_ = S.runs[run], st = R_.steps.find(s => s.f === f), pk = st && st.packs && st.packs[name];
+  const file = pk ? pk[0] : name, ch = pk ? pk[1] : 0;
+  return [`${DATA}${R_.base}/` + R_.file.replace("{name}", file).replace("{f:03d}", String(f).padStart(3, "0")), ch];
+}
+const pixCache = new Map();
+function getPixels(url) {   // one fetch + decode per image, shared by every field packed in it
+  if (pixCache.has(url)) return pixCache.get(url);
+  const p = (async () => {
+    const t0 = performance.now(); const r = await fetch(url); if (!r.ok) throw new Error(`${url}: HTTP ${r.status}`);
+    const blob = await r.blob(), t1 = performance.now();
+    const bm = await createImageBitmap(blob, { premultiplyAlpha: "none", colorSpaceConversion: "none" });
+    const oc = new OffscreenCanvas(bm.width, bm.height), cx = oc.getContext("2d", { willReadFrequently: true });
+    cx.drawImage(bm, 0, 0); const px = cx.getImageData(0, 0, bm.width, bm.height).data;
+    S.timings.push({ key: url, bytes: blob.size, fetch: t1 - t0, decode: performance.now() - t1 });
+    return { px, w: bm.width, h: bm.height, bytes: blob.size };
+  })();
+  p.catch(() => pixCache.delete(url)); pixCache.set(url, p); return p;
 }
 function getField(run, name, f) {
   const key = `${run}/${name}/${f}`;
   if (S.fields.has(key)) return S.fields.get(key);
   const p = (async () => {
-    const t0 = performance.now(); const [url, ch] = fieldURL(run, name, f);
-    const blob = await (await fetch(url)).blob(); const t1 = performance.now();
-    const bm = await createImageBitmap(blob, { premultiplyAlpha: "none", colorSpaceConversion: "none" });
-    const oc = new OffscreenCanvas(bm.width, bm.height), cx = oc.getContext("2d", { willReadFrequently: true });
-    cx.drawImage(bm, 0, 0); const px = cx.getImageData(0, 0, bm.width, bm.height).data;
-    const st = S.runs[run].steps.find(s => s.f === f), [lo, hi] = st.ranges[name], sc = (hi - lo) / 255;
-    const n = bm.width * bm.height, out = new Float32Array(n);
-    // image row 0 = first (southern) HRRR row: the encoder writes the grid as-is
+    const st = S.runs[run].steps.find(s => s.f === f);
+    if (!st || !st.ranges[name]) throw new Error(`nodata:${name}`);
+    const [url, ch] = fieldURL(run, name, f), I = await getPixels(url);
+    const [lo, hi] = st.ranges[name], sc = (hi - lo) / 255, n = I.w * I.h, out = new Float32Array(n), px = I.px;
+    // image row 0 = first (southern) grid row: the encoder writes the grid as-is
     for (let k = 0; k < n; k++) out[k] = lo + px[k * 4 + ch] * sc;
-    const t2 = performance.now();
-    S.timings.push({ key, bytes: blob.size, fetch: t1 - t0, decode: t2 - t1 });
-    return { v: out, w: bm.width, h: bm.height, bytes: blob.size };
+    return { v: out, w: I.w, h: I.h, bytes: I.bytes };
   })();
-  S.fields.set(key, p); return p;
+  p.catch(() => S.fields.delete(key)); S.fields.set(key, p); return p;
 }
 function blur(a, w, h, sigma) {               // separable gaussian (scipy gaussian_filter, mode reflect, truncate 4)
   const r = Math.ceil(4 * sigma), k = []; let s = 0;
@@ -171,7 +182,17 @@ let drawSeq = 0;
 async function draw() {
   const seq = ++drawSeq, t0 = performance.now();
   const run = S.run, vid = S.view, pid = S.prod, step = S.runs[run].steps[S.i], f = step.f;
-  const [st, D, key] = await Promise.all([viewStatic(vid), productFields(run, pid, f), getKey(pid, vid)]);
+  let st, D, key;
+  try { [st, D, key] = await Promise.all([viewStatic(vid), productFields(run, pid, f), getKey(pid, vid)]); }
+  catch (e) {
+    if (seq !== drawSeq) return;
+    if (!String(e && e.message).startsWith("nodata:")) throw e;
+    S.derived.delete(`${run}/${pid}/${f}`);
+    const V = VIEWS()[vid], cv = $("map"), st2 = await viewStatic(vid); if (cv.width !== V.fig[0]) { cv.width = V.fig[0]; cv.height = V.fig[1]; }
+    const ctx = cv.getContext("2d"); ctx.fillStyle = S.man.style.BG; ctx.fillRect(0, 0, cv.width, cv.height); ctx.drawImage(st2.base, 0, 0, cv.width, cv.height);
+    header(ctx, V, PRODS()[pid].title, step.valid_line, `${S.runs[run].runline}  \u00b7  ${V.label}  \u00b7  not in this model run at this hour`, step.badge);
+    S.cur = null; window.__drawn = `${pid}/${vid}/${f}`; return;
+  }
   if (seq !== drawSeq) return;
   const t1 = performance.now();
   const V = VIEWS()[vid], P = PRODS()[pid], cv = $("map");
@@ -242,7 +263,7 @@ function fmtVal(P, v) {   // temp_maps fmt_int / fmt_vis
   if (P.fmt === "vis") return v >= 7 ? "7+" : v < 3 ? v.toFixed(1) : v.toFixed(0);
   return String(Math.round(v));
 }
-const UNITS = { t2m: "\u00b0F", gust10: " mph", aifswind: " mph", t850: "\u00b0C", t700: "\u00b0C", tcc: "%", vis: " mi", ir: "\u00b0C",
+const UNITS = { mucape: " J/kg", sbcape: " J/kg", ltng: " /km\u00b2/5 min", ltgp: " in", t2m: "\u00b0F", gust10: " mph", aifswind: " mph", t850: "\u00b0C", t700: "\u00b0C", tcc: "%", vis: " mi", ir: "\u00b0C",
                 refc: " dBZ", qpf: " in", snow: " in", frz: " ft", snowlvl: " ft" };
 // value under the cursor / tap (item 1) and swipe to step (item 6)
 function readout(ev) {
@@ -265,6 +286,39 @@ function setupPointer() {
     if (!down) return; const dx = e.clientX - down.x, dy = e.clientY - down.y; down = null;
     if (Math.abs(dx) > 40 && Math.abs(dx) > 1.5 * Math.abs(dy)) go(dx < 0 ? 1 : -1); else readout(e);
   });
+}
+// "Save image" (Benjamin 10-29-26 7:48 PM): the map exactly as drawn (base, data, towns, key, title/time; no controls)
+// as a PNG at the map's full size. Phones: share sheet with the file (iOS "Save Image"); no file sharing: long-press view
+// (touch) or a download (desktop).
+function saveName() {
+  const [m, c] = S.run.split("/"), st = S.runs[S.run].steps[S.i], v = new Date(st.valid);
+  const P = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(v).map(x => [x.type, x.value]));
+  const clean = t => String(t).replace(/[^A-Za-z0-9.+-]+/g, "-").replace(/^-|-$/g, "");
+  return `${clean(S.man.models[m].site)}_${c.slice(8)}Z_${clean(S.prod)}_${clean(S.view)}_valid-${P.year}-${P.month}-${P.day}_${P.hour}${P.minute}PT_F${String(st.f).padStart(3, "0")}.png`;
+}
+function closeSaveView() { const o = $("saveview"); if (o) { URL.revokeObjectURL(o.dataset.url || ""); o.remove(); } }
+function saveImage() {
+  const cv = $("map"); if (!cv.width) return;
+  const name = saveName();
+  // synchronous encode keeps the tap's user activation for navigator.share (iOS Safari is strict about it)
+  const durl = cv.toDataURL("image/png"), bin = atob(durl.split(",")[1]), u8 = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+  const blob = new Blob([u8], { type: "image/png" }), file = new File([blob], name, { type: "image/png" });
+  const touch = matchMedia("(pointer: coarse)").matches;
+  if (touch && navigator.canShare && navigator.share && navigator.canShare({ files: [file] })) {
+    navigator.share({ files: [file], title: name }).catch(e => { if (e && e.name !== "AbortError") showSaveView(blob, name); });
+    return;
+  }
+  if (touch) { showSaveView(blob, name); return; }
+  const a = document.createElement("a"), url = URL.createObjectURL(blob); a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000);
+  $("save").textContent = "Saved"; setTimeout(() => $("save").textContent = "Save image", 1500);
+}
+function showSaveView(blob, name) {   // fallback: full-screen image to press and hold (Save to Photos / Download Image)
+  closeSaveView(); const url = URL.createObjectURL(blob), o = document.createElement("div"); o.id = "saveview"; o.dataset.url = url;
+  o.innerHTML = `<div class="sv-top"><span>Press and hold the map, then choose Save Image</span><a download="${name}" href="${url}">Download</a><button type="button">Close</button></div><img alt="${name}" src="${url}">`;
+  o.querySelector("button").onclick = closeSaveView; document.body.appendChild(o);
 }
 async function share() {
   const u = location.href;
