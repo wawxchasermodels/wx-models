@@ -184,13 +184,14 @@ async function productFields(run, pid, f) {
     } else if (P.clim) {   // anomaly: field minus the 1991-2020 normal at the valid time (static climatology, see climAt)
       const fld = P.anom || "z500", C = await climAt(run, P.clim, S.runs[run].steps.find(x => x.f === f).valid), z = F[fld].v, o = new Float32Array(z.length);
       for (let k = 0; k < z.length; k++) o[k] = z[k] - C[k]; out.fill = fld === "z500" ? blur(o, g.w, g.h, 1.0) : o;
-    } else if (P.window && (P.wmax || P.wsum)) {   // highest value over the steps in the last N hours (incl. this one)
+    } else if (P.window && (P.wmax || P.wsum || P.wmin)) {   // highest value over the steps in the last N hours (incl. this one)
       const fld = P.wfield || P.fields[0], fs = S.runs[run].steps.map(x => x.f).filter(x => x > f - P.window && x <= f);
       if (f - P.window < 0 && !P.sofar) throw new Error(`nodata:${fld}`);
       const arrs = await Promise.all(fs.map(x => getField(run, fld, x).then(r => r.v, () => null))), ok = arrs.filter(Boolean);
       if (!ok.length) throw new Error(`nodata:${fld}`);
       const o = new Float32Array(ok[0]);
       if (P.wsum) { for (const a of ok.slice(1)) for (let k = 0; k < o.length; k++) o[k] += a[k]; }   // per-interval amounts -> total
+      else if (P.wmin) { for (const a of ok.slice(1)) for (let k = 0; k < o.length; k++) if (a[k] < o[k]) o[k] = a[k]; }
       else for (const a of ok.slice(1)) for (let k = 0; k < o.length; k++) if (a[k] > o[k]) o[k] = a[k];
       out.fill = o;
     } else if (P.window) {   // amount in the last N hours = run total now minus run total N hours ago (stage 2, browser-only)
@@ -205,6 +206,19 @@ async function productFields(run, pid, f) {
         else if (t >= 80) { const es = Math.exp(17.625 * ((D_[k] - 32) / 1.8) / (243.04 + (D_[k] - 32) / 1.8)), e0 = Math.exp(17.625 * ((t - 32) / 1.8) / (243.04 + (t - 32) / 1.8)), R = Math.min(100, 100 * es / e0);
           o[k] = -42.379 + 2.04901523 * t + 10.14333127 * R - 0.22475541 * t * R - 0.00683783 * t * t - 0.05481717 * R * R + 0.00122874 * t * t * R + 0.00085282 * t * R * R - 0.00000199 * t * t * R * R; }
         else o[k] = t; }
+      out.fill = o;
+    } else if (P.fill === "fog") {   // old site's fog risk index (0-100): near-saturation x light wind (+ model visibility), damped in rain
+      const T = F.t2m.v, D_ = F.d2m.v, u = F.u10.v, v = F.v10.v, o = new Float32Array(T.length), has = new Set(S.runs[run].fields);
+      const vis = has.has("vis") ? await getField(run, "vis", f).then(r => r.v, () => null) : null;
+      let rr = null;
+      if (has.has("apcp")) { const st_ = S.runs[run].steps, k0 = st_.findIndex(x => x.f === f), f0 = k0 > 0 ? st_[k0 - 1].f : 0;
+        const a = await getField(run, "apcp", f).then(r => r.v, () => null), b = f0 > 0 ? await getField(run, "apcp", f0).then(r => r.v, () => null) : null;
+        if (a && (b || f0 === 0)) { rr = new Float32Array(a.length); for (let k = 0; k < a.length; k++) rr[k] = Math.max(0, a[k] - (b ? b[k] : 0)) / Math.max(1, f - f0); } }
+      for (let k = 0; k < T.length; k++) {
+        const sat = Math.min(1, Math.max(0, (5 - (T[k] - D_[k])) / 5)), calm = Math.min(1, Math.max(0, (15 - Math.hypot(u[k], v[k]) * 1.15078) / 12));
+        let x = sat * calm; if (vis) x = 0.6 * x + 0.4 * Math.min(1, Math.max(0, (5 - vis[k]) / 4.5)) * sat;
+        if (rr) x *= Math.min(1, Math.max(0.25, 1 - rr[k] / 0.08));
+        o[k] = 100 * x; }
       out.fill = o;
     } else if (P.fill === "thick") { const a = F.z500.v, b = F.z1000.v, o = new Float32Array(a.length); for (let k = 0; k < a.length; k++) o[k] = (a[k] - b[k]) / 10; out.fill = blur(o, g.w, g.h, 1.0);
     } else if (P.fill === "snowlvl") { const a = F.frz.v, o = new Float32Array(a.length); for (let k = 0; k < a.length; k++) o[k] = Math.max(0, a[k] - 1000); out.fill = o; }
@@ -380,7 +394,7 @@ function fmtVal(P, v) {   // temp_maps fmt_int / fmt_vis
   if (P.fmt === "vis") return v >= 7 ? "7+" : v < 3 ? v.toFixed(1) : v.toFixed(0);
   return String(Math.round(v));
 }
-const UNITS = { d2m: "\u00b0F", feels: "\u00b0F", gustmax: " mph", t925w: "\u00b0C", t850w: "\u00b0C", t700w: "\u00b0C", t500w: "\u00b0C", t300w: "\u00b0C", w850: " kt", thick: " dam", slp: " mb", pw: " in", pwa: " in", ptype: "", qpfa: " in", qpfpct: "%", eqpf90: " in", esnow: " in", esnow90: " in", egust90: " mph", epcape: "%", elows: "%", spag: " m", nqpf1: " in", nqpf6: " in", nsnow6: " in", ntstm: "%", nmaxt: "\u00b0F", nmint: "\u00b0F", dsnod: " in", qpf3: " in", qpf12: " in", qpf48: " in", snow1: " in", snow6: " in", gust6: " mph", ltng6: " /km\u00b2/5 min", qpf1: " in", qpf6: " in", qpf24: " in", mslpqpf: " in", t2ma: "\u00b0F", t850a: "\u00b0C", et2sd: "\u00b0F", ep32: "%", ez500: " m", w500: " kt", w250: " kt", z500anom: " m", mucape: " J/kg", sbcape: " J/kg", ltng: " /km\u00b2/5 min", ltgp: " in", t2m: "\u00b0F", gust10: " mph", aifswind: " mph", t850: "\u00b0C", t700: "\u00b0C", tcc: "%", vis: " mi", ir: "\u00b0C",
+const UNITS = { ivt: " kg/m/s", fog: "", ehigh: "\u00b0F", elow: "\u00b0F", d2m: "\u00b0F", feels: "\u00b0F", gustmax: " mph", t925w: "\u00b0C", t850w: "\u00b0C", t700w: "\u00b0C", t500w: "\u00b0C", t300w: "\u00b0C", w850: " kt", thick: " dam", slp: " mb", pw: " in", pwa: " in", ptype: "", qpfa: " in", qpfpct: "%", eqpf90: " in", esnow: " in", esnow90: " in", egust90: " mph", epcape: "%", elows: "%", spag: " m", nqpf1: " in", nqpf6: " in", nsnow6: " in", ntstm: "%", nmaxt: "\u00b0F", nmint: "\u00b0F", dsnod: " in", qpf3: " in", qpf12: " in", qpf48: " in", snow1: " in", snow6: " in", gust6: " mph", ltng6: " /km\u00b2/5 min", qpf1: " in", qpf6: " in", qpf24: " in", mslpqpf: " in", t2ma: "\u00b0F", t850a: "\u00b0C", et2sd: "\u00b0F", ep32: "%", ez500: " m", w500: " kt", w250: " kt", z500anom: " m", mucape: " J/kg", sbcape: " J/kg", ltng: " /km\u00b2/5 min", ltgp: " in", t2m: "\u00b0F", gust10: " mph", aifswind: " mph", t850: "\u00b0C", t700: "\u00b0C", tcc: "%", vis: " mi", ir: "\u00b0C",
                 refc: " dBZ", qpf: " in", snow: " in", frz: " ft", snowlvl: " ft" };
 // value under the cursor / tap (item 1) and swipe to step (item 6)
 function readout(ev) {
@@ -607,8 +621,14 @@ function drawBarbs(ctx, st, D, P, V) {   // matplotlib barbs (length 5.6 pt, 5 k
     const nX = Math.cos(a), nY = -Math.sin(a);           // north, y up
     const eX = nY, eY = -nX;                              // east = north turned clockwise
     const wx = uu * eX + vv * nX, wy = uu * eY + vv * nY, sp = Math.hypot(uu, vv);
-    barb(ctx, st.x0 + x, st.y0 + y, wx, wy, sp, Lp);
+    if (B.arrows) { if (sp >= (B.min || 0)) arrow(ctx, st.x0 + x, st.y0 + y, wx / sp, wy / sp, Lp * (0.55 + 0.75 * Math.min(1, sp / (B.ref || sp)))); }
+    else barb(ctx, st.x0 + x, st.y0 + y, wx, wy, sp, Lp);
   }
+}
+function arrow(ctx, X, Y, dx, dy, L) {   // flow arrow centred on (X, Y), pointing downstream (dx, dy y-up unit vector)
+  const x1 = X + dx * L / 2, y1 = Y - dy * L / 2, x0 = X - dx * L / 2, y0 = Y + dy * L / 2, h = Math.max(4, 0.3 * L), w = 0.45 * h;
+  ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1 - dx * h * 0.6, y1 + dy * h * 0.6); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x1 - dx * h - dy * w, y1 + dy * h - dx * w); ctx.lineTo(x1 - dx * h + dy * w, y1 + dy * h + dx * w); ctx.closePath(); ctx.fill();
 }
 function barb(ctx, X, Y, wx, wy, sp, L) {
   const m = 5 * Math.round(sp / 5), nf = Math.floor(m / 50), nb = Math.floor((m % 50) / 10), half = (m % 10) >= 5;

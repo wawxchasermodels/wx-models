@@ -15,15 +15,15 @@ for p in (os.environ.get("WX_FORECAST_TOOLS"), os.path.join(HERE, "..", "forecas
 
 DPI = 100; STRIDE = 8
 HRRR_LCC = dict(central_longitude=-97.5, central_latitude=38.5, standard_parallels=(38.5, 38.5))
-GLOBAL_VIEWS = ("puget", "wa", "wwa", "ewa", "passes", "pnwt", "pnw", "na")
+GLOBAL_VIEWS = ("puget", "wa", "wwa", "ewa", "passes", "newa", "lm", "bc", "pnwt", "pnw", "na")
 MODELS = {   # grid "lcc" = HRRR 3 km, "ll" = 0.25 deg global (lat 90 -> -90, lon rolled to 0..360)
-    "hrrr": dict(grid="lcc", views=("puget", "wa", "wwa", "ewa", "passes", "pnwhr"), cycles=(0, 6, 12, 18), steps=list(range(1, 49)), keep=2),
+    "hrrr": dict(grid="lcc", views=("puget", "wa", "wwa", "ewa", "passes", "newa", "lm", "pnwhr"), cycles=(0, 6, 12, 18), steps=list(range(1, 49)), keep=2),
     # 06/18Z added 10-29-26 7:24 PM (Benjamin). Checked on data.ecmwf.int / NOAA 10-29 18Z: GFS 06/18Z go to 384 h like 00/12Z;
     # ECMWF 0.25 06/18Z only to 144 h (3-hourly); AIFS 06/18Z to 360 h (6-hourly) like 00/12Z.
     # RRFS (NOAA, 3 km CONUS, operational since 2026): 00/06/12/18Z hourly to 48 h then 3-hourly to 84 h (stage 3, 10-30-26)
-    "rrfs": dict(grid="lcc", views=("puget", "wa", "wwa", "ewa", "passes", "pnwhr"), cycles=(0, 6, 12, 18), steps=list(range(1, 49)) + list(range(51, 85, 3)), keep=2),
+    "rrfs": dict(grid="lcc", views=("puget", "wa", "wwa", "ewa", "passes", "newa", "lm", "pnwhr"), cycles=(0, 6, 12, 18), steps=list(range(1, 49)) + list(range(51, 85, 3)), keep=2),
     # NBM (NOAA National Blend, 2.5 km CONUS NDFD grid): 00/06/12/18Z, hourly to 36 h then 3-hourly to 168 h (stage 3, 10-30-26)
-    "nbm":  dict(grid="lcc", views=("puget", "wa", "wwa", "ewa", "passes", "pnwhr"), cycles=(0, 6, 12, 18), steps=list(range(1, 37)) + list(range(39, 169, 3)), keep=2,
+    "nbm":  dict(grid="lcc", views=("puget", "wa", "wwa", "ewa", "passes", "newa", "lm", "pnwhr"), cycles=(0, 6, 12, 18), steps=list(range(1, 37)) + list(range(39, 169, 3)), keep=2,
                  lcc=dict(central_longitude=-95.0, central_latitude=25.0, standard_parallels=(25.0, 25.0)), radius=6371200.0),
     "gfs":  dict(grid="ll", views=GLOBAL_VIEWS, cycles=(0, 6, 12, 18), steps=list(range(3, 361, 3)), keep=2),
     "ifs":  dict(grid="ll", views=GLOBAL_VIEWS, cycles=(0, 6, 12, 18), steps=list(range(3, 145, 3)) + list(range(150, 361, 6)),
@@ -91,7 +91,9 @@ class _NoSt:
 # Stage 4 extras (10-30): per-step member params beyond 2 m temp + 500 mb height. name: (param, level, kind, scale, offset)
 #   kind "ms": mean (+ sd); "p90": mean + 90th percentile; "pc": mean + chance >= threshold. Memory: one param's member stack at a time.
 ENS_EXTRA = {"tp": ("tp", None, "p90", 39.3701, 0), "sf": ("sf", None, "p90", 393.701, 0), "10fg": ("10fg", None, "p90", 2.23694, 0),
-             "msl": ("msl", None, "ms", 0.01, 0), "t850": ("t", "850", "ms", 1.0, -273.15), "mucape": ("mucape", None, "pc", 1.0, 0)}
+             "msl": ("msl", None, "ms", 0.01, 0), "t850": ("t", "850", "ms", 1.0, -273.15), "mucape": ("mucape", None, "pc", 1.0, 0),
+             # old site "EPS lows / highs" = ENS mean of member extremes: 2 m max/min over the last 3 h (to 144 h) or 6 h (after), deg F
+             "mx2t": (("mx2t3", "mx2t6"), None, "m", 1.8, -459.67), "mn2t": (("mn2t3", "mn2t6"), None, "m", 1.8, -459.67)}
 SPAG_LEVELS = (5520, 5760)   # 552 / 576 dam member lines (trough / ridge)
 class EpsReader:
     """ECMWF ENS / AIFS ENS step: downloads the 50 member messages (HTTP ranges) and keeps running sums for 2 m temp and 500 mb
@@ -129,7 +131,7 @@ class EpsReader:
             if not crop: return
             # extras: one param at a time (cropped member stacks, float32)
             for name, (par, lev, kind_, sc, off) in ENS_EXTRA.items():
-                xs = [x for x in mem if x["param"] == par and (lev is None or x.get("levelist") == lev)]
+                xs = [x for x in mem if x["param"] in (par if isinstance(par, tuple) else (par,)) and (lev is None or x.get("levelist") == lev)]
                 if len(xs) < 40: continue
                 try: st = np.stack([self._crop(decode(blob) * sc + off).astype(np.float32) for x, blob in ex.map(fetch, xs)])
                 except Exception as e: print(f"{kind} f{s:03d} {name}: {str(e)[:100]}", flush=True); continue
@@ -274,6 +276,23 @@ def _fzinc(R, m):
     if m in NOAA: fz = np.asarray(R._idx(M_NO("cfrzr"), R.url)[2], float) > 0.5
     else: fz = np.isin(np.rint(np.asarray(R.f("ptype")[2], float)), (3, 12))
     return _inc(R, m, "tp") * fz
+IVT_P = (1000, 925, 850, 700, 600, 500, 400, 300)
+def _ivt(R, m):
+    """Integrated vapor transport (kg/m/s), east and north parts: (1/g) * integral of q*V dp, 1000-300 mb, trapezoid over the
+    standard levels; levels below ground (surface pressure) dropped. Same formula as the old site's IVT map (ifs, aifs; + gfs)."""
+    if m not in ("ifs", "aifs", "gfs"): raise KeyError("ivt")
+    if "_ivt" in R.cache: return R.cache["_ivt"]
+    try: sp = np.asarray(R.f("sp")[2], float)
+    except KeyError: sp = None
+    qu, qv = [], []
+    for lev in IVT_P:
+        q = np.asarray(R.f(f"Q:{lev}")[2], float); u = np.asarray(R.f(f"U:{lev}")[2], float); v = np.asarray(R.f(f"V:{lev}")[2], float)
+        ok = 1.0 if sp is None else (sp >= lev * 100.0)
+        qu.append(q * u * ok); qv.append(q * v * ok)
+    P = np.array(IVT_P, float) * 100.0
+    iu = sum((qu[k] + qu[k + 1]) / 2 * (P[k] - P[k + 1]) for k in range(len(P) - 1)) / 9.80665
+    iv = sum((qv[k] + qv[k + 1]) / 2 * (P[k] - P[k + 1]) for k in range(len(P) - 1)) / 9.80665
+    R.cache["_ivt"] = r = (iu, iv); return r
 def _tcc(R, m):
     t = np.asarray(R.f("tcc")[2], float); return np.clip(t * 100.0 if np.nanmax(t) <= 1.01 else t, 0, 100)
 def _ir(R, m):
@@ -366,13 +385,15 @@ FIELDS = {   # name: (getter, units)
     "pw": (_f("pwat", lambda v: v / 25.4), "in"),
     "prt": (_prt, "code"),
     "kinc": (_kinc, "in"), "fzinc": (_fzinc, "in"),
+    "ivtu": (lambda R, m: _ivt(R, m)[0], "kg/m/s"), "ivtv": (lambda R, m: _ivt(R, m)[1], "kg/m/s"),
     # ECMWF ENS (model "eps" only)
     "t2sd": (_ens("t2sd"), "F"), "p32": (_ens("p32"), "%"), "z5sd": (_ens("z5sd"), "m"),
 }
 # ensemble-only fields (stage 4 extras): means reuse the deterministic names so the shared products / meteograms work
 ENS_FIELDS = {"apcp": (_ensc("tp"), "in"), "apcp90": (_ensc("tp90"), "in"), "asnow": (_ensc("sf"), "in"), "asnow90": (_ensc("sf90"), "in"),
               "gust": (_ensc("10fg"), "mph"), "gust90": (_ensc("10fg90"), "mph"), "mslp": (_ensc("msl"), "mb"), "t850": (_ensc("t850"), "C"),
-              "mucape": (_ensc("mucape"), "J/kg"), "pcape": (_ensc("mucapep"), "%"), "lowp": (_ensc("lowp"), "%")}
+              "mucape": (_ensc("mucape"), "J/kg"), "pcape": (_ensc("mucapep"), "%"), "lowp": (_ensc("lowp"), "%"),
+              "maxt": (_ensc("mx2t"), "F"), "mint": (_ensc("mn2t"), "F")}
 # Packing (R2 write budget): fields used together share one RGB PNG (one channel each). A field not in a pack is its own
 # grayscale PNG. run.json "packs" maps field -> [file name, channel]; the viewer reads either layout.
 PACKS = {"wind": ("mslp", "u10", "v10"), "aloft": ("t850", "t700", "frz"), "accum": ("apcp", "asnow", "ltgp"),
@@ -380,7 +401,7 @@ PACKS = {"wind": ("mslp", "u10", "v10"), "aloft": ("t850", "t700", "frz"), "accu
          "e2t": ("t2m", "t2sd", "p32"), "e500": ("z500", "z5sd"), "eqp": ("apcp", "apcp90", "asnow"), "eqs": ("asnow90", "gust", "gust90"),
          "emsl": ("mslp", "t850", "lowp"), "ecape": ("mucape", "pcape"),
          "w850": ("u850", "v850", "t925"), "w925": ("u925", "v925", "z1000"), "w700": ("u700", "v700", "t500"), "w300": ("u300", "v300", "t300"),
-         "moist": ("d2m", "pw", "prt"), "kfz": ("kinc", "fzinc"),
+         "etx": ("maxt", "mint"), "moist": ("d2m", "pw", "prt"), "kfz": ("kinc", "fzinc"), "ivt": ("ivtu", "ivtv"),
          "nbm1": ("t2m", "gust", "tcc"), "nbm2": ("nq1", "nq6", "ns6"), "nbm3": ("tstm", "maxt", "mint")}
 
 SQRT_FIELDS = {"apcp", "asnow", "apcp90", "asnow90", "nq1", "nq6", "ns6", "ltgp", "kinc", "fzinc"}
@@ -522,8 +543,35 @@ def extra_views(TM, ccrs):
                                  ll=(l0 + dlon, l1 + dlon, a0 + dlat, a1 + dlat), box=(b0 + dlon, b1 + dlon, c0 + dlat, c1 + dlat), fast_shift=True)
     # Puget Sound close-up (Benjamin's saved order 10-29): Olympia to Everett, Olympics' east slopes to the Cascade foothills
     TM.VIEWS.setdefault("puget", dict(label="Puget Sound", size=(16, 15), proj=lcc(-122.45), ll=(-123.65, -121.25, 46.95, 48.25), box=(-124.3, -120.6, 46.5, 48.7)))
+    # Old-site parity (10-30-26): Southern BC + Lower Mainland (old "BC rain" tab), NE WA mountains (old snow tab)
+    lcb = lambda lon, lat: ccrs.LambertConformal(central_longitude=lon, central_latitude=lat, standard_parallels=(lat - 2, lat + 2))
+    TM.VIEWS.setdefault("bc", dict(label="Southern BC", size=(16, 15), proj=lcb(-123.4, 49.7), ll=(-126.25, -120.5, 47.95, 51.45), box=(-128.0, -118.8, 47.0, 52.4)))
+    TM.VIEWS.setdefault("lm", dict(label="Lower Mainland", size=(16, 9.5), proj=lcb(-122.35, 49.2), ll=(-123.45, -121.25, 48.86, 49.6), box=(-124.3, -120.4, 48.5, 49.95)))
+    TM.VIEWS.setdefault("newa", dict(label="NE WA mountains", size=(16, 11.5), proj=lcb(-118.55, 48.3), ll=(-120.15, -116.95, 47.6, 49.0), box=(-121.0, -116.1, 47.2, 49.4)))
     TM.VIEWS.setdefault("passes", dict(label="Cascade Passes", size=(16, 15), proj=lcc(-121.2), ll=(-123.9, -118.5, 46.2, 49.05), box=(-125, -117.5, 45.4, 49.8)))
-WA_LIKE = ("wa", "wwa", "ewa", "passes", "puget")
+WA_LIKE = ("wa", "wwa", "ewa", "passes", "puget", "bc", "lm", "newa")
+# Southern BC / Lower Mainland towns (old site's precip_map.py BC lists, lat-lon order), placed ahead of the WA towns
+_BC = [("Vancouver", 49.2827, -123.1207), ("Victoria", 48.4284, -123.3656), ("Abbotsford", 49.0504, -122.3045), ("Nanaimo", 49.1659, -123.9401),
+       ("Chilliwack", 49.1579, -121.9515), ("Hope", 49.383, -121.442), ("Squamish", 49.7016, -123.1558), ("Whistler", 50.1163, -122.9574),
+       ("Pemberton", 50.3192, -122.8027), ("Port Alberni", 49.2339, -124.8055), ("Courtenay", 49.6866, -124.9936), ("Campbell River", 50.0244, -125.2475),
+       ("Powell River", 49.8352, -124.5247), ("Sechelt", 49.4741, -123.7545), ("Duncan", 48.7787, -123.7079), ("Tofino", 49.153, -125.9066),
+       ("Ucluelet", 48.942, -125.5466), ("Lillooet", 50.6864, -121.9364), ("Merritt", 50.1113, -120.7862), ("Lytton", 50.2316, -121.5824),
+       ("Boston Bar", 49.8655, -121.444), ("Princeton", 49.459, -120.5062), ("Manning Park", 49.065, -120.785), ("Parksville", 49.319, -124.312),
+       ("Port Renfrew", 48.555, -124.421), ("Gold River", 49.777, -126.051), ("Sooke", 48.374, -123.7262), ("Gold Bridge", 50.853, -122.838)]
+_LM = [("Vancouver", 49.2827, -123.1207), ("Surrey", 49.1913, -122.849), ("Burnaby", 49.2488, -122.9805), ("Richmond", 49.1666, -123.1336),
+       ("Abbotsford", 49.0504, -122.3045), ("Coquitlam", 49.2838, -122.7932), ("Chilliwack", 49.1579, -121.9515), ("North Vancouver", 49.32, -123.0724),
+       ("New Westminster", 49.2057, -122.911), ("Delta (Ladner)", 49.0897, -123.082), ("Tsawwassen", 49.017, -123.083), ("White Rock", 49.0253, -122.8026),
+       ("Langley", 49.1044, -122.66), ("Port Moody", 49.283, -122.8317), ("Maple Ridge", 49.2193, -122.6019), ("Mission", 49.133, -122.3089),
+       ("Harrison Hot Springs", 49.3, -121.785), ("Agassiz", 49.238, -121.769), ("Hope", 49.383, -121.442), ("Squamish", 49.7016, -123.1558),
+       ("Gibsons", 49.4, -123.505), ("Bellingham", 48.75, -122.48), ("Lynden", 48.946, -122.452), ("Point Roberts", 48.985, -123.068)]
+BC_PASSES_FAST = {"Coquihalla Summit": ("Coquihalla", 49.594, -121.095, 4081), "Allison Pass": ("Allison", 49.124, -120.855, 4403),
+                  "Duffey Lake Summit": ("Duffey", 50.37, -122.49, 4199)}
+TOWN_SETS = {"bc": [(n, a, o, "r") for n, a, o in _BC], "lm": [(n, a, o, "r") for n, a, o in _LM],
+             "newa": [("Colville", 48.546, -117.905, "r"), ("Chewelah", 48.276, -117.715, "r"), ("Metaline Falls", 48.862, -117.366, "r"),
+                      ("Ione", 48.742, -117.418, "r"), ("Northport", 48.917, -117.781, "r"), ("Omak", 48.411, -119.528, "r"),
+                      ("Okanogan", 48.361, -119.583, "l"), ("Oroville", 48.939, -119.435, "r"), ("Twisp", 48.364, -120.122, "r"),
+                      ("Inchelium", 48.296, -118.199, "r"), ("Springdale", 48.058, -117.742, "r"), ("Usk", 48.311, -117.284, "r"),
+                      ("Coulee Dam", 47.965, -118.976, "r"), ("Nespelem", 48.167, -118.973, "r"), ("Spokane", 47.66, -117.43, "r")]}
 # Extra towns for the zoomed Western / Eastern Washington frames (Benjamin 10-29-26 7:26 PM: "more town labels").
 # Appended after the site's own WA_TOWNS, so the site's placement code keeps its towns first and drops extras that collide.
 EXTRA_TOWNS = {
@@ -656,7 +704,9 @@ def static(m, out, views_only=None):
         if vid in WA_LIKE and vid != "wa":   # zoomed Washington frames: the Washington town list, only places inside the frame
             l0, l1, a0, a1 = TM.VIEWS[vid]["ll"]; ins = lambda la_, lo_: a0 + 0.05 <= la_ <= a1 - 0.05 and l0 + 0.05 <= lo_ <= l1 - 0.05
             keepT, keepP = TM.WA_TOWNS, TM.WA_PASSES
-            TM.WA_TOWNS = [t for t in keepT + EXTRA_TOWNS.get(vid, []) if ins(t[1], t[2])]; TM.WA_PASSES = {k: v for k, v in keepP.items() if ins(v[1], v[2])}
+            first = TOWN_SETS.get(vid, []); names = {t[0] for t in first}
+            TM.WA_TOWNS = [t for t in first + [t for t in keepT if t[0] not in names] + EXTRA_TOWNS.get(vid, []) if ins(t[1], t[2])]
+            TM.WA_PASSES = {k: v for k, v in {**keepP, **(BC_PASSES_FAST if vid in ("bc", "lm") else {})}.items() if ins(v[1], v[2])}
             try: return TM.towns(ax, "wa", field, lambda v: None if not np.isfinite(v) else "88") or []
             finally: TM.WA_TOWNS, TM.WA_PASSES = keepT, keepP
         return TM.towns(ax, vid, field, lambda v: None if not np.isfinite(v) else "88") or []
@@ -763,6 +813,10 @@ def static(m, out, views_only=None):
               pwa=HS.cmap(["#7f4a10", "#a6611a", "#c58a3c", "#dfc27d", "#ecdcb6", "#f6efe0", "#f5f5f5", "#e3f2e1", "#c7e9c0", "#74c476", "#238b45", "#2171b5", "#3a4fb0"],
                           "#543005", "#5b2a9c"),
               ptype=HS.cmap(PT_C, PT_C[0], PT_C[-1]))
+    IVT_L = [100, 150, 250, 300, 400, 500, 600, 700, 800, 1000, 1200, 1500]
+    CM["ivt"] = M.ramp(IVT_L, [(100, "#e4e6ea"), (250, "#f7e28a"), (400, "#f3a64c"), (600, "#e0503a"), (800, "#b0245c"), (1200, "#6a2a8f"), (1500, "#c9a7e6")])
+    FOG_L = list(range(20, 101, 10))
+    CM["fog"] = M.ramp(FOG_L, [(20, "#e6e8eb"), (40, "#b9c4cf"), (60, "#7f95ab"), (80, "#4f6a8a"), (100, "#2c3f5f")])
     CM.update(d2m=CM["t2m"], feels=CM["t2m"], gustmax=CM["gust10"], t925w=CM["t850"], t850w=CM["t850"], t700w=CM["t700"])
     prods = {
         "t2m": dict(title="2 m Temperature", fields=["t2m"], key="Temp (\u00b0F)", ticks=HS.TEMP_TICKS, **table(HS.TEMP_LEVELS, CM["t2m"], "both"),
@@ -894,6 +948,14 @@ def static(m, out, views_only=None):
                      extra="precip that fell as freezing rain / drizzle since the run started (liquid amount)  \u00b7  max {hi} in in view",
                      pct=[0, 100], dec=2, fmt="in2", only=("hrrr", "rrfs", "gfs", "ifs")),
         # 10-30 parity with the old site's model menus (global models; HRRR/RRFS get them too where the fields exist)
+        "ivt": dict(title="Integrated Vapor Transport (IVT)", fields=["ivtu", "ivtv"], fill="wspd", wind=["ivtu", "ivtv"], spd_mult=1.0, spd_sigma=1.0, key="IVT (kg/m/s)",
+                    ticks=[150, 250, 400, 600, 800, 1000, 1200], tickfmt=True, **table(IVT_L, CM["ivt"], "max"),
+                    barbs=dict(u="ivtu", v="ivtv", color="#1b1d22", length=HS.BARB_LENGTH, lw=1.0, arrows=True, min=250, ref=1000),
+                    extra="water vapor carried by the wind, 1000-300 mb  ·  arrows where IVT is 250 or more  ·  up to {hi} in view", pct=[1, 99.9],
+                    towns="none", only=("gfs", "ifs", "aifs")),
+        "fog": dict(title="Fog Risk Index", fields=["t2m", "d2m", "u10", "v10"], fill="fog", key="Fog risk", ticks=[20, 40, 60, 80, 100], tickfmt=True,
+                    **table(FOG_L, CM["fog"], "neither"), extra="our index: dewpoint spread + light wind (+ model visibility on HRRR/RRFS), damped in rain"
+                    "  ·  not a model fog forecast", pct=[0, 100], only=("hrrr", "rrfs", "gfs", "ifs", "aifs")),
         "d2m": dict(title="2 m Dewpoint", fields=["d2m"], key="Dewpoint (\u00b0F)", ticks=HS.TEMP_TICKS, **table(HS.TEMP_LEVELS, CM["t2m"], "both"),
                     extra="{lo} to {hi}\u00b0F in view", pct=[0.5, 99.5], only=("hrrr", "rrfs", "gfs", "ifs", "aifs")),
         "feels": dict(title="Feels-Like Temperature", fields=["t2m", "d2m", "u10", "v10"], fill="feels", key="Feels like (\u00b0F)", ticks=HS.TEMP_TICKS,
@@ -1000,6 +1062,14 @@ def static(m, out, views_only=None):
                              spag=True, extra="blue = each member's 552 dam line, red = 576 dam  \u00b7  black = ensemble mean  \u00b7  gray = spread",
                              pct=[0.5, 99.5], towns="names")
         CM["spag"] = M.ramp(list(range(0, 161, 10)), [(0, "#ffffff"), (60, "#e9e9e9"), (160, "#a9a9a9")])
+        if m == "eps":   # old site's "EPS lows / highs" (WA tabs): mean of the members' 2 m max / min, worst of the 24 h ending at the valid time
+            CM.update(ehigh=CM["t2m"], elow=CM["t2m"])
+            prods["ehigh"] = dict(title="24 h High Temperature (ens. mean)", fields=["maxt"], window=24, wmax=True, wfield="maxt", fill="window", key="Temp (\u00b0F)",
+                                  ticks=HS.TEMP_TICKS, **table(HS.TEMP_LEVELS, CM["t2m"], "both"), freeze=32,
+                                  extra="mean of 50 members' 2 m max (3 h / 6 h periods), highest in the 24 h ending at the valid time  \u00b7  {lo} to {hi}\u00b0F in view",
+                                  pct=[0.5, 99.5])
+            prods["elow"] = dict(prods["ehigh"], title="24 h Low Temperature (ens. mean)", fields=["mint"], wmax=False, wmin=True, wfield="mint",
+                                 extra="mean of 50 members' 2 m min (3 h / 6 h periods), lowest in the 24 h ending at the valid time  \u00b7  {lo} to {hi}\u00b0F in view")
         prods["t2ma"]["title"] = "2 m Temperature Anomaly (ens. mean)"
         prods["t2m"]["title"] = "2 m Temperature (ens. mean)"; prods["t2m"]["extra"] = "mean of 50 members  \u00b7  " + prods["t2m"]["extra"]
         prods["z500anom"]["title"] = "500 mb Height Anomaly (ens. mean)"
@@ -1026,6 +1096,8 @@ def static(m, out, views_only=None):
         if k in prods: prods[k]["under"] = "#f4f5f7"   # light below the first level so barbs and height lines stay readable
     if "mslpqpf" in prods: prods["mslpqpf"]["under"] = "#f4f5f7"   # light background so the dark isobars read (no blanking)
     if "ntstm" in prods: prods["ntstm"]["min_show"] = 10
+    for k in ("fog", "ivt"):   # light below the first level (old site: clear over the light basemap)
+        if k in prods: prods[k]["under"] = "#f4f5f7"
     if "ptype" in prods: prods["ptype"]["under"] = "#f4f5f7"
     for k in ("nqpf1", "nqpf6", "nsnow6"):
         if k in prods: prods[k]["min_show"] = prods[k]["levels"][0]
