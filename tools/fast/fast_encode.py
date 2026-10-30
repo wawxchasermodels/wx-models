@@ -276,6 +276,31 @@ def _fzinc(R, m):
     if m in NOAA: fz = np.asarray(R._idx(M_NO("cfrzr"), R.url)[2], float) > 0.5
     else: fz = np.isin(np.rint(np.asarray(R.f("ptype")[2], float)), (3, 12))
     return _inc(R, m, "tp") * fz
+WAVE_URL = "https://data.ecmwf.int/forecasts/{d}/{h:02d}z/ifs/0p25/wave/{d}{h:02d}0000-{s}h-wave-fc"
+def _wave(R, m):
+    """ECMWF IFS wave model (WAM, open data 0.25 deg; the old site's 0.1 deg wave files are no longer published): significant wave
+    height (ft), mean wave direction as a unit vector pointing where the waves travel, mean period (s). Land = swh -0.5 (drawn as land)."""
+    if m != "ifs": raise KeyError("wave")
+    if "_wave" in R.cache: return R.cache["_wave"]
+    import temp_maps as TM, eccodes as ec
+    base = WAVE_URL.format(d=f"{R.c:%Y%m%d}", h=R.c.hour, s=R.s)
+    try: idx = [json.loads(l) for l in TM.get(base + ".index").decode().splitlines()]
+    except Exception as e:
+        if "404" in str(e): raise KeyError("wave")
+        raise
+    out = {}
+    for par in ("swh", "mwd", "mwp"):
+        r = next((x for x in idx if x["param"] == par), None)
+        if r is None: raise KeyError("wave")
+        g = ec.codes_new_from_message(TM.get(base + ".grib2", (r["_offset"], r["_offset"] + r["_length"] - 1)))
+        ni, nj = ec.codes_get(g, "Ni"), ec.codes_get(g, "Nj"); lo0 = ec.codes_get(g, "longitudeOfFirstGridPointInDegrees")
+        d = ec.codes_get(g, "iDirectionIncrementInDegrees"); mv = ec.codes_get(g, "missingValue")
+        v = ec.codes_get_values(g).reshape(nj, ni).astype(float); ec.codes_release(g)
+        v[v == mv] = np.nan; lon = (lo0 + d * np.arange(ni) + 180) % 360 - 180; out[par] = v[:, np.argsort(lon)]
+    sea = np.isfinite(out["swh"]); th = np.radians(np.nan_to_num(out["mwd"]))   # mwd = direction waves come FROM (deg, meteorological)
+    R.cache["_wave"] = r = dict(swh=np.where(sea, out["swh"] * 3.28084, -0.5), wdu=np.where(sea, -np.sin(th), 0.0), wdv=np.where(sea, -np.cos(th), 0.0),
+                                mwp=np.where(sea, np.nan_to_num(out["mwp"]), 0.0))
+    return r
 IVT_P = (1000, 925, 850, 700, 600, 500, 400, 300)
 def _ivt(R, m):
     """Integrated vapor transport (kg/m/s), east and north parts: (1/g) * integral of q*V dp, 1000-300 mb, trapezoid over the
@@ -385,6 +410,7 @@ FIELDS = {   # name: (getter, units)
     "pw": (_f("pwat", lambda v: v / 25.4), "in"),
     "prt": (_prt, "code"),
     "kinc": (_kinc, "in"), "fzinc": (_fzinc, "in"),
+    "swh": (lambda R, m: _wave(R, m)["swh"], "ft"), "wdu": (lambda R, m: _wave(R, m)["wdu"], "1"), "wdv": (lambda R, m: _wave(R, m)["wdv"], "1"),
     "ivtu": (lambda R, m: _ivt(R, m)[0], "kg/m/s"), "ivtv": (lambda R, m: _ivt(R, m)[1], "kg/m/s"),
     # ECMWF ENS (model "eps" only)
     "t2sd": (_ens("t2sd"), "F"), "p32": (_ens("p32"), "%"), "z5sd": (_ens("z5sd"), "m"),
@@ -401,7 +427,7 @@ PACKS = {"wind": ("mslp", "u10", "v10"), "aloft": ("t850", "t700", "frz"), "accu
          "e2t": ("t2m", "t2sd", "p32"), "e500": ("z500", "z5sd"), "eqp": ("apcp", "apcp90", "asnow"), "eqs": ("asnow90", "gust", "gust90"),
          "emsl": ("mslp", "t850", "lowp"), "ecape": ("mucape", "pcape"),
          "w850": ("u850", "v850", "t925"), "w925": ("u925", "v925", "z1000"), "w700": ("u700", "v700", "t500"), "w300": ("u300", "v300", "t300"),
-         "etx": ("maxt", "mint"), "moist": ("d2m", "pw", "prt"), "kfz": ("kinc", "fzinc"), "ivt": ("ivtu", "ivtv"),
+         "etx": ("maxt", "mint"), "moist": ("d2m", "pw", "prt"), "kfz": ("kinc", "fzinc"), "ivt": ("ivtu", "ivtv"), "wave": ("swh", "wdu", "wdv"),
          "nbm1": ("t2m", "gust", "tcc"), "nbm2": ("nq1", "nq6", "ns6"), "nbm3": ("tstm", "maxt", "mint")}
 
 SQRT_FIELDS = {"apcp", "asnow", "apcp90", "asnow90", "nq1", "nq6", "ns6", "ltgp", "kinc", "fzinc"}
@@ -815,6 +841,10 @@ def static(m, out, views_only=None):
               ptype=HS.cmap(PT_C, PT_C[0], PT_C[-1]))
     IVT_L = [100, 150, 250, 300, 400, 500, 600, 700, 800, 1000, 1200, 1500]
     CM["ivt"] = M.ramp(IVT_L, [(100, "#e4e6ea"), (250, "#f7e28a"), (400, "#f3a64c"), (600, "#e0503a"), (800, "#b0245c"), (1200, "#6a2a8f"), (1500, "#c9a7e6")])
+    WV_L = [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 40]
+    CM["waves"] = M.ramp(WV_L, [(0, "#283c96"), (2, "#2878c8"), (4, "#28afd2"), (6, "#32be8c"), (8, "#6ec846"), (10, "#c8dc3c"), (14, "#f0b432"),
+                                (20, "#e6642d"), (28, "#c82846"), (40, "#8c1e78")])
+    CM["wavemax"] = CM["waves"]
     FOG_L = list(range(20, 101, 10))
     CM["fog"] = M.ramp(FOG_L, [(20, "#e6e8eb"), (40, "#b9c4cf"), (60, "#7f95ab"), (80, "#4f6a8a"), (100, "#2c3f5f")])
     CM.update(d2m=CM["t2m"], feels=CM["t2m"], gustmax=CM["gust10"], t925w=CM["t850"], t850w=CM["t850"], t700w=CM["t700"])
@@ -953,6 +983,14 @@ def static(m, out, views_only=None):
                     barbs=dict(u="ivtu", v="ivtv", color="#1b1d22", length=HS.BARB_LENGTH, lw=1.0, arrows=True, min=250, ref=1000),
                     extra="water vapor carried by the wind, 1000-300 mb  ·  arrows where IVT is 250 or more  ·  up to {hi} in view", pct=[1, 99.9],
                     towns="none", only=("gfs", "ifs", "aifs")),
+        "waves": dict(title="Significant Wave Height", fields=["swh", "wdu", "wdv"], key="Wave height (ft)", ticks=[0, 2, 4, 6, 8, 10, 14, 20, 28, 40],
+                      tickfmt=True, **table(WV_L, CM["waves"], "max"),
+                      barbs=dict(u="wdu", v="wdv", color="#1b1d22", length=HS.BARB_LENGTH, lw=1.0, arrows=True, min=0.5, ref=1, fixed=True),
+                      extra="ECMWF wave model (WAM 0.25\u00b0)  \u00b7  arrows = mean wave direction  \u00b7  up to {hi} ft in view", pct=[0, 99.9],
+                      only=("ifs",)),
+        "wavemax": dict(title="Estimated Max Wave Height", fields=["swh"], fill="hmax", key="Max wave (ft)", ticks=[0, 4, 8, 14, 20, 28, 40], tickfmt=True,
+                        **table(WV_L, CM["wavemax"], "max"), extra="1.86 x significant height (largest of ~1000 waves, Rayleigh; as the old site)"
+                        "  \u00b7  up to {hi} ft in view", pct=[0, 99.9], only=("ifs",)),
         "fog": dict(title="Fog Risk Index", fields=["t2m", "d2m", "u10", "v10"], fill="fog", key="Fog risk", ticks=[20, 40, 60, 80, 100], tickfmt=True,
                     **table(FOG_L, CM["fog"], "neither"), extra="our index: dewpoint spread + light wind (+ model visibility on HRRR/RRFS), damped in rain"
                     "  ·  not a model fog forecast", pct=[0, 100], only=("hrrr", "rrfs", "gfs", "ifs", "aifs")),
@@ -1096,6 +1134,8 @@ def static(m, out, views_only=None):
         if k in prods: prods[k]["under"] = "#f4f5f7"   # light below the first level so barbs and height lines stay readable
     if "mslpqpf" in prods: prods["mslpqpf"]["under"] = "#f4f5f7"   # light background so the dark isobars read (no blanking)
     if "ntstm" in prods: prods["ntstm"]["min_show"] = 10
+    for k in ("waves", "wavemax"):   # land (swh -0.5) drawn in the basemap land tone
+        if k in prods: prods[k]["under"] = "#ece8df"
     for k in ("fog", "ivt"):   # light below the first level (old site: clear over the light basemap)
         if k in prods: prods[k]["under"] = "#f4f5f7"
     if "ptype" in prods: prods["ptype"]["under"] = "#f4f5f7"
