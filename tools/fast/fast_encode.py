@@ -17,33 +17,35 @@ DPI = 100; STRIDE = 8; X2 = 2   # X2: hi-res copies of the fixed layers (static/
 HRRR_LCC = dict(central_longitude=-97.5, central_latitude=38.5, standard_parallels=(38.5, 38.5))
 GLOBAL_VIEWS = ("puget", "wa", "wwa", "ewa", "passes", "newa", "lm", "bc", "pnwt", "pnw", "na")
 MODELS = {   # grid "lcc" = HRRR 3 km, "ll" = 0.25 deg global (lat 90 -> -90, lon rolled to 0..360)
-    "hrrr": dict(grid="lcc", views=("puget", "wa", "wwa", "ewa", "passes", "newa", "lm", "pnwhr"), cycles=(0, 6, 12, 18), steps=list(range(1, 49)), keep=2),
+    # 10-31 12:02 PM (Benjamin pt1876u): runs on the site = 4 for HRRR / RRFS / NBM / ECMWF / EPS / AIFS ENS, 3 for GFS / AIFS,
+    # 2 for ECMWF 9 km (keep=). R2 ~3.6 -> ~6 GB; older runs still keep town files for the meteograms page (MG_KEEP).
+    "hrrr": dict(grid="lcc", views=("puget", "wa", "wwa", "ewa", "passes", "newa", "lm", "pnwhr"), cycles=(0, 6, 12, 18), steps=list(range(1, 49)), keep=4),
     # 06/18Z added 10-29-26 7:24 PM (Benjamin). Checked on data.ecmwf.int / NOAA 10-29 18Z: GFS 06/18Z go to 384 h like 00/12Z;
     # ECMWF 0.25 06/18Z only to 144 h (3-hourly); AIFS 06/18Z to 360 h (6-hourly) like 00/12Z.
     # RRFS (NOAA, 3 km CONUS, operational since 2026): 00/06/12/18Z hourly to 48 h then 3-hourly to 84 h (stage 3, 10-30-26)
-    "rrfs": dict(grid="lcc", views=("puget", "wa", "wwa", "ewa", "passes", "newa", "lm", "pnwhr"), cycles=(0, 6, 12, 18), steps=list(range(1, 49)) + list(range(51, 85, 3)), keep=2),
+    "rrfs": dict(grid="lcc", views=("puget", "wa", "wwa", "ewa", "passes", "newa", "lm", "pnwhr"), cycles=(0, 6, 12, 18), steps=list(range(1, 49)) + list(range(51, 85, 3)), keep=4),
     # NBM (NOAA National Blend, 2.5 km CONUS NDFD grid): 00/06/12/18Z, hourly to 36 h then 3-hourly to 168 h (stage 3, 10-30-26)
-    "nbm":  dict(grid="lcc", views=("puget", "wa", "wwa", "ewa", "passes", "newa", "lm", "pnwhr"), cycles=(0, 6, 12, 18), steps=list(range(1, 37)) + list(range(39, 169, 3)), keep=2,
+    "nbm":  dict(grid="lcc", views=("puget", "wa", "wwa", "ewa", "passes", "newa", "lm", "pnwhr"), cycles=(0, 6, 12, 18), steps=list(range(1, 37)) + list(range(39, 169, 3)), keep=4,
                  lcc=dict(central_longitude=-95.0, central_latitude=25.0, standard_parallels=(25.0, 25.0)), radius=6371200.0),
-    "gfs":  dict(grid="ll", views=GLOBAL_VIEWS, cycles=(0, 6, 12, 18), steps=list(range(3, 361, 3)), keep=2),
+    "gfs":  dict(grid="ll", views=GLOBAL_VIEWS, cycles=(0, 6, 12, 18), steps=list(range(3, 361, 3)), keep=3),
     "ifs":  dict(grid="ll", views=GLOBAL_VIEWS, cycles=(0, 6, 12, 18), steps=list(range(3, 145, 3)) + list(range(150, 361, 6)),
-                 steps_short=list(range(3, 145, 3)), short_cycles=(6, 18), keep=2, keep_long=True),
-    "aifs": dict(grid="ll", views=GLOBAL_VIEWS, cycles=(0, 6, 12, 18), steps=list(range(6, 361, 6)), keep=2),
+                 steps_short=list(range(3, 145, 3)), short_cycles=(6, 18), keep=4, keep_long=True),
+    "aifs": dict(grid="ll", views=GLOBAL_VIEWS, cycles=(0, 6, 12, 18), steps=list(range(6, 361, 6)), keep=3),
     # ECMWF IFS 9 km (Benjamin 10-31 1:58 AM "build the euro 9km option"): the same IFS run on ECMWF's free 0.1 deg open data
     # (ifs/0p1/oper, -sfc / -pl files, out about 2 h after the 0.25 deg files, since 10-20-26). Kept small: Washington-scale
     # views + Pacific NW tight only (no North America / Pacific NW wide), 0-144 h every 3 h, newest run only. The crop at 0.1 deg
     # (about 400 x 240 points) is smaller than the 0.25 deg global crop, so a run is ~1/3 the size of an ECMWF 0.25 run.
     "ifs9": dict(grid="ll", res=0.1, views=("puget", "wa", "wwa", "ewa", "passes", "newa", "lm", "bc", "pnwt"), cycles=(0, 6, 12, 18),
-                 steps=list(range(3, 145, 3)), keep=1, as_model="ifs"),
+                 steps=list(range(3, 145, 3)), keep=2, as_model="ifs"),
     # ECMWF ENS (EPS) 0.25 open data, 50 perturbed members (no control in the open files), 00/12Z to 360 h. Mean/spread/probability
     # computed here from the members (the open em/es file only appears once the whole run is out). 10-30-26 (Benjamin's saved order).
     # 10-31 (Benjamin "06Z/18Z ensembles"): + 06/18Z, which ECMWF runs to 144 h only (3-hourly; we keep the 6-hourly steps);
     # keep_long keeps the newest 00/12Z run on the site too, so 360 h never drops off (same as "ifs")
-    "eps":  dict(grid="ll", views=GLOBAL_VIEWS, cycles=(0, 6, 12, 18), steps=list(range(6, 361, 6)), keep=2, grid_from="ifs",
+    "eps":  dict(grid="ll", views=GLOBAL_VIEWS, cycles=(0, 6, 12, 18), steps=list(range(6, 361, 6)), keep=4, grid_from="ifs",
                  steps_short=list(range(6, 145, 6)), short_cycles=(6, 18), keep_long=True),
     # AIFS ensemble (stage 4): 50 members, 00/06/12/18Z, 6-hourly to 360 h; 2 m temp + 500 mb height (z / g), same products as "eps"
     # 10-31: + 06/18Z (AIFS ENS 06/18Z run the full 360 h)
-    "aens": dict(grid="ll", views=GLOBAL_VIEWS, cycles=(0, 6, 12, 18), steps=list(range(6, 361, 6)), keep=2, grid_from="ifs"),
+    "aens": dict(grid="ll", views=GLOBAL_VIEWS, cycles=(0, 6, 12, 18), steps=list(range(6, 361, 6)), keep=4, grid_from="ifs"),
 }
 MINFO = {"aens": dict(name="ECMWF AIFS Ensemble", site="AIFS ENS", res="0.25\u00b0 \u00b7 50 members", credit_as="aifs"),
          "nbm": dict(name="NOAA NBM", site="NBM", res="2.5 km", noaa=True),
