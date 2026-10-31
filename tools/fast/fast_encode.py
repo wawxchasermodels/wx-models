@@ -1085,7 +1085,7 @@ def static(m, out, views_only=None, x2_only=False):
         "pwa": dict(title="Precipitable Water Anomaly", fields=["pw"], fill="anom", anom="pw", clim="pw", key="Anomaly (in)", ticks=[-1, -0.75, -0.5, -0.25, 0, 0.25, 0.5, 0.75, 1],
                     tickfmt=True, **table(PWA_L, CM["pwa"], "both"),
                     extra="vs 1991-2020 NCEP/NCAR monthly normal moved to model terrain  \u00b7  {lo} to {hi} in in view", pct=[0.5, 99.5], dec=2,
-                    only=("gfs", "ifs", "aifs")),
+                    only=("hrrr", "rrfs", "gfs", "ifs", "aifs")),
         "ptype": dict(title="MSLP + Precipitation Type", fields=["prt", "mslp"], fill="prt", key="Precip type (light to heavy)",
                       ticks=[4.5, 20.5, 36.5, 52.5], tickfmt=True, **table(PT_L, CM["ptype"], "neither"),
                       isobars=dict(field="mslp", every=4, sigma=6.0 if m == "hrrr" else 1.0, color=HS.ISOBAR_COLOR, lw=HS.ISOBAR_LW, halo=HS.ISOBAR_HALO),
@@ -1262,6 +1262,9 @@ def static(m, out, views_only=None, x2_only=False):
         P["ticks"] = [float(t) for t in tk0]
     if x2_only:
         json.dump(prods, open(f"{out}/products_{m}.json", "w"), indent=1)   # for a targeted manifest merge (tools: add_product.py)
+        if os.environ.get("WX_X2_CLIM"):   # also build the named climatologies (comma list) for a targeted manifest clim merge
+            clim = {var: clim_static(m, out, crop_la, crop_lo, var, None if oro is None else oro[i0:i1, j0:j1] / 3.28084) for var in os.environ["WX_X2_CLIM"].split(",")}
+            json.dump(clim, open(f"{out}/clim_{m}.json", "w"), indent=1)
         print(f"{m} x2 layers done (no clim / manifest)", flush=True); return
     clim = {}
     for var in sorted({P["clim"] for P in prods.values() if P.get("clim")}):
