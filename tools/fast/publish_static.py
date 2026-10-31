@@ -13,7 +13,9 @@ loc = json.load(open(f"{D}/manifest.json"))
 import time; sv = time.strftime("%Y%m%d%H%M%S", time.gmtime())   # viewer cache-buster for static/
 def merge(man):   # keep the runs lists in R2 (the Actions jobs own them); ETag-checked write, see fast_cycle.update_manifest
     runs = loc.get("runs", {}) if a.runs_from_local else man.get("runs", {})
+    mgr = man.get("mgruns", {})   # meteograms page run lists (fast_cycle owns them too)
     man.clear(); man.update(loc); man["runs"] = dict(runs); man["static_v"] = sv
+    if mgr: man["mgruns"] = dict(mgr)
     for m in man.get("models", {}): man["runs"].setdefault(m, [])
 from fast_cycle import update_manifest
 man = update_manifest(s3, merge)

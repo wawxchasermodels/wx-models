@@ -89,6 +89,7 @@ def main():
             for f in files: os.remove(f"{D}/{f}")   # keep the runner disk small
             if full["complete"]: break
 
+MG_KEEP = 4   # runs per model with town data for the meteograms page
 def publish_manifest(s3, D, m):
     keep = FE.MODELS[m]["keep"]
     pre = {o["Prefix"].split("/")[2] for o in s3.list_objects_v2(Bucket=BUCKET, Prefix=f"runs/{m}/", Delimiter="/").get("CommonPrefixes", [])}
@@ -97,12 +98,22 @@ def publish_manifest(s3, D, m):
     if FE.MODELS[m].get("keep_long"):   # also keep the newest full-length (00/12Z) run so 360 h stays on the site
         longs = [r for r in present if int(r[8:10]) not in FE.MODELS[m].get("short_cycles", ())]
         if longs and longs[-1] not in kept: kept = sorted(kept + [longs[-1]])
-    man = update_manifest(s3, lambda mn: mn.setdefault("runs", {}).__setitem__(m, kept))
+    # 10-30 meteograms page multi-run (old site showed 4 runs): the newest MG_KEEP runs keep their small town files
+    # (run.json + pts_/mem_ JSON); map images of runs that left the map list are deleted ("slim" runs, marker key .../slim).
+    mg = present[-MG_KEEP:]
+    def both(mn): mn.setdefault("runs", {})[m] = kept; mn.setdefault("mgruns", {})[m] = sorted(set(mg) | set(kept))
+    man = update_manifest(s3, both)
     json.dump(man, open(f"{D}/manifest.json", "w"))
     for old in [r for r in present if r not in kept]:
+        slim = old in mg
+        if slim:
+            try: s3.head_object(Bucket=BUCKET, Key=f"runs/{m}/{old}/slim"); continue   # already slimmed
+            except Exception: pass
         ks = [o["Key"] for pg in s3.get_paginator("list_objects_v2").paginate(Bucket=BUCKET, Prefix=f"runs/{m}/{old}/") for o in pg.get("Contents", [])]
+        if slim: ks = [k for k in ks if not (k.endswith("/run.json") or k.split("/")[-1].startswith(("pts_", "mem_")))]
         for i in range(0, len(ks), 1000): s3.delete_objects(Bucket=BUCKET, Delete={"Objects": [{"Key": k} for k in ks[i:i + 1000]]})
-        print("pruned", m, old, len(ks), "objects", flush=True)
+        if slim: s3.put_object(Bucket=BUCKET, Key=f"runs/{m}/{old}/slim", Body=b"1")
+        print("slimmed" if slim else "pruned", m, old, len(ks), "objects", flush=True)
 
 if __name__ == "__main__":
     main()
