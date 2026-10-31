@@ -161,9 +161,14 @@ def publish_manifest(s3, D, m, prog=None):
     keep = FE.MODELS[m]["keep"]
     pre = {o["Prefix"].split("/")[2] for o in s3.list_objects_v2(Bucket=BUCKET, Prefix=f"runs/{m}/", Delimiter="/").get("CommonPrefixes", [])}
     present = sorted(r for r in pre if "Contents" in s3.list_objects_v2(Bucket=BUCKET, Prefix=f"runs/{m}/{r}/run.json", MaxKeys=1))
-    kept = present[-keep:]
+    # 10-31 (keep 2 -> 4): a run already slimmed (map images deleted, marker .../slim) must never come back into the map list
+    def is_slim(r):
+        try: s3.head_object(Bucket=BUCKET, Key=f"runs/{m}/{r}/slim"); return True
+        except Exception: return False
+    full = [r for r in present if not is_slim(r)]
+    kept = full[-keep:]
     if FE.MODELS[m].get("keep_long"):   # also keep the newest full-length (00/12Z) run so 360 h stays on the site
-        longs = [r for r in present if int(r[8:10]) not in FE.MODELS[m].get("short_cycles", ())]
+        longs = [r for r in full if int(r[8:10]) not in FE.MODELS[m].get("short_cycles", ())]
         if longs and longs[-1] not in kept: kept = sorted(kept + [longs[-1]])
     # 10-30 meteograms page multi-run (old site showed 4 runs): the newest MG_KEEP runs keep their small town files
     # (run.json + pts_/mem_ JSON); map images of runs that left the map list are deleted ("slim" runs, marker key .../slim).
