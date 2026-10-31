@@ -169,11 +169,13 @@ function pickIdx() {
 }
 function mpInfo() {
   const idx = pickIdx(), sp = +$s("mps").value, hold = +$s("mph").value, p = getPins(), pan = $s("mpmode").value === "pan";
+  const zv = (id) => $s(id).value === "f" ? null : +$s(id).value, za = zv("mpz0"), zb = zv("mpz1");
+  const zt = za === null && zb === null ? "" : ` \u00b7 zoom ${za === null ? "as framed" : za + "\u00d7"} \u2192 ${zb === null ? (za === null ? "as framed" : za + "\u00d7") : zb + "\u00d7"}`;
   $s("mppins").textContent = pan ? (p.a ? "A set" : "A not set") + " \u00b7 " + (p.b ? "B set" : "B not set") : "";
   $s("mpinfo").textContent = idx.length < 2 ? "Pick an end hour after the start hour." :
-    `${idx.length} maps, F+${S.runs[S.run].steps[idx[0]].f} to F+${S.runs[S.run].steps[idx[idx.length - 1]].f} \u00b7 about ${(idx.length / sp + hold).toFixed(1)} s of video at 30 fps`;
+    `${idx.length} maps, F+${S.runs[S.run].steps[idx[0]].f} to F+${S.runs[S.run].steps[idx[idx.length - 1]].f} \u00b7 about ${(idx.length / sp + hold).toFixed(1)} s of video at 30 fps${zt}`;
 }
-function mpMode() { const pan = $s("mpmode").value === "pan"; $s("mppan").hidden = !pan; PIN.show = pan; render("v"); render("h"); mpInfo(); }
+function mpMode() { const pan = $s("mpmode").value === "pan"; if (pan && $s("mpz0").value === "f") $s("mpz0").value = "1.8"; /* a pan needs room to move */ $s("mppan").hidden = !pan; PIN.show = pan; render("v"); render("h"); mpInfo(); }
 let muxP = null;
 const loadMuxer = () => muxP || (muxP = new Promise((res, rej) => { const sc = document.createElement("script"); sc.src = "vendor/mp4-muxer.js?v=522"; sc.onload = res; sc.onerror = () => { muxP = null; rej(new Error("could not load the MP4 writer")); }; document.head.appendChild(sc); }));
 async function makeEncoder(cv, W, H) {
@@ -212,7 +214,13 @@ async function makeMp4() {
   const k = $s("mpk").value, f = F[k], pan = $s("mpmode").value === "pan", pins = getPins(), idx = pickIdx(), steps = S.runs[S.run].steps;
   if (idx.length < 2) { mpSt("Pick an end hour after the start hour."); return; }
   if (pan && !(pins.a && pins.b)) { mpSt("Set pin A and pin B on the map first."); return; }
-  const per = FPS / +$s("mps").value, holdN = Math.round(+$s("mph").value * FPS), zoom = +$s("mpz").value, panN = Math.max(1, Math.round(idx.length * per) - 1);
+  const per = FPS / +$s("mps").value, holdN = Math.round(+$s("mph").value * FPS), panN = Math.max(1, Math.round(idx.length * per) - 1);
+  // 10-31 1:35 PM (Benjamin: "starting zoom and ending zoom ... start zoom out a bit but zoom in slowly on the storm"): the zoom
+  // eases from Start to End over the loop (geometric, so each step looks the same); with pins the centre eases A -> B at the
+  // same time, without pins the centre is where the frame is framed now. "as framed" = the frame's own zoom.
+  const fr0 = getFr(k), z0 = $s("mpz0").value === "f" ? Math.max(1, fr0.zoom || 1) : +$s("mpz0").value, z1 = $s("mpz1").value === "f" ? z0 : +$s("mpz1").value;
+  const ramp = pan || Math.abs(z1 - z0) > 1e-6 || $s("mpz0").value !== "f", c0 = crop(k, fr0);
+  const zoomAt = (t) => z0 * Math.pow(z1 / z0, ease(t));
   const run = S.run, keep = S.i, t0 = performance.now(); let enc = null;
   REC.on = true; REC.cancel = false; PLAY.on = false; $s("mpout").hidden = true; $s("mpgo").disabled = true; $s("mpstop").hidden = false; document.body.classList.add("rec");
   try {
@@ -225,7 +233,9 @@ async function makeMp4() {
       mpSt(`Making video\u2026 F+${steps[idx[j]].f} (${j + 1}/${idx.length})`);
       const n1 = Math.round((j + 1) * per) + (j === idx.length - 1 ? holdN : 0); let drawn = false;
       for (; n < n1; n++) {
-        if (pan) { const t = ease(Math.min(1, n / panN)); await render(k, frAt(k, lerp(pins.a.x, pins.b.x, t), lerp(pins.a.y, pins.b.y, t), zoom)); }
+        const tt = Math.min(1, n / panN);
+        if (pan) { const t = ease(tt); await render(k, frAt(k, lerp(pins.a.x, pins.b.x, t), lerp(pins.a.y, pins.b.y, t), zoomAt(tt))); }
+        else if (ramp) await render(k, frAt(k, c0.cx, c0.cy, zoomAt(tt)));
         else if (!drawn || enc.realtime) { await render(k); drawn = true; }   // real-time recorder: redraw so each frame is a fresh canvas frame
         await enc.add(n);
       }
@@ -246,7 +256,7 @@ if (!CLEAN && $s("mp4p")) {
       h.textContent = `Tap either frame where the loop should ${m_ === "a" ? "START (pin A)" : "END (pin B)"}. Drag the frame first if you need to. Esc cancels.`; render("v"); render("h"); }
     else if (m_ === "c") { setPins({}); mpInfo(); render("v"); render("h"); }
     else if (m_ === "go") makeMp4(); else if (m_ === "stop") REC.cancel = true; });
-  for (const id of ["mpa", "mpb", "mpe", "mps", "mph", "mpz"]) $s(id).addEventListener("change", mpInfo);
+  for (const id of ["mpa", "mpb", "mpe", "mps", "mph", "mpz0", "mpz1"]) $s(id).addEventListener("change", mpInfo);
   $s("mpmode").addEventListener("change", mpMode);
   addEventListener("keydown", (e) => { if (e.key === "Escape" && PIN.mode) { PIN.mode = null; $s("pinhint").hidden = true; $s("mp4p").hidden = false; } });
   window.__studioMp4 = { getPins, setPins, makeMp4, openMp4 };

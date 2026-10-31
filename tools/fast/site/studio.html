@@ -147,10 +147,11 @@ body.clean .sfr canvas,body.clean #fv canvas,body.clean #fh canvas{width:auto!im
   <label>Mode <select id="mpmode"><option value="loop">Plain loop</option><option value="pan">Track storm (pan A &rarr; B)</option></select></label></div>
   <div class="mp-row"><label>Start <select id="mpa"></select></label><label>End <select id="mpb"></select></label></div>
   <div class="mp-row"><label>Every <select id="mpe"><option value="0">hour in the run</option><option value="3">3 h</option><option value="6">6 h</option><option value="12">12 h</option><option value="24">24 h</option></select></label>
-  <label>Speed <select id="mps"><option value="2">2 maps/s</option><option value="3">3 maps/s</option><option value="4" selected>4 maps/s</option><option value="6">6 maps/s</option><option value="8">8 maps/s</option><option value="10">10 maps/s</option></select></label>
+  <label>Speed <select id="mps"><option value="1">1 map/s</option><option value="1.5">1.5 maps/s</option><option value="2">2 maps/s</option><option value="3">3 maps/s</option><option value="4" selected>4 maps/s</option><option value="6">6 maps/s</option><option value="8">8 maps/s</option><option value="10">10 maps/s</option></select></label>
   <label>Hold end <select id="mph"><option value="0">0 s</option><option value="0.5">0.5 s</option><option value="1" selected>1 s</option><option value="2">2 s</option></select></label></div>
-  <div class="mp-row" id="mppan" hidden><label>Zoom <select id="mpz"><option>1.4</option><option selected>1.8</option><option>2.2</option><option>2.5</option></select></label>
-  <button type="button" data-m="a">Set pin A (start)</button><button type="button" data-m="b">Set pin B (end)</button><button type="button" data-m="c">Clear pins</button><span id="mppins"></span></div>
+  <div class="mp-row"><label>Start zoom <select id="mpz0"><option value="f">as framed</option><option value="1">1&times;</option><option value="1.2">1.2&times;</option><option value="1.4">1.4&times;</option><option value="1.6">1.6&times;</option><option value="1.8">1.8&times;</option><option value="2">2&times;</option><option value="2.2">2.2&times;</option><option value="2.5">2.5&times;</option><option value="2.8">2.8&times;</option><option value="3">3&times;</option></select></label>
+  <label>End zoom <select id="mpz1"><option value="f">same as start</option><option value="1">1&times;</option><option value="1.2">1.2&times;</option><option value="1.4">1.4&times;</option><option value="1.6">1.6&times;</option><option value="1.8">1.8&times;</option><option value="2">2&times;</option><option value="2.2">2.2&times;</option><option value="2.5">2.5&times;</option><option value="2.8">2.8&times;</option><option value="3">3&times;</option></select></label></div>
+  <div class="mp-row" id="mppan" hidden><button type="button" data-m="a">Set pin A (start)</button><button type="button" data-m="b">Set pin B (end)</button><button type="button" data-m="c">Clear pins</button><span id="mppins"></span></div>
   <div class="mp-row mp-note" id="mpinfo"></div>
   <div class="mp-row"><button type="button" data-m="go" id="mpgo" class="pri">Make MP4</button><button type="button" data-m="stop" id="mpstop" hidden>Stop</button><span id="mpst"></span></div>
   <div id="mpout" hidden><video id="mpv" controls loop muted playsinline></video><div class="mp-row"><a id="mpdl" download>Save MP4</a><button type="button" id="mpshare" hidden>Share / Save to Photos</button></div></div>
@@ -158,5 +159,5 @@ body.clean .sfr canvas,body.clean #fv canvas,body.clean #fh canvas{width:auto!im
 <div id="pinhint" hidden></div>
 <div id="dock"></div>
 <script src="viewer.js?v=20261031s"></script>
-<script src="studio.js?v=20261031b"></script>
+<script src="studio.js?v=20261031c"></script>
 </body></html>
