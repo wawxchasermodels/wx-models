@@ -54,6 +54,47 @@ function colorbar(c, P, x, y, w, h, size) {
   c.textAlign = "left"; c.font = `700 ${size}px Montserrat`; c.fillText(P.key || "", x, y - size * 0.55);
   return true;
 }
+// ---- branding (10-31 3:49 PM, Benjamin: "Yes to 3"): a title card at the start of a video and a lower third on every frame
+// (logo, title / storm name, model + run, forecast date). Toggles in the Save MP4 panel (remembered); links: &brand=1 (both on),
+// &title=, &storm=, &brandlogo=wa|usa|wawc|usawc|none, &card=0|1, &lower=0|1.
+const LOGOS = { wa: "brand/wawx.png", usa: "brand/usawx.png", wawc: "brand/wawc.png", usawc: "brand/usawc.png" };
+const BR = Object.assign({ card: false, lower: false, logo: "wa", title: "", storm: "" }, (() => { try { return JSON.parse(localStorage.getItem("studio:brand") || "{}"); } catch (e) { return {}; } })());
+if (SQ.get("brand") === "1") { BR.card = true; BR.lower = true; }
+for (const [q, k_] of [["card", "card"], ["lower", "lower"]]) if (SQ.has(q)) BR[k_] = SQ.get(q) === "1";
+if (SQ.has("title")) BR.title = SQ.get("title"); if (SQ.has("storm")) BR.storm = SQ.get("storm"); if (SQ.has("brandlogo")) BR.logo = SQ.get("brandlogo");
+const saveBR = () => { if (!SQ.get("make") && !CLEAN) try { localStorage.setItem("studio:brand", JSON.stringify(BR)); } catch (e) { /* private */ } };
+const logoImg = {};
+function getLogo() { const u = LOGOS[BR.logo]; if (!u) return null; if (!logoImg[u]) { const im = new Image(); im.src = u; logoImg[u] = im; im.onload = () => renderAll(); } const im = logoImg[u]; return im.complete && im.naturalWidth ? im : null; }
+const ptTime = (iso, o) => { try { return new Date(iso).toLocaleString("en-US", Object.assign({ timeZone: "America/Los_Angeles" }, o)); } catch (e) { return iso; } };
+function runText() { const [m, c] = last.cur.run.split("/"), site = (S.man.models[m] || {}).site || m; return `${site} ${c.slice(8)}Z ${c.slice(4, 6)}-${c.slice(6, 8)} run`; }
+function lowerThird(k, c) {
+  const f = F[k], step = last.step, lg = getLogo(), h = k === "v" ? 150 : 118, w = k === "v" ? f.W - 2 * f.pad : 860, x = f.pad, y = f.H - f.bot - h - (k === "v" ? 40 : 26);
+  c.save(); c.fillStyle = "rgba(13,15,19,0.84)"; c.beginPath(); c.roundRect ? c.roundRect(x, y, w, h, 16) : c.rect(x, y, w, h); c.fill();
+  c.fillStyle = "#2f8cff"; c.fillRect(x, y + 14, 8, h - 28);
+  let tx = x + 28; const ls = h - 30;
+  if (lg) { c.drawImage(lg, tx, y + 15, ls, ls); tx += ls + 22; }
+  const l1 = BR.storm || BR.title || last.cur.P.title, l2 = `${runText()} \u00b7 ${ptTime(step.valid, { weekday: "short", month: "short", day: "numeric", hour: "numeric" })} PT`;
+  c.fillStyle = "#fff"; c.font = `800 ${k === "v" ? 46 : 40}px Montserrat`; c.textBaseline = "alphabetic";
+  let t1 = l1; while (c.measureText(t1).width > x + w - tx - 24 && t1.length > 4) t1 = t1.slice(0, -2); if (t1 !== l1) t1 += "\u2026";
+  c.fillText(t1, tx, y + h * 0.5); c.font = `600 ${k === "v" ? 28 : 25}px Montserrat`; c.fillStyle = "#ffc24d"; c.fillText(l2, tx, y + h * 0.5 + (k === "v" ? 44 : 38));
+  c.restore();
+}
+function titleCard(k, c, alpha, a0, a1) {   // over the first map; a0 / a1 = first / last step of the loop
+  const f = F[k], lg = getLogo(); c.save(); c.globalAlpha = alpha;
+  c.fillStyle = "rgba(10,12,16,0.86)"; c.fillRect(0, 0, f.W, f.H);
+  const ls = k === "v" ? 380 : 300, cx = f.W / 2; let y = k === "v" ? 520 : 150;
+  if (lg) { c.drawImage(lg, cx - ls / 2, y, ls, ls); y += ls + (k === "v" ? 110 : 90); } else y += k === "v" ? 300 : 220;
+  c.textAlign = "center"; c.fillStyle = "#fff"; c.font = `900 ${k === "v" ? 76 : 80}px Montserrat`;
+  const words = (BR.title || BR.storm || last.cur.P.title).split(" "), maxW = f.W - 2 * f.pad, lines = []; let line = "";
+  for (const w_ of words) { const t = line ? line + " " + w_ : w_; if (c.measureText(t).width > maxW && line) { lines.push(line); line = w_; } else line = t; } lines.push(line);
+  lines.slice(0, 3).forEach((t, i) => c.fillText(t, cx, y + i * (k === "v" ? 86 : 88))); y += (Math.min(3, lines.length) - 1) * (k === "v" ? 86 : 88) + (k === "v" ? 80 : 74);
+  if (BR.storm && BR.title) { c.font = `800 ${k === "v" ? 48 : 46}px Montserrat`; c.fillStyle = "#ffc24d"; c.fillText(BR.storm, cx, y); y += k === "v" ? 70 : 64; }
+  c.font = `600 ${k === "v" ? 38 : 36}px Montserrat`; c.fillStyle = "#cfd3da";
+  c.fillText(`${runText()} \u00b7 ${last.cur.P.title}`, cx, y); y += k === "v" ? 58 : 54;
+  if (a0 && a1) c.fillText(`${ptTime(a0.valid, { weekday: "short", month: "short", day: "numeric", hour: "numeric" })} \u2013 ${ptTime(a1.valid, { weekday: "short", month: "short", day: "numeric", hour: "numeric" })} PT`, cx, y);
+  c.restore();
+}
+window.__studioBrand = { BR, titleCard: (k, a) => titleCard(k, F[k].cv.getContext("2d"), a == null ? 1 : a, null, null) };
 async function render(k, frO) {   // frO: camera override (MP4 storm-track pan)
   if (!last) return; const f = F[k], c = f.cv.getContext("2d"), fr = frO || getFr(k), { cv, cur, step } = last, P = cur.P, [m] = cur.run.split("/");
   if (!frO) f.zoom.value = Math.round((fr.zoom || 1) * 100);
@@ -88,6 +129,7 @@ async function render(k, frO) {   // frO: camera override (MP4 storm-track pan)
   // 9:16: credit under the bar, logo right; 16:9: bar fills the left 58 %, so credit (and logo above it) sit bottom-right
   if (k === "v") c.fillText(credit, f.pad, f.H - 70); else { c.textAlign = "right"; c.fillText(credit, f.W - f.pad, f.H - 24); c.textAlign = "left"; }
   if (logo) { c.font = `800 ${k === "v" ? 34 : 28}px Montserrat`; c.fillStyle = "#fff"; c.textAlign = "right"; c.fillText(logo, f.W - f.pad, f.H - (k === "v" ? 70 : 60)); c.textAlign = "left"; }
+  if (BR.lower) lowerThird(k, c);
   if (PIN.show && !REC.on) drawPins(k, c, r);
   window.__studio = (window.__studio || 0) + 1;
 }
@@ -308,7 +350,12 @@ async function makeMp4() {
   try {
     enc = await makeEncoder(f.cv, f.W, f.H); const totN = Math.round(T[idx.length] * FPS) + holdN, pg = $s("mpprog"); pg.hidden = false; pg.value = 0;
     S.i = idx[0]; $("step").value = idx[0]; await draw(); await sleep(500); await draw();   // let this view's sharp (x2) layers land first
-    let n = 0;
+    let n = 0, cardN = 0;
+    if (BR.card) {   // title card: 1.5 s, fading out over the first map in the last 0.5 s (the loop timing starts after it)
+      getLogo(); await sleep(50); const cN = Math.round(1.5 * FPS), fN = Math.round(0.5 * FPS), c = f.cv.getContext("2d"), fr1 = pan ? frAt(k, pins.a.x, pins.a.y, zoomAt(0)) : ramp ? frAt(k, c0.cx, c0.cy, zoomAt(0)) : null;
+      for (let j = 0; j < cN; j++) { await render(k, fr1); titleCard(k, c, j < cN - fN ? 1 : (cN - j) / fN, steps[idx[0]], steps[idx[idx.length - 1]]); await enc.add(j); }
+      enc.off = cN; cardN = cN;
+    }
     for (let j = 0; j < idx.length; j++) {
       if (REC.cancel || S.run !== run) throw new Error("stopped");
       if (j) { if (enc.idle) enc.idle(); S.i = idx[j]; $("step").value = idx[j]; await draw(); }   // an hour missing from the run keeps the previous map
@@ -319,14 +366,14 @@ async function makeMp4() {
         if (pan) { const t = ease(tt); await render(k, frAt(k, lerp(pins.a.x, pins.b.x, t), lerp(pins.a.y, pins.b.y, t), zoomAt(tt))); }
         else if (ramp) await render(k, frAt(k, c0.cx, c0.cy, zoomAt(tt)));
         else if (!drawn || enc.realtime) { await render(k); drawn = true; }   // real-time recorder: redraw so each frame is a fresh canvas frame
-        await enc.add(n); if (n % 6 === 0) pg.value = n / totN;
+        await enc.add(n + (enc.off || 0)); if (n % 6 === 0) pg.value = n / totN;
       }
     }
     pg.value = 1; mpSt("Finishing\u2026"); const how = enc.how, blob = await enc.done(); enc = null;
     const nm = `${run.replace("/", "_")}_${last.cur.pid}_${S.view}_F${steps[idx[0]].f}-F${steps[idx[idx.length - 1]].f}_${k === "v" ? "1080x1920" : "1920x1080"}${pan ? "_track" : ""}.${blob.type.includes("mp4") ? "mp4" : "webm"}`;
     const u = URL.createObjectURL(blob), v = $s("mpv"), dl = $s("mpdl"); if (v.dataset.u) URL.revokeObjectURL(v.dataset.u); v.dataset.u = u; v.src = u; dl.href = u; dl.download = nm;
     const file = new File([blob], nm, { type: blob.type }); $s("mpshare").hidden = !(navigator.canShare && navigator.canShare({ files: [file] })); $s("mpshare").onclick = () => navigator.share({ files: [file] }).catch(() => {});
-    $s("mpout").hidden = false; window.__mp4 = { name: nm, bytes: blob.size, frames: n, seconds: n / FPS, how, ms: Math.round(performance.now() - t0) };
+    n += cardN; $s("mpout").hidden = false; window.__mp4 = { name: nm, bytes: blob.size, frames: n, seconds: n / FPS, branded: !!(BR.card || BR.lower), how, ms: Math.round(performance.now() - t0), blob };
     mpSt(`Done: ${(blob.size / 1e6).toFixed(1)} MB, ${(n / FPS).toFixed(1)} s, made in ${((performance.now() - t0) / 1000).toFixed(0)} s`);
   } catch (e) { if (enc) enc.abort(); mpSt(e.message === "stopped" ? "Stopped." : "Could not make the video: " + (e.message || e)); window.__mp4 = { error: String(e.message || e) }; }
   finally { REC.on = false; window.__vjNoJump = false; $s("mpgo").disabled = false; $s("mpstop").hidden = true; $s("mpprog").hidden = true; document.body.classList.remove("rec"); if (S.run === run) { S.i = keep; $("step").value = keep; } draw(); }
@@ -380,12 +427,100 @@ function applyStorm(n) {
   setPins({ a: { x: P_.a.x, y: P_.a.y }, b: { x: P_.b.x, y: P_.b.y } });
   for (const [id, v] of Object.entries(PRESETS.landfall)) $s(id).value = v;   // the landfall look: pan A -> B, zoom in, slow down
   $s("mpa").value = String(ix(P_.startF)); $s("mpb").value = String(ix(P_.endF)); $s("mppre").value = "storm";
+  // 10-31 3:53 PM (Benjamin: "After storm finds the storm, make it autofill in the settings for the storm it found"): a map with
+  // isobars, the frame shape from the track's direction, zooms from its size, a speed for a ~7 s loop (slowing into landfall),
+  // and the branding title / storm name. All still editable.
+  const R_ = S.runs[S.run], has = (x) => PRODS()[x] && PRODS()[x].fields.every((fl) => R_.fields.includes(fl));
+  if (!(PRODS()[S.prod] || {}).isobars) { const want = ["mslpqpf", "slp", "aifswind", "ptype"].find(has); if (want) { S.prod = want; setLists(); $("prod").value = want; } }
+  const V = VIEWS()[S.view], dx = Math.abs(P_.b.x - P_.a.x), dy = Math.abs(P_.b.y - P_.a.y), d = Math.hypot(dx, dy) / V.panel[2];
+  if (!(SQ.get("make") && SQ.get("shape"))) $s("mpk").value = dx >= dy ? "h" : "v";
+  const snap = (v, opts) => opts.reduce((b, o) => Math.abs(o - v) < Math.abs(b - v) ? o : b, opts[0]), ZO = [1, 1.2, 1.4, 1.6, 1.8, 2, 2.2, 2.5, 2.8, 3];
+  const z1 = snap(Math.min(2.5, Math.max(1.6, 2.6 - 2.5 * d)), ZO), z0 = snap(Math.max(1, Math.min(z1 - 0.4, 1 / (0.5 + d))), ZO);
+  $s("mpz0").value = String(z0); $s("mpz1").value = String(z1);
+  $s("mpe").value = P_.endF - P_.startF <= 48 ? "3" : "6";
+  const nMaps = pickIdx().length, s0 = Math.min(6, Math.max(1.5, Math.round(nMaps / 7 * 2) / 2));
+  $s("mps").value = String(s0); $s("mps1").value = P_.landfall ? String(snap(Math.max(1, s0 / 2), [0.5, 1, 1.5, 2, 3, 4, 5, 6])) : "";
+  const vt = (f) => (steps.find((x) => x.f === f) || {}).valid, day = (f) => ptTime(vt(f), { weekday: "short", month: "short", day: "numeric", hour: "numeric" }) + " PT";
+  if (!BR.title || BR.autoT) { BR.title = P_.landfall ? `Storm landfall ${day(P_.landfall.f)}` : `Deep low offshore ${day(P_.fMin)}`; BR.autoT = true; }
+  if (!BR.storm || BR.autoS) { BR.storm = `${Math.round(P_.minP)} mb low`; BR.autoS = true; }
+  brSync(); saveBR();
   mpMode(); saveOpts();
   const fi = ix(P_.landfall ? P_.landfall.f : P_.fMin); if (fi >= 0 && !REC.on) { S.i = fi; $("step").value = fi; draw(); }
   const lf = P_.landfall;
   $s("mpsfi").textContent = `Deepest ${Math.round(P_.minP)} mb at F+${P_.fMin}. ` + (lf ? `Landfall F+${lf.f}${lf.lat !== undefined ? " near " + StormFind.fmtLL(lf) : ""}. ` : "No landfall in this view: B is where the track ends. ") +
     `Loop F+${P_.startF} to F+${P_.endF}. A = start, B = ${lf ? "landfall" : "end"}. Change any of it below, or Set pin A / B by hand.`;
   mpSt(`Found ${TRK.list.length} storm track${TRK.list.length === 1 ? "" : "s"}; using the deepest.`); mpInfo();
+}
+function brSync() { if (!$s("brcard")) return; $s("brcard").checked = BR.card; $s("brlower").checked = BR.lower; $s("brlogo").value = LOGOS[BR.logo] ? BR.logo : "none"; $s("brtitle").value = BR.title || ""; $s("brstorm").value = BR.storm || ""; }
+// ---- batch export (10-31 3:49 PM, Benjamin: "Yes to 2"): tick models / products / views / frame shapes, one button makes every
+// MP4 with the panel's settings (hours by forecast hour, speed, zoom, mode / pins of each view, preset; "Auto storm track" finds
+// the storm per map) and packs them in one .zip (stored, MP4s don't compress). Result: window.__batchResult.
+const BX = { on: false, cancel: false };
+const MORDER = ["hrrr", "rrfs", "nbm", "gfs", "ifs", "ifs9", "aifs", "eps", "aens"];
+function bxFill() {
+  const ck = (id, v, t, on) => `<label><input type="checkbox" data-g="${id}" value="${v}"${on ? " checked" : ""}> ${t}</label>`, [m0] = S.run.split("/"), R_ = S.runs[S.run];
+  $s("bxm").innerHTML = MORDER.filter((m) => S.man.models[m] && (S.man.runs[m] || []).length).map((m) => ck("m", m, S.man.models[m].site || m, m === m0)).join("");
+  $s("bxp").innerHTML = Object.entries(PRODS()).filter(([, p]) => p.fields.every((fl) => R_.fields.includes(fl))).map(([k, p]) => ck("p", k, p.title, k === S.prod)).join("");
+  $s("bxv").innerHTML = Object.entries(VIEWS()).map(([k, v]) => ck("v", k, v.label, k === S.view)).join(""); bxCount();
+}
+const bxSel = (g) => [...document.querySelectorAll(`#mpbatch input[data-g="${g}"]:checked`)].map((e) => e.value);
+function bxCount() { const n = bxSel("m").length * bxSel("p").length * bxSel("v").length * (+$s("bxsv").checked + +$s("bxsh").checked); $s("bxn").textContent = `${n} video${n === 1 ? "" : "s"} (at most 40)`; return n; }
+const CRC = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+const crc32 = (u) => { let c = 0xFFFFFFFF; for (let i = 0; i < u.length; i++) c = CRC[(c ^ u[i]) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; };
+async function zipStore(files) {   // plain "stored" zip (no compression), UTF-8 names
+  const parts = [], cd = []; let off = 0;
+  for (const f of files) {
+    const data = new Uint8Array(await f.blob.arrayBuffer()), nm = new TextEncoder().encode(f.name), crc = crc32(data), L = new DataView(new ArrayBuffer(30)), C = new DataView(new ArrayBuffer(46));
+    L.setUint32(0, 0x04034b50, true); L.setUint16(4, 20, true); L.setUint16(6, 0x0800, true); L.setUint16(12, 0x21, true); L.setUint32(14, crc, true); L.setUint32(18, data.length, true); L.setUint32(22, data.length, true); L.setUint16(26, nm.length, true);
+    C.setUint32(0, 0x02014b50, true); C.setUint16(4, 20, true); C.setUint16(6, 20, true); C.setUint16(8, 0x0800, true); C.setUint16(14, 0x21, true); C.setUint32(16, crc, true); C.setUint32(20, data.length, true); C.setUint32(24, data.length, true); C.setUint16(28, nm.length, true); C.setUint32(42, off, true);
+    parts.push(L, nm, data); cd.push(C, nm); off += 30 + nm.length + data.length;
+  }
+  const size = cd.reduce((a, x) => a + x.byteLength, 0), E_ = new DataView(new ArrayBuffer(22));
+  E_.setUint32(0, 0x06054b50, true); E_.setUint16(8, files.length, true); E_.setUint16(10, files.length, true); E_.setUint32(12, size, true); E_.setUint32(16, off, true);
+  return new Blob([...parts, ...cd, E_], { type: "application/zip" });
+}
+async function setCombo(m, p, v) {
+  const rs = S.man.runs[m] || []; if (!rs.length) return "no run";
+  if (!(S.man.models[m].views || {})[v]) return "view not in this model";
+  const run = `${m}/${rs[rs.length - 1]}`; await loadRun(run); S.run = run; $("run").value = run; S.view = v; S.prod = p; setLists();
+  if (S.prod !== p) return "product not in this run"; if (S.view !== v) return "view not in this model";
+  $("prod").value = p; $("view").value = v; await draw(); return null;
+}
+async function batchExport(opts) {
+  if (BX.on || REC.on || !last) return; const o = opts || {};
+  const ms = o.models || bxSel("m"), ps = o.prods || bxSel("p"), vs = o.views || bxSel("v"), ks = o.shapes || ["v", "h"].filter((k) => $s("bxs" + k).checked);
+  const steps0 = S.runs[S.run].steps, fA = steps0[+$s("mpa").value].f, fB = steps0[+$s("mpb").value].f, keepO = {}; for (const id of OPT_IDS) keepO[id] = $s(id).value;
+  const pre = $s("mppre").value, back = { run: S.run, prod: S.prod, view: S.view, i: S.i }, res = window.__batchResult = { state: "making", items: [], skipped: [] };
+  const combos = []; for (const m of ms) for (const p of ps) for (const v of vs) for (const k of ks) combos.push([m, p, v, k]);
+  if (!combos.length) { $s("bxst").textContent = "Tick at least one model, product, view and frame shape."; res.state = "error"; return res; }
+  if (combos.length > 40) { $s("bxst").textContent = `${combos.length} videos is too many at once (40 at most).`; res.state = "error"; return res; }
+  BX.on = true; BX.cancel = false; $s("bxgo").disabled = true; $s("bxstop").hidden = false; $s("bxout").innerHTML = ""; const files = [];
+  try {
+    for (let j = 0; j < combos.length; j++) {
+      if (BX.cancel) throw new Error("stopped"); const [m, p, v, k] = combos[j];
+      $s("bxst").textContent = `${j + 1}/${combos.length}: ${S.man.models[m].site || m} \u00b7 ${p} \u00b7 ${v} \u00b7 ${k === "v" ? "9:16" : "16:9"}`;
+      const why = await setCombo(m, p, v); if (why) { res.skipped.push({ m, p, v, k, why }); continue; }
+      const st = S.runs[S.run].steps; openMp4(k); for (const [id, val] of Object.entries(keepO)) $s(id).value = val; $s("mpk").value = k;
+      const ia = st.findIndex((x) => x.f >= fA); let ib = -1; st.forEach((x, i) => { if (x.f <= fB) ib = i; });
+      if (ia < 0 || ib <= ia) { res.skipped.push({ m, p, v, k, why: `no hours F+${fA}..F+${fB}` }); continue; }
+      $s("mpa").value = String(ia); $s("mpb").value = String(ib);
+      if (pre === "storm") { const l = await findStorms(); $s("mpk").value = k; if (!l.length) $s("mpmode").value = "loop"; }
+      else if ($s("mpmode").value === "pan" && !(getPins().a && getPins().b)) $s("mpmode").value = "loop";   // no pins for this view
+      if (pre === "storm" && S.prod !== p) S.prod = p, setLists(), $("prod").value = p;   // keep the ticked product
+      mpMode(); await makeMp4(); const r = window.__mp4 || {};
+      if (!r.blob) { res.skipped.push({ m, p, v, k, why: r.error || "no video" }); if (r.error === "stopped") throw new Error("stopped"); continue; }
+      files.push({ name: r.name, blob: r.blob }); res.items.push({ name: r.name, bytes: r.bytes, seconds: r.seconds });
+      const a = document.createElement("a"); a.href = URL.createObjectURL(r.blob); a.download = r.name; a.textContent = `${r.name} (${(r.bytes / 1e6).toFixed(1)} MB)`; $s("bxout").appendChild(a);
+    }
+    if (!files.length) throw new Error("no videos were made" + (res.skipped.length ? ": " + res.skipped.map((x) => x.why).join("; ") : ""));
+    $s("bxst").textContent = "Packing the .zip\u2026"; const zip = await zipStore(files), zn = `wx_studio_batch_${new Date().toISOString().slice(0, 16).replace(/[-:T]/g, "")}.zip`;
+    const za = document.createElement("a"); za.id = "bxzip"; za.href = URL.createObjectURL(zip); za.download = zn; za.textContent = `Download all (${files.length} MP4s, ${(zip.size / 1e6).toFixed(1)} MB .zip)`; $s("bxout").prepend(za);
+    Object.assign(res, { state: "done", ok: true, zipName: zn, zipBytes: zip.size, zipUrl: za.href });
+    $s("bxst").textContent = `Done: ${files.length} video${files.length === 1 ? "" : "s"}${res.skipped.length ? `, ${res.skipped.length} skipped (not in that model / run)` : ""}.`;
+  } catch (e) { Object.assign(res, { state: "error", ok: false, error: String(e.message || e) }); $s("bxst").textContent = e.message === "stopped" ? "Stopped." : "Batch: " + (e.message || e); }
+  finally { BX.on = false; $s("bxgo").disabled = false; $s("bxstop").hidden = true;
+    try { await loadRun(back.run); S.run = back.run; $("run").value = back.run; S.view = back.view; S.prod = back.prod; setLists(); S.i = Math.min(back.i, S.runs[S.run].steps.length - 1); $("step").value = S.i; draw(); } catch (e) { /* stay */ } }
+  return res;
 }
 // ---- instant loop link (10-31 3:38 PM, Benjamin: "Yes go ahead and add the api"): studio.html?make=loop&model=ecmwf&product=mslp
 // &view=na&from=24&to=144&shape=h [&step=6&speed=4&endspeed=1&startzoom=1.2&endzoom=2&pinA=lat,lon&pinB=lat,lon&preset=landfall|
@@ -401,7 +536,7 @@ async function autoLoop() {
     const k = SQ.get("shape") === "v" ? "v" : "h", pre = SQ.get("preset") || ""; openMp4(k);
     const steps = S.runs[S.run].steps;
     if (PRESETS[pre]) { for (const [id, v] of Object.entries(PRESETS[pre])) if (id !== "span") $s(id).value = v; $s("mppre").value = pre; }
-    if (pre === "storm") { const l = await findStorms(); if (!l.length && !SQ.get("pinA")) throw new Error("storm finder: " + $s("mpst").textContent); }
+    if (pre === "storm") { const l = await findStorms(); if (!l.length && !SQ.get("pinA")) throw new Error("storm finder: " + $s("mpst").textContent); if (SQ.get("shape")) $s("mpk").value = k; }
     const from = num("from"), to = num("to");
     if (from !== null) { const i = steps.findIndex((x) => x.f >= from); if (i >= 0) $s("mpa").value = String(i); }
     if (to !== null) { let i = -1; steps.forEach((x, j) => { if (x.f <= to) i = j; }); if (i >= 0) $s("mpb").value = String(i); }
@@ -450,6 +585,16 @@ if (!CLEAN && $s("mp4p")) {
   for (const id of OPT_IDS) $s(id).addEventListener("change", (e) => { saveOpts(); if (e.isTrusted) $s("mppre").value = ""; });
   $s("mppre").addEventListener("change", (e) => { if (e.target.value === "storm") findStorms(); else applyPreset(e.target.value); });
   $s("mpsfl").addEventListener("change", (e) => applyStorm(+e.target.value));
+  brSync();
+  for (const id of ["brcard", "brlower"]) $s(id).addEventListener("change", (e) => { BR[id === "brcard" ? "card" : "lower"] = e.target.checked; saveBR(); renderAll(); });
+  $s("brlogo").addEventListener("change", (e) => { BR.logo = e.target.value; saveBR(); renderAll(); });
+  $s("brtitle").addEventListener("input", (e) => { BR.title = e.target.value; BR.autoT = false; saveBR(); renderAll(); });
+  $s("brstorm").addEventListener("input", (e) => { BR.storm = e.target.value; BR.autoS = false; saveBR(); renderAll(); });
+  $s("brcardpv").addEventListener("click", async () => { if (!last || REC.on) return; const k = $s("mpk").value; getLogo(); await sleep(80); await render(k); titleCard(k, F[k].cv.getContext("2d"), 1, null, null); setTimeout(() => render(k), 2500); });
+  $s("mpbatch").addEventListener("toggle", (e) => { if (e.target.open) bxFill(); });
+  $s("mpbatch").addEventListener("change", (e) => { if (e.target.matches("input[type=checkbox]")) bxCount(); });
+  $s("bxgo").addEventListener("click", () => batchExport());
+  $s("bxstop").addEventListener("click", () => { BX.cancel = true; REC.cancel = true; });
   $s("mpk").addEventListener("change", () => { mpInfo(); });
   // Enter = Make MP4 (not while typing in a menu that uses Enter itself)
   $s("mp4p").addEventListener("keydown", (e) => { if (e.key === "Enter" && e.target.tagName !== "SELECT" && e.target.tagName !== "BUTTON" && e.target.tagName !== "A") { e.preventDefault(); makeMp4(); } });
@@ -471,7 +616,7 @@ if (!CLEAN && $s("mp4p")) {
     if (PIN.mode) { PIN.mode = null; $s("pinhint").hidden = true; $s("mp4p").hidden = false; mpInfo(); render("v"); render("h"); }
     else if (REC.on) REC.cancel = true;
     else if (!$s("mp4p").hidden) { $s("mp4p").hidden = true; PIN.show = false; document.body.classList.remove("mprange"); render("v"); render("h"); } });
-  window.__studioMp4 = { getPins, setPins, makeMp4, openMp4, findStorms, applyStorm, llToFig, TRK };
+  window.__studioMp4 = { getPins, setPins, makeMp4, openMp4, findStorms, applyStorm, llToFig, TRK, BR, batchExport, bxFill };
   if (SQ.get("make") === "loop") autoLoop();
 }
 // auto-advance (clean mode or ?play=1): next hour after each finished frame + dwell; loops (or holds); newest run on loop when model= is used

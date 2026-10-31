@@ -220,7 +220,17 @@ function applyStorm(n) {
   const Q = TRK.list[n]; if (!Q || TRK.key !== `${S.run}/${S.view}`) return; TRK.sel = n; $s("lpsfl").value = String(n);
   const p = getPins(); for (const k of ["v", "h"]) { p[k + "a"] = frac(S.view, k, Q.a.lat, Q.a.lon); p[k + "b"] = frac(S.view, k, Q.b.lat, Q.b.lon); } setPins(p);
   for (const [id, v] of Object.entries(PRESETS.landfall)) $s(id).value = v;
-  info(); $s("lpa").value = String(Q.startF); $s("lpb").value = String(Q.endF); $s("lppre").value = "storm"; saveOpts(); info();
+  // 10-31 3:53 PM (Benjamin: "make it autofill in the settings for the storm it found"): MSLP map, frame shape from the track's
+  // direction, zooms from its size, speed for a ~7 s loop (slowing into landfall). All still editable.
+  const pe = document.getElementById("prod");
+  if (pe && !/mslp|slp/.test(S.prod) && [...pe.options].some((o) => o.value === "mslpqpf")) { pe.value = "mslpqpf"; pe.dispatchEvent(new Event("change")); }
+  const dx = Math.abs(p.ha.x - p.hb.x) * 16, dy = Math.abs(p.ha.y - p.hb.y) * 9, k = dx >= dy ? "h" : "v"; $s("lpk").value = k;
+  const d = Math.hypot(p[k + "a"].x - p[k + "b"].x, p[k + "a"].y - p[k + "b"].y), snap = (v, o) => o.reduce((b, x) => Math.abs(x - v) < Math.abs(b - v) ? x : b, o[0]), ZO = [1, 1.2, 1.4, 1.6, 1.8, 2, 2.5];
+  const z1 = snap(Math.min(2.5, Math.max(1.6, 2.6 - 2.5 * d)), ZO), z0 = snap(Math.max(1, Math.min(z1 - 0.4, 1 / (0.5 + d))), ZO);
+  $s("lpz0").value = String(z0); $s("lpz1").value = String(z1);
+  info(); $s("lpa").value = String(Q.startF); $s("lpb").value = String(Q.endF); $s("lppre").value = "storm";
+  const nM = pick().length, s0 = Math.min(6, Math.max(1.5, Math.round(nM / 7 * 2) / 2)); $s("lps").value = String(s0);
+  $s("lps1").value = Q.landfall ? String(snap(Math.max(1, s0 / 2), [0.5, 1, 1.5, 2, 3, 4, 6])) : ""; saveOpts(); info();
   const lf = Q.landfall;
   $s("lpsfi").textContent = `Deepest ${Math.round(Q.minP)} mb at F+${Q.fMin}. ` + (lf ? `Landfall F+${lf.f} near ${StormFind.fmtLL(lf)}. ` : "No landfall in this frame: B is where the track ends. ") +
     `Loop F+${Q.startF} to F+${Q.endF}. Change any of it, or Set pin A / B by hand.`;
