@@ -502,7 +502,7 @@ async function render(lite) {
   if (P.barbs) drawBarbs(ctx, st, D, P, V);
   S.lowPanel = null;
   if (P.lows || P.spag) drawEns(ctx, st, D, P, V, gk);
-  if (P.hl) drawHL(ctx, st, D, V, gk);
+  if ((P.hl || (P.isobars && (P.isobars.field || "mslp") === "mslp")) && D.iso && !P.lows) drawHL(ctx, st, D, V, gk);   // every MSLP-isobar map (incl. MSLP + wind), not the ensemble-lows map
   ctx.restore();
   // 4. towns (dots + names static) and live numbers
   const tmode = P.towns || "numbers";
@@ -853,25 +853,63 @@ function gridInv(V, st, fi, fj, guess) {   // [fi, fj] -> panel px, or null when
   if (x < -300 || y < -300 || x > st.W + 300 || y > st.H + 300) return null;
   return [x, y];
 }
-function drawHL(ctx, st, D, V, gk) {   // H / L centres: extremes of smoothed MSLP over a ~ 1/12-panel window, labelled with the pressure
-  const out = geo(`hl/${gk}`, () => hlGeom(D));
-  paintHL(ctx, st, V, out);
+// H / L centres (Benjamin 10-31 1:26 AM: "a small red L in the middle of surface lows with the lowest pressure number, likewise
+// with H ... highest pressure number"; 1:27 AM: also on MSLP + wind maps). Old site's house_style.find_centers ported: smoothed
+// MSLP, neighbourhood extreme over a radius (km) per view, prominence vs the median of the ring at that radius, min spacing;
+// the number is the raw (unsmoothed) min / max near the centre. Drawn on every map with MSLP isobars except ensemble lows.
+const HL_VIEW = { na: [800, 3.0, 75], pnw: [400, 2.0, 50], pnwt: [400, 2.0, 50], pnwhr: [400, 2.0, 45] };   // radius km, prominence mb, smoothing km
+const HL_WA = [250, 1.5, 35];   // Washington-type frames (old HL_RADIUS_KM / HL_PROMINENCE_MB "wa")
+const HL_LOW_COLOR = "#d7191c", HL_HIGH_COLOR = "#d7191c";   // both red as asked (old site drew H in blue #1747c9)
+function drawHL(ctx, st, D, V, gk) {
+  const out = geo(`hl/${gk}`, () => hlGeom(st, D, V));
+  paintHL(ctx, out);
 }
-function hlGeom(D) {
-  const w = D.w, h = D.h, a = D.iso, r = Math.max(4, Math.round(Math.min(w, h) / 14)), out = [];
-  for (let i = r; i < h - r; i += 2) for (let j = r; j < w - r; j += 2) {
-    const v = a[i * w + j]; let mx = true, mn = true;
-    for (let di = -r; di <= r && (mx || mn); di += 2) for (let dj = -r; dj <= r; dj += 2) { const q = a[(i + di) * w + j + dj]; if (q > v) mx = false; if (q < v) mn = false; }
-    if (mx || mn) out.push([i, j, v, mx]);
+function hlGeom(st, D, V) {
+  const raw = D.raw && D.raw.mslp ? D.raw.mslp.v : D.iso; if (!raw) return [];
+  const m = S.run.split("/")[0], M = S.man.models[m], cr = M.crop || [0, 0, 0, 0], ll = M.grid === "ll";
+  const ck = ll ? 27.8 : parseFloat(M.res) || 3, s = ll ? 1 : Math.max(1, Math.round(9 / ck)), w0 = D.w, h0 = D.h;
+  const [rk, prom, smk] = HL_VIEW[S.view] || HL_WA, cell = ck * s;
+  // decimated grid (s native cells), smoothed to ~smk km
+  const w = Math.floor((w0 - 1) / s) + 1, h = Math.floor((h0 - 1) / s) + 1, a0 = new Float32Array(w * h);
+  for (let i = 0; i < h; i++) for (let j = 0; j < w; j++) a0[i * w + j] = raw[i * s * w0 + j * s];
+  const a = blur(a0, w, h, Math.max(0.6, smk / cell));
+  const lat = i => ll ? 90 - (i * s + cr[0]) * 0.25 : 47;
+  const [r0, r1, c0, c1] = V.cut || [0, h0, 0, w0];
+  const ry = Math.max(2, Math.round(rk / cell)), rxOf = i => ll ? Math.max(2, Math.round(rk / (cell * Math.max(0.25, Math.cos(lat(i) * Math.PI / 180))))) : ry;
+  const I0 = Math.max(1, Math.floor(r0 / s)), I1 = Math.min(h - 1, Math.ceil(r1 / s)), J0 = Math.max(1, Math.floor(c0 / s)), J1 = Math.min(w - 1, Math.ceil(c1 / s));
+  const out = [], mg = pt(16);
+  for (const sgn of [1, -1]) {   // highs, then lows
+    const cand = [];
+    for (let i = I0; i < I1; i++) for (let j = J0; j < J1; j++) { const v = sgn * a[i * w + j];
+      if (v < sgn * a[i * w + j - 1] || v < sgn * a[i * w + j + 1] || v < sgn * a[(i - 1) * w + j] || v < sgn * a[(i + 1) * w + j]) continue;
+      cand.push([v, i, j]); }
+    cand.sort((x, y) => y[0] - x[0]); const placed = [];
+    for (const [v, i, j] of cand) {
+      if (placed.length >= 12) break;
+      const rx = rxOf(i); let ok = true;
+      for (let di = -ry; di <= ry && ok; di++) { const ii = i + di; if (ii < 0 || ii >= h) continue;
+        for (let dj = -rx; dj <= rx; dj++) { const jj = j + dj; if (jj < 0 || jj >= w) continue; if (sgn * a[ii * w + jj] > v) { ok = false; break; } } }
+      if (!ok) continue;
+      const cl = ll ? Math.max(0.25, Math.cos(lat(i) * Math.PI / 180)) : 1, ring = []; let tot = 0;
+      for (let t = 0; t < 48; t++) { const th = t / 48 * 2 * Math.PI, ii = Math.round(i + ry * Math.sin(th)), jj = Math.round(j + rx * Math.cos(th));
+        tot++; if (ii >= 0 && jj >= 0 && ii < h && jj < w) ring.push(a[ii * w + jj]); }
+      if (ring.length < 0.6 * tot) continue;   // too little of the ring in the data to call it closed
+      ring.sort((x, y) => x - y); if (sgn * (sgn * v - ring[ring.length >> 1]) < prom) continue;
+      if (placed.some(([pi, pj]) => (i - pi) ** 2 / ry ** 2 + (j - pj) ** 2 / rx ** 2 < 1)) continue;
+      const p = gridInv(V, st, i * s, j * s, null);
+      if (!p || p[0] < mg || p[1] < mg || p[0] > st.W - mg || p[1] > st.H - mg) continue;   // centre in view, clear of the frame edge
+      placed.push([i, j]);
+      const R = Math.max(1, Math.round(30 / ck)); let ex = -Infinity;   // raw extreme within ~30 km
+      for (let di = -R; di <= R; di++) for (let dj = -R; dj <= R; dj++) { const ii = i * s + di, jj = j * s + dj; if (ii >= 0 && jj >= 0 && ii < h0 && jj < w0) ex = Math.max(ex, sgn * raw[ii * w0 + jj]); }
+      out.push([st.x0 + p[0], st.y0 + p[1], sgn * ex, sgn > 0]);
+    }
   }
   return out;
 }
-function paintHL(ctx, st, V, out) {
-  ctx.textAlign = "center"; ctx.textBaseline = "middle";
-  for (const [i, j, v, hi] of out) { const p = gridInv(V, st, i, j, null); if (!p || p[0] < 8 || p[1] < 8 || p[0] > st.W - 8 || p[1] > st.H - 8) continue;
-    const X = st.x0 + p[0], Y = st.y0 + p[1];
-    haloText(ctx, hi ? "H" : "L", X, Y - pt(5), `900 ${pt(19)}px Montserrat`, hi ? "#1f4fd1" : "#d1261f", pt(3.2), "center", "middle");
-    haloText(ctx, String(Math.round(v)), X, Y + pt(9), `800 ${pt(9)}px Montserrat`, hi ? "#1f4fd1" : "#d1261f", pt(2.6), "center", "middle"); }
+function paintHL(ctx, out) {
+  for (const [X, Y, v, hi] of out) { const col = hi ? HL_HIGH_COLOR : HL_LOW_COLOR;
+    haloText(ctx, hi ? "H" : "L", X, Y, `900 ${pt(16)}px Montserrat`, col, pt(2.4), "center", "middle");
+    haloText(ctx, String(Math.round(v)), X, Y + pt(9.5), `800 ${pt(9)}px Montserrat`, col, pt(2.2), "center", "top"); }
 }
 function drawEns(ctx, st, D, P, V, gk) {
   const E = D.ens; if (!E) return;
