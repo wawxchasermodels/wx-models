@@ -98,12 +98,13 @@ function landfall(T, land) {
   for (const p of T.pts) { if (p.lat === undefined) return null; const l = land(p.lat, p.lon); if (l === false) sea = true; else if (l === true && sea) return p; }
   return null;
 }
-// the loop for a track: up to 72 h before landfall (or the deepest hour) to 12 h after it (or the end of the track);
+// the loop for a track: up to 72 h before landfall (or the deepest hour) to 12 h after landfall (or 36 h after the deepest hour);
 // A = where the low is at the start, B = landfall (or where it is at the end)
 function plan(T, lf) {
   const pts = T.pts, key = lf ? lf.f : T.fMin;
   const a = pts.find((p) => p.f >= key - 72) || pts[0], last = pts[pts.length - 1];
-  const endF = lf ? Math.min(last.f, lf.f + 12) : last.f, b = lf || last;
+  // no landfall: end 36 h after the deepest hour (a whole two-week track makes a dull loop); B = where the low is then
+  const endF = lf ? Math.min(last.f, lf.f + 12) : Math.min(last.f, T.fMin + 36), b = lf || [...pts].reverse().find((p) => p.f <= endF) || last;
   return { startF: a.f, endF: Math.max(endF, b.f), a, b, landfall: lf, minP: T.minP, fMin: T.fMin, pts };
 }
 // Lambert conformal (WGS84, as cartopy's LambertConformal) for the social frames
