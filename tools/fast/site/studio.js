@@ -345,6 +345,13 @@ async function makeMp4() {
   const fr0 = getFr(k), z0 = $s("mpz0").value === "f" ? Math.max(1, fr0.zoom || 1) : +$s("mpz0").value, z1 = $s("mpz1").value === "f" ? z0 : +$s("mpz1").value;
   const ramp = pan || Math.abs(z1 - z0) > 1e-6 || $s("mpz0").value !== "f", c0 = crop(k, fr0);
   const zoomAt = (t) => z0 * Math.pow(z1 / z0, ease(t));
+  // storm finder track: camera centre at forecast hour f, straight between the track's hourly positions (A / B = the found ones)
+  const TS = TRK.sel >= 0 && TRK.run === S.run && TRK.view === S.view ? TRK.list[TRK.sel] : null, near = (u, v) => u && v && Math.abs(u.x - v.x) < 1 && Math.abs(u.y - v.y) < 1;
+  const trk = pan && TS && near(pins.a, TS.a) && near(pins.b, TS.b) ? (() => {
+    const P = TS.pts.filter((q) => q.f >= TS.startF && q.f <= TS.endF); if (P.length < 2) return null;
+    return (f) => { if (f <= P[0].f) return [P[0].x, P[0].y]; if (f >= P[P.length - 1].f) return [P[P.length - 1].x, P[P.length - 1].y];
+      let i = 0; while (P[i + 1].f < f) i++; const u = (f - P[i].f) / (P[i + 1].f - P[i].f); return [lerp(P[i].x, P[i + 1].x, u), lerp(P[i].y, P[i + 1].y, u)]; };
+  })() : null;
   const run = S.run, keep = S.i, t0 = performance.now(); let enc = null;
   REC.on = true; REC.cancel = false; PLAY.on = false; window.__vjNoJump = true;   // a video never repeats hours: missing hours keep the previous map $s("mpout").hidden = true; $s("mpgo").disabled = true; $s("mpstop").hidden = false; document.body.classList.add("rec");
   try {
@@ -352,7 +359,7 @@ async function makeMp4() {
     S.i = idx[0]; $("step").value = idx[0]; await draw(); await sleep(500); await draw();   // let this view's sharp (x2) layers land first
     let n = 0, cardN = 0;
     if (BR.card) {   // title card: 1.5 s, fading out over the first map in the last 0.5 s (the loop timing starts after it)
-      getLogo(); await sleep(50); const cN = Math.round(1.5 * FPS), fN = Math.round(0.5 * FPS), c = f.cv.getContext("2d"), fr1 = pan ? frAt(k, pins.a.x, pins.a.y, zoomAt(0)) : ramp ? frAt(k, c0.cx, c0.cy, zoomAt(0)) : null;
+      getLogo(); await sleep(50); const cN = Math.round(1.5 * FPS), fN = Math.round(0.5 * FPS), c = f.cv.getContext("2d"), fr1 = pan ? frAt(k, ...(trk ? trk(steps[idx[0]].f) : [pins.a.x, pins.a.y]), zoomAt(0)) : ramp ? frAt(k, c0.cx, c0.cy, zoomAt(0)) : null;
       for (let j = 0; j < cN; j++) { await render(k, fr1); titleCard(k, c, j < cN - fN ? 1 : (cN - j) / fN, steps[idx[0]], steps[idx[idx.length - 1]]); await enc.add(j); }
       enc.off = cN; cardN = cN;
     }
@@ -360,10 +367,13 @@ async function makeMp4() {
       if (REC.cancel || S.run !== run) throw new Error("stopped");
       if (j) { if (enc.idle) enc.idle(); S.i = idx[j]; $("step").value = idx[j]; await draw(); }   // an hour missing from the run keeps the previous map
       mpSt(`Making video\u2026 F+${steps[idx[j]].f} (${j + 1}/${idx.length})`);
-      const n1 = Math.round(T[j + 1] * FPS) + (j === idx.length - 1 ? holdN : 0); let drawn = false;
+      const n0 = Math.round(T[j] * FPS), n1 = Math.round(T[j + 1] * FPS) + (j === idx.length - 1 ? holdN : 0); let drawn = false;
       for (; n < n1; n++) {
         const tt = Math.min(1, n / panN);
-        if (pan) { const t = ease(tt); await render(k, frAt(k, lerp(pins.a.x, pins.b.x, t), lerp(pins.a.y, pins.b.y, t), zoomAt(tt))); }
+        if (pan && trk) {   // found storm, pins untouched: the camera follows the low hour by hour (not a straight line A -> B)
+          const fNow = j + 1 < idx.length ? lerp(steps[idx[j]].f, steps[idx[j + 1]].f, Math.min(1, (n - n0) / Math.max(1, Math.round(T[j + 1] * FPS) - n0))) : steps[idx[j]].f, [cx, cy] = trk(fNow);
+          await render(k, frAt(k, cx, cy, zoomAt(tt))); }
+        else if (pan) { const t = ease(tt); await render(k, frAt(k, lerp(pins.a.x, pins.b.x, t), lerp(pins.a.y, pins.b.y, t), zoomAt(tt))); }
         else if (ramp) await render(k, frAt(k, c0.cx, c0.cy, zoomAt(tt)));
         else if (!drawn || enc.realtime) { await render(k); drawn = true; }   // real-time recorder: redraw so each frame is a fresh canvas frame
         await enc.add(n + (enc.off || 0)); if (n % 6 === 0) pg.value = n / totN;
