@@ -26,7 +26,26 @@ def target_cycle(m):
         c = now - dt.timedelta(hours=b)
         if c.hour in FE.MODELS[m]["cycles"] and avail(m, c, FE.MODELS[m]["steps"][0]): return c
 
-MORE = set()
+MORE = set(); WORK = {}
+# first chunk per model (steps): small so the first hours go live fast
+FIRST_CHUNK = {"hrrr": 3, "rrfs": 3, "nbm": 6, "gfs": 4, "ifs": 4, "ifs9": 4, "aifs": 4, "eps": 2, "aens": 2}
+# --watch: minutes after the cycle time when the first step is usually out (measured 10-31 from R2 upload times and the
+# NOAA / ECMWF open-data files); watching starts WATCH_EARLY min before that, and stops WATCH_SPAN h after it or when complete
+DUE_MIN = {"hrrr": 45, "rrfs": 60, "nbm": 55, "gfs": 200, "ifs": 330, "ifs9": 420, "aifs": 320, "eps": 380, "aens": 350}
+WATCH_EARLY, WATCH_SPAN = 60, 6
+
+def run_due(s3, m):
+    """True when model m has a cycle whose data is due now (or flowing) and whose run is not complete in R2."""
+    now = dt.datetime.now(dt.timezone.utc)
+    for b in range(0, 18):
+        c = (now - dt.timedelta(hours=b)).replace(minute=0, second=0, microsecond=0)
+        if c.hour not in FE.MODELS[m]["cycles"]: continue
+        t0 = c + dt.timedelta(minutes=DUE_MIN.get(m, 60))
+        if not (t0 - dt.timedelta(minutes=WATCH_EARLY) <= now <= t0 + dt.timedelta(hours=WATCH_SPAN)): continue
+        try: r = json.loads(s3.get_object(Bucket=BUCKET, Key=f"runs/{m}/{c:%Y%m%d%H}/run.json")["Body"].read())
+        except Exception: return True
+        if not r.get("complete"): return True
+    return False
 
 def update_manifest(s3, fn, tries=8):
     """Read-modify-write manifest.json with an ETag check (If-Match), so parallel model jobs never overwrite each other."""
@@ -44,25 +63,29 @@ def update_manifest(s3, fn, tries=8):
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("--models", default="hrrr,gfs,ifs,aifs"); ap.add_argument("--minutes", type=float, default=40)
     ap.add_argument("--workers", type=int, default=4); ap.add_argument("--out", default=os.path.join(HERE, "data")); ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--watch", action="store_true"); ap.add_argument("--every", type=float, default=60)
     a = ap.parse_args(); t_end = time.time() + a.minutes * 60; D = a.out; os.makedirs(D, exist_ok=True)
     s3 = client(); s3.download_file(BUCKET, "manifest.json", f"{D}/manifest.json")
     models = a.models.split(",")
     # ECMWF 9 km (ifs9) rides the ECMWF job (no workflow change): after "ifs", once its static layers are in the manifest
     if "ifs" in models and "ifs9" not in models: models.insert(models.index("ifs") + 1, "ifs9")
-    for m in models:
-        if time.time() > t_end - 120: print("time budget used up", flush=True); MORE.add(m); continue
-        if m not in json.load(open(f"{D}/manifest.json")).get("models", {}): print(m, "no static layers in R2 yet, skipped", flush=True); continue
+    def one(m):
+        if time.time() > t_end - 120: print("time budget used up", flush=True); MORE.add(m); return
+        if m not in json.load(open(f"{D}/manifest.json")).get("models", {}): print(m, "no static layers in R2 yet, skipped", flush=True); return
         c = target_cycle(m)
-        if not c: print(m, "no cycle out", flush=True); continue
+        if not c: print(m, "no cycle out", flush=True); return
         cyc = f"{c:%Y%m%d%H}"; key = f"runs/{m}/{cyc}/run.json"; rd = f"{D}/runs/{m}/{cyc}"; os.makedirs(rd + "/single", exist_ok=True)
         try:
             s3.download_file(BUCKET, key, f"{rd}/run.json"); r0 = json.load(open(f"{rd}/run.json"))
-            if r0.get("complete"): print(m, cyc, "complete in R2", flush=True); continue
+            if r0.get("complete"): print(m, cyc, "complete in R2", flush=True); return
         except Exception: r0 = None
         print(m, cyc, "has", len((r0 or {}).get("steps", [])), "steps in R2", flush=True)
         want = FE.steps_for(m, c.hour)
         # encode in chunks so the site gets new hours every few minutes (progressive publishing)
-        chunk = 12 if m == "hrrr" else 24
+        # 10-31 (Benjamin: "make it so the first forecast hours show for a new run in every model"): a small first chunk so a new
+        # run is on the site minutes after its first hours are out, then bigger chunks (ensembles: 6, each step is 50 members)
+        chunk = 12 if m == "hrrr" else 6 if m in ("eps", "aens") else 24
+        if not (r0 or {}).get("steps"): chunk = FIRST_CHUNK.get(m, 3)
         while True:
             if time.time() >= t_end - 60: MORE.add(m); break   # budget ran out with hours left -> ask for a re-dispatch
             have = {x["f"] for x in (json.load(open(f"{rd}/run.json"))["steps"] if os.path.exists(f"{rd}/run.json") else [])}
@@ -87,14 +110,26 @@ def main():
                 from concurrent.futures import ThreadPoolExecutor
                 with ThreadPoolExecutor(16) as ex: list(ex.map(lambda k: s3.upload_file(f"{D}/{k}", BUCKET, k, ExtraArgs={"ContentType": "application/json" if k.endswith(".json") else "image/png"}), files))
                 s3.upload_file(f"{rd}/run.json", BUCKET, key, ExtraArgs={"ContentType": "application/json"})
-                publish_manifest(s3, D, m)
-            print(f"{m} {cyc}: uploaded {len(files)} files, {len(ordered)}/{len(want)} steps live", flush=True)
+                publish_manifest(s3, D, m, prog=(cyc, ordered[-1]["f"] if ordered else None, want[-1], full["complete"]))
+            print(f"{m} {cyc}: uploaded {len(files)} files, {len(ordered)}/{len(want)} steps live", flush=True); WORK[m] = WORK.get(m, 0) + len(new)
             for f in files: os.remove(f"{D}/{f}")   # keep the runner disk small
             if full["complete"]:
                 if not a.dry_run:
                     try: write_agg(s3, m, cyc, full, f"{rd}/run.json", key)
                     except Exception as e: print(m, cyc, "aggregate town files failed (site falls back to per-step files):", e, flush=True)
                 break
+
+    for m in models: one(m)
+    # --watch (10-31): keep polling (every --every s) while a model has a run due or in progress, so a new run starts within
+    # about a minute of its first hours being out instead of waiting for the next (throttled, ~40 min apart) cron run
+    while a.watch and time.time() < t_end - 180:
+        due = [m for m in models if m not in MORE and run_due(s3, m)]
+        if not due: print("watch: nothing due, done", flush=True); break
+        time.sleep(a.every)
+        for m in due: one(m)
+    if a.watch:
+        for m in models:
+            if run_due(s3, m): MORE.add(m)   # still due when the budget ends -> re-dispatch (chains until the run is in)
 
 MG_KEEP = 4   # runs per model with town data for the meteograms page
 def write_agg(s3, m, cyc, full, local, key):
@@ -118,7 +153,7 @@ def write_agg(s3, m, cyc, full, local, key):
         print(m, cyc, "aggregate town files:", agg, flush=True)
 
 
-def publish_manifest(s3, D, m):
+def publish_manifest(s3, D, m, prog=None):
     keep = FE.MODELS[m]["keep"]
     pre = {o["Prefix"].split("/")[2] for o in s3.list_objects_v2(Bucket=BUCKET, Prefix=f"runs/{m}/", Delimiter="/").get("CommonPrefixes", [])}
     present = sorted(r for r in pre if "Contents" in s3.list_objects_v2(Bucket=BUCKET, Prefix=f"runs/{m}/{r}/run.json", MaxKeys=1))
@@ -134,6 +169,14 @@ def publish_manifest(s3, D, m):
     xr = []
     def both(mn):
         mn.setdefault("runs", {})[m] = kept; mn.setdefault("mgruns", {})[m] = sorted(set(mg) | set(kept))
+        # 10-31: runs still coming in -> manifest "progress" {model: {cycle: [last hour live, last hour expected]}} so the site can
+        # say "loading" (the production page ignores the key); dropped once complete or out of the list
+        pg = mn.setdefault("progress", {}).setdefault(m, {})
+        if prog:
+            if prog[3]: pg.pop(prog[0], None)
+            else: pg[prog[0]] = [prog[1], prog[2]]
+        for k in [k for k in pg if k not in kept]: pg.pop(k)
+        if not pg: mn["progress"].pop(m)
         xr[:] = (mn.get("runs_x") or {}).pop(m, None) or []
         if "runs_x" in mn and not mn["runs_x"]: del mn["runs_x"]
     man = update_manifest(s3, both)

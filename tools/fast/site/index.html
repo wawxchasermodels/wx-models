@@ -20,6 +20,10 @@ html,body{overscroll-behavior:none}
 #step::-webkit-slider-thumb{-webkit-appearance:none;width:28px;height:28px;margin-top:-10px;border-radius:50%;background:#2f8cff;border:3px solid #f4f2ee;box-shadow:0 1px 4px #0008}
 #step::-moz-range-thumb{width:22px;height:22px;border-radius:50%;background:#2f8cff;border:3px solid #f4f2ee}
 #stat{color:#a7abb3;font-size:12px;min-width:260px}
+#loadnote{display:none;color:#ffd27a;font-size:12px;font-weight:600;white-space:nowrap;padding:3px 8px;border:1px solid #6b5a2e;border-radius:10px;background:#2a2416}
+#loadnote.on{display:inline-block}
+body.phone #loadnote{font-size:11px;padding:2px 6px;flex:0 0 auto}
+body.phone #dock #step{min-width:90px}
 #wrap{position:relative;flex:1 1 auto;min-height:0;display:flex;align-items:center;justify-content:center;padding:4px;box-sizing:border-box}
 /* 10-30 7:50 PM (Benjamin's iPhone screenshots: whole map blurry, buttons sharp): no will-change:transform on the map. Safari/WebKit
    rasterizes a will-change:transform layer once at 1x and stretches it (3x on an iPhone), so the canvas showed at a third of its res. */
@@ -84,7 +88,7 @@ table.pf td small.el{color:#a7abb3;font-weight:500;font-size:11px}table.pf td.fz
   <label>Product <select id="prod"></select></label>
   <label>View <select id="view"></select></label>
   <span id="stepctl"><button id="prev">&lsaquo;</button><button id="play">Play</button><button id="next">&rsaquo;</button>
-  <input id="step" type="range" min="0" max="0" value="0"></span>
+  <input id="step" type="range" min="0" max="0" value="0"><span id="loadnote" title="This run is still coming in; new hours appear here automatically"></span></span>
   <button id="save" title="Save this map as a picture">Save image</button>
   <button id="share">Share</button>
   <button id="mgbtn" title="Hour-by-hour forecast for a town or pass">Meteogram</button>
@@ -94,5 +98,5 @@ table.pf td small.el{color:#a7abb3;font-weight:500;font-size:11px}table.pf td.fz
 </div>
 <div id="wrap"><canvas id="map"></canvas><div id="tip" hidden></div></div>
 <div id="dock"></div>
-<script src="viewer.js?v=20261031n"></script>
+<script src="viewer.js?v=20261031o"></script>
 </body></html>

@@ -160,7 +160,8 @@ async function boot() {
   S.run = all.includes(qr) ? qr : (all.find(r => qm && r.startsWith(qm + "/")) || all[0]);
   await loadRun(S.run);
   // "Runs" menu (Benjamin 10-29 7:10 PM): every available run, grouped by model, newest first; picking one keeps the valid time
-  const runLabel = r => { const [m, c] = r.split("/"); return `${S.man.models[m].site} ${c.slice(8)}Z ${c.slice(4, 6)}-${c.slice(6, 8)}`; };
+  const runLabel = r => { const [m, c] = r.split("/"), p = ((S.man.progress || {})[m] || {})[c];
+    return `${S.man.models[m].site} ${c.slice(8)}Z ${c.slice(4, 6)}-${c.slice(6, 8)}${p ? ` (loading, to F+${p[0]})` : ""}`; };
   $("run").innerHTML = order.map(m => `<optgroup label="${S.man.models[m].site}">` +
     all.filter(r => r.startsWith(m + "/")).map(r => `<option value="${r}"${r === S.run ? " selected" : ""}>${runLabel(r)}</option>`).join("") + "</optgroup>").join("");
   setLists();
@@ -170,7 +171,7 @@ async function boot() {
   $("run").onchange = async e => {   // keep the same valid time when switching runs/models (nearest step)
     const vt = Date.parse(S.runs[S.run].steps[S.i].valid); S.run = e.target.value; await loadRun(S.run); setLists();
     const st = S.runs[S.run].steps; let b = 0; st.forEach((x, k) => { if (Math.abs(Date.parse(x.valid) - vt) < Math.abs(Date.parse(st[b].valid) - vt)) b = k; });
-    S.i = b; $("step").value = b; draw(); };
+    S.i = b; $("step").value = b; draw(); loadNote(); };
   // phones: hour slider under the map (Benjamin 10-29 9:01 PM)
   const mq = matchMedia("(max-width: 700px), (max-height: 500px)"), placeSteps = () => {
     const ph = mq.matches; document.body.classList.toggle("phone", ph);
@@ -192,7 +193,7 @@ async function boot() {
   $("play").onclick = () => { if (S.timer) { clearInterval(S.timer); S.timer = null; $("play").textContent = "Play"; }
                               else { S.timer = setInterval(() => go(1, true), 250); $("play").textContent = "Stop"; } };
   addEventListener("keydown", e => { if (e.key === "Escape") mgClose(); if (MG.open) return; if (e.key === "ArrowRight") go(1); if (e.key === "ArrowLeft") go(-1); });
-  await draw();
+  await draw(); loadNote(); setInterval(refreshPartial, 90e3);
   // ?mg= / ?obs= open the panel once (meteograms page "Pass Forecaster" tab links to ./?mg=pass) and are then dropped from the
   // address: they used to stay in it after Close, so every reload / iOS tab restore / shared link reopened Pass Forecaster
   // ("the website glitches into pass mode every so often", Benjamin 10-31 2:01 AM).
@@ -201,6 +202,26 @@ async function boot() {
   if (Q.has("mg") || Q.has("obs")) { const u = new URL(location); u.searchParams.delete("mg"); u.searchParams.delete("obs"); try { history.replaceState(null, "", u); } catch (e) {} }
   window.__ready = true;
   if (Q.get("bench")) bench();
+}
+// 10-31 (Benjamin: "make it so the first forecast hours show for a new run in every model"): runs go live after their first few
+// hours; while one is still coming in (run.json complete = false) a note by the slider says so and new hours are added in place.
+function loadNote() {
+  const el = $("loadnote"), R_ = S.runs[S.run]; if (!el || !R_) return;
+  const on = R_.complete === false, last = R_.steps.length ? R_.steps[R_.steps.length - 1].f : 0;
+  el.classList.toggle("on", on);
+  const [m, c] = S.run.split("/"), p = ((S.man.progress || {})[m] || {})[c];
+  if (on && document.body.classList.contains("phone")) el.textContent = `Loading F+${last}${p && p[1] ? `/${p[1]}` : ""}`; else
+  el.textContent = on ? `Run still coming in: F+${last}${p && p[1] ? ` of F+${p[1]}` : ""} so far${!(p && p[1]) && R_.expected ? ` (${R_.steps.length} of ${R_.expected} maps)` : ""}` : "";
+  if (!on && p) {   // finished while open: drop "(loading ...)" from the Runs menu
+    delete S.man.progress[m][c]; const o = [...$("run").options].find(x => x.value === S.run); if (o) o.textContent = o.textContent.replace(/ \(loading[^)]*\)$/, "");
+  } else if (on) { const o = [...$("run").options].find(x => x.value === S.run); if (o) o.textContent = o.textContent.replace(/ \(loading[^)]*\)$/, "") + ` (loading, to F+${last})`; }
+}
+async function refreshPartial() {
+  const r = S.run, R_ = S.runs[r]; if (!R_ || R_.complete !== false || document.hidden) return;
+  let N; try { N = await (await fetch(`${DATA}runs/${r}/${runFile(r)}`, { cache: "no-cache" })).json(); } catch (e) { return; }
+  if (S.run !== r || !N || !N.steps || N.steps.length < R_.steps.length) return;
+  const newF = N.fields.join() !== R_.fields.join();
+  S.runs[r] = N; if (newF) setLists(); $("step").max = N.steps.length - 1; $("step").value = S.i; loadNote();
 }
 async function loadRun(r) { if (!S.runs[r]) S.runs[r] = await (await fetch(`${DATA}runs/${r}/${runFile(r)}`, { cache: "no-cache" })).json(); return S.runs[r]; }
 const SV = () => (S.man.static_v ? `?v=${S.man.static_v}` : "");   // cache-buster for static layers (they are cached 1 day)

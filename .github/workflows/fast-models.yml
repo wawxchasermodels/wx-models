@@ -4,6 +4,10 @@
 # (progressive). One job per model runs in parallel; manifest.json is updated with an ETag check so jobs never clash.
 # Keeps the newest 2 runs per model (+ newest 00/12Z ECMWF run). If a job runs out of time with hours still to do, the
 # job re-dispatches the workflow (duplicates collapse into GitHub's one pending run) (GitHub schedules are throttled, so this keeps a run from stalling for an hour).
+# 10-31 --watch: GitHub fires this cron only every ~35-50 min, so each model job now also polls every 60 s while its next run is
+# due (from ~1 h before its usual first-hour time) or still coming in, and re-dispatches itself at the end of the time budget if
+# it still is. A new run starts about a minute after its first hours are out. Jobs with nothing due exit right away.
+# Public repo: standard runners are free; roughly 1/3 of each model's day is spent watching.
 name: fast-models
 on:
   schedule:
@@ -56,7 +60,7 @@ jobs:
           CF_PAGES_KEY: ${{ secrets.CF_PAGES_KEY }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          python tools/fast/fast_cycle.py --models "${{ matrix.model }}" --minutes "${{ inputs.minutes || '40' }}" --workers 4
+          python tools/fast/fast_cycle.py --models "${{ matrix.model }}" --minutes "${{ inputs.minutes || '40' }}" --workers 4 --watch
       - name: Re-dispatch (this model still had hours to do when its time budget ran out)
         if: steps.run.outputs.more == 'true'
         env:
