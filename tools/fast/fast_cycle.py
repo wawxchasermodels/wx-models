@@ -129,8 +129,18 @@ def publish_manifest(s3, D, m):
     # 10-30 meteograms page multi-run (old site showed 4 runs): the newest MG_KEEP runs keep their small town files
     # (run.json + pts_/mem_ JSON); map images of runs that left the map list are deleted ("slim" runs, marker key .../slim).
     mg = present[-MG_KEEP:]
-    def both(mn): mn.setdefault("runs", {})[m] = kept; mn.setdefault("mgruns", {})[m] = sorted(set(mg) | set(kept))
+    # 10-31: runs the box published for the hidden preview before this code was pushed (manifest "runs_x", file run_x.json, so
+    # the old workflow never listed them). Once this code runs they are dropped from the manifest and deleted below.
+    xr = []
+    def both(mn):
+        mn.setdefault("runs", {})[m] = kept; mn.setdefault("mgruns", {})[m] = sorted(set(mg) | set(kept))
+        xr[:] = (mn.get("runs_x") or {}).pop(m, None) or []
+        if "runs_x" in mn and not mn["runs_x"]: del mn["runs_x"]
     man = update_manifest(s3, both)
+    for old in [r for r in xr if r not in present]:
+        ks = [o["Key"] for pg in s3.get_paginator("list_objects_v2").paginate(Bucket=BUCKET, Prefix=f"runs/{m}/{old}/") for o in pg.get("Contents", [])]
+        for i in range(0, len(ks), 1000): s3.delete_objects(Bucket=BUCKET, Delete={"Objects": [{"Key": k} for k in ks[i:i + 1000]]})
+        print("pruned preview run", m, old, len(ks), "objects", flush=True)
     json.dump(man, open(f"{D}/manifest.json", "w"))
     for old in [r for r in present if r not in kept]:
         slim = old in mg

@@ -37,9 +37,13 @@ MODELS = {   # grid "lcc" = HRRR 3 km, "ll" = 0.25 deg global (lat 90 -> -90, lo
                  steps=list(range(3, 145, 3)), keep=1, as_model="ifs"),
     # ECMWF ENS (EPS) 0.25 open data, 50 perturbed members (no control in the open files), 00/12Z to 360 h. Mean/spread/probability
     # computed here from the members (the open em/es file only appears once the whole run is out). 10-30-26 (Benjamin's saved order).
-    "eps":  dict(grid="ll", views=GLOBAL_VIEWS, cycles=(0, 12), steps=list(range(6, 361, 6)), keep=2, grid_from="ifs"),
-    # AIFS ensemble (stage 4): 50 members, 00/12Z, 6-hourly to 360 h; 2 m temp + 500 mb height (z / g), same products as "eps"
-    "aens": dict(grid="ll", views=GLOBAL_VIEWS, cycles=(0, 12), steps=list(range(6, 361, 6)), keep=2, grid_from="ifs"),
+    # 10-31 (Benjamin "06Z/18Z ensembles"): + 06/18Z, which ECMWF runs to 144 h only (3-hourly; we keep the 6-hourly steps);
+    # keep_long keeps the newest 00/12Z run on the site too, so 360 h never drops off (same as "ifs")
+    "eps":  dict(grid="ll", views=GLOBAL_VIEWS, cycles=(0, 6, 12, 18), steps=list(range(6, 361, 6)), keep=2, grid_from="ifs",
+                 steps_short=list(range(6, 145, 6)), short_cycles=(6, 18), keep_long=True),
+    # AIFS ensemble (stage 4): 50 members, 00/06/12/18Z, 6-hourly to 360 h; 2 m temp + 500 mb height (z / g), same products as "eps"
+    # 10-31: + 06/18Z (AIFS ENS 06/18Z run the full 360 h)
+    "aens": dict(grid="ll", views=GLOBAL_VIEWS, cycles=(0, 6, 12, 18), steps=list(range(6, 361, 6)), keep=2, grid_from="ifs"),
 }
 MINFO = {"aens": dict(name="ECMWF AIFS Ensemble", site="AIFS ENS", res="0.25\u00b0 \u00b7 50 members", credit_as="aifs"),
          "nbm": dict(name="NOAA NBM", site="NBM", res="2.5 km", noaa=True),

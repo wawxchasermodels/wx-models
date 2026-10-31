@@ -135,12 +135,24 @@ function fillSharp(ctx, st, vals, pal, mins, nn, rs) {   // fill binned at RS fr
   const tmp = new OffscreenCanvas(w2, h2); tmp.getContext("2d").putImageData(im, 0, 0);
   ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(tmp, X0, Y0); ctx.restore();
 }
+// 10-31 06Z/18Z ensembles, hidden preview before a push: runs the box published under manifest "runs_x" (run file run_x.json, so
+// the production page never lists them) join the normal run lists here. After the push the workflow drops runs_x itself.
+const XR = new Set();
+function mergeRunsX(man) {
+  for (const [m, cs] of Object.entries(man.runs_x || {})) {
+    const reg = (man.runs || {})[m] || [];
+    for (const c of cs) if (!reg.includes(c)) XR.add(`${m}/${c}`);
+    (man.runs = man.runs || {})[m] = [...new Set([...reg, ...cs])].sort();
+  }
+  return man;
+}
+const runFile = (r) => XR.has(r) ? "run_x.json" : "run.json";
 async function boot() {
   if (Q.get("bare")) document.body.classList.add("bare");
   // 10-29: manifest, fonts and the shown run's run.json in parallel; other runs load when picked
   const [man] = await Promise.all([fetch(DATA + "manifest.json", { cache: "no-cache" }).then(r => r.json()),
                                    document.fonts.load("800 20px Montserrat"), document.fonts.load("500 12px Montserrat")]);
-  S.man = man;
+  S.man = mergeRunsX(man);
   // runs: "model/cycle", newest first per model; models in a fixed order
   const order = ["hrrr", "rrfs", "nbm", "gfs", "ifs", "ifs9", "aifs", "eps", "aens"].filter(m => S.man.models[m] && (S.man.runs[m] || []).length);
   const all = []; for (const m of order) for (const c of [...S.man.runs[m]].reverse()) all.push(`${m}/${c}`);
@@ -190,7 +202,7 @@ async function boot() {
   window.__ready = true;
   if (Q.get("bench")) bench();
 }
-async function loadRun(r) { if (!S.runs[r]) S.runs[r] = await (await fetch(`${DATA}runs/${r}/run.json`, { cache: "no-cache" })).json(); return S.runs[r]; }
+async function loadRun(r) { if (!S.runs[r]) S.runs[r] = await (await fetch(`${DATA}runs/${r}/${runFile(r)}`, { cache: "no-cache" })).json(); return S.runs[r]; }
 const SV = () => (S.man.static_v ? `?v=${S.man.static_v}` : "");   // cache-buster for static layers (they are cached 1 day)
 const MD = () => S.man.models[S.run.split("/")[0]];
 // Severe tab (10-31): new products are published under the manifest's products_x (production's older viewer only reads "products")

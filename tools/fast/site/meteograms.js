@@ -118,7 +118,19 @@ const getJSON = (u, nc) => fetch(u, nc ? { cache: "no-cache" } : {}).then((r) =>
 function memo(k, fn) { if (!CACHE.has(k)) CACHE.set(k, fn().catch((e) => { CACHE.delete(k); throw e; })); return CACHE.get(k); }
 // newest first: map runs + older "slim" runs that keep only their town files (manifest.mgruns, up to 4 per model)
 const runsOf = (m) => [...new Set([...((S.man && S.man.runs[m]) || []), ...((S.man && S.man.mgruns && S.man.mgruns[m]) || [])])].sort().reverse();
-const loadRun = (m, c) => memo(`run/${m}/${c}`, () => getJSON(`${DATA}runs/${m}/${c}/run.json`, true));
+// 10-31 06Z/18Z ensembles, hidden preview before a push: runs the box published under manifest "runs_x" (run file run_x.json, so
+// the production page never lists them) join the normal run lists here. After the push the workflow drops runs_x itself.
+const XR = new Set();
+function mergeRunsX(man) {
+  for (const [m, cs] of Object.entries(man.runs_x || {})) {
+    const reg = (man.runs || {})[m] || [];
+    for (const c of cs) if (!reg.includes(c)) XR.add(`${m}/${c}`);
+    (man.runs = man.runs || {})[m] = [...new Set([...reg, ...cs])].sort();
+  }
+  return man;
+}
+const runFile = (r) => XR.has(r) ? "run_x.json" : "run.json";
+const loadRun = (m, c) => memo(`run/${m}/${c}`, () => getJSON(`${DATA}runs/${m}/${c}/${runFile(`${m}/${c}`)}`, true));
 async function perStep(m, c, name, maxF) {   // [{f, valid, d}] for steps whose file exists
   const R = await loadRun(m, c), st = (R.steps || []).filter((s) => maxF == null || s.f <= maxF), out = new Array(st.length); let k = 0;
   if ((R.agg || []).includes(name)) try {   // complete runs: one aggregated file ({name}_all.json) instead of ~50
@@ -477,7 +489,10 @@ const memEmpty = (sec, what) => ({ empty: ["Not generated yet", `${what} need th
 
 async function build(sec, prod, town) {
   const m = sec.id, runs = runsOf(m);
-  let D = null, c = null; for (const cc of runs) { try { D = await ptsSeries(m, cc); } catch (e) { D = null; } if (D) { c = cc; break; } }
+  // 10-31: EPS 06/18Z runs stop at 144 h; these charts are 240-360 h (old-site EPS layout), so the newest 00/12Z run comes first
+  // here (the 06/18Z runs still count in the multi-run charts and in the map page's meteogram / Pass table)
+  const short = (cc) => m === "eps" && ["06", "18"].includes(cc.slice(8, 10)), pick = [...runs.filter((cc) => !short(cc)), ...runs.filter(short)];
+  let D = null, c = null; for (const cc of pick) { try { D = await ptsSeries(m, cc); } catch (e) { D = null; } if (D) { c = cc; break; } }
   if (!D) return { empty: ["Not generated yet", `${sec.label} town data starts with the first run encoded after 10-30 12:53 PM PT. Check back after the next ${sec.label} run.`], sug: "none" };
   const name = town.label, pn = town.pt.n, k = prod.kind, ensM = ENS(m);
   const credit = sec.credit, run = runLine(sec, c);
@@ -705,7 +720,7 @@ addEventListener("hashchange", () => { const a = [S.sec, S.town, S.prod].join("|
   readHash(); if (!secObj()) S.sec = "eps";
   try { await Promise.race([Promise.all(["800 16px Montserrat", "700 12px Montserrat", "600 12px Montserrat", "500 11px Montserrat"].map((f) => document.fonts.load(f))), new Promise((r) => setTimeout(r, 2500))]); } catch (e) { /* system font */ }
   let lm = null;
-  try { const r = await fetch(DATA + "manifest.json", { cache: "no-cache" }); if (!r.ok) throw new Error(r.status); lm = Date.parse(r.headers.get("last-modified") || ""); S.man = await r.json(); }
+  try { const r = await fetch(DATA + "manifest.json", { cache: "no-cache" }); if (!r.ok) throw new Error(r.status); lm = Date.parse(r.headers.get("last-modified") || ""); S.man = mergeRunsX(await r.json()); }
   catch (e) { $("stamp").textContent = "Could not load the map list"; return; }
   const full = fmt({ weekday: "short", month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" });
   const newest = Object.keys(S.man.runs).map((m) => runsOf(m)[0]).filter(Boolean).sort().pop();

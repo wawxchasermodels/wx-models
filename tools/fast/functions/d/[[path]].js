@@ -8,7 +8,7 @@ export async function onRequest({ request, params, env }) {
   if (!obj) return new Response("not found", { status: 404 });
   const h = new Headers(); obj.writeHttpMetadata(h); h.set("etag", obj.httpEtag);
   if (obj.uploaded) h.set("last-modified", obj.uploaded.toUTCString());   // meteograms page "Updated" stamp
-  const live = key === "manifest.json" || key.endsWith("/run.json");
+  const live = key === "manifest.json" || key.endsWith("/run.json") || key.endsWith("/run_x.json");
   h.set("cache-control", live ? "private, max-age=30" : key.startsWith("runs/") ? "private, max-age=31536000, immutable" : "private, max-age=86400");
   if (!("body" in obj) || !obj.body) return new Response(null, { status: 304, headers: h });
   if (request.method === "HEAD") return new Response(null, { headers: h });
