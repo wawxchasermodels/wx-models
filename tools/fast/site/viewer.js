@@ -36,6 +36,37 @@ function wantRS(LW, LH) {
   const cap = Math.min(3, Math.sqrt(12e6 / (LW * LH)));
   return Math.max(1, Math.min(cap, Math.ceil(want * 4 - 0.2) / 4));
 }
+// 10-30 7:30 PM (Benjamin: "images are still blurry on the phone view", "check the desktop versions too"): the soft parts were
+// the fixed layers (coast / borders / county lines, town names, color key + credit), 1600 px PNGs stretched to the RS bitmap
+// (2x on a zoomed phone, 1.5x on a retina laptop). The encoder now also saves them at 2x (static/x2/, same figure, same
+// placement). When the bitmap is above 1x the x2 file is fetched (only then: unzoomed phones / 1x desktops never load
+// it), the 1x one is drawn until it lands, then the frame is redrawn. Missing x2 file (404) -> 1x, no retry. ?x1=1 = old way.
+const X2 = new Map();   // 1x url -> HTMLImageElement | null (failed) | Promise (loading); small LRU (decoded 3200 px layers are big)
+function layer(im1, u1, rs) {
+  if (!im1 || !u1 || rs <= 1.01 || Q.get("x1")) return im1;
+  const h = X2.get(u1);
+  if (h instanceof HTMLImageElement) { X2.delete(u1); X2.set(u1, h); return h; }
+  if (h === undefined) {
+    const u2 = u1.replace("static/", "static/x2/");
+    X2.set(u1, img(u2).then(im => (im.decode ? im.decode().then(() => im, () => im) : im)).then(im => {
+      X2.set(u1, im); while (X2.size > 5) X2.delete(X2.keys().next().value);
+      if (window.__drawn) draw(); }, () => X2.set(u1, null)));
+  }
+  return im1;
+}
+// x2 layer at a bitmap scale other than 2 (e.g. 1.5 on a retina laptop): resample once into a canvas of the bitmap size, so each
+// frame copies it 1:1 instead of resampling three 3200 px layers per frame (measured +25 ms per frame at RS 1.5 without this)
+const XS = new Map();
+function fitLayer(im, u1, rs, LW, LH) {
+  if (!im || !(im instanceof HTMLImageElement) || im.naturalWidth <= LW + 1) return im;   // 1x layer: as before
+  const w = Math.round(LW * rs), h = Math.round(LH * rs); if (Math.abs(im.naturalWidth - w) <= 1) return im;
+  const k = `${u1}@${w}x${h}`; let c = XS.get(k);
+  if (!c) { c = document.createElement("canvas"); c.width = w; c.height = h; const x = c.getContext("2d");
+    x.imageSmoothingEnabled = true; x.imageSmoothingQuality = "high"; x.drawImage(im, 0, 0, w, h);
+    XS.set(k, c); while (XS.size > 4) XS.delete(XS.keys().next().value); }
+  else { XS.delete(k); XS.set(k, c); }
+  return c;
+}
 let sharpTimer = null;
 function schedSharp() {
   clearTimeout(sharpTimer); sharpTimer = setTimeout(() => { const cv = $("map");
@@ -168,11 +199,12 @@ async function viewStatic(vid) {
         idx[k] = r0 * gnx + c0; wy[k] = fi - r0; wx[k] = fj - c0;
       }
     }
-    const obj = { lut, base, towns: null, townsP, x0, y0, W, H, idx, wx, wy, gnx }; return obj;
+    const obj = { lut, base, towns: null, townsP, x0, y0, W, H, idx, wx, wy, gnx, baseU: DATA + `static/base_${vid}.png` + SV(), townsU: DATA + `static/towns_${vid}.png` + SV() }; return obj;
   })();
   S.statics[sk] = p; return p;
 }
-const keyImg = {}; const getKey = (pid, vid) => { const u = DATA + PRODS()[pid].keys[vid] + SV(); return keyImg[u] || (keyImg[u] = img(u)); };
+const keyImg = {}; const keyURL = (pid, vid) => DATA + PRODS()[pid].keys[vid] + SV();
+const getKey = (pid, vid) => { const u = keyURL(pid, vid); return keyImg[u] || (keyImg[u] = img(u)); };
 
 // ---------------------------------------------------------------- data images
 function fieldURL(run, name, f) {   // packed runs: several fields share one RGB PNG, one channel each (run.json steps[].packs)
@@ -367,7 +399,7 @@ async function render(lite) {
     if (!String(e && e.message).startsWith("nodata:")) throw e;
     S.derived.delete(`${run}/${pid}/${f}`);
     const V = VIEWS()[vid], cv = $("map"), st2 = await viewStatic(vid);
-    const ctx = sizeMap(cv, V, lite), [LW, LH] = V.fig; ctx.fillStyle = S.man.style.BG; ctx.fillRect(0, 0, LW, LH); ctx.drawImage(st2.base, 0, 0, LW, LH);
+    const ctx = sizeMap(cv, V, lite), [LW, LH] = V.fig; ctx.fillStyle = S.man.style.BG; ctx.fillRect(0, 0, LW, LH); ctx.drawImage(layer(st2.base, st2.baseU, cv._rs), 0, 0, LW, LH);
     header(ctx, V, PRODS()[pid].title, step.valid_line, `${S.runs[run].runline}  \u00b7  ${V.label}  \u00b7  not in this model run at this hour`, step.badge);
     S.cur = null; window.__drawn = `${pid}/${vid}/${f}`; return;
   }
@@ -397,7 +429,10 @@ async function render(lite) {
   else { const tmp = new OffscreenCanvas(st.W, st.H); tmp.getContext("2d").putImageData(im, 0, 0); ctx.drawImage(tmp, st.x0, st.y0); }
   const t2 = performance.now();
   // 2. borders/coast/frame + header box (static layer)
-  ctx.drawImage(st.base, 0, 0, LW, LH);
+  const kU = keyURL(pid, vid), L2 = { base: fitLayer(layer(st.base, st.baseU, rs), st.baseU, rs, LW, LH),
+    towns: fitLayer(layer(st.towns, st.townsU, rs), st.townsU, rs, LW, LH), key: fitLayer(layer(key, kU, rs), kU, rs, LW, LH) };
+  window.__layers = Object.fromEntries(Object.entries(L2).map(([k, v]) => [k, v ? (v.naturalWidth || v.width) : 0]));
+  ctx.drawImage(L2.base, 0, 0, LW, LH);
   // 3. product lines
   ctx.save(); ctx.beginPath(); ctx.rect(st.x0, st.y0, st.W, st.H); ctx.clip();
   if (P.freeze !== undefined) {
@@ -413,7 +448,7 @@ async function render(lite) {
   ctx.restore();
   // 4. towns (dots + names static) and live numbers
   const tmode = P.towns || "numbers";
-  if (st.towns && tmode !== "none") ctx.drawImage(st.towns, 0, 0, LW, LH);
+  if (st.towns && tmode !== "none") ctx.drawImage(L2.towns, 0, 0, LW, LH);
   if (st.towns && tmode === "numbers") for (const t of V.towns) {
     if (!(t.fi >= 0 && t.fj >= 0 && t.fi < D.h - 1 && t.fj < D.w - 1)) continue;
     let v = sampleRC(D.fill, D.w, t.fi, t.fj); if (!isFinite(v)) continue;   // HRRR: integer = nearest 3 km point; global: bilinear at the pin
@@ -421,7 +456,7 @@ async function render(lite) {
     haloText(ctx, fmtVal(P, v), t.x * LW, t.y * LH, `800 ${pt(t.size)}px Montserrat`, t.color, pt(3.0), "left", "middle");
   }
   // 5. key + header text
-  ctx.drawImage(key, 0, 0, LW, LH);
+  ctx.drawImage(L2.key, 0, 0, LW, LH);
   const [r0, r1, c0, c1] = V.cut;                                            // same rows/cols temp_maps.cut() keeps
   if (!D.pct) D.pct = {};
   if (!D.pct[vid]) { const a = new Float32Array(Math.ceil((r1 - r0) / 2) * Math.ceil((c1 - c0) / 2)); let n = 0;   // every 2nd cell
