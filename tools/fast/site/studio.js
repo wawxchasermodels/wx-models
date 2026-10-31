@@ -538,7 +538,7 @@ async function batchExport(opts) {
       if (pre === "storm" && S.prod !== p) S.prod = p, setLists(), $("prod").value = p;   // keep the ticked product
       mpMode(); await makeMp4(); const r = window.__mp4 || {};
       if (!r.blob) { res.skipped.push({ m, p, v, k, why: r.error || "no video" }); if (r.error === "stopped") throw new Error("stopped"); continue; }
-      files.push({ name: r.name, blob: r.blob }); res.items.push({ name: r.name, bytes: r.bytes, seconds: r.seconds });
+      files.push({ name: r.name, blob: r.blob }); res.items.push({ name: r.name, bytes: r.bytes, seconds: r.seconds, corner: r.corner });
       const a = document.createElement("a"); a.href = URL.createObjectURL(r.blob); a.download = r.name; a.textContent = `${r.name} (${(r.bytes / 1e6).toFixed(1)} MB)`; $s("bxout").appendChild(a);
     }
     if (!files.length) throw new Error("no videos were made" + (res.skipped.length ? ": " + res.skipped.map((x) => x.why).join("; ") : ""));
