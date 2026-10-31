@@ -17,9 +17,13 @@ const $ = id => document.getElementById(id);
     t700: "t700w", t500: "t500w", t300: "t300w", mslpptype: "ptype", snowkuch: "kuchera", snowk24: "kuch24", snowrate: "snow1", frzr: "fzra",
     tcc: "tcc", ir: "ir", vis: "vis", fog: "fog", ivt: "ivt", pwanom: "pwa", pw: "pw", w250: "w250", w500: "w500", w850: "w850", thick: "thick",
     t850anom: "t850a", aifs500: "z500anom", aifsmslp: "slp", mslpprecip: "mslpqpf", aifswind: "aifswind", elows: "elows", e500: "spag" }[t] || "";
-  if (t === "rain" || t === "bcrain" || t === "qpf") prod = m === "nbm" ? (per === "1h" ? "nqpf1" : "nqpf6") : p90 ? "eqpf90" : (acc[per] || "qpf");
-  if (t === "snow" || t === "snow10") prod = m === "nbm" ? "nsnow6" : m === "eps" ? (p90 ? "esnow90" : "esnow") : per === "1h" ? "snow1" : per === "6h" && /hrrr|rrfs/.test(m) ? "snow6" : "snow";
-  if (t === "gusts") prod = p90 ? "egust90" : per.startsWith("max") && m !== "nbm" && m !== "eps" ? "gust6" : "gust10";
+  const hh = { "6h": "6", "12h": "12", "24h": "24", "48h": "48" }[per];
+  if (t === "rain" || t === "bcrain" || t === "qpf") prod = m === "nbm" ? (per === "1h" ? "nqpf1" : per === "total" ? "nqpftot" : "nqpf" + (hh || "6")) : p90 ? "eqpf90" : (acc[per] || "qpf");
+  if (t === "snow" || t === "snow10") prod = m === "nbm" ? (per === "total" ? "nsnowtot" : "nsnow" + (hh || "6")) : m === "eps" ? (p90 ? "esnow90" : hh ? "esnow" + hh : "esnow")
+    : per === "1h" ? "snow1" : hh ? "snow" + hh : "snow";
+  if (t === "snowkuch" && hh) prod = "kuch" + hh;
+  if (t === "frzr" && hh) prod = "fzra" + hh;
+  if (t === "gusts") prod = p90 ? "egust90" : per === "max6h" && m !== "nbm" ? "gust6" : per === "max12h" && m !== "nbm" ? "gust12" : per === "max24h" && m !== "nbm" ? "gust24" : "gust10";
   if (t === "lows") prod = m === "eps" ? "elow" : "nmint";
   if (t === "highs") prod = m === "eps" ? "ehigh" : "nmaxt";
   if (t === "waves") prod = per === "max24h" ? "wavemax" : "waves";
@@ -190,11 +194,11 @@ const PRODS = () => MD().products, VIEWS = () => MD().views;
 // The Product menu lists only the open tab's products, in the order below (Pivotal: winds by level, 250 -> 850 mb);
 // product ids / URLs are unchanged (?prod= picks its tab). Products not listed here land in an "Other" tab.
 const TABS = [
-  ["sfc", "Surface", ["t2m", "feels", "d2m", "t2ma", "nmaxt", "nmint", "ehigh", "elow", "et2sd", "ep32", "gust10", "gust6", "gustmax", "egust90",
-                      "aifswind", "slp", "elows", "tcc", "vis", "fog", "ir", "waves", "wavemax"]],
-  ["pcp", "Precip", ["qpf", "qpf1", "nqpf1", "qpf3", "qpf6", "nqpf6", "qpf12", "qpf24", "qpf48", "eqpf90", "mslpqpf", "ptype", "refc", "pw", "pwa", "ivt",
+  ["sfc", "Surface", ["t2m", "feels", "d2m", "t2ma", "nmaxt", "nmint", "ehigh", "elow", "et2sd", "ep32", "gust10", "gust6", "gust12", "gust24", "gustmax", "egust90",
+                      "aifswind", "slp", "elows", "tcc", "vis", "fog", "ir", "waves", "wavemax", "wavemax24"]],
+  ["pcp", "Precip", ["qpf", "qpf1", "nqpf1", "qpf3", "qpf6", "nqpf6", "qpf12", "qpf24", "qpf48", "nqpf12", "nqpf24", "nqpf48", "nqpftot", "eqpf90", "mslpqpf", "ptype", "refc", "pw", "pwa", "ivt",
                      "qpfa", "qpfpct"]],
-  ["snow", "Snow", ["snow", "kuchera", "esnow", "esnow90", "snow1", "snow6", "nsnow6", "kuch24", "dsnod", "fzra", "snowlvl", "frz", "thick"]],
+  ["snow", "Snow", ["snow", "kuchera", "esnow", "esnow90", "snow1", "snow6", "snow12", "snow24", "snow48", "nsnow6", "nsnow12", "nsnow24", "nsnow48", "nsnowtot", "esnow6", "esnow12", "esnow24", "esnow48", "kuch6", "kuch12", "kuch24", "kuch48", "dsnod", "fzra", "fzra6", "fzra12", "fzra24", "fzra48", "snowlvl", "frz", "thick"]],
   ["ua", "Upper Air", ["w250", "w300", "w500", "w850", "t300w", "t500w", "t700w", "t850w", "t925w", "t850", "t700", "t850a", "z500anom", "ez500", "spag"]],
   ["svr", "Severe", ["mucape", "sbcape", "epcape", "ltng", "ltng6", "ltgp", "ntstm"]],
 ];
@@ -324,8 +328,9 @@ async function productFields(run, pid, f) {
       const fld = P.anom || "z500", C = await climAt(run, P.clim, S.runs[run].steps.find(x => x.f === f).valid), z = F[fld].v, o = new Float32Array(z.length);
       for (let k = 0; k < z.length; k++) o[k] = z[k] - C[k]; out.fill = fld === "z500" ? blur(o, g.w, g.h, 1.0) : o;
     } else if (P.window && (P.wmax || P.wsum || P.wmin)) {   // highest value over the steps in the last N hours (incl. this one)
-      const fld = P.wfield || P.fields[0], fs = S.runs[run].steps.map(x => x.f).filter(x => x > f - P.window && x <= f);
+      const fld = P.wfield || P.fields[0], fs = S.runs[run].steps.map(x => x.f).filter(x => x > f - P.window && x <= f && (!P.wstep || (f - x) % P.wstep === 0));
       if (f - P.window < 0 && !P.sofar) throw new Error(`nodata:${fld}`);
+      if (P.wstep && f % P.wstep) throw new Error(`nodata:${fld}`);   // NBM sums of 6 h amounts: only at 6-hourly valid times
       const arrs = await Promise.all(fs.map(x => getField(run, fld, x).then(r => r.v, () => null))), ok = arrs.filter(Boolean);
       if (!ok.length) throw new Error(`nodata:${fld}`);
       const o = new Float32Array(ok[0]);

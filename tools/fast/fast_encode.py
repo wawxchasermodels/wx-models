@@ -1088,6 +1088,24 @@ def static(m, out, views_only=None, x2_only=False):
                       extra="precip type and rate at the valid time  \u00b7  isobars every 4 mb", pct=[0, 100], towns="names", ticklabels=["Rain", "Snow", "Sleet / mix", "Freezing rain"],
                       only=("hrrr", "rrfs", "gfs", "ifs")),
     }
+    # Overnight 10-30 (go-live audit gap 5): the old site's period variants. All browser-side sums / maxima of fields every run
+    # already stores (snow water, Kuchera and freezing-rain increments, gust), so no new R2 data per run; only keys are added.
+    SNOW_T = {6: [0.1, 1, 3, 6, 10, 15, 24], 12: [0.1, 1, 3, 6, 10, 15, 24], 24: [0.1, 1, 3, 6, 10, 15, 24, 36], 48: [0.1, 1, 3, 6, 10, 15, 24, 36, 48]}
+    snow_how = "ECMWF snowfall water x 10 (10:1)" if m in ("ifs", "eps", "aens") else "model snow density"
+    prods["snow6"]["only"] = ("hrrr", "rrfs", "ifs")
+    prods["snow6"]["extra"] = f"snowfall in the 6 h ending at the valid time ({snow_how})  \u00b7  max {{hi}} in in view"
+    for h in (12, 24, 48):
+        prods[f"snow{h}"] = dict(prods["snow6"], cmap_of="snow", title=f"{h} h Snowfall", window=h, ticks=SNOW_T[h],
+                                 extra=f"snowfall in the {h} h ending at the valid time ({snow_how})  \u00b7  max {{hi}} in in view")
+    for h in (6, 12, 48):
+        prods[f"kuch{h}"] = dict(prods["kuch24"], cmap_of="snow", title=f"{h} h Snowfall (Kuchera)", window=h, ticks=SNOW_T[h],
+                                 extra=f"Kuchera snow in the {h} h ending at the valid time  \u00b7  max {{hi}} in in view")
+    for h in (6, 12, 24, 48):
+        prods[f"fzra{h}"] = dict(prods["fzra"], cmap_of="fzra", title=f"{h} h Freezing Rain", window=h, sofar=False,
+                                 extra=f"precip that fell as freezing rain / drizzle in the {h} h ending at the valid time (liquid amount)  \u00b7  max {{hi}} in in view")
+    for h in (12, 24):
+        prods[f"gust{h}"] = dict(prods["gust6"], cmap_of="gust10", title=f"{h} h Max Wind Gust", window=h,
+                                 extra=f"highest gust over the model hours in the {h} h ending at the valid time  \u00b7  up to {{hi}} mph in view")
     ALLP = {k: dict(v) for k, v in prods.items()}   # before the per-model filter (ensemble picks shared products below)
     for v in ALLP.values(): v.pop("only", None)
     prods = {k: v for k, v in prods.items() if m in v.pop("only", (m,))}
@@ -1105,6 +1123,14 @@ def static(m, out, views_only=None, x2_only=False):
         prods["nsnow6"] = dict(title="6 h Snowfall", fields=["ns6"], key="Snow (in)", ticks=[0.1, 1, 3, 6, 10, 15, 24], tickfmt=True,
                                **table(M.SNOW_LEVELS, CM["snow"], "max"), extra="NBM snowfall in the 6 h ending at the valid time (every 6 h)  \u00b7  max {hi} in in view",
                                pct=[0, 100], dec=1, fmt="in1")
+        for h in (12, 24, 48, 9999):   # overnight 10-30: NBM 12 / 24 / 48 h and run-total precip + snow = sums of the 6 h fields
+            lab = "since the run started" if h == 9999 else f"in the {h} h ending at the valid time"
+            prods["nqpf" + ("tot" if h == 9999 else str(h))] = dict(prods["nqpf6"], cmap_of="qpf", title="Precipitation Total" if h == 9999 else f"{h} h Precipitation",
+                fields=["nq6"], window=h, wstep=6, wsum=True, wfield="nq6", fill="window", sofar=h == 9999, ticks=[0.1, 0.5, 1, 2, 3, 4, 6, 8, 10],
+                extra=f"NBM liquid equivalent {lab} (sum of the 6 h amounts)  \u00b7  max {{hi}} in in view")
+            prods["nsnow" + ("tot" if h == 9999 else str(h))] = dict(prods["nsnow6"], cmap_of="snow", title="Snowfall Total" if h == 9999 else f"{h} h Snowfall",
+                fields=["ns6"], window=h, wstep=6, wsum=True, wfield="ns6", fill="window", sofar=h == 9999, ticks=SNOW_T[48],
+                extra=f"NBM snowfall {lab} (sum of the 6 h amounts)  \u00b7  max {{hi}} in in view")
         prods["ntstm"] = dict(title="Thunderstorm Chance (3 h)", fields=["tstm"], key="Chance (%)", ticks=TS_L, tickfmt=True,
                               **table(TS_L, CM["ntstm"], "neither"), extra="NBM chance of thunder in the 3 h ending at the valid time (every 3 h)", pct=[0, 100], towns="names")
         prods["nmaxt"] = dict(title="12 h High Temperature", fields=["maxt"], key="Temp (\u00b0F)", ticks=HS.TEMP_TICKS, **table(HS.TEMP_LEVELS, CM["t2m"], "both"),
@@ -1125,6 +1151,14 @@ def static(m, out, views_only=None, x2_only=False):
         prods["esnow"] = dict(title="Snowfall Total (ens. mean, 10:1)", fields=["asnow"], key="Snow (in)", ticks=[0.1, 1, 3, 6, 10, 15, 24, 36, 48], tickfmt=True,
                               **table(M.SNOW_LEVELS, CM["snow"], "max"), extra="mean of 50 members' snowfall water x 10  \u00b7  since the run started  \u00b7  max {hi} in in view",
                               pct=[0, 100], dec=1, fmt="in1", accum=True)
+        for h in (6, 12, 24, 48):   # overnight 10-30: ens-mean snow per window (difference of the mean totals = mean of the members' windows)
+            prods[f"esnow{h}"] = dict(prods["esnow"], cmap_of="snow", title=f"{h} h Snowfall (ens. mean, 10:1)", window=h, wfield="asnow", fill="window", accum=False,
+                                      ticks=SNOW_T[h], extra=f"mean of 50 members' snowfall water x 10 in the {h} h ending at the valid time  \u00b7  max {{hi}} in in view")
+        prods["qpf12"] = dict(ALLP["qpf12"], cmap_of="qpf", title="12 h Precipitation (ens. mean)", extra="mean of 50 members  \u00b7  " + ALLP["qpf12"]["extra"])
+        if m == "eps":
+            for h in (12, 24):
+                prods[f"gust{h}"] = dict(ALLP["gust6"], cmap_of="gust10", title=f"{h} h Max Wind Gust (ens. mean)", window=h,
+                                         extra=f"highest of the 6-hourly ens-mean max gusts in the {h} h ending at the valid time  \u00b7  up to {{hi}} mph in view")
         prods["esnow90"] = dict(prods["esnow"], title="Snowfall Total, 90th Percentile (10:1)", fields=["asnow90"],
                                 extra="reasonable high end: 5 of 50 members are snowier  \u00b7  10:1  \u00b7  since the run started  \u00b7  max {hi} in in view")
         if m == "eps": prods["egust90"] = dict(title="Wind Gusts, 90th Percentile", fields=["gust90"], key="Gust (mph)", ticks=HS.WIND_TICKS, **table(HS.WIND_LEVELS, CM["gust10"], "max"),
@@ -1196,6 +1230,8 @@ def static(m, out, views_only=None, x2_only=False):
         if k in prods: prods[k]["min_show"] = prods[k]["levels"][0]
     for k in ("qpf", "snow", "refc", "qpf1", "qpf3", "qpf6", "qpf12", "qpf24", "qpf48", "snow1", "snow6", "ltng6"):
         if k in prods: prods[k]["min_show"] = prods[k]["levels"][0]   # blank below the first level (like the site)
+    for k in prods:   # overnight 10-30 period variants: blank below the first level like their base products
+        if k[:4] in ("snow", "kuch", "fzra", "nqpf", "nsno", "esno") and k[-1].isdigit() or k in ("nqpftot", "nsnowtot"): prods[k]["min_show"] = prods[k]["levels"][0]
     for pid, P in prods.items():
         P.setdefault("fill", P["fields"][0]); tk0 = list(P["ticks"])
         P.update(freeze_color=HS.FREEZE_COLOR, freeze_lw=HS.FREEZE_LW) if "freeze" in P else None
@@ -1203,7 +1239,7 @@ def static(m, out, views_only=None, x2_only=False):
         for vid in vids:
             fn = f"static/key_{m}_{pid}_{vid}.png"; P["keys"][vid] = fn
             fig, ax, ky = layer_fig(vid); x0, x1, y0, y1 = ax.get_extent(TM.VIEWS[vid]["proj"])
-            X, Y = np.meshgrid([x0, x1], [y0, y1]); L = np.asarray(P["levels"]); cm = CM[pid]
+            X, Y = np.meshgrid([x0, x1], [y0, y1]); L = np.asarray(P["levels"]); cm = CM[pid] if pid in CM else CM[P["cmap_of"]]
             ext = "both" if P["under"] and P["over"] else "max" if P["over"] else "min" if P["under"] else "neither"
             if pid == "vis": ext = "max"
             cs = ax.contourf(X, Y, np.full((2, 2), np.nan), levels=L, cmap=cm, norm=BoundaryNorm(L, cm.N), extend=ext, transform=ax.projection)
