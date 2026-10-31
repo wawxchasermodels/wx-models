@@ -93,7 +93,7 @@ async function render(k, frO) {   // frO: camera override (MP4 storm-track pan)
 }
 const renderAll = () => { if (REC.on) return; if (CLEAN) render(OUTQ); else { render("v"); render("h"); } };
 window.onStudioSkip = () => { if (PLAY.on) PLAY.next(); };
-window.onStudioDraw = (cv, cur, step) => { last = { cv, cur, step }; renderAll(); if (PLAY.on) PLAY.next(); };
+window.onStudioDraw = (cv, cur, step) => { last = { cv, cur, step }; renderAll(); if (PLAY.on) PLAY.next(); if (!REC.on && typeof mpSync === "function") try { mpSync(); } catch (e) { /* panel not ready */ } };
 // drag / keys / zoom / buttons
 for (const k of ["v", "h"]) {
   const f = F[k], cv = f.cv; let d = null;
@@ -184,13 +184,31 @@ function pickIdx() {
   for (let i = a; i <= b; i++) if (!out.length || !e || st[i].f - st[out[out.length - 1]].f >= e) out.push(i);
   return out;
 }
+// 10-31 1:51 PM (Benjamin: "an option to change mp4 loop speed"): Speed slider 0.5-15 maps/s; optional End speed ramps the speed
+// map by map (e.g. slow down into landfall). T[j] = time (s) at which map j starts.
+function loopTimes(n) {
+  const s0 = +$s("mps").value, s1 = $s("mps1").value ? +$s("mps1").value : s0, T = [0];
+  for (let j = 0; j < n; j++) T.push(T[j] + 1 / lerp(s0, s1, n > 1 ? j / (n - 1) : 0));
+  return T;
+}
+// ("when choosing the loop, I want to be able to still manipulate where I am in the model run"): the panel is not modal; the
+// hour slider / buttons / arrow keys / Play keep working, "Start = now" / "End = now" take the hour on the map, and the loop
+// range is shaded on the hour slider.
+function mpSync() {
+  if ($s("mp4p").hidden || !S.run) return; const st = S.runs[S.run].steps, sl = $("step"), mx = Math.max(1, +sl.max || st.length - 1);
+  if (+$s("mpa").options.length !== st.length) return;   // run changed: options rebuilt on next open
+  $s("mpnow").textContent = `Map now: ${lbl(st[S.i])}`;
+  const a = +$s("mpa").value, b = +$s("mpb").value; sl.style.setProperty("--ra", String(Math.min(a, b) / mx)); sl.style.setProperty("--rb", String(Math.max(a, b) / mx));
+  document.body.classList.add("mprange");
+}
 function mpInfo() {
-  const idx = pickIdx(), sp = +$s("mps").value, hold = +$s("mph").value, p = getPins(), pan = $s("mpmode").value === "pan";
+  mpSync(); const s0 = +$s("mps").value, s1 = $s("mps1").value; $s("mpsv").textContent = `${s0} map${s0 === 1 ? "" : "s"}/s`;
+  const idx = pickIdx(), T = loopTimes(idx.length), hold = +$s("mph").value, p = getPins(), pan = $s("mpmode").value === "pan";
   const zv = (id) => $s(id).value === "f" ? null : +$s(id).value, za = zv("mpz0"), zb = zv("mpz1");
   const zt = za === null && zb === null ? "" : ` \u00b7 zoom ${za === null ? "as framed" : za + "\u00d7"} \u2192 ${zb === null ? (za === null ? "as framed" : za + "\u00d7") : zb + "\u00d7"}`;
   $s("mppins").textContent = pan ? (p.a ? "A set" : "A not set") + " \u00b7 " + (p.b ? "B set" : "B not set") : "";
   $s("mpinfo").textContent = idx.length < 2 ? "Pick an end hour after the start hour." :
-    `${idx.length} maps, F+${S.runs[S.run].steps[idx[0]].f} to F+${S.runs[S.run].steps[idx[idx.length - 1]].f} \u00b7 about ${(idx.length / sp + hold).toFixed(1)} s of video at 30 fps${zt}`;
+    `${idx.length} maps, F+${S.runs[S.run].steps[idx[0]].f} to F+${S.runs[S.run].steps[idx[idx.length - 1]].f} \u00b7 ${(T[idx.length] + hold).toFixed(1)} s of video at 30 fps${s1 && +s1 !== s0 ? ` (speed ${s0} \u2192 ${s1} maps/s)` : ""}${zt}`;
 }
 function mpMode() { const pan = $s("mpmode").value === "pan"; if (pan && $s("mpz0").value === "f") $s("mpz0").value = "1.8"; /* a pan needs room to move */ $s("mppan").hidden = !pan; PIN.show = pan; render("v"); render("h"); mpInfo(); }
 let muxP = null;
@@ -231,7 +249,7 @@ async function makeMp4() {
   const k = $s("mpk").value, f = F[k], pan = $s("mpmode").value === "pan", pins = getPins(), idx = pickIdx(), steps = S.runs[S.run].steps;
   if (idx.length < 2) { mpSt("Pick an end hour after the start hour."); return; }
   if (pan && !(pins.a && pins.b)) { mpSt("Set pin A and pin B on the map first."); return; }
-  const per = FPS / +$s("mps").value, holdN = Math.round(+$s("mph").value * FPS), panN = Math.max(1, Math.round(idx.length * per) - 1);
+  const T = loopTimes(idx.length), holdN = Math.round(+$s("mph").value * FPS), panN = Math.max(1, Math.round(T[idx.length] * FPS) - 1);
   // 10-31 1:35 PM (Benjamin: "starting zoom and ending zoom ... start zoom out a bit but zoom in slowly on the storm"): the zoom
   // eases from Start to End over the loop (geometric, so each step looks the same); with pins the centre eases A -> B at the
   // same time, without pins the centre is where the frame is framed now. "as framed" = the frame's own zoom.
@@ -248,7 +266,7 @@ async function makeMp4() {
       if (REC.cancel || S.run !== run) throw new Error("stopped");
       if (j) { if (enc.idle) enc.idle(); S.i = idx[j]; $("step").value = idx[j]; await draw(); }   // an hour missing from the run keeps the previous map
       mpSt(`Making video\u2026 F+${steps[idx[j]].f} (${j + 1}/${idx.length})`);
-      const n1 = Math.round((j + 1) * per) + (j === idx.length - 1 ? holdN : 0); let drawn = false;
+      const n1 = Math.round(T[j + 1] * FPS) + (j === idx.length - 1 ? holdN : 0); let drawn = false;
       for (; n < n1; n++) {
         const tt = Math.min(1, n / panN);
         if (pan) { const t = ease(tt); await render(k, frAt(k, lerp(pins.a.x, pins.b.x, t), lerp(pins.a.y, pins.b.y, t), zoomAt(tt))); }
@@ -268,12 +286,21 @@ async function makeMp4() {
 }
 if (!CLEAN && $s("mp4p")) {
   $s("mp4p").addEventListener("click", (e) => { const b = e.target.closest("button[data-m]"); if (!b) return; const m_ = b.dataset.m;
-    if (m_ === "x") { if (!REC.on) { $s("mp4p").hidden = true; PIN.show = false; render("v"); render("h"); } }
+    if (m_ === "x") { if (!REC.on) { $s("mp4p").hidden = true; PIN.show = false; document.body.classList.remove("mprange"); render("v"); render("h"); } }
+    else if (m_ === "min") { const mn = $s("mp4p").classList.toggle("min"); b.innerHTML = mn ? "+" : "&ndash;"; b.title = mn ? "Expand" : "Minimize"; }
+    else if (m_ === "sa" || m_ === "sb") { if (REC.on) return; const a = $s("mpa"), z = $s("mpb");
+      if (m_ === "sa") { a.value = String(S.i); if (+z.value <= S.i) z.value = String(Math.min(S.runs[S.run].steps.length - 1, S.i + 1)); }
+      else { z.value = String(S.i); if (+a.value >= S.i) a.value = String(Math.max(0, S.i - 1)); }
+      mpInfo(); }
     else if (m_ === "a" || m_ === "b") { PIN.mode = m_; PIN.show = true; $s("mp4p").hidden = true; const h = $s("pinhint"); h.hidden = false;
       h.textContent = `Tap either frame where the loop should ${m_ === "a" ? "START (pin A)" : "END (pin B)"}. Drag the frame first if you need to. Esc cancels.`; render("v"); render("h"); }
     else if (m_ === "c") { setPins({}); mpInfo(); render("v"); render("h"); }
     else if (m_ === "go") makeMp4(); else if (m_ === "stop") REC.cancel = true; });
-  for (const id of ["mpa", "mpb", "mpe", "mps", "mph", "mpz0", "mpz1"]) $s(id).addEventListener("change", mpInfo);
+  for (const id of ["mpa", "mpb", "mpe", "mps", "mps1", "mph", "mpz0", "mpz1"]) $s(id).addEventListener("change", mpInfo);
+  $s("mps").addEventListener("input", mpInfo);
+  // arrow keys inside the panel's menus / slider change those, not the hour (the viewer steps hours on arrows anywhere else)
+  $s("mp4p").addEventListener("keydown", (e) => { if (/^(SELECT|INPUT)$/.test(e.target.tagName) && /^Arrow/.test(e.key)) e.stopPropagation(); });
+  $("step").addEventListener("input", mpSync);
   $s("mpmode").addEventListener("change", mpMode);
   addEventListener("keydown", (e) => { if (e.key === "Escape" && PIN.mode) { PIN.mode = null; $s("pinhint").hidden = true; $s("mp4p").hidden = false; } });
   window.__studioMp4 = { getPins, setPins, makeMp4, openMp4 };
