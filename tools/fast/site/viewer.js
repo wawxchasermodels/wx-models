@@ -61,6 +61,7 @@ function fitPhone() {   // phones: map as large as fits between the menus and th
 // dragged the RS in use is kept and the fill is the light half-res one; the full sharp frame comes when the finger lifts.
 function wantRS(LW, LH) {
   const cv = $("map"); if (!cv || !LW || Q.get("rs1")) return 1;
+  if (Q.get("studio")) return Math.max(1, Math.min(3, Math.floor(Math.sqrt(16e6 / (LW * LH)) * 4) / 4));   // Studio: always sharp (crops are scaled up to 1920 px)
   const shown = cv.offsetWidth || LW, want = shown * (window.devicePixelRatio || 1) * (Z.k || 1) / LW;
   const cap = Math.min(3, Math.sqrt(12e6 / (LW * LH)));
   return Math.max(1, Math.min(cap, Math.ceil(want * 4 - 0.2) / 4));
@@ -285,9 +286,11 @@ function setLists() {   // products this run carries (all their fields present),
   const cur = S.tab && inTab(S.tab) ? S.tab : tabOf(S.prod); S.tab = cur; S.lastTab[cur] = S.prod;
   $("tabs").innerHTML = tabs.map(([id, label]) => `<button type="button" role="tab" data-t="${id}" aria-selected="${id === cur}"${id === cur ? ' class="on"' : ""}>${label}</button>`).join("") +
     // WA Maps (10-31, Benjamin 8:58 AM): the posted Washington state-view maps, own page (wamaps.html)
-    (Q.get("embed") ? "" : `<button type="button" data-t="wamaps" title="Washington state-view forecast maps">WA Maps</button>` +
-      `<button type="button" data-t="compare" title="Two maps side by side: two models, or two runs of one model">Compare</button>`);
+    (Q.get("embed") || Q.get("studio") ? "" : `<button type="button" data-t="wamaps" title="Washington state-view forecast maps">WA Maps</button>` +
+      `<button type="button" data-t="compare" title="Two maps side by side: two models, or two runs of one model">Compare</button>` +
+      `<button type="button" data-t="studio" title="Studio: 9:16 and 16:9 video frames for Reels / OBS">Studio</button>`);
   $("tabs").onclick = e => { const b = e.target.closest("button[data-t]"); if (b && b.dataset.t === "wamaps") { location.href = "wamaps.html"; return; }
+    if (b && b.dataset.t === "studio") { location.href = `studio.html?run=${encodeURIComponent(S.run)}&prod=${S.prod}&view=${S.view}&f=${S.runs[S.run].steps[S.i].f}`; return; }
     if (b && b.dataset.t === "compare") { const R_ = S.runs[S.run], st = R_.steps[S.i], [m] = S.run.split("/"), rs = (S.man.runs[m] || []);
       const other = rs.length > 1 ? `${m}/${rs[rs.length - 1] === S.run.split("/")[1] ? rs[rs.length - 2] : rs[rs.length - 1]}` : S.run;
       location.href = `compare.html?l=${encodeURIComponent(S.run)}&r=${encodeURIComponent(other)}&prod=${S.prod}&view=${S.view}&valid=${encodeURIComponent(st.valid)}`; return; }
@@ -536,7 +539,7 @@ async function render(lite) {
     const V = VIEWS()[vid], cv = $("map"), st2 = await viewStatic(vid);
     const ctx = sizeMap(cv, V, lite), [LW, LH] = V.fig; ctx.fillStyle = S.man.style.BG; ctx.fillRect(0, 0, LW, LH); ctx.drawImage(layer(st2.base, st2.baseU, cv._rs), 0, 0, LW, LH);
     header(ctx, V, PRODS()[pid].title, step.valid_line, `${S.runs[run].runline}  \u00b7  ${V.label}  \u00b7  not in this model run at this hour`, step.badge);
-    S.cur = null; window.__drawn = `${pid}/${vid}/${f}`; return;
+    S.cur = null; window.__drawn = `${pid}/${vid}/${f}`; if (window.onStudioSkip) window.onStudioSkip(); return;
   }
   if (seq !== drawSeq) return;
   const t1 = performance.now();
@@ -611,11 +614,13 @@ async function render(lite) {
   postCompare(run, pid, vid, step);
   if (lite) return;
   // iOS Safari throws after 100 history.replaceState calls in 10 s: update the URL once things settle
-  clearTimeout(urlTimer); urlTimer = setTimeout(() => { const u = new URL(location); u.searchParams.set("prod", pid); u.searchParams.set("view", vid);
+  if (!Q.get("clean")) clearTimeout(urlTimer), urlTimer = setTimeout(() => { const u = new URL(location); u.searchParams.set("prod", pid); u.searchParams.set("view", vid);
     u.searchParams.set("f", f); u.searchParams.set("run", run); u.searchParams.delete("model");
     u.searchParams.delete("mg"); u.searchParams.delete("obs"); try { history.replaceState(null, "", u); } catch (e) {} }, 400);
   preload(run, pid, S.i);
+  if (window.onStudioDraw) window.onStudioDraw(cv_(), S.cur, step);
 }
+const cv_ = () => $("map");
 
 function preload(run, pid, i) {   // next 6 steps first, then the rest of the run, 3 at a time
   const steps = S.runs[run].steps, order = [];
