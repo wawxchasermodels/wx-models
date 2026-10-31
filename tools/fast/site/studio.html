@@ -118,6 +118,7 @@ body.clean .sfr{display:none}body.clean .sfr.on{display:block}
 #mpv{display:block;max-width:100%;max-height:46vh;margin-top:6px;background:#000}
 #pinhint{position:fixed;left:50%;top:10px;transform:translateX(-50%);z-index:13;background:#2f8cff;color:#fff;font-weight:700;padding:8px 14px;border-radius:8px;box-shadow:0 4px 16px #0008;max-width:90vw;text-align:center}
 body.rec .sfr .shd button,body.rec #bar{pointer-events:none;opacity:.55}
+#mpprog{width:120px;accent-color:#2f8cff}#mp4p .mp-h{cursor:move;user-select:none}#mpkeys{color:#8e939c!important;font-size:11.5px}
 #mp4p .mp-h{gap:8px}#mp4p .mp-hint{flex:1;color:#8e939c;font-size:11.5px}#mp4p.min > :not(.mp-h){display:none!important}#mp4p.min .mp-hint{display:none}
 #mps{width:170px;accent-color:#2f8cff}#mpsv{min-width:80px}
 /* loop range shown on the hour slider while the MP4 panel is open (thumb 28 px) */
@@ -146,6 +147,8 @@ body.clean .sfr canvas,body.clean #fv canvas,body.clean #fh canvas{width:auto!im
 </div>
 <div id="wrap"><canvas id="map"></canvas><div id="tip" hidden></div></div>
 <div id="mp4p" hidden><div class="mp-h"><b>Save MP4 loop</b><span class="mp-hint">The hour slider, &lsaquo; &rsaquo;, arrow keys and Play still work while this is open</span><span><button type="button" data-m="min" id="mpmin" aria-label="Minimize" title="Minimize">&ndash;</button> <button type="button" data-m="x" aria-label="Close">&times;</button></span></div>
+  <div class="mp-row"><label>Preset <select id="mppre" title="Fill in the settings for a common loop"><option value="">choose&hellip;</option><option value="landfall">Landfall zoom-in (pan A &rarr; B, slows down)</option><option value="overview">Quick 5-day overview</option><option value="smooth">Smooth every-hour loop</option><option value="zoomin">Slow zoom-in on the framing</option></select></label>
+  <button type="button" data-m="pv" id="mppv" title="Play the camera move (pins / zoom) once on the frame, at the hour shown now. Nothing is saved.">Preview move</button></div>
   <div class="mp-row"><label>Frame <select id="mpk"><option value="v">9:16 (1080&times;1920)</option><option value="h">16:9 (1920&times;1080)</option></select></label>
   <label>Mode <select id="mpmode"><option value="loop">Plain loop</option><option value="pan">Track storm (pan A &rarr; B)</option></select></label></div>
   <div class="mp-row"><label>Start <select id="mpa"></select></label><button type="button" data-m="sa" title="Use the hour the map is on now">Start = now</button></div>
@@ -157,8 +160,9 @@ body.clean .sfr canvas,body.clean #fv canvas,body.clean #fh canvas{width:auto!im
   <div class="mp-row"><label>Start zoom <select id="mpz0"><option value="f">as framed</option><option value="1">1&times;</option><option value="1.2">1.2&times;</option><option value="1.4">1.4&times;</option><option value="1.6">1.6&times;</option><option value="1.8">1.8&times;</option><option value="2">2&times;</option><option value="2.2">2.2&times;</option><option value="2.5">2.5&times;</option><option value="2.8">2.8&times;</option><option value="3">3&times;</option></select></label>
   <label>End zoom <select id="mpz1"><option value="f">same as start</option><option value="1">1&times;</option><option value="1.2">1.2&times;</option><option value="1.4">1.4&times;</option><option value="1.6">1.6&times;</option><option value="1.8">1.8&times;</option><option value="2">2&times;</option><option value="2.2">2.2&times;</option><option value="2.5">2.5&times;</option><option value="2.8">2.8&times;</option><option value="3">3&times;</option></select></label></div>
   <div class="mp-row" id="mppan" hidden><button type="button" data-m="a">Set pin A (start)</button><button type="button" data-m="b">Set pin B (end)</button><button type="button" data-m="c">Clear pins</button><span id="mppins"></span></div>
+  <div class="mp-row mp-note" id="mpkeys">Keys: Esc closes / cancels a pin &middot; Enter makes the MP4 &middot; drag the panel by its title bar (desktop)</div>
   <div class="mp-row mp-note" id="mpinfo"></div>
-  <div class="mp-row"><button type="button" data-m="go" id="mpgo" class="pri">Make MP4</button><button type="button" data-m="stop" id="mpstop" hidden>Stop</button><span id="mpst"></span></div>
+  <div class="mp-row"><button type="button" data-m="go" id="mpgo" class="pri">Make MP4</button><button type="button" data-m="stop" id="mpstop" hidden>Stop</button><progress id="mpprog" max="1" value="0" hidden></progress><span id="mpst"></span></div>
   <div id="mpout" hidden><video id="mpv" controls loop muted playsinline></video><div class="mp-row"><a id="mpdl" download>Save MP4</a><button type="button" id="mpshare" hidden>Share / Save to Photos</button></div></div>
 </div>
 <div id="studio">
@@ -169,5 +173,5 @@ body.clean .sfr canvas,body.clean #fv canvas,body.clean #fh canvas{width:auto!im
 <div id="pinhint" hidden></div>
 <div id="dock"></div>
 <script src="viewer.js?v=20261031t"></script>
-<script src="studio.js?v=20261031e"></script>
+<script src="studio.js?v=20261031f"></script>
 </body></html>

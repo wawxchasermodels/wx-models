@@ -169,15 +169,52 @@ function drawPins(k, c, r) {
 function placePin(k, cv, e) {
   const f = F[k], b = cv.getBoundingClientRect(), ox = (e.clientX - b.left) * f.W / b.width, oy = (e.clientY - b.top) * f.H / b.height, r = crop(k, getFr(k));
   const p = getPins(); p[PIN.mode] = { x: r.cx + (ox - f.W / 2) / r.kk, y: r.cy + (oy - f.H / 2) / r.kk }; setPins(p);
+  // pin A placed and no pin B yet: go straight on to pin B (one less tap); Esc stops
+  if (PIN.mode === "a" && !p.b) { PIN.mode = "b"; $s("pinhint").textContent = "Pin A set. Now tap where the loop should END (pin B). Esc cancels."; render("v"); render("h"); return; }
   PIN.mode = null; $s("pinhint").hidden = true; $s("mp4p").hidden = false; mpInfo(); render("v"); render("h");
 }
+// ---- usability (10-31 2:24 PM, Benjamin: "I want the studio to be as intuitive and functional as possible")
+// remembered loop settings (not the frame: the Save MP4 button you press picks that), presets, a camera-move preview, progress bar,
+// Enter / Esc keys, a draggable panel on desktop
+const OPT_IDS = ["mpmode", "mpe", "mph", "mps", "mps1", "mpz0", "mpz1"], OPT_KEY = "studio:mp4opts";
+function saveOpts() { const o = {}; for (const id of OPT_IDS) o[id] = $s(id).value; try { localStorage.setItem(OPT_KEY, JSON.stringify(o)); } catch (e) { /* private mode */ } }
+function loadOpts() { let o = {}; try { o = JSON.parse(localStorage.getItem(OPT_KEY) || "{}"); } catch (e) { /* none */ }
+  for (const id of OPT_IDS) if (o[id] !== undefined && [...($s(id).options || [])].concat($s(id).type === "range" ? [{ value: o[id] }] : []).some((x) => x.value === o[id])) $s(id).value = o[id]; }
+const PRESETS = {
+  landfall: { mpmode: "pan", mpe: "6", mps: "3", mps1: "1", mph: "2", mpz0: "1.2", mpz1: "2.2" },
+  overview: { mpmode: "loop", mpe: "6", mps: "6", mps1: "", mph: "1", mpz0: "f", mpz1: "f", span: 120 },
+  smooth: { mpmode: "loop", mpe: "0", mps: "10", mps1: "", mph: "1", mpz0: "f", mpz1: "f" },
+  zoomin: { mpmode: "loop", mpe: "6", mps: "3", mps1: "", mph: "1.5", mpz0: "1", mpz1: "1.8" },
+};
+function applyPreset(name) {
+  const P_ = PRESETS[name]; if (!P_) return;
+  for (const [id, v] of Object.entries(P_)) if (id !== "span") $s(id).value = v;
+  if (P_.span) { const st = S.runs[S.run].steps, a = +$s("mpa").value, e = st.findIndex((x) => x.f >= st[a].f + P_.span); $s("mpb").value = String(e > a ? e : st.length - 1); }
+  mpMode(); saveOpts(); $s("mppre").value = name;
+  const p = getPins();
+  if (P_.mpmode === "pan" && !(p.a && p.b)) { PIN.mode = "a"; PIN.show = true; $s("mp4p").hidden = true; const h = $s("pinhint"); h.hidden = false;
+    h.textContent = "Landfall zoom-in: tap where the storm is at the START (pin A), then where it makes landfall (pin B). Esc cancels."; render("v"); render("h"); }
+}
+const PV = { on: false };
+async function previewMove() {
+  if (PV.on || REC.on || !last) return; const k = $s("mpk").value, pan = $s("mpmode").value === "pan", pins = getPins();
+  if (pan && !(pins.a && pins.b)) { mpSt("Set pin A and pin B first (Set pin A, then tap the frame)."); return; }
+  const fr0 = getFr(k), z0 = $s("mpz0").value === "f" ? Math.max(1, fr0.zoom || 1) : +$s("mpz0").value, z1 = $s("mpz1").value === "f" ? z0 : +$s("mpz1").value, c0 = crop(k, fr0);
+  PV.on = true; mpSt("Previewing the camera move…"); F[k].cv.scrollIntoView({ block: "nearest" });
+  const N = 75;
+  for (let n = 0; n <= N; n++) { const tt = n / N, z = z0 * Math.pow(z1 / z0, ease(tt)), t = ease(tt);
+    await render(k, pan ? frAt(k, lerp(pins.a.x, pins.b.x, t), lerp(pins.a.y, pins.b.y, t), z) : frAt(k, c0.cx, c0.cy, z)); await sleep(1000 / FPS); }
+  await sleep(500); PV.on = false; render(k); mpSt("");
+}
 const lbl = (st) => { const d = new Date(st.valid); return `F+${st.f} \u00b7 ${d.toUTCString().slice(0, 3)} ${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")} ${String(d.getUTCHours()).padStart(2, "0")}Z`; };
+function startPin(m_) { PIN.mode = m_; PIN.show = true; $s("mp4p").hidden = true; const h = $s("pinhint"); h.hidden = false;
+  h.textContent = `Tap either frame where the loop should ${m_ === "a" ? "START (pin A)" : "END (pin B)"}. Drag the frame first if you need to. Esc cancels.`; render("v"); render("h"); }
 function openMp4(k) {
   if (!last) return; const st = S.runs[S.run].steps, a = $s("mpa"), b = $s("mpb");
   const opts = st.map((x, i) => `<option value="${i}">${lbl(x)}</option>`).join(""); a.innerHTML = opts; b.innerHTML = opts;
   const e5 = st.findIndex((x) => x.f >= st[S.i].f + 120);   // default: the next 5 days (or to the end of the run)
   a.value = String(S.i); b.value = String(e5 > S.i ? e5 : st.length - 1);
-  $s("mpk").value = k; $s("mp4p").hidden = false; $s("mpout").hidden = true; mpMode(); mpInfo();
+  loadOpts(); $s("mpk").value = k; $s("mp4p").hidden = false; $s("mpout").hidden = true; mpMode(); mpInfo();
 }
 function pickIdx() {
   const st = S.runs[S.run].steps, a = +$s("mpa").value, b = +$s("mpb").value, e = +$s("mpe").value, out = [];
@@ -248,7 +285,7 @@ async function makeMp4() {
   if (!last || REC.on) return;
   const k = $s("mpk").value, f = F[k], pan = $s("mpmode").value === "pan", pins = getPins(), idx = pickIdx(), steps = S.runs[S.run].steps;
   if (idx.length < 2) { mpSt("Pick an end hour after the start hour."); return; }
-  if (pan && !(pins.a && pins.b)) { mpSt("Set pin A and pin B on the map first."); return; }
+  if (pan && !(pins.a && pins.b)) { mpSt("Track storm needs pins: tap the frame where the loop starts (A), then where it ends (B)."); startPin(pins.a ? "b" : "a"); return; }
   const T = loopTimes(idx.length), holdN = Math.round(+$s("mph").value * FPS), panN = Math.max(1, Math.round(T[idx.length] * FPS) - 1);
   // 10-31 1:35 PM (Benjamin: "starting zoom and ending zoom ... start zoom out a bit but zoom in slowly on the storm"): the zoom
   // eases from Start to End over the loop (geometric, so each step looks the same); with pins the centre eases A -> B at the
@@ -259,7 +296,7 @@ async function makeMp4() {
   const run = S.run, keep = S.i, t0 = performance.now(); let enc = null;
   REC.on = true; REC.cancel = false; PLAY.on = false; $s("mpout").hidden = true; $s("mpgo").disabled = true; $s("mpstop").hidden = false; document.body.classList.add("rec");
   try {
-    enc = await makeEncoder(f.cv, f.W, f.H);
+    enc = await makeEncoder(f.cv, f.W, f.H); const totN = Math.round(T[idx.length] * FPS) + holdN, pg = $s("mpprog"); pg.hidden = false; pg.value = 0;
     S.i = idx[0]; $("step").value = idx[0]; await draw(); await sleep(500); await draw();   // let this view's sharp (x2) layers land first
     let n = 0;
     for (let j = 0; j < idx.length; j++) {
@@ -272,17 +309,17 @@ async function makeMp4() {
         if (pan) { const t = ease(tt); await render(k, frAt(k, lerp(pins.a.x, pins.b.x, t), lerp(pins.a.y, pins.b.y, t), zoomAt(tt))); }
         else if (ramp) await render(k, frAt(k, c0.cx, c0.cy, zoomAt(tt)));
         else if (!drawn || enc.realtime) { await render(k); drawn = true; }   // real-time recorder: redraw so each frame is a fresh canvas frame
-        await enc.add(n);
+        await enc.add(n); if (n % 6 === 0) pg.value = n / totN;
       }
     }
-    mpSt("Finishing\u2026"); const how = enc.how, blob = await enc.done(); enc = null;
+    pg.value = 1; mpSt("Finishing\u2026"); const how = enc.how, blob = await enc.done(); enc = null;
     const nm = `${run.replace("/", "_")}_${last.cur.pid}_${S.view}_F${steps[idx[0]].f}-F${steps[idx[idx.length - 1]].f}_${k === "v" ? "1080x1920" : "1920x1080"}${pan ? "_track" : ""}.${blob.type.includes("mp4") ? "mp4" : "webm"}`;
     const u = URL.createObjectURL(blob), v = $s("mpv"), dl = $s("mpdl"); if (v.dataset.u) URL.revokeObjectURL(v.dataset.u); v.dataset.u = u; v.src = u; dl.href = u; dl.download = nm;
     const file = new File([blob], nm, { type: blob.type }); $s("mpshare").hidden = !(navigator.canShare && navigator.canShare({ files: [file] })); $s("mpshare").onclick = () => navigator.share({ files: [file] }).catch(() => {});
     $s("mpout").hidden = false; window.__mp4 = { name: nm, bytes: blob.size, frames: n, seconds: n / FPS, how, ms: Math.round(performance.now() - t0) };
     mpSt(`Done: ${(blob.size / 1e6).toFixed(1)} MB, ${(n / FPS).toFixed(1)} s, made in ${((performance.now() - t0) / 1000).toFixed(0)} s`);
   } catch (e) { if (enc) enc.abort(); mpSt(e.message === "stopped" ? "Stopped." : "Could not make the video: " + (e.message || e)); window.__mp4 = { error: String(e.message || e) }; }
-  finally { REC.on = false; $s("mpgo").disabled = false; $s("mpstop").hidden = true; document.body.classList.remove("rec"); if (S.run === run) { S.i = keep; $("step").value = keep; } draw(); }
+  finally { REC.on = false; $s("mpgo").disabled = false; $s("mpstop").hidden = true; $s("mpprog").hidden = true; document.body.classList.remove("rec"); if (S.run === run) { S.i = keep; $("step").value = keep; } draw(); }
 }
 if (!CLEAN && $s("mp4p")) {
   $s("mp4p").addEventListener("click", (e) => { const b = e.target.closest("button[data-m]"); if (!b) return; const m_ = b.dataset.m;
@@ -292,17 +329,34 @@ if (!CLEAN && $s("mp4p")) {
       if (m_ === "sa") { a.value = String(S.i); if (+z.value <= S.i) z.value = String(Math.min(S.runs[S.run].steps.length - 1, S.i + 1)); }
       else { z.value = String(S.i); if (+a.value >= S.i) a.value = String(Math.max(0, S.i - 1)); }
       mpInfo(); }
-    else if (m_ === "a" || m_ === "b") { PIN.mode = m_; PIN.show = true; $s("mp4p").hidden = true; const h = $s("pinhint"); h.hidden = false;
-      h.textContent = `Tap either frame where the loop should ${m_ === "a" ? "START (pin A)" : "END (pin B)"}. Drag the frame first if you need to. Esc cancels.`; render("v"); render("h"); }
+    else if (m_ === "a" || m_ === "b") startPin(m_);
+    else if (m_ === "pv") previewMove();
     else if (m_ === "c") { setPins({}); mpInfo(); render("v"); render("h"); }
     else if (m_ === "go") makeMp4(); else if (m_ === "stop") REC.cancel = true; });
   for (const id of ["mpa", "mpb", "mpe", "mps", "mps1", "mph", "mpz0", "mpz1"]) $s(id).addEventListener("change", mpInfo);
+  for (const id of OPT_IDS) $s(id).addEventListener("change", (e) => { saveOpts(); if (e.isTrusted) $s("mppre").value = ""; });
+  $s("mppre").addEventListener("change", (e) => applyPreset(e.target.value));
+  $s("mpk").addEventListener("change", () => { mpInfo(); });
+  // Enter = Make MP4 (not while typing in a menu that uses Enter itself)
+  $s("mp4p").addEventListener("keydown", (e) => { if (e.key === "Enter" && e.target.tagName !== "SELECT" && e.target.tagName !== "BUTTON" && e.target.tagName !== "A") { e.preventDefault(); makeMp4(); } });
+  // drag the panel by its title bar (desktop: the panel floats over the frames); position remembered
+  (() => { const P_ = $s("mp4p"), hd = P_.querySelector(".mp-h"); let dd = null;
+    const place = (x, y) => { x = Math.max(0, Math.min(innerWidth - 120, x)); y = Math.max(0, Math.min(innerHeight - 40, y)); P_.style.left = x + "px"; P_.style.top = y + "px"; P_.style.bottom = "auto"; };
+    try { const q = JSON.parse(localStorage.getItem("studio:mp4pos") || "null"); if (q && innerWidth > 820) place(q.x, q.y); } catch (e) { /* none */ }
+    hd.addEventListener("pointerdown", (e) => { if (innerWidth <= 820 || e.target.closest("button")) return; const r = P_.getBoundingClientRect(); dd = { dx: e.clientX - r.left, dy: e.clientY - r.top }; hd.setPointerCapture(e.pointerId); });
+    hd.addEventListener("pointermove", (e) => { if (dd) place(e.clientX - dd.dx, e.clientY - dd.dy); });
+    hd.addEventListener("pointerup", () => { if (!dd) return; dd = null; try { localStorage.setItem("studio:mp4pos", JSON.stringify({ x: parseFloat(P_.style.left), y: parseFloat(P_.style.top) })); } catch (e) { /* private */ } });
+    hd.addEventListener("dblclick", () => { P_.style.left = P_.style.top = P_.style.bottom = ""; localStorage.removeItem("studio:mp4pos"); });
+  })();
   $s("mps").addEventListener("input", mpInfo);
   // arrow keys inside the panel's menus / slider change those, not the hour (the viewer steps hours on arrows anywhere else)
   $s("mp4p").addEventListener("keydown", (e) => { if (/^(SELECT|INPUT)$/.test(e.target.tagName) && /^Arrow/.test(e.key)) e.stopPropagation(); });
   $("step").addEventListener("input", mpSync);
   $s("mpmode").addEventListener("change", mpMode);
-  addEventListener("keydown", (e) => { if (e.key === "Escape" && PIN.mode) { PIN.mode = null; $s("pinhint").hidden = true; $s("mp4p").hidden = false; } });
+  addEventListener("keydown", (e) => { if (e.key !== "Escape") return;
+    if (PIN.mode) { PIN.mode = null; $s("pinhint").hidden = true; $s("mp4p").hidden = false; mpInfo(); render("v"); render("h"); }
+    else if (REC.on) REC.cancel = true;
+    else if (!$s("mp4p").hidden) { $s("mp4p").hidden = true; PIN.show = false; document.body.classList.remove("mprange"); render("v"); render("h"); } });
   window.__studioMp4 = { getPins, setPins, makeMp4, openMp4 };
 }
 // auto-advance (clean mode or ?play=1): next hour after each finished frame + dwell; loops (or holds); newest run on loop when model= is used
