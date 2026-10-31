@@ -93,7 +93,10 @@ class _NoSt:
 ENS_EXTRA = {"tp": ("tp", None, "p90", 39.3701, 0), "sf": ("sf", None, "p90", 393.701, 0), "10fg": ("10fg", None, "p90", 2.23694, 0),
              "msl": ("msl", None, "ms", 0.01, 0), "t850": ("t", "850", "ms", 1.0, -273.15), "mucape": ("mucape", None, "pc", 1.0, 0),
              # old site "EPS lows / highs" = ENS mean of member extremes: 2 m max/min over the last 3 h (to 144 h) or 6 h (after), deg F
-             "mx2t": (("mx2t3", "mx2t6"), None, "m", 1.8, -459.67), "mn2t": (("mn2t3", "mn2t6"), None, "m", 1.8, -459.67)}
+             "mx2t": (("mx2t3", "mx2t6"), None, "m", 1.8, -459.67), "mn2t": (("mn2t3", "mn2t6"), None, "m", 1.8, -459.67),
+             # 10-30 meteograms page member grids only (mean not written as a map field): cloud cover %, precipitable water in
+             # (IFS ENS tcwv; AIFS ENS has only tcw = vapour + cloud water)
+             "tcc": ("tcc", None, "m", 1.0, 0), "pwat": (("tcwv", "tcw"), None, "m", 0.0393701, 0)}
 # 10-30 meteograms page: per-member values at these places (old site's 22 meteogram towns + passes + a few more), one small
 # mem_fFFF.json per ensemble step -> plumes / member views drawn in the browser. Names = run.json "points" names.
 MEM_POINTS = ("Seattle", "Tacoma", "Everett", "Arlington", "Bellingham", "Olympia", "Portland", "Port Angeles", "Forks", "Aberdeen",
@@ -101,7 +104,7 @@ MEM_POINTS = ("Seattle", "Tacoma", "Everett", "Arlington", "Bellingham", "Olympi
               "Bellevue", "Granite Falls", "Mount Vernon", "Leavenworth", "North Bend", "Enumclaw", "Longview", "Centralia", "Port Townsend",
               "Sequim", "Chelan", "Winthrop", "Colville", "Packwood", "Skykomish", "Goldendale", "Shelton", "Monroe",
               "Snoqualmie", "Stevens", "White", "Blewett", "Chinook", "Satus", "Sherman", "Wauconda", "Disautel")
-MEM_SCALE = {"2t": 10, "tp": 100, "sf": 10, "10fg": 1, "mx2t": 1, "mn2t": 1, "t850": 10, "gh": 1, "msl": 10, "mucape": 1}   # stored as ints (value * scale)
+MEM_SCALE = {"2t": 10, "tp": 100, "sf": 10, "10fg": 1, "mx2t": 1, "mn2t": 1, "t850": 10, "gh": 1, "msl": 10, "mucape": 1, "tcc": 1, "pwat": 100}   # stored as ints (value * scale)
 SPAG_LEVELS = (5520, 5760)   # 552 / 576 dam member lines (trough / ridge)
 class EpsReader:
     """ECMWF ENS / AIFS ENS step: downloads the 50 member messages (HTTP ranges) and keeps running sums for 2 m temp and 500 mb
@@ -146,12 +149,15 @@ class EpsReader:
             if not crop: return
             # extras: one param at a time (cropped member stacks, float32)
             for name, (par, lev, kind_, sc, off) in ENS_EXTRA.items():
-                xs = [x for x in mem if x["param"] in (par if isinstance(par, tuple) else (par,)) and (lev is None or x.get("levelist") == lev)]
+                for p_ in (par if isinstance(par, tuple) else (par,)):   # first listed param this step carries (e.g. tcwv before tcw)
+                    xs = [x for x in mem if x["param"] == p_ and (lev is None or x.get("levelist") == lev)]
+                    if len(xs) >= 40: break
                 if len(xs) < 40: continue
                 if kind == "aens" and name in ("tp", "sf"): sc = sc / 1000.0   # AIFS ENS precip / snow water come in kg/m2 (mm), IFS ENS in m
                 try: st = np.stack([self._crop(decode(blob) * sc + off).astype(np.float32) for x, blob in ex.map(fetch, xs)])
                 except Exception as e: print(f"{kind} f{s:03d} {name}: {str(e)[:100]}", flush=True); continue
                 if name in ("tp", "sf"): st = np.clip(st, 0, None)
+                if name == "tcc" and float(np.nanmax(st)) <= 1.01: st = st * 100.0   # fraction -> %
                 if MP and name in MEM_SCALE:
                     for a_ in st: memo(name, a_)
                 self.X[name] = st.mean(0)
