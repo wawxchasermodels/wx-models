@@ -181,8 +181,12 @@ async function boot() {
                               else { S.timer = setInterval(() => go(1, true), 250); $("play").textContent = "Stop"; } };
   addEventListener("keydown", e => { if (e.key === "Escape") mgClose(); if (MG.open) return; if (e.key === "ArrowRight") go(1); if (e.key === "ArrowLeft") go(-1); });
   await draw();
+  // ?mg= / ?obs= open the panel once (meteograms page "Pass Forecaster" tab links to ./?mg=pass) and are then dropped from the
+  // address: they used to stay in it after Close, so every reload / iOS tab restore / shared link reopened Pass Forecaster
+  // ("the website glitches into pass mode every so often", Benjamin 10-31 2:01 AM).
   if (Q.get("obs")) obsOpen();
   if (Q.get("mg")) mgOpen(Q.get("mg") === "pass" ? "pass" : "town");
+  if (Q.has("mg") || Q.has("obs")) { const u = new URL(location); u.searchParams.delete("mg"); u.searchParams.delete("obs"); try { history.replaceState(null, "", u); } catch (e) {} }
   window.__ready = true;
   if (Q.get("bench")) bench();
 }
@@ -532,7 +536,8 @@ async function render(lite) {
   if (lite) return;
   // iOS Safari throws after 100 history.replaceState calls in 10 s: update the URL once things settle
   clearTimeout(urlTimer); urlTimer = setTimeout(() => { const u = new URL(location); u.searchParams.set("prod", pid); u.searchParams.set("view", vid);
-    u.searchParams.set("f", f); u.searchParams.set("run", run); u.searchParams.delete("model"); try { history.replaceState(null, "", u); } catch (e) {} }, 400);
+    u.searchParams.set("f", f); u.searchParams.set("run", run); u.searchParams.delete("model");
+    u.searchParams.delete("mg"); u.searchParams.delete("obs"); try { history.replaceState(null, "", u); } catch (e) {} }, 400);
   preload(run, pid, S.i);
 }
 
