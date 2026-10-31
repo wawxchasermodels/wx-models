@@ -847,8 +847,13 @@ def static(m, out, views_only=None, x2_only=False):
     DS_C = ["#5c3310", "#7a4a1d", "#94622e", "#ad7c43", "#c4975e", "#d6b07c", "#e4c89c", "#efdcbf", "#f6ece0", "#f4f5f7",
             "#e3eefa", "#c6dbef", "#9ecae1", "#6baed6", "#4292c6", "#2171b5", "#3a4fb0", "#5b2a9c", "#3d0f6b"]
     CM["dsnod"] = HS.cmap(DS_C, DS_C[0], DS_C[-1])
-    PA_L = [-4, -3, -2, -1.5, -1, -0.5, -0.25, -0.1, 0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4]
-    PA_C = ["#543005", "#7f4a10", "#a6611a", "#c58a3c", "#dfc27d", "#ecdcb6", "#f6efe0", "#f5f5f5", "#e3f2e1", "#c7e9c0", "#a1d99b", "#74c476", "#41ab5d", "#238b45", "#005a32"]
+    # Benjamin 10-31 1:45 AM "need to increase the precipitation anomaly scale": +/-4 in saturated on long runs (GFS 00Z 10-31
+    # F360: 15 % of Washington above +4 in, up to +14 in WA / +27 in on the BC coast; lows to -6.5 in). Range now +/-12 in, same
+    # brown -> white -> green ramp (resampled to the new bins, white still centered on -0.1..0.1).
+    PA_L = [-12, -8, -6, -4, -3, -2, -1, -0.5, -0.25, -0.1, 0.1, 0.25, 0.5, 1, 2, 3, 4, 6, 8, 12]
+    PA_C0 = ["#543005", "#7f4a10", "#a6611a", "#c58a3c", "#dfc27d", "#ecdcb6", "#f6efe0", "#f5f5f5", "#e3f2e1", "#c7e9c0", "#a1d99b", "#74c476", "#41ab5d", "#238b45", "#005a32"]
+    from matplotlib.colors import LinearSegmentedColormap as _LSC, to_hex as _hex
+    _pa = _LSC.from_list("pa", PA_C0); PA_C = [_hex(_pa(k / (len(PA_L) - 2))) for k in range(len(PA_L) - 1)]
     PP_L = [0, 10, 25, 50, 75, 90, 110, 125, 150, 200, 300, 400]
     PP_C = ["#7f4a10", "#a6611a", "#c58a3c", "#dfc27d", "#f1e3c0", "#f5f5f5", "#c7e9c0", "#a1d99b", "#41ab5d", "#1f78b4", "#3a4fb0"]
     CM.update(qpfa=HS.cmap(PA_C, "#3d2004", "#00391f"), qpfpct=HS.cmap(PP_C, PP_C[0], "#5b2a9c"))
@@ -1004,7 +1009,7 @@ def static(m, out, views_only=None, x2_only=False):
                       only=("hrrr", "rrfs", "gfs", "ifs", "aifs")),
         # 10-30 (Benjamin 1:05 PM): precipitation anomaly vs 1991-2020 normals for the same days (see CLIM_SOURCE["pr"])
         "qpfa": dict(title="Precipitation Anomaly", fields=["apcp"], fill="panom", anom="pr", clim="pr", key="Departure from normal (in)",
-                     ticks=[-3, -2, -1, -0.5, -0.25, 0.25, 0.5, 1, 2, 3], tickfmt=True, **table(PA_L, CM["qpfa"], "both"),
+                     ticks=[-12, -8, -4, -2, -1, -0.25, 0.25, 1, 2, 4, 8, 12], tickfmt=True, **table(PA_L, CM["qpfa"], "both"),
                      extra="precip since the run started minus the 1991-2020 normal for those days  \u00b7  {lo} to {hi} in in view",
                      pct=[0.5, 99.5], dec=2, fmt="in2", towns="names", only=("hrrr", "rrfs", "gfs", "ifs", "aifs", "eps", "aens")),
         "qpfpct": dict(title="Precipitation, Percent of Normal", fields=["apcp"], fill="ppct", anom="pr", clim="pr", key="Percent of normal (%)",
