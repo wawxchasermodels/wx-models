@@ -18,11 +18,16 @@ cp $SRC/wamaps.js public/; cp -r $SRC/wamaps public/
 cp $SRC/compare.html $SRC/compare.js public/
 # Studio (10-31): 9:16 + 16:9 video frames (viewer.js off-screen + studio.js)
 cp $SRC/studio.js public/
+# Social (10-31): browse / save the ECMWF social graphics (R2 social/, made by tools/fast/social/)
+cp $SRC/social.js public/
+sed -e 's#<script src="social.js"></script>#<script>window.WX_DATA="/d/"</script><script src="social.js"></script>#' \
+    -e 's#,url(fonts/Montserrat.ttf) format("truetype")##' \
+    -e 's#<head>#<head><meta name="robots" content="noindex,nofollow">#' $SRC/social.html > public/social.html
 sed -e 's#<script src="viewer.js#<script>window.WX_DATA="/d/"</script><script src="viewer.js#' \
     -e 's#,url(fonts/Montserrat.ttf) format("truetype")##' \
     -e 's#<head>#<head><meta name="robots" content="noindex,nofollow">#' $SRC/studio.html > public/studio.html
 sed -e 's#<script src="wamaps.js"></script>#<script>window.WX_DATA="/d/"</script><script src="wamaps.js"></script>#' \
     -e 's#,url(fonts/Montserrat.ttf) format("truetype")##' \
     -e 's#<head>#<head><meta name="robots" content="noindex,nofollow">#' $SRC/wamaps.html > public/wamaps.html
-printf '/*\n  X-Robots-Tag: noindex\n/viewer.js\n  Cache-Control: no-cache\n/index.html\n  Cache-Control: no-cache\n/meteograms*\n  Cache-Control: no-cache\n/wamaps.*\n  Cache-Control: no-cache\n/compare.*\n  Cache-Control: no-cache\n/studio.*\n  Cache-Control: no-cache\n/fonts/*\n  Cache-Control: public, max-age=31536000, immutable\n' > public/_headers
+printf '/*\n  X-Robots-Tag: noindex\n/viewer.js\n  Cache-Control: no-cache\n/index.html\n  Cache-Control: no-cache\n/meteograms*\n  Cache-Control: no-cache\n/wamaps.*\n  Cache-Control: no-cache\n/compare.*\n  Cache-Control: no-cache\n/studio.*\n  Cache-Control: no-cache\n/social.*\n  Cache-Control: no-cache\n/fonts/*\n  Cache-Control: public, max-age=31536000, immutable\n' > public/_headers
 printf '{"version":1,"include":["/d/*"],"exclude":[]}\n' > public/_routes.json

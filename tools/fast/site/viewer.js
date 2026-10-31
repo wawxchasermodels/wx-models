@@ -288,8 +288,10 @@ function setLists() {   // products this run carries (all their fields present),
     // WA Maps (10-31, Benjamin 8:58 AM): the posted Washington state-view maps, own page (wamaps.html)
     (Q.get("embed") || Q.get("studio") ? "" : `<button type="button" data-t="wamaps" title="Washington state-view forecast maps">WA Maps</button>` +
       `<button type="button" data-t="compare" title="Two maps side by side: two models, or two runs of one model">Compare</button>` +
-      `<button type="button" data-t="studio" title="Studio: 9:16 and 16:9 video frames for Reels / OBS">Studio</button>`);
+      `<button type="button" data-t="studio" title="Studio: 9:16 and 16:9 video frames for Reels / OBS">Studio</button>` +
+      `<button type="button" data-t="social" title="Social: ECMWF 4K graphics (9:16 and 16:9) to browse and save">Social</button>`);
   $("tabs").onclick = e => { const b = e.target.closest("button[data-t]"); if (b && b.dataset.t === "wamaps") { location.href = "wamaps.html"; return; }
+    if (b && b.dataset.t === "social") { location.href = "social.html"; return; }
     if (b && b.dataset.t === "studio") { location.href = `studio.html?run=${encodeURIComponent(S.run)}&prod=${S.prod}&view=${S.view}&f=${S.runs[S.run].steps[S.i].f}`; return; }
     if (b && b.dataset.t === "compare") { const R_ = S.runs[S.run], st = R_.steps[S.i], [m] = S.run.split("/"), rs = (S.man.runs[m] || []);
       const other = rs.length > 1 ? `${m}/${rs[rs.length - 1] === S.run.split("/")[1] ? rs[rs.length - 2] : rs[rs.length - 1]}` : S.run;

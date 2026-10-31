@@ -315,14 +315,18 @@ def main():
     ap.add_argument("--run", default=""); ap.add_argument("--out", required=True)
     ap.add_argument("--prods", default="z500anom,t2ma,t850a,mslpqpf"); ap.add_argument("--views", default="na,pnw")
     ap.add_argument("--hours", default="72,144"); ap.add_argument("--aspects", default="h,v"); ap.add_argument("--logo", default="")
+    ap.add_argument("--skip-existing", action="store_true")
     a = ap.parse_args(); D = Data(a.base); F = fonts()
-    runs = D.man["runs"]["ifs"]; run = a.run or next(r for r in reversed(runs) if r[-2:] in ("00", "12") and D.run(r).get("complete"))
-    R = D.run(run); done = []
+    runs = D.man["runs"]["ifs"]; run = a.run or next(r for r in reversed(runs) if r[-2:] in ("00", "12"))
+    R = D.run(run); done = []; have = {s_["f"] for s_ in R["steps"]}
     for prod in a.prods.split(","):
         for view in a.views.split(","):
             for f in map(int, a.hours.split(",")):
                 for k in a.aspects.split(","):
-                    p = os.path.join(a.out, run, f"{prod}_{view}_f{f:03d}_{k}.png"); render(D, R, run, prod, view, f, k, p, F, a.logo)
+                    p = os.path.join(a.out, run, f"{prod}_{view}_f{f:03d}_{k}.png")
+                    if f not in have: continue                      # run still coming in (or shorter 06/18Z run)
+                    if a.skip_existing and os.path.exists(p): continue
+                    render(D, R, run, prod, view, f, k, p, F, a.logo)
                     done.append(p); print(p, flush=True)
     return done
 

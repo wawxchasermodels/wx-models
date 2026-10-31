@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>WX Models · Social</title>
+<link rel="preload" href="fonts/Montserrat-sub.woff2" as="font" type="font/woff2" crossorigin>
+<style>
+@font-face{font-family:Montserrat;src:url(fonts/Montserrat-sub.woff2) format("woff2"),url(fonts/Montserrat.ttf) format("truetype");font-weight:100 900}
+html,body{margin:0;background:#15171c;color:#f4f2ee;font:14px Montserrat,system-ui,sans-serif}
+#bar{position:sticky;top:0;z-index:5;display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:8px 12px;background:#1d2027;border-bottom:1px solid #2c3039}
+#bar select,#bar button,#bar a,.fr a{background:#262931;color:#f4f2ee;border:1px solid #7d828c;border-radius:6px;padding:4px 8px;font:inherit;text-decoration:none;touch-action:manipulation}
+#bar b{font-weight:800}
+#msg{color:#a7abb3;font-size:12px;flex:1;min-width:200px}
+#main{display:flex;gap:16px;padding:12px 14px;align-items:flex-start}
+.fr{display:flex;flex-direction:column;gap:6px;min-width:0}
+.fr .hd{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:13px;color:#cfd3da}.fr .hd b{color:#f4f2ee}
+.fr img{display:block;background:#0b0f16;outline:1px solid #3a3f49}
+#fv{flex:0 0 auto}#fv img{height:calc(100vh - 170px);width:auto;aspect-ratio:9/16}
+#fh{flex:1 1 0}#fh img{width:100%;height:auto;max-height:calc(100vh - 170px);object-fit:contain;object-position:left top;aspect-ratio:16/9}
+#strip{display:flex;gap:6px;overflow-x:auto;padding:0 14px 14px}
+#strip button{flex:0 0 auto;background:#262931;border:1px solid #3a3f49;border-radius:6px;padding:3px;color:#cfd3da;font:12px Montserrat;cursor:pointer}
+#strip button.on{border-color:#2f8cff;outline:1px solid #2f8cff}
+#strip img{display:block;width:160px;height:90px;object-fit:cover;border-radius:4px}
+@media (max-width:820px){#main{flex-direction:column}#fv{flex:none}#fh{flex:none}#fv img{height:auto;width:100%}#fh img{max-height:none}#bar{gap:6px;padding:6px}#bar select{max-width:44vw}#msg{flex:1 1 100%;order:9}}
+</style></head>
+<body>
+<div id="bar">
+  <a href="./" title="Back to the model maps">&larr; <span>Maps</span></a>
+  <b>Social</b>
+  <select id="run" aria-label="Run"></select>
+  <select id="prod" aria-label="Product"></select>
+  <select id="view" aria-label="View"></select>
+  <select id="hour" aria-label="Hour"></select>
+  <span id="msg">Loading…</span>
+</div>
+<div id="main">
+  <div class="fr" id="fv"><div class="hd"><b>9:16</b> 2160×3840 <a id="sv" download>Save PNG</a> <a id="sv1" download>Save 1280 JPG</a></div><img id="iv" alt="vertical frame"></div>
+  <div class="fr" id="fh"><div class="hd"><b>16:9</b> 3840×2160 <a id="sh" download>Save PNG</a> <a id="sh1" download>Save 1280 JPG</a></div><img id="ih" alt="16:9 frame"></div>
+</div>
+<div id="strip" aria-label="All hours"></div>
+<script src="social.js"></script>
+</body></html>
