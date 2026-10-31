@@ -2,6 +2,31 @@
 // No framework. Static layers (borders, towns, color keys) are drawn once by the encoder with the site's own code.
 "use strict";
 const $ = id => document.getElementById(id);
+// Old-site links (go-live audit 10-30 8:50 PM): the old site kept its state in the hash (#t=tab&m=model&p=period&v=view&e=end,
+// #t=meteograms&s=&w=&p=, #t=obs&v=). Bookmarks / shared links of the old site open the matching fast map, meteogram or obs.
+(function oldLink() {
+  const h = new URLSearchParams(location.hash.slice(1)), t = h.get("t"); if (!t || location.search) return;
+  if (t === "meteograms") { location.replace(`meteograms.html#${new URLSearchParams({ s: h.get("s") || "", w: h.get("w") || "", p: h.get("p") || "" })}`); return; }
+  if (t === "obs") { location.replace("?obs=1"); return; }
+  const M = { "ECMWF 0.25\u00b0": "ifs", ECMWF: "ifs", AIFS: "aifs", GFS: "gfs", HRRR: "hrrr", RRFS: "rrfs", NBM: "nbm", EPS: "eps", "EPS mean": "eps",
+              "EPS 90th pct": "eps", "AIFS ENS": "aens", "AIFS ENS mean": "aens" };
+  const V = { full: "wa", west: "wwa", east: "ewa", cascades: "passes", northeast: "newa", lowermainland: "lm", vi: "wa" };
+  const ml = h.get("m") || "", m = M[ml] || "", per = h.get("p") || "", p90 = /90th/.test(ml);
+  const acc = { "1h": "qpf1", step: "qpf3", "6h": "qpf6", "12h": "qpf12", "24h": "qpf24", "48h": "qpf48", total: "qpf" };
+  let prod = { t2m: "t2m", t2manom: "t2ma", feels: "feels", t850: "t850w", gust10: "gust10", peakgust: "gustmax", td2m: "d2m", t925: "t925w",
+    t700: "t700w", t500: "t500w", t300: "t300w", mslpptype: "ptype", snowkuch: "kuchera", snowk24: "kuch24", snowrate: "snow1", frzr: "fzra",
+    tcc: "tcc", ir: "ir", vis: "vis", fog: "fog", ivt: "ivt", pwanom: "pwa", pw: "pw", w250: "w250", w500: "w500", w850: "w850", thick: "thick",
+    t850anom: "t850a", aifs500: "z500anom", aifsmslp: "slp", mslpprecip: "mslpqpf", aifswind: "aifswind", elows: "elows", e500: "spag" }[t] || "";
+  if (t === "rain" || t === "bcrain" || t === "qpf") prod = m === "nbm" ? (per === "1h" ? "nqpf1" : "nqpf6") : p90 ? "eqpf90" : (acc[per] || "qpf");
+  if (t === "snow" || t === "snow10") prod = m === "nbm" ? "nsnow6" : m === "eps" ? (p90 ? "esnow90" : "esnow") : per === "1h" ? "snow1" : per === "6h" && /hrrr|rrfs/.test(m) ? "snow6" : "snow";
+  if (t === "gusts") prod = p90 ? "egust90" : per.startsWith("max") && m !== "nbm" && m !== "eps" ? "gust6" : "gust10";
+  if (t === "lows") prod = m === "eps" ? "elow" : "nmint";
+  if (t === "highs") prod = m === "eps" ? "ehigh" : "nmaxt";
+  if (t === "waves") prod = per === "max24h" ? "wavemax" : "waves";
+  const q = new URLSearchParams(); if (prod) q.set("prod", prod); if (m || t === "waves") q.set("model", m || "ifs");
+  const v = h.get("v"); if (v) q.set("view", V[v] || v); q.set("valid", h.get("e") || new Date().toISOString());   // old default: the first frame that is current
+  history.replaceState(null, "", "?" + q);
+})();
 const Q = new URLSearchParams(location.search);
 const DATA = window.WX_DATA || "data/";   // "/d/" on the hosted fast page (Pages Function -> R2)
 const S = { man: null, runs: {}, view: Q.get("view") || "wa", prod: Q.get("prod") || "t2m", run: null, i: 0,
@@ -123,7 +148,9 @@ async function boot() {
   $("run").innerHTML = order.map(m => `<optgroup label="${S.man.models[m].site}">` +
     all.filter(r => r.startsWith(m + "/")).map(r => `<option value="${r}"${r === S.run ? " selected" : ""}>${runLabel(r)}</option>`).join("") + "</optgroup>").join("");
   setLists();
-  const f0 = Q.get("f"), steps = S.runs[S.run].steps; S.i = f0 ? Math.max(0, steps.findIndex(s => s.f == +f0)) : 0; $("step").value = S.i;
+  const f0 = Q.get("f"), steps = S.runs[S.run].steps; S.i = f0 ? Math.max(0, steps.findIndex(s => s.f == +f0)) : 0;
+  const vq = Date.parse(Q.get("valid") || ""); if (!f0 && vq) { let b = 0; steps.forEach((x, k) => { if (Math.abs(Date.parse(x.valid) - vq) < Math.abs(Date.parse(steps[b].valid) - vq)) b = k; }); S.i = b; }   // old-site links
+  $("step").value = S.i;
   $("run").onchange = async e => {   // keep the same valid time when switching runs/models (nearest step)
     const vt = Date.parse(S.runs[S.run].steps[S.i].valid); S.run = e.target.value; await loadRun(S.run); setLists();
     const st = S.runs[S.run].steps; let b = 0; st.forEach((x, k) => { if (Math.abs(Date.parse(x.valid) - vt) < Math.abs(Date.parse(st[b].valid) - vt)) b = k; });
