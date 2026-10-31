@@ -193,7 +193,8 @@ function applyPreset(name) {
   mpMode(); saveOpts(); $s("mppre").value = name;
   const p = getPins();
   if (P_.mpmode === "pan" && !(p.a && p.b)) { PIN.mode = "a"; PIN.show = true; $s("mp4p").hidden = true; const h = $s("pinhint"); h.hidden = false;
-    h.textContent = "Landfall zoom-in: tap where the storm is at the START (pin A), then where it makes landfall (pin B). Esc cancels."; render("v"); render("h"); }
+    h.textContent = "Landfall zoom-in: tap where the storm is at the START (pin A), then where it makes landfall (pin B). Esc cancels."; render("v"); render("h");
+    if (innerWidth <= 820) F[$s("mpk").value].cv.scrollIntoView({ block: "center", behavior: "smooth" }); }
 }
 const PV = { on: false };
 async function previewMove() {
@@ -208,7 +209,8 @@ async function previewMove() {
 }
 const lbl = (st) => { const d = new Date(st.valid); return `F+${st.f} \u00b7 ${d.toUTCString().slice(0, 3)} ${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")} ${String(d.getUTCHours()).padStart(2, "0")}Z`; };
 function startPin(m_) { PIN.mode = m_; PIN.show = true; $s("mp4p").hidden = true; const h = $s("pinhint"); h.hidden = false;
-  h.textContent = `Tap either frame where the loop should ${m_ === "a" ? "START (pin A)" : "END (pin B)"}. Drag the frame first if you need to. Esc cancels.`; render("v"); render("h"); }
+  h.textContent = `Tap either frame where the loop should ${m_ === "a" ? "START (pin A)" : "END (pin B)"}. Drag the frame first if you need to. Esc cancels.`; render("v"); render("h");
+  if (innerWidth <= 820) F[$s("mpk").value].cv.scrollIntoView({ block: "center", behavior: "smooth" }); }   // phone: bring the frame to the thumb
 function openMp4(k) {
   if (!last) return; const st = S.runs[S.run].steps, a = $s("mpa"), b = $s("mpb");
   const opts = st.map((x, i) => `<option value="${i}">${lbl(x)}</option>`).join(""); a.innerHTML = opts; b.innerHTML = opts;
