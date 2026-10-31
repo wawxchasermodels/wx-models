@@ -58,11 +58,16 @@ function colorbar(c, P, x, y, w, h, size) {
 // (logo, title / storm name, model + run, forecast date). Toggles in the Save MP4 panel (remembered); links: &brand=1 (both on),
 // &title=, &storm=, &brandlogo=wa|usa|wawc|usawc|none, &card=0|1, &lower=0|1.
 const LOGOS = { wa: "brand/wawx.png", usa: "brand/usawx.png", wawc: "brand/wawc.png", usawc: "brand/usawc.png" };
-const BR = Object.assign({ card: false, lower: false, logo: "wa", title: "", storm: "" }, (() => { try { return JSON.parse(localStorage.getItem("studio:brand") || "{}"); } catch (e) { return {}; } })());
+// 10-31 4:45 PM (Benjamin: "I think I liked it better without the logo and that bar"): OFF by default everywhere. The on / off
+// toggles are never remembered (key studio:brand3 keeps only logo / title / storm; old studio:brand "on" values are dropped);
+// links (make=loop, clean OBS) ignore saved settings and only brand when the link says brand=1 (or card=1 / lower=1).
+try { localStorage.removeItem("studio:brand"); } catch (e) { /* private */ }
+const BR = Object.assign({ card: false, lower: false, logo: "wa", title: "", storm: "" }, (() => { if (SQ.get("make") || CLEAN) return {};
+  try { const o = JSON.parse(localStorage.getItem("studio:brand3") || "{}"); delete o.card; delete o.lower; return o; } catch (e) { return {}; } })());
 if (SQ.get("brand") === "1") { BR.card = true; BR.lower = true; }
 for (const [q, k_] of [["card", "card"], ["lower", "lower"]]) if (SQ.has(q)) BR[k_] = SQ.get(q) === "1";
 if (SQ.has("title")) BR.title = SQ.get("title"); if (SQ.has("storm")) BR.storm = SQ.get("storm"); if (SQ.has("brandlogo")) BR.logo = SQ.get("brandlogo");
-const saveBR = () => { if (!SQ.get("make") && !CLEAN) try { localStorage.setItem("studio:brand", JSON.stringify(BR)); } catch (e) { /* private */ } };
+const saveBR = () => { if (!SQ.get("make") && !CLEAN) try { localStorage.setItem("studio:brand3", JSON.stringify({ logo: BR.logo, title: BR.autoT ? "" : BR.title, storm: BR.autoS ? "" : BR.storm })); } catch (e) { /* private */ } };
 const logoImg = {};
 function getLogo() { const u = LOGOS[BR.logo]; if (!u) return null; if (!logoImg[u]) { const im = new Image(); im.src = u; logoImg[u] = im; im.onload = () => renderAll(); } const im = logoImg[u]; return im.complete && im.naturalWidth ? im : null; }
 const ptTime = (iso, o) => { try { return new Date(iso).toLocaleString("en-US", Object.assign({ timeZone: "America/Los_Angeles" }, o)); } catch (e) { return iso; } };
