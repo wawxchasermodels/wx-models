@@ -1240,8 +1240,10 @@ function mgChart(cv, T, box) {
         c.strokeStyle = "#5aa9ff"; c.lineWidth = 1.5; c.setLineDash([6, 4]); c.beginPath(); c.moveTo(L + 6 + fzX, yy); c.lineTo(L + 6 + fzX + 18, yy); c.stroke(); c.setLineDash([]); }
         label(fzT, "#5aa9ff", fzX + 22, fzY);
       };
-      if (!T.p32) fzNote();
-      if (T.p32) { const s2 = scale(0, 100); line(T.p32, s2, "#7fd1ff", 1.5, [2, 3]); axis(0, 100, s2, "%", true, "#7fd1ff"); fzNote(); { c.font = `700 ${small ? 10 : 12}px Montserrat`; const lab = "chance \u2264 32\u00b0F (right axis)", px0 = fzX + fzW + 10, fits = L + 6 + px0 + c.measureText(lab).width < W - Rm - 4; label(lab, "#7fd1ff", fits ? px0 : 0, fits ? fzY : fzY + rowH); } }
+      // Benjamin 10-31 8:55 AM: no "chance <= 32F" line / right % axis on PASS meteograms (towns keep it); the freezing note stays
+      const p32 = T.P && T.P.k === "pass" ? null : T.p32;
+      if (!p32) fzNote();
+      if (p32) { const s2 = scale(0, 100); line(p32, s2, "#7fd1ff", 1.5, [2, 3]); axis(0, 100, s2, "%", true, "#7fd1ff"); fzNote(); { c.font = `700 ${small ? 10 : 12}px Montserrat`; const lab = "chance \u2264 32\u00b0F (right axis)", px0 = fzX + fzW + 10, fits = L + 6 + px0 + c.measureText(lab).width < W - Rm - 4; label(lab, "#7fd1ff", fits ? px0 : 0, fits ? fzY : fzY + rowH); } }
       const mx = [], mn = []; // daily hi/lo labels
       for (const dd of days) { const ks = T.t.map((t, k) => k).filter(k => fmtPT(T.t[k], { weekday: "short", month: "numeric", day: "numeric" }) === dd.d && T.t2m[k] != null);
         if (ks.length < 3) continue; const kH = ks.reduce((a, b) => T.t2m[b] > T.t2m[a] ? b : a), kL = ks.reduce((a, b) => T.t2m[b] < T.t2m[a] ? b : a);
