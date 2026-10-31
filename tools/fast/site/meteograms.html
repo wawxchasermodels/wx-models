@@ -4,21 +4,16 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#241c16">
-  <title>Meteograms · Washington Forecast Maps</title>
+  <title>Washington Forecast Maps</title>
   <link rel="icon" href="data:,">
-  <!-- 10-30: same page frame as the old site's Meteograms tab (old/base.css + old/forecast.css are read-only copies made at build);
-       charts are drawn in the browser from the fast site's per-town data (R2), not pre-made images. -->
+  <!-- 10-30: same page as the old site's Meteograms tab (old/base.css + old/forecast.css are read-only copies made at build);
+       charts are drawn in the browser from the fast site's per-town data (R2) in the old charts' look, then shown as an image. -->
   <link rel="stylesheet" href="old/base.css">
   <link rel="stylesheet" href="old/forecast.css">
   <style>
     @font-face { font-family: "Montserrat"; src: url(fonts/Montserrat-sub.woff2) format("woff2"); font-weight: 100 900; font-display: swap; }
-    .stage.meteo { display: block; max-height: none; overflow-x: auto; overflow-y: hidden; touch-action: pan-x pan-y; min-height: 320px; }
-    .stage.meteo canvas { display: block; }
     #meteo-pane .meteo-grid, #meteo-pane .plate { min-width: 0; max-width: 100%; }
-    .stage.meteo { width: 100%; -webkit-overflow-scrolling: touch; }
-    .stage.meteo .empty { margin: 40px auto; }
     #meteo-pane { margin-top: 14px; }
-    .mnote { margin: 8px 0 0; font-size: 13px; color: var(--muted); }
     .chips button.extra { border-style: dashed; }
     .chips .chip-sep { flex: 0 0 auto; align-self: center; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; padding: 0 4px 0 10px; }
     #mproduct option.na { color: #888; }
@@ -28,8 +23,8 @@
   <a class="skip" href="#mstage">Skip to chart</a>
   <header class="mast">
     <div class="brand">
-      <h1 class="word">Meteograms</h1>
-      <p class="tag">Washington town and pass meteograms · fast version (drawn in your browser)</p>
+      <h1 class="word">Forecast Maps</h1>
+      <p class="tag">Washington forecast maps and town meteograms</p>
     </div>
     <p class="stamp" id="stamp" role="status">Loading…</p>
   </header>
@@ -52,22 +47,21 @@
       <figure class="plate">
         <figcaption><span id="mcap-left"></span><span id="mcap-right"></span></figcaption>
         <div class="stage meteo" id="mstage" tabindex="0">
-          <canvas id="mchart" role="img" aria-label=""></canvas>
+          <img id="meteo-img" alt="" decoding="async" hidden>
           <div class="loader" id="meteo-loader" hidden><span></span>Loading…</div>
           <div class="empty" id="meteo-empty" hidden></div>
         </div>
         <div class="savebar">
           <a class="savebtn" id="dl-meteo" role="button" download aria-disabled="true">Download image</a>
-          <span class="save-tip">Charts are drawn from the newest run each time you open them.</span>
+          <span class="save-tip">or right-click the chart and choose “Save image as”</span>
         </div>
-        <p class="mnote" id="mnote"></p>
       </figure>
     </div>
   </section>
 
   <footer class="colophon">
     <p><strong>Data.</strong> ECMWF open data (IFS 0.25&deg;, AIFS, ENS 0.25&deg;, AIFS ENS), Copyright &copy; European Centre for Medium-Range Weather Forecasts (ECMWF), <a href="https://www.ecmwf.int">www.ecmwf.int</a>, licensed under <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>. Charts are modified from the data. ECMWF does not accept any liability whatsoever for any error or omission in the data, their availability, or for any loss or damage arising from their use. NOAA NBM, GFS, HRRR and RRFS data are public domain.</p>
-    <p>All times are Pacific (PT). Values are the model grid at each town (bilinear); pass temperatures are corrected to summit height.</p>
+    <p>All times are Pacific (PT). F+ is hours after the model run started.</p>
   </footer>
   <script src="meteograms.js"></script>
 </body>
