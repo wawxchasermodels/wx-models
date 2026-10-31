@@ -8,7 +8,8 @@ Reads the fast site's own ECMWF IFS 0.25 data (manifest -> run.json -> 8-bit fie
 --base (the site's /d/ data path or a mirror of it), decodes them exactly like viewer.js (getField / climMonth / climAt /
 blur), so the anomaly numbers match the site, then draws 3840x2160 (h) and 2160x3840 (v) frames: dark base, bright
 diverging fills, white contours, H/L, Montserrat header, color bar, model tag, credit and logo slot. Writes
-<out>/<run>/<prod>_<view>_f<hhh>_<h|v>.png. Nothing is uploaded or posted.
+<out>/<run>/<prod>_<view>_f<hhh>_<h|v>.png (4K stills). --hd [--every 6] writes <out>/<run>/loop/<name>.jpg HD loop frames
+(same layout at half scale, JPEG) for the Social tab MP4 loops. Nothing is uploaded or posted.
 Style notes adapted from the Video Editing Bot NARR maps (frame / regrid-to-pixels / overlays), copied, not imported."""
 import argparse, io, json, os, sys, datetime as dt, urllib.request
 from zoneinfo import ZoneInfo
@@ -175,6 +176,7 @@ def to_rgba(v, P):
     idx = np.where(v < lv[0], n, np.where(v >= lv[-1], n + 1, np.clip(idx, 0, n - 1)))
     out = tab[idx]; out[..., 3] *= 0.9; return out
 
+HD_Q = 80   # JPEG quality of the HD loop frames (~0.15-0.45 MB at 1920x1080, avg ~0.3)
 BG, LAND, LINE = "#0b0f16", "#151b24", "#c9d3df"
 
 def text(fig, W, H, x, y, s, f, px, color="#fff", ha="left", va="baseline", stroke=0, **kw):
@@ -199,7 +201,7 @@ def wrap(fig, s, f, px, maxw, W, H):
         else: cur = t
     return lines + [cur]
 
-def render(D, R, run, prod, view, f, k, out, F, logo=""):
+def render(D, R, run, prod, view, f, k, out, F, logo="", dpi=200):
     P = product(D, R, prod, f); g = geometry(view, k); V = VIEWS[view]; W, H = W_[k]
     fig = plt.figure(figsize=(W / 200, H / 200), dpi=200, facecolor=BG)
     ax = fig.add_axes([0, 0, 1, 1], projection=g["proj"]); ax.set_facecolor(BG); ax.set_extent(g["ext"], crs=g["proj"])
@@ -234,7 +236,11 @@ def render(D, R, run, prod, view, f, k, out, F, logo=""):
                 path_effects=[pe.withStroke(linewidth=5, foreground="#000000c0")])
     header(fig, P, R, run, f, k, W, H, F)
     footer(fig, P, view, k, W, H, F, logo)
-    os.makedirs(os.path.dirname(out), exist_ok=True); fig.savefig(out, dpi=200, facecolor=BG); plt.close(fig)
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    if out.endswith(".jpg"):   # HD loop frame: the same layout drawn at half scale (dpi 100 -> 1920x1080 / 1080x1920), JPEG
+        fig.savefig(out, dpi=dpi, facecolor=BG, pil_kwargs=dict(quality=HD_Q, optimize=True, progressive=True))
+    else: fig.savefig(out, dpi=dpi, facecolor=BG)
+    plt.close(fig)
     return P
 
 def hl(ax, g, P, view, k, F):
@@ -322,17 +328,21 @@ def main():
     ap.add_argument("--prods", default="z500anom,mslpa,t2ma,t850a,mslpqpf"); ap.add_argument("--views", default="na,pnw")
     ap.add_argument("--hours", default="72,144"); ap.add_argument("--aspects", default="h,v"); ap.add_argument("--logo", default="")
     ap.add_argument("--skip-existing", action="store_true")
+    ap.add_argument("--hd", action="store_true", help="HD loop frames: <out>/<run>/loop/<name>.jpg at 1920x1080 / 1080x1920 (Social tab MP4 loops)")
+    ap.add_argument("--every", type=int, default=0, help="with --hd: every N hours from the first to the last of --hours (e.g. --hours 24,240 --every 6)")
     a = ap.parse_args(); D = Data(a.base); F = fonts()
     runs = D.man["runs"]["ifs"]; run = a.run or next(r for r in reversed(runs) if r[-2:] in ("00", "12"))
     R = D.run(run); done = []; have = {s_["f"] for s_ in R["steps"]}
+    hours = list(map(int, a.hours.split(",")))
+    if a.every: hours = list(range(hours[0], hours[-1] + 1, a.every))
     for prod in a.prods.split(","):
         for view in a.views.split(","):
-            for f in map(int, a.hours.split(",")):
+            for f in hours:
                 for k in a.aspects.split(","):
-                    p = os.path.join(a.out, run, f"{prod}_{view}_f{f:03d}_{k}.png")
+                    p = os.path.join(a.out, run, *(["loop"] if a.hd else []), f"{prod}_{view}_f{f:03d}_{k}." + ("jpg" if a.hd else "png"))
                     if f not in have: continue                      # run still coming in (or shorter 06/18Z run)
                     if a.skip_existing and os.path.exists(p): continue
-                    render(D, R, run, prod, view, f, k, p, F, a.logo)
+                    render(D, R, run, prod, view, f, k, p, F, a.logo, dpi=100 if a.hd else 200)
                     done.append(p); print(p, flush=True)
     return done
 

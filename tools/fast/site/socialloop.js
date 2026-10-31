@@ -3,8 +3,10 @@
 // start / end zoom, storm pan between pins A and B, 9:16 or 16:9, saved as MP4 in the browser (WebCodecs H.264 + vendor/mp4-muxer,
 // MediaRecorder fallback). Source = the 4K social PNGs (2160x3840 / 3840x2160) drawn into a 1080x1920 / 1920x1080 frame.
 // The social frames are finished graphics (title, date, color bar baked in), so when zoomed the title band and the color-bar band
-// are redrawn unzoomed on top with a soft edge: the map zooms, the text stays put. Frames are every 24 h for now, so "Crossfade"
-// blends one map into the next.
+// are redrawn unzoomed on top with a soft edge: the map zooms, the text stays put. "Crossfade" blends one map into the next.
+// Finer hours (10-31-26, Benjamin 2:02 PM "Only needs to be hd"): the latest run also has HD loop frames every 6 h
+// (social/<run>/loop/<name>.jpg, 1920x1080 / 1080x1920, same layout as the 4K stills; index item .loop = {hours, every, size});
+// "Step" picks 6 h / 12 h from those (default 6 h) or the 24 h 4K stills. Older runs: 24 h only.
 "use strict";
 (() => {
 const FPS = 30, OUT = { v: [1080, 1920], h: [1920, 1080] };
@@ -13,7 +15,17 @@ const BAND = { v: { top: [0.25, 0.272], bot: [0.80, 0.775] }, h: { top: [0.265, 
 const $s = (id) => document.getElementById(id), sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const lerp = (a, b, t) => a + (b - a) * t, ease = (t) => t * t * (3 - 2 * t);
 const P = { on: false, cancel: false, pinMode: null };
-const hours = () => [...$s("hour").options].map((o) => +o.value);
+const stills = () => [...$s("hour").options].map((o) => +o.value);
+const loopInfo = () => { const it = S.idx && S.idx.items && S.idx.items[S.run]; return it && it.loop && it.loop.hours && it.loop.hours.length ? it.loop : null; };
+const step = () => +($s("lpstep").value || 24);
+const useHD = () => !!loopInfo() && step() < 24;
+const hours = () => { const L = loopInfo(), st_ = step(); return useHD() ? L.hours.filter((f) => (f - L.hours[0]) % st_ === 0) : stills(); };
+function fillStep() {   // the Step menu follows the run: 6 h / 12 h HD only where loop frames exist
+  const e = $s("lpstep"), L = loopInfo(), want = e.dataset.v || (L ? String(L.every || 6) : "24");
+  const o = (L ? [[L.every || 6, `${L.every || 6} h (HD frames)`], [12, "12 h (HD frames)"]] : []).concat([[24, "24 h (4K stills)"]]);
+  e.innerHTML = o.map(([v, t]) => `<option value="${v}">${t}</option>`).join(""); e.value = o.some(([v]) => String(v) === want) ? want : String(o[0][0]);
+  $s("lpsteph").textContent = L ? "" : "This run has 24 h frames only (finer HD frames are kept for the newest run).";
+}
 const cur = () => ({ run: S.run, prod: S.prod, view: S.view });
 const pinKey = () => `social:pins:${S.view}`;
 const getPins = () => { try { return JSON.parse(localStorage.getItem(pinKey()) || "{}"); } catch (e) { return {}; } };
@@ -27,6 +39,7 @@ const pick = () => { const a = +$s("lpa").value, b = +$s("lpb").value; return ho
 function times(n) { const s0 = +$s("lps").value, s1 = $s("lps1").value ? +$s("lps1").value : s0, T = [0];
   for (let j = 0; j < n; j++) T.push(T[j] + 1 / lerp(s0, s1, n > 1 ? j / (n - 1) : 0)); return T; }
 function info() {
+  fillStep(); fillHours();
   const s0 = +$s("lps").value, s1 = $s("lps1").value, hs = pick(), T = times(hs.length), hold = +$s("lph").value, p = getPins(), pan = $s("lpmode").value === "pan";
   $s("lpsv").textContent = `${s0} map${s0 === 1 ? "" : "s"}/s`; $s("lpnow").textContent = `Showing now: F+${S.hour}`;
   $s("lppan").hidden = !pan; $s("lppins").textContent = pan ? `${p.a ? "A set" : "A not set"} \u00b7 ${p.b ? "B set" : "B not set"}` : "";
@@ -85,7 +98,10 @@ async function makeEncoder(cv, W, H) {   // same as studio.js
 function paint(c, k, A, B, mix, cx, cy, z, tmp) {
   const [W, H] = OUT[k]; c.globalAlpha = 1; c.fillStyle = "#111316"; c.fillRect(0, 0, W, H);
   const draw1 = (ctx, bmp, zz, ccx, ccy) => { const sw = bmp.width / zz, sh = bmp.height / zz;
-    const sx = Math.min(bmp.width - sw, Math.max(0, ccx * bmp.width - sw / 2)), sy = Math.min(bmp.height - sh, Math.max(0, ccy * bmp.height - sh / 2));
+    // zoomed: keep the crop's title / colour-bar rows hidden under the unzoomed bands (no big doubled date line below the title):
+    // output row bd.top[1] must come from at/below source row bd.top[1] and output row bd.bot[1] from at/above source row bd.bot[1]
+    const bd = BAND[k], lo = zz > 1.001 ? bd.top[1] * bmp.height * (1 - 1 / zz) : 0, hi = zz > 1.001 ? bd.bot[1] * bmp.height * (1 - 1 / zz) : bmp.height - sh;
+    const sx = Math.min(bmp.width - sw, Math.max(0, ccx * bmp.width - sw / 2)), sy = Math.min(hi, Math.max(lo, ccy * bmp.height - sh / 2));
     ctx.drawImage(bmp, sx, sy, sw, sh, 0, 0, W, H); };
   const layer = (ctx, zz, ccx, ccy) => { ctx.globalAlpha = 1; draw1(ctx, A, zz, ccx, ccy); if (B && mix > 0) { ctx.globalAlpha = mix; draw1(ctx, B, zz, ccx, ccy); ctx.globalAlpha = 1; } };
   c.imageSmoothingQuality = "high"; layer(c, z, cx, cy);
@@ -109,7 +125,7 @@ async function make() {
   const t0 = performance.now(), C = cur(); let enc = null, A = null, B = null; P.busy = true; P.cancel = false; $s("lpgo").disabled = true; $s("lpstop").hidden = false; $s("lpout").hidden = true;
   try {
     enc = await makeEncoder(cv, W, H); let n = 0;
-    const src = (f) => url(nm(k, f, C.prod, C.view));
+    const hd = useHD(), src = (f) => hd ? `${DATA}social/${C.run}/loop/${nm(k, f, C.prod, C.view)}.jpg` : url(nm(k, f, C.prod, C.view));
     A = await loadBmp(src(hs[0]));
     for (let j = 0; j < hs.length; j++) {
       if (P.cancel) throw new Error("stopped");
@@ -137,7 +153,7 @@ async function make() {
   finally { P.busy = false; $s("lpgo").disabled = false; $s("lpstop").hidden = true; if (A && A.close) A.close(); }
 }
 const st = (t) => { $s("lpst").textContent = t; };
-function open() { P.on = true; $s("lp").hidden = false; fillHours(); if (!$s("lpa").dataset.init) { $s("lpa").value = String(S.hour); $s("lpa").dataset.init = 1; fillHours(); } info(); }
+function open() { P.on = true; $s("lp").hidden = false; fillStep(); fillHours(); if (!$s("lpa").dataset.init) { $s("lpa").value = String(S.hour); $s("lpa").dataset.init = 1; fillHours(); } info(); }
 function init() {
   $s("loopbtn").onclick = () => { if ($s("lp").hidden) open(); else { P.on = false; $s("lp").hidden = true; drawPins(); } };
   $s("lp").addEventListener("click", (e) => { const b = e.target.closest("button[data-m]"); if (!b) return; const m = b.dataset.m;
@@ -148,13 +164,14 @@ function init() {
     else if (m === "a" || m === "b") { P.pinMode = m; const h = $s("lphint"); h.hidden = false; h.textContent = `Tap the ${$s("lpk").value === "v" ? "9:16" : "16:9"} picture where the loop should ${m === "a" ? "START (pin A)" : "END (pin B)"}.`; }
     else if (m === "c") { const p = getPins(), k = $s("lpk").value; delete p[k + "a"]; delete p[k + "b"]; setPins(p); info(); }
     else if (m === "go") make(); else if (m === "stop") P.cancel = true; });
+  $s("lpstep").addEventListener("change", (e) => { e.target.dataset.v = e.target.value; info(); });
   for (const id of ["lpa", "lpb", "lps1", "lph", "lpz0", "lpz1", "lpx", "lpmode", "lpk"]) $s(id).addEventListener("change", info);
   $s("lps").addEventListener("input", info);
   $s("lp").addEventListener("keydown", (e) => { if (/^(SELECT|INPUT)$/.test(e.target.tagName) && /^Arrow/.test(e.key)) e.stopPropagation(); }, true);
   for (const k of ["v", "h"]) $s("i" + k).addEventListener("click", (e) => onImgClick(k, e));
   addEventListener("resize", drawPins);
-  window.__socialShown = () => { if (P.on) { fillHours(); info(); } };   // social.js calls this after every show()
-  window.__socialLoop = { getPins, setPins, make, open, info };
+  window.__socialShown = () => { if (P.on) info(); };   // social.js calls this after every show()
+  window.__socialLoop = { getPins, setPins, make, open, info, hours, useHD };
 }
 init();
 })();

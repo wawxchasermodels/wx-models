@@ -49,6 +49,7 @@ html,body{margin:0;background:#15171c;color:#f4f2ee;font:14px Montserrat,system-
 <div id="lp" hidden><div class="mp-h"><b>MP4 loop</b><span class="mp-hint">Hour menu, thumbnails and arrow keys still work while this is open</span><span><button type="button" data-m="min" aria-label="Minimize">&ndash;</button> <button type="button" data-m="x" aria-label="Close">&times;</button></span></div>
   <div class="mp-row"><label>Frame <select id="lpk"><option value="v">9:16 (1080&times;1920)</option><option value="h">16:9 (1920&times;1080)</option></select></label>
   <label>Mode <select id="lpmode"><option value="loop">Plain loop</option><option value="pan">Track storm (pan A &rarr; B)</option></select></label></div>
+  <div class="mp-row"><label>Step <select id="lpstep"><option value="24">24 h (4K stills)</option></select></label><span id="lpsteph" class="mp-note"></span></div>
   <div class="mp-row"><label>Start <select id="lpa"></select></label><button type="button" data-m="sa">Start = now</button></div>
   <div class="mp-row"><label>End <select id="lpb"></select></label><button type="button" data-m="sb">End = now</button><span id="lpnow" class="mp-note"></span></div>
   <div class="mp-row"><label>Speed <input type="range" id="lps" min="0.5" max="15" step="0.5" value="2"></label><b id="lpsv">2 maps/s</b>
@@ -59,7 +60,7 @@ html,body{margin:0;background:#15171c;color:#f4f2ee;font:14px Montserrat,system-
   <label>End zoom <select id="lpz1"><option value="s">same as start</option><option>1</option><option>1.2</option><option>1.4</option><option>1.6</option><option>1.8</option><option>2</option><option>2.5</option></select></label></div>
   <div class="mp-row" id="lppan" hidden><button type="button" data-m="a">Set pin A (start)</button><button type="button" data-m="b">Set pin B (end)</button><button type="button" data-m="c">Clear pins</button><span id="lppins" class="mp-note"></span></div>
   <div class="mp-row mp-note" id="lpinfo"></div>
-  <div class="mp-row mp-note">Frames are every 24 h for now (finer hours need more rendering; ask first). When zoomed, the title and color bar stay put.</div>
+  <div class="mp-row mp-note">Step 6 h uses the HD loop frames (1920&times;1080 / 1080&times;1920, newest run); 24 h uses the 4K stills. When zoomed, the title and color bar stay put.</div>
   <div class="mp-row"><button type="button" data-m="go" id="lpgo" class="pri">Make MP4</button><button type="button" data-m="stop" id="lpstop" hidden>Stop</button><span id="lpst"></span></div>
   <canvas id="lpprev" hidden></canvas>
   <div id="lpout" hidden><video id="lpv" controls loop muted playsinline></video><div class="mp-row"><a id="lpdl" download>Save MP4</a><button type="button" id="lpshare" hidden>Share / Save to Photos</button></div></div>
@@ -71,5 +72,5 @@ html,body{margin:0;background:#15171c;color:#f4f2ee;font:14px Montserrat,system-
 </div>
 <div id="strip" aria-label="All hours"></div>
 <script src="social.js"></script>
-<script src="socialloop.js?v=20261031b"></script>
+<script src="socialloop.js?v=20261031d"></script>
 </body></html>

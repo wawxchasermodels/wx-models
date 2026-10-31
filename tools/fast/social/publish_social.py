@@ -4,6 +4,8 @@
   <R2 venv python> publish_social.py upload <out>/<run> [--keep 2]
 R2 layout: social/<run>/<name>.png (4K PNG), social/<run>/jpg/<name>.jpg, social/index.json
   {"runs": [newest first], "items": {run: {"prods": [...], "views": [...], "hours": [...], "aspects": ["v","h"]}}, "updated": iso}
+  <R2 venv python> publish_social.py loop <out>/<run>   (HD loop frames from make_social.py --hd -> social/<run>/loop/<name>.jpg;
+  index item gets "loop": {"hours", "every", "size", "files", "bytes"}; loop frames of every OTHER run are deleted: newest run only)
 Only the social/ prefix is touched (the map viewer never reads it); runs beyond --keep are deleted."""
 import os, sys, json, glob, time, datetime as dt
 mode, d = sys.argv[1], sys.argv[2].rstrip("/")
@@ -19,6 +21,25 @@ if mode == "thumbs":
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 import upload_r2 as U
 from concurrent.futures import ThreadPoolExecutor
+if mode == "loop":
+    s3 = U.client(); B = U.BUCKET
+    import re
+    fs = sorted(glob.glob(f"{d}/loop/*.jpg")); assert fs, "no loop frames in " + d + "/loop"
+    t0 = time.time()
+    with ThreadPoolExecutor(16) as ex: list(ex.map(lambda p: s3.upload_file(p, B, f"social/{run}/loop/" + os.path.basename(p), ExtraArgs={"ContentType": "image/jpeg"}), fs))
+    hrs = sorted({int(re.search(r"_f(\d+)_", os.path.basename(p)).group(1)) for p in fs}); nb = sum(os.path.getsize(p) for p in fs)
+    every = min(b - a for a, b in zip(hrs, hrs[1:])) if len(hrs) > 1 else 24
+    idx = json.loads(s3.get_object(Bucket=B, Key="social/index.json")["Body"].read())
+    assert run in idx["items"], f"upload the 4K stills of {run} first"
+    idx["items"][run]["loop"] = dict(hours=hrs, every=every, size="1920x1080/1080x1920", files=len(fs), bytes=nb)
+    for other in list(idx["items"]):
+        if other == run: continue
+        ks = [o["Key"] for pg in s3.get_paginator("list_objects_v2").paginate(Bucket=B, Prefix=f"social/{other}/loop/") for o in pg.get("Contents", [])]
+        for i in range(0, len(ks), 1000): s3.delete_objects(Bucket=B, Delete={"Objects": [{"Key": k} for k in ks[i:i + 1000]]})
+        if idx["items"][other].pop("loop", None) is not None or ks: print("dropped loop frames of", other, len(ks))
+    idx["updated"] = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
+    s3.put_object(Bucket=B, Key="social/index.json", Body=json.dumps(idx).encode(), ContentType="application/json", CacheControl="no-cache")
+    print("loop: uploaded", len(fs), "files,", round(nb / 1e6, 1), "MB, hours", hrs[0], "-", hrs[-1], "every", every, "h, in", round(time.time() - t0, 1), "s"); sys.exit()
 keep = int(sys.argv[sys.argv.index("--keep") + 1]) if "--keep" in sys.argv else 2
 s3 = U.client(); B = U.BUCKET
 files = [(p, f"social/{run}/" + os.path.relpath(p, d)) for p in glob.glob(f"{d}/*.png") + glob.glob(f"{d}/jpg/*.jpg")]
@@ -31,6 +52,8 @@ item = dict(prods=sorted({p[0] for p in parts}), views=sorted({p[1] for p in par
             files=sorted(names))
 try: idx = json.loads(s3.get_object(Bucket=B, Key="social/index.json")["Body"].read())
 except Exception: idx = {"runs": [], "items": {}}
+item["loop"] = idx["items"].get(run, {}).get("loop") or item.pop("loop", None)
+if not item["loop"]: item.pop("loop")
 idx["items"][run] = item; idx["runs"] = sorted(set(idx["runs"]) | {run}, reverse=True)
 for old in idx["runs"][keep:]:
     ks = [o["Key"] for pg in s3.get_paginator("list_objects_v2").paginate(Bucket=B, Prefix=f"social/{old}/") for o in pg.get("Contents", [])]
