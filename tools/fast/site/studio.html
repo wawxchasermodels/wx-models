@@ -107,6 +107,18 @@ body.clean{background:var(--sbg,#111316);display:block;height:auto;overflow:hidd
 body.clean #bar,body.clean #dock,body.clean .shd,body.clean .shint,body.clean #tip{display:none!important}
 body.clean #studio{padding:0;gap:0;display:block}
 body.clean .sfr{display:none}body.clean .sfr.on{display:block}
+/* MP4 loop panel (10-31) */
+#mp4p{position:fixed;left:14px;bottom:14px;z-index:12;width:min(560px,calc(100vw - 28px));max-height:calc(100dvh - 90px);overflow:auto;background:#1d2027f5;border:1px solid #4a4f5a;border-radius:10px;padding:10px 12px;box-shadow:0 6px 24px #000a;box-sizing:border-box}
+#mp4p[hidden],#pinhint[hidden],#mpout[hidden],#mppan[hidden],#mp4p [hidden]{display:none!important}
+#mp4p .mp-h{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;font-size:15px}
+#mp4p .mp-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:6px 0;font-size:13px}
+#mp4p select,#mp4p button,#mp4p a{background:#262931;color:#f4f2ee;border:1px solid #7d828c;border-radius:6px;padding:4px 8px;font:inherit;font-size:13px;text-decoration:none;touch-action:manipulation;cursor:pointer}
+#mp4p button.pri{background:#2f8cff;border-color:#2f8cff;font-weight:700}#mp4p button:disabled{opacity:.5}
+#mp4p .mp-note,#mppins,#mpst{color:#cfd3da}#mpst{font-weight:600}
+#mpv{display:block;max-width:100%;max-height:46vh;margin-top:6px;background:#000}
+#pinhint{position:fixed;left:50%;top:10px;transform:translateX(-50%);z-index:13;background:#2f8cff;color:#fff;font-weight:700;padding:8px 14px;border-radius:8px;box-shadow:0 4px 16px #0008;max-width:90vw;text-align:center}
+body.rec .sfr .shd button,body.rec #bar{pointer-events:none;opacity:.55}
+@media (max-width:820px){#mp4p{left:8px;right:8px;bottom:8px;width:auto}#mp4p select{max-width:62vw}}
 body.clean .sfr canvas,body.clean #fv canvas,body.clean #fh canvas{width:auto!important;height:auto!important;max-height:none!important;outline:0;background:none;cursor:default}
 </style></head>
 <body>
@@ -126,11 +138,25 @@ body.clean .sfr canvas,body.clean #fv canvas,body.clean #fh canvas{width:auto!im
 </div>
 <div id="wrap"><canvas id="map"></canvas><div id="tip" hidden></div></div>
 <div id="studio">
-  <div class="sfr" id="fv"><div class="shd"><b>9:16</b> 1080&times;1920 &middot; zoom <input type="range" id="zv" min="100" max="250" value="100"> <button type="button" data-a="reset">Reset</button> <button type="button" data-a="png">Save PNG</button> <button type="button" data-a="obs">Copy OBS URL</button></div><canvas id="cv" width="1080" height="1920" tabindex="0"></canvas></div>
-  <div class="sfr" id="fh"><div class="shd"><b>16:9</b> 1920&times;1080 &middot; zoom <input type="range" id="zh" min="100" max="250" value="100"> <button type="button" data-a="reset">Reset</button> <button type="button" data-a="png">Save PNG</button> <button type="button" data-a="obs">Copy OBS URL</button></div><canvas id="ch" width="1920" height="1080" tabindex="0"></canvas>
+  <div class="sfr" id="fv"><div class="shd"><b>9:16</b> 1080&times;1920 &middot; zoom <input type="range" id="zv" min="100" max="250" value="100"> <button type="button" data-a="reset">Reset</button> <button type="button" data-a="png">Save PNG</button> <button type="button" data-a="mp4">Save MP4</button> <button type="button" data-a="obs">Copy OBS URL</button></div><canvas id="cv" width="1080" height="1920" tabindex="0"></canvas></div>
+  <div class="sfr" id="fh"><div class="shd"><b>16:9</b> 1920&times;1080 &middot; zoom <input type="range" id="zh" min="100" max="250" value="100"> <button type="button" data-a="reset">Reset</button> <button type="button" data-a="png">Save PNG</button> <button type="button" data-a="mp4">Save MP4</button> <button type="button" data-a="obs">Copy OBS URL</button></div><canvas id="ch" width="1920" height="1080" tabindex="0"></canvas>
   <div class="shint">Drag a frame to line the map up (arrow keys 1 px, Shift 10 px, +/- zoom, 0 reset). Framing is saved per frame and view.</div></div>
 </div>
+<div id="mp4p" hidden><div class="mp-h"><b>Save MP4 loop</b><button type="button" data-m="x" aria-label="Close">&times;</button></div>
+  <div class="mp-row"><label>Frame <select id="mpk"><option value="v">9:16 (1080&times;1920)</option><option value="h">16:9 (1920&times;1080)</option></select></label>
+  <label>Mode <select id="mpmode"><option value="loop">Plain loop</option><option value="pan">Track storm (pan A &rarr; B)</option></select></label></div>
+  <div class="mp-row"><label>Start <select id="mpa"></select></label><label>End <select id="mpb"></select></label></div>
+  <div class="mp-row"><label>Every <select id="mpe"><option value="0">hour in the run</option><option value="3">3 h</option><option value="6">6 h</option><option value="12">12 h</option><option value="24">24 h</option></select></label>
+  <label>Speed <select id="mps"><option value="2">2 maps/s</option><option value="3">3 maps/s</option><option value="4" selected>4 maps/s</option><option value="6">6 maps/s</option><option value="8">8 maps/s</option><option value="10">10 maps/s</option></select></label>
+  <label>Hold end <select id="mph"><option value="0">0 s</option><option value="0.5">0.5 s</option><option value="1" selected>1 s</option><option value="2">2 s</option></select></label></div>
+  <div class="mp-row" id="mppan" hidden><label>Zoom <select id="mpz"><option>1.4</option><option selected>1.8</option><option>2.2</option><option>2.5</option></select></label>
+  <button type="button" data-m="a">Set pin A (start)</button><button type="button" data-m="b">Set pin B (end)</button><button type="button" data-m="c">Clear pins</button><span id="mppins"></span></div>
+  <div class="mp-row mp-note" id="mpinfo"></div>
+  <div class="mp-row"><button type="button" data-m="go" id="mpgo" class="pri">Make MP4</button><button type="button" data-m="stop" id="mpstop" hidden>Stop</button><span id="mpst"></span></div>
+  <div id="mpout" hidden><video id="mpv" controls loop muted playsinline></video><div class="mp-row"><a id="mpdl" download>Save MP4</a><button type="button" id="mpshare" hidden>Share / Save to Photos</button></div></div>
+</div>
+<div id="pinhint" hidden></div>
 <div id="dock"></div>
 <script src="viewer.js?v=20261031s"></script>
-<script src="studio.js?v=20261031a"></script>
+<script src="studio.js?v=20261031b"></script>
 </body></html>

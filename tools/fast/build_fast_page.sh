@@ -18,6 +18,7 @@ cp $SRC/wamaps.js public/; cp -r $SRC/wamaps public/
 cp $SRC/compare.html $SRC/compare.js public/
 # Studio (10-31): 9:16 + 16:9 video frames (viewer.js off-screen + studio.js)
 cp $SRC/studio.js public/
+rm -rf public/vendor && cp -r $SRC/vendor public/   # Studio MP4 export: mp4-muxer (MIT), loaded only when "Save MP4" is used
 # Social (10-31): browse / save the ECMWF social graphics (R2 social/, made by tools/fast/social/)
 cp $SRC/social.js public/
 sed -e 's#<script src="social.js"></script>#<script>window.WX_DATA="/d/"</script><script src="social.js"></script>#' \
