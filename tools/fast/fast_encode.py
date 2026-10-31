@@ -823,7 +823,11 @@ def static(m, out, views_only=None, x2_only=False):
     REFC_L = np.arange(5, 80, 5)
     REFC_C = ["#04e9e7", "#019ff4", "#0300f4", "#02fd02", "#01c501", "#008e00", "#fdf802", "#e5bc00", "#fd9500", "#fd0000", "#d40000", "#bc0000", "#f800fd", "#9854c6"]
     FRZ_L = np.arange(0, 12001, 250); FRZ_A = [(0, "#3b2a7a"), (1000, "#2f63c8"), (2500, "#57c6e0"), (4000, "#9fe0b0"), (5500, "#f4e04d"), (7000, "#f2a33a"), (9000, "#d43f3a"), (12000, "#7d1f3f")]
-    CM = {"t2m": HS.temp_cmap(), "gust10": HS.wind_cmap(), "aifswind": HS.wind_cmap(), "t850": HS.t850_cmap(), "t700": HS.t850_cmap(),
+    # Benjamin 10-31 1:53 AM "increase the wind gust scale to 120 mph": gust maps only (MSLP + 10 m wind keeps the shared
+    # 0-100 house scale). 0-100 mph colors unchanged (house_style WIND_COLORS), then 100-120 mph indigo -> magenta -> orchid.
+    GUST_L = np.arange(0, 121, 2); GUST_TICKS = list(range(0, 121, 10))
+    GUST_C = list(HS.WIND_COLORS) + list(HS.smooth((GUST_L[50:-1] + GUST_L[51:]) / 2.0, [100, 106, 113, 120], ["#2b1c5d", "#6a1f7f", "#b2459f", "#e58bd6"]))
+    CM = {"t2m": HS.temp_cmap(), "gust10": HS.cmap(GUST_C, HS.WIND_UNDER, "#f7e1f4"), "aifswind": HS.wind_cmap(), "t850": HS.t850_cmap(), "t700": HS.t850_cmap(),
           "tcc": M.ramp(M.TCC_LEVELS, M.TCC_ANCH), "ir": M.ramp(M.IR_LEVELS, M.IR_ANCH), "vis": HS.cmap(M.VIS_COLS, M.VIS_COLS[0], (0, 0, 0, 0)),
           "refc": HS.cmap(REFC_C, REFC_C[0], REFC_C[-1]), "frz": M.ramp(FRZ_L, FRZ_A), "snowlvl": M.ramp(FRZ_L, FRZ_A),
           "qpf": HS.rain_cmap(), "snow": M.ramp(M.SNOW_LEVELS, M.SNOW_ANCH)}
@@ -892,7 +896,7 @@ def static(m, out, views_only=None, x2_only=False):
     prods = {
         "t2m": dict(title="2 m Temperature", fields=["t2m"], key="Temp (\u00b0F)", ticks=HS.TEMP_TICKS, **table(HS.TEMP_LEVELS, CM["t2m"], "both"),
                     freeze=32, extra="32\u00b0F line dashed  \u00b7  {lo} to {hi}\u00b0F in view", pct=[0.5, 99.5]),
-        "gust10": dict(title="10 m Wind Gusts", fields=["gust"], key="Gust (mph)", ticks=HS.WIND_TICKS, **table(HS.WIND_LEVELS, CM["gust10"], "max"),
+        "gust10": dict(title="10 m Wind Gusts", fields=["gust"], key="Gust (mph)", ticks=GUST_TICKS, **table(GUST_L, CM["gust10"], "max"),
                        extra=(M.gust_note(m) if m in M.MODELS else "") + "  \u00b7  up to {hi} mph in view", pct=[1, 99.9]),
         "aifswind": dict(title="MSLP + 10 m Wind", fields=["mslp", "u10", "v10"], fill="wspd", key="10 m wind (mph)", ticks=HS.WIND_TICKS,
                          **table(HS.WIND_LEVELS, CM["aifswind"], "max"), spd_sigma=1.5, isobars=dict(every=4, sigma=6.0 if m == "hrrr" else 1.0,
@@ -989,8 +993,8 @@ def static(m, out, views_only=None, x2_only=False):
         "snow6": dict(title="6 h Snowfall", fields=["asnow"], window=6, wfield="asnow", fill="window", key="Snow (in)", ticks=[0.1, 1, 3, 6, 10, 15, 24], tickfmt=True,
                       **table(M.SNOW_LEVELS, CM["snow"], "max"), extra="snowfall in the 6 h ending at the valid time (model snow density)  \u00b7  max {hi} in in view",
                       pct=[0, 100], dec=1, fmt="in1", only=("hrrr", "rrfs")),
-        "gust6": dict(title="6 h Max Wind Gust", fields=["gust"], window=6, wmax=True, wfield="gust", fill="window", key="Gust (mph)", ticks=HS.WIND_TICKS,
-                      **table(HS.WIND_LEVELS, CM["gust10"], "max"), extra="highest gust over the model hours in the 6 h ending at the valid time  \u00b7  up to {hi} mph in view",
+        "gust6": dict(title="6 h Max Wind Gust", fields=["gust"], window=6, wmax=True, wfield="gust", fill="window", key="Gust (mph)", ticks=GUST_TICKS,
+                      **table(GUST_L, CM["gust10"], "max"), extra="highest gust over the model hours in the 6 h ending at the valid time  \u00b7  up to {hi} mph in view",
                       pct=[1, 99.9], only=("hrrr", "rrfs", "gfs", "ifs")),
         "ltng6": dict(title="6 h Max Lightning Threat", fields=["ltng"], window=6, wmax=True, wfield="ltng", fill="window", key="Flashes per km\u00b2 per 5 min",
                       ticks=LTNG_L, tickfmt=True, **table(LTNG_L, CM["ltng"], "max"), extra="highest hourly flash density in the 6 h ending at the valid time  \u00b7  up to {hi} in view",
@@ -1056,7 +1060,7 @@ def static(m, out, views_only=None, x2_only=False):
                       extra="wind chill at 50\u00b0F and below, heat index at 80\u00b0F and above (NWS formulas)  \u00b7  {lo} to {hi}\u00b0F in view", pct=[0.5, 99.5],
                       only=("hrrr", "rrfs", "gfs", "ifs", "aifs")),
         "gustmax": dict(title="Peak Wind Gust So Far", fields=["gust"], window=9999, sofar=True, wmax=True, wfield="gust", fill="window", key="Gust (mph)",
-                        ticks=HS.WIND_TICKS, **table(HS.WIND_LEVELS, CM["gust10"], "max"),
+                        ticks=GUST_TICKS, **table(GUST_L, CM["gust10"], "max"),
                         extra="highest gust at any hour since the run started  \u00b7  up to {hi} mph in view", pct=[1, 99.9], only=("hrrr", "rrfs", "gfs", "ifs")),
         "t925w": dict(title="925 mb Temperature + Wind", fields=["t925", "u925", "v925"], fill="t925", key="925 mb temp (\u00b0C)", ticks=HS.T850_TICKS, tickfmt=True,
                       **table(HS.T850_LEVELS, CM["t850"], "both"), freeze=0, barbs=dict(u="u925", v="v925", color=HS.BARB_COLOR, length=HS.BARB_LENGTH, lw=HS.BARB_LW),
@@ -1170,7 +1174,7 @@ def static(m, out, views_only=None, x2_only=False):
                                          extra=f"highest of the 6-hourly ens-mean max gusts in the {h} h ending at the valid time  \u00b7  up to {{hi}} mph in view")
         prods["esnow90"] = dict(prods["esnow"], title="Snowfall Total, 90th Percentile (10:1)", fields=["asnow90"],
                                 extra="reasonable high end: 5 of 50 members are snowier  \u00b7  10:1  \u00b7  since the run started  \u00b7  max {hi} in in view")
-        if m == "eps": prods["egust90"] = dict(title="Wind Gusts, 90th Percentile", fields=["gust90"], key="Gust (mph)", ticks=HS.WIND_TICKS, **table(HS.WIND_LEVELS, CM["gust10"], "max"),
+        if m == "eps": prods["egust90"] = dict(title="Wind Gusts, 90th Percentile", fields=["gust90"], key="Gust (mph)", ticks=GUST_TICKS, **table(GUST_L, CM["gust10"], "max"),
                                 extra="5 of 50 members gust higher (max in the 6 h ending at the valid time)  \u00b7  up to {hi} mph in view", pct=[1, 99.9])
         PC_L = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]; CM["epcape"] = M.ramp(PC_L, [(10, "#d9e8c3"), (30, "#f2e34b"), (50, "#f4a43a"), (70, "#e2462f"), (100, "#8c1450")])
         if m == "eps":
