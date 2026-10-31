@@ -12,6 +12,10 @@ from upload_r2 import client, BUCKET, CT
 
 def avail(m, c, s):
     import temp_maps as TM, menu_maps as M
+    # 10-31 (Benjamin: "pull ECMWF 9 km 12Z too"): the 9 km source URLs are registered by FE._patch_models, which only ran inside an
+    # encode; when the 0.25 deg run was already complete nothing had encoded yet, so every 9 km cycle read as "no cycle out" (the
+    # 06Z and 12Z 0.1 deg files were on the source). Register them here so the check sees them.
+    FE._patch_models(M)
     try:
         if m in FE.NOAA: u = M.MODELS[m]["url"].format(d=f"{c:%Y%m%d}", h=c.hour, s=s) + ".idx"
         elif m in ("eps", "aens"): u = FE.ENS_SRC[m][0].format(d=f"{c:%Y%m%d}", h=c.hour, s=s) + ".index"
