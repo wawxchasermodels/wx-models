@@ -29,6 +29,12 @@ MODELS = {   # grid "lcc" = HRRR 3 km, "ll" = 0.25 deg global (lat 90 -> -90, lo
     "ifs":  dict(grid="ll", views=GLOBAL_VIEWS, cycles=(0, 6, 12, 18), steps=list(range(3, 145, 3)) + list(range(150, 361, 6)),
                  steps_short=list(range(3, 145, 3)), short_cycles=(6, 18), keep=2, keep_long=True),
     "aifs": dict(grid="ll", views=GLOBAL_VIEWS, cycles=(0, 6, 12, 18), steps=list(range(6, 361, 6)), keep=2),
+    # ECMWF IFS 9 km (Benjamin 10-31 1:58 AM "build the euro 9km option"): the same IFS run on ECMWF's free 0.1 deg open data
+    # (ifs/0p1/oper, -sfc / -pl files, out about 2 h after the 0.25 deg files, since 10-20-26). Kept small: Washington-scale
+    # views + Pacific NW tight only (no North America / Pacific NW wide), 0-144 h every 3 h, newest run only. The crop at 0.1 deg
+    # (about 400 x 240 points) is smaller than the 0.25 deg global crop, so a run is ~1/3 the size of an ECMWF 0.25 run.
+    "ifs9": dict(grid="ll", res=0.1, views=("puget", "wa", "wwa", "ewa", "passes", "newa", "lm", "bc", "pnwt"), cycles=(0, 6, 12, 18),
+                 steps=list(range(3, 145, 3)), keep=1, as_model="ifs"),
     # ECMWF ENS (EPS) 0.25 open data, 50 perturbed members (no control in the open files), 00/12Z to 360 h. Mean/spread/probability
     # computed here from the members (the open em/es file only appears once the whole run is out). 10-30-26 (Benjamin's saved order).
     "eps":  dict(grid="ll", views=GLOBAL_VIEWS, cycles=(0, 12), steps=list(range(6, 361, 6)), keep=2, grid_from="ifs"),
@@ -37,7 +43,9 @@ MODELS = {   # grid "lcc" = HRRR 3 km, "ll" = 0.25 deg global (lat 90 -> -90, lo
 }
 MINFO = {"aens": dict(name="ECMWF AIFS Ensemble", site="AIFS ENS", res="0.25\u00b0 \u00b7 50 members", credit_as="aifs"),
          "nbm": dict(name="NOAA NBM", site="NBM", res="2.5 km", noaa=True),
-         "eps": dict(name="ECMWF Ensemble", site="ECMWF EPS", res="0.25\u00b0 \u00b7 50 members", credit_as="ifs")}
+         "eps": dict(name="ECMWF Ensemble", site="ECMWF EPS", res="0.25\u00b0 \u00b7 50 members", credit_as="ifs"),
+         "ifs9": dict(name="ECMWF IFS", site="ECMWF 9 km", res="9 km (0.1\u00b0)", credit_as="ifs")}
+def as_model(m): return MODELS.get(m, {}).get("as_model", m)   # ifs9 = IFS (same fields / products / units), only the files differ
 def minfo(m):
     import menu_maps as M
     return MINFO.get(m) or M.MODELS[m]
@@ -243,6 +251,15 @@ NOAA = ("hrrr", "gfs", "rrfs")
 def _patch_models(M):
     """In-memory only (live tools untouched): RRFS pressure-level fields come from its prslev file."""
     if "rrfs" in M.MODELS and "prs" not in M.MODELS["rrfs"]: M.MODELS["rrfs"]["prs"] = M.MODELS["rrfs"]["url"].replace(".2dfld.", ".prslev.")
+    # ECMWF 9 km: the IFS reader pointed at the 0.1 deg files (surface and pressure levels are separate files there)
+    TM = M.TM
+    if "ifs9" not in TM.MODELS:
+        # ECMWF's own AWS mirror of the open data (same files; ~6x faster than data.ecmwf.int from the box, 14 vs 2.2 MB/s,
+        # and it keeps the 2000-connection portal free): a 9 km step is ~114 MB of GRIB (39 fields)
+        E9 = "https://ecmwf-forecasts.s3.eu-central-1.amazonaws.com/{d}/{h:02d}z/"
+        TM.MODELS["ifs9"] = dict(TM.MODELS["ifs"], site="ECMWF 9 km", res="0.1\u00b0",
+                                 url={"sfc": E9 + "ifs/0p1/oper/{d}{h:02d}0000-{s}h-oper-fc-sfc", "pl": E9 + "ifs/0p1/oper/{d}{h:02d}0000-{s}h-oper-fc-pl"})
+    if "ifs9" not in M.MODELS: M.MODELS["ifs9"] = dict(M.MODELS["ifs"], site="ECMWF 9 km", res="0.1\u00b0")
 
 def _f(key, conv): return lambda R, m: conv(np.asarray(R.f(key)[2], float))
 def _raw(key, conv):
@@ -281,7 +298,7 @@ def _inc(R, m, what):
         prev = 0.0 if s0 == 0 else np.asarray(M.Reader(m, R.c, s0).acc0("APCP:surface")[2], float) / 25.4
     else:
         now = np.asarray(R.st.field(what)[2], float) * 39.3701
-        prev = 0.0 if s0 == 0 else np.asarray(TM.Step(m, R.c, s0).field(what)[2], float) * 39.3701
+        prev = 0.0 if s0 == 0 else np.asarray(TM.Step(R.m, R.c, s0).field(what)[2], float) * 39.3701
     R.cache[k] = r = np.clip(now - prev, 0, None); return r
 def _tmax_col(R, m):   # warmest of 2 m, 925, 850, 700 and 500 mb (K), for the Kuchera ratio
     t = np.asarray(R.f("t2m")[2], float)
@@ -372,7 +389,7 @@ def _ltgp(R, m):
     import temp_maps as TM
     cp = _ec("cp")(R, m); s0 = R.s - 6
     if s0 > 0:
-        try: cp = cp - np.asarray(TM.Step(m, R.c, s0).field("cp")[2], float)
+        try: cp = cp - np.asarray(TM.Step(R.m, R.c, s0).field("cp")[2], float)
         except Exception as e: raise RuntimeError(f"cp f{s0}: {e}")
     return np.where(_ec("mucape")(R, m) >= 100, np.clip(cp, 0, None) * 1000 / 25.4, 0.0)
 
@@ -458,13 +475,14 @@ PACKS = {"wind": ("mslp", "u10", "v10"), "aloft": ("t850", "t700", "frz"), "accu
          "etx": ("maxt", "mint"), "moist": ("d2m", "pw", "prt"), "kfz": ("kinc", "fzinc"), "ivt": ("ivtu", "ivtv"), "wave": ("swh", "wdu", "wdv"),
          "nbm1": ("t2m", "gust", "tcc"), "nbm2": ("nq1", "nq6", "ns6"), "nbm3": ("tstm", "maxt", "mint")}
 
+IFS9_SKIP = {"swh", "wdu", "wdv"}   # ECMWF waves are 0.25 deg only (separate WAM files): not on the 9 km grid
 SQRT_FIELDS = {"apcp", "asnow", "apcp90", "asnow90", "nq1", "nq6", "ns6", "ltgp", "kinc", "fzinc"}
 def q8(a, lo, hi): return np.clip(np.rint((a - lo) / (hi - lo) * 255), 0, 255).astype(np.uint8)
 def rng(a):
     lo, hi = float(np.floor(np.nanmin(a))), float(np.ceil(np.nanmax(a))); return lo, max(hi, lo + 1)
 
-def roll_ll(v):   # 0.25 deg global: lon -180..179.75 -> 0..359.75
-    return np.roll(v, -720, axis=1) if v.shape[1] == 1440 else v
+def roll_ll(v):   # global lat/lon: lon -180.. -> 0..360 (0.25 deg: 1440 columns, 0.1 deg: 3600)
+    return np.roll(v, -(v.shape[1] // 2), axis=1) if v.shape[1] in (1440, 3600) else v
 
 PT_FIELDS = ("t2m", "d2m", "pw", "kinc", "fzinc", "gust", "u10", "v10", "mslp", "apcp", "asnow", "tcc", "frz", "dsnod", "refc", "t850", "mucape",
              "nq1", "nq6", "ns6", "tstm", "maxt", "mint", "t2sd", "p32")
@@ -492,8 +510,10 @@ def step_job(args):
     _patch_models(M)
     try: R = EpsReader(c, s, m, crop, P) if m in ("eps", "aens") else NbmReader(c, s) if m == "nbm" else M.Reader(m, c, s)
     except Exception as e: return s, None, str(e), 0, 0
+    mg = as_model(m)   # getters see "ifs" for ifs9 (same params / units); R reads the 0.1 deg files
     for name, (get, units) in (NBM_FIELDS if m == "nbm" else dict(FIELDS, **ENS_FIELDS) if m in ("eps", "aens") else FIELDS).items():
-        try: a = get(R, m)
+        if m == "ifs9" and name in IFS9_SKIP: continue
+        try: a = get(R, mg)
         except (KeyError, StopIteration): continue
         except Exception as e:
             if name == "t2m" or "404" in str(e): return s, None, f"{name}: {e}", 0, time.time() - t   # step (or its prs file) not out yet: retry next pass
@@ -717,7 +737,8 @@ def static(m, out, views_only=None, x2_only=False):
         def to_ij(LO_, LA_):
             hh = hp.transform_points(pc, LO_, LA_); return (hh[..., 1] - gy0) / d, (hh[..., 0] - gx0) / d
     else:
-        def to_ij(LO_, LA_): return (90.0 - LA_) / 0.25, np.mod(LO_, 360.0) / 0.25
+        rs_ = MD.get("res", 0.25)
+        def to_ij(LO_, LA_): return (90.0 - LA_) / rs_, np.mod(LO_, 360.0) / rs_
     views, luts = {}, {}
     for vid in vids:
         V = TM.VIEWS[vid]
@@ -900,9 +921,9 @@ def static(m, out, views_only=None, x2_only=False):
         "t2m": dict(title="2 m Temperature", fields=["t2m"], key="Temp (\u00b0F)", ticks=HS.TEMP_TICKS, **table(HS.TEMP_LEVELS, CM["t2m"], "both"),
                     freeze=32, extra="32\u00b0F line dashed  \u00b7  {lo} to {hi}\u00b0F in view", pct=[0.5, 99.5]),
         "gust10": dict(title="10 m Wind Gusts", fields=["gust"], key="Gust (mph)", ticks=GUST_TICKS, **table(GUST_L, CM["gust10"], "max"),
-                       extra=(M.gust_note(m) if m in M.MODELS else "") + "  \u00b7  up to {hi} mph in view", pct=[1, 99.9]),
+                       extra=(M.gust_note(as_model(m)) if m in M.MODELS else "") + "  \u00b7  up to {hi} mph in view", pct=[1, 99.9]),
         "aifswind": dict(title="MSLP + 10 m Wind", fields=["mslp", "u10", "v10"], fill="wspd", key="10 m wind (mph)", ticks=HS.WIND_TICKS,
-                         **table(HS.WIND_LEVELS, CM["aifswind"], "max"), spd_sigma=1.5, isobars=dict(every=4, sigma=6.0 if m == "hrrr" else 1.0,
+                         **table(HS.WIND_LEVELS, CM["aifswind"], "max"), spd_sigma=1.5, isobars=dict(every=4, sigma=6.0 if m == "hrrr" else 2.5 if m == "ifs9" else 1.0,
                          color=HS.ISOBAR_COLOR, lw=HS.ISOBAR_LW, halo=HS.ISOBAR_HALO), barbs=dict(color=HS.BARB_COLOR, length=HS.BARB_LENGTH, lw=HS.BARB_LW),
                          extra="isobars every 4 mb  \u00b7  barbs in kt  \u00b7  up to {hi} mph in view", pct=[0.5, 99.5]),
         "t850": dict(title="850 mb Temperature", fields=["t850"], key="850 mb temp (\u00b0C)", ticks=HS.T850_TICKS, tickfmt=True,
@@ -929,7 +950,7 @@ def static(m, out, views_only=None, x2_only=False):
         "ir": dict(title="Simulated IR Satellite", fields=["ir"], key="Tops (\u00b0C)", ticks=[-80, -60, -40, -20, 0, 20, 40], tickfmt=True,
                    **table(M.IR_LEVELS, CM["ir"], "both"), extra="model cloud-top temperature, 10.7 \u00b5m  \u00b7  colors = cold, high tops", pct=[0, 100], towns="names"),
         "mucape": dict(title="Most Unstable CAPE", fields=["mucape"], key="MUCAPE (J/kg)", ticks=CAPE_L, tickfmt=True,
-                       **table(CAPE_L, CM["mucape"], "max"), extra=("ECMWF most-unstable CAPE" if m == "ifs" else "most-unstable parcel (lowest 255 mb)") +
+                       **table(CAPE_L, CM["mucape"], "max"), extra=("ECMWF most-unstable CAPE" if as_model(m) == "ifs" else "most-unstable parcel (lowest 255 mb)") +
                        "  \u00b7  blank under 100 J/kg  \u00b7  up to {hi} J/kg in view", pct=[0, 99.9], only=("ifs", "gfs", "hrrr", "rrfs")),
         "sbcape": dict(title="Surface-Based CAPE", fields=["sbcape"], key="SBCAPE (J/kg)", ticks=CAPE_L, tickfmt=True,
                        **table(CAPE_L, CM["sbcape"], "max"), extra="surface parcel  \u00b7  blank under 100 J/kg  \u00b7  up to {hi} J/kg in view",
@@ -942,13 +963,13 @@ def static(m, out, views_only=None, x2_only=False):
                      extra="PROXY, not flash density: ECMWF has no free lightning field  \u00b7  6 h convective precip (3 h at F+3) where MUCAPE \u2265 100",
                      pct=[0, 99.9], dec=2, fmt="in2", towns="names", only=("ifs",)),
         "w500": dict(title="500 mb Wind", fields=["u500", "v500", "z500"], fill="wspd", wind=["u500", "v500"], spd_mult=1.0, key="Wind (kt)",
-                     ticks=list(range(20, 151, 10)), tickfmt=True, **table(W5_L, CM["w500"], "max"), spd_sigma=2.0 if m == "hrrr" else 0.8,
-                     isobars=dict(field="z500", scale=0.1, every=6, sigma=7.0 if m == "hrrr" else 1.5, color="#101114", lw=1.1, halo=2.6),
+                     ticks=list(range(20, 151, 10)), tickfmt=True, **table(W5_L, CM["w500"], "max"), spd_sigma=2.0 if m == "hrrr" else 2.0 if m == "ifs9" else 0.8,
+                     isobars=dict(field="z500", scale=0.1, every=6, sigma=7.0 if m == "hrrr" else 3.5 if m == "ifs9" else 1.5, color="#101114", lw=1.1, halo=2.6),
                      barbs=dict(u="u500", v="v500", color=HS.BARB_COLOR, length=HS.BARB_LENGTH, lw=HS.BARB_LW),
                      extra="speed in kt  \u00b7  shaded from 20 kt  \u00b7  heights every 6 dam  \u00b7  up to {hi} kt in view", pct=[0.5, 99.9], towns="names"),
         "w250": dict(title="250 mb Wind (jet)", fields=["u250", "v250", "z250"], fill="wspd", wind=["u250", "v250"], spd_mult=1.0, key="Wind (kt)",
-                     ticks=list(range(50, 201, 25)), tickfmt=True, **table(JET_L, CM["w250"], "max"), spd_sigma=2.0 if m == "hrrr" else 0.8,
-                     isobars=dict(field="z250", scale=0.1, every=12, sigma=7.0 if m == "hrrr" else 1.5, color="#101114", lw=1.1, halo=2.6),
+                     ticks=list(range(50, 201, 25)), tickfmt=True, **table(JET_L, CM["w250"], "max"), spd_sigma=2.0 if m == "hrrr" else 2.0 if m == "ifs9" else 0.8,
+                     isobars=dict(field="z250", scale=0.1, every=12, sigma=7.0 if m == "hrrr" else 3.5 if m == "ifs9" else 1.5, color="#101114", lw=1.1, halo=2.6),
                      barbs=dict(u="u250", v="v250", color=HS.BARB_COLOR, length=HS.BARB_LENGTH, lw=HS.BARB_LW),
                      extra="speed in kt  \u00b7  shaded from 50 kt  \u00b7  heights every 12 dam  \u00b7  up to {hi} kt in view", pct=[0.5, 99.9], towns="names"),
         # 10-30 8 PM (Benjamin: "Please add 300mb wind to the products on the global maps"): same look as the 250 mb jet map
@@ -987,7 +1008,7 @@ def static(m, out, views_only=None, x2_only=False):
                      pct=[0, 100], dec=2, fmt="in2", only=("hrrr", "rrfs", "gfs", "ifs", "aifs")),
         "mslpqpf": dict(title="MSLP + 6 h Precipitation", fields=["apcp", "mslp"], window=6, fill="window", key="6 h precip (in)",
                         ticks=[0.1, 0.5, 1, 2, 3, 4, 6], tickfmt=True, **table(HS.RAIN_LEVELS, CM["qpf"], "max"),
-                        isobars=dict(field="mslp", every=4, sigma=6.0 if m == "hrrr" else 1.0, color=HS.ISOBAR_COLOR, lw=HS.ISOBAR_LW, halo=HS.ISOBAR_HALO),
+                        isobars=dict(field="mslp", every=4, sigma=6.0 if m == "hrrr" else 2.5 if m == "ifs9" else 1.0, color=HS.ISOBAR_COLOR, lw=HS.ISOBAR_LW, halo=HS.ISOBAR_HALO),
                         extra="isobars every 4 mb  \u00b7  precip in the 6 h ending at the valid time  \u00b7  max {hi} in in view",
                         pct=[0, 100], dec=2, fmt="in2", towns="names", only=("hrrr", "rrfs", "gfs", "ifs", "aifs")),
         "snow1": dict(title="1 h Snowfall (rate)", fields=["asnow"], window=1, wfield="asnow", fill="window", key="Snow (in)", ticks=[0.1, 0.5, 1, 2, 3, 4], tickfmt=True,
@@ -1085,11 +1106,11 @@ def static(m, out, views_only=None, x2_only=False):
                      extra="barbs in kt  \u00b7  up to {hi} kt in view", pct=[1, 99.9], towns="none", only=("hrrr", "rrfs", "gfs", "ifs", "aifs")),
         "thick": dict(title="1000-500 mb Thickness + MSLP", fields=["z500", "z1000", "mslp"], fill="thick", key="Thickness (dam)", ticks=list(range(498, 601, 12)), tickfmt=True,
                       **table(TH_L, CM["thick"], "both"), freeze=540,
-                      isobars=dict(field="mslp", every=4, sigma=6.0 if m == "hrrr" else 1.0, color=HS.ISOBAR_COLOR, lw=HS.ISOBAR_LW, halo=HS.ISOBAR_HALO),
+                      isobars=dict(field="mslp", every=4, sigma=6.0 if m == "hrrr" else 2.5 if m == "ifs9" else 1.0, color=HS.ISOBAR_COLOR, lw=HS.ISOBAR_LW, halo=HS.ISOBAR_HALO),
                       extra="540 dam line dashed (rain/snow rule of thumb)  \u00b7  isobars every 4 mb  \u00b7  {lo} to {hi} dam in view", pct=[0.5, 99.5], towns="none",
                       only=("hrrr", "rrfs", "gfs", "ifs", "aifs")),
         "slp": dict(title="Sea-Level Pressure", fields=["mslp"], key="MSLP (mb)", ticks=list(range(960, 1051, 10)), tickfmt=True, **table(SLP_L, CM["slp"], "both"),
-                    isobars=dict(field="mslp", every=4, sigma=6.0 if m == "hrrr" else 1.0, color=HS.ISOBAR_COLOR, lw=HS.ISOBAR_LW, halo=HS.ISOBAR_HALO), hl=True,
+                    isobars=dict(field="mslp", every=4, sigma=6.0 if m == "hrrr" else 2.5 if m == "ifs9" else 1.0, color=HS.ISOBAR_COLOR, lw=HS.ISOBAR_LW, halo=HS.ISOBAR_HALO), hl=True,
                     extra="isobars every 4 mb  \u00b7  H / L = high and low centers  \u00b7  {lo} to {hi} mb in view", pct=[0.5, 99.5], towns="none",
                     only=("hrrr", "rrfs", "gfs", "ifs", "aifs", "eps", "aens")),
         "pw": dict(title="Precipitable Water", fields=["pw"], key="PW (in)", ticks=[0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 2.5], tickfmt=True, **table(PW_L, CM["pw"], "max"),
@@ -1100,14 +1121,14 @@ def static(m, out, views_only=None, x2_only=False):
                     only=("hrrr", "rrfs", "gfs", "ifs", "aifs")),
         "ptype": dict(title="MSLP + Precipitation Type", fields=["prt", "mslp"], fill="prt", key="Precip type (light to heavy)",
                       ticks=[4.5, 20.5, 36.5, 52.5], tickfmt=True, **table(PT_L, CM["ptype"], "neither"),
-                      isobars=dict(field="mslp", every=4, sigma=6.0 if m == "hrrr" else 1.0, color=HS.ISOBAR_COLOR, lw=HS.ISOBAR_LW, halo=HS.ISOBAR_HALO),
+                      isobars=dict(field="mslp", every=4, sigma=6.0 if m == "hrrr" else 2.5 if m == "ifs9" else 1.0, color=HS.ISOBAR_COLOR, lw=HS.ISOBAR_LW, halo=HS.ISOBAR_HALO),
                       extra="precip type and rate at the valid time  \u00b7  isobars every 4 mb", pct=[0, 100], towns="names", ticklabels=["Rain", "Snow", "Sleet / mix", "Freezing rain"],
                       only=("hrrr", "rrfs", "gfs", "ifs")),
     }
     # Overnight 10-30 (go-live audit gap 5): the old site's period variants. All browser-side sums / maxima of fields every run
     # already stores (snow water, Kuchera and freezing-rain increments, gust), so no new R2 data per run; only keys are added.
     SNOW_T = {6: [0.1, 1, 3, 6, 10, 15, 24], 12: [0.1, 1, 3, 6, 10, 15, 24], 24: [0.1, 1, 3, 6, 10, 15, 24, 36], 48: [0.1, 1, 3, 6, 10, 15, 24, 36, 48]}
-    snow_how = "ECMWF snowfall water x 10 (10:1)" if m in ("ifs", "aifs", "eps", "aens") else "model snow density"
+    snow_how = "ECMWF snowfall water x 10 (10:1)" if as_model(m) in ("ifs", "aifs", "eps", "aens") else "model snow density"
     prods["snow6"]["only"] = ("hrrr", "rrfs", "ifs", "aifs")
     prods["snow6"]["extra"] = f"snowfall in the 6 h ending at the valid time ({snow_how})  \u00b7  max {{hi}} in in view"
     for h in (12, 24, 48):
@@ -1124,7 +1145,9 @@ def static(m, out, views_only=None, x2_only=False):
                                  extra=f"highest gust over the model hours in the {h} h ending at the valid time  \u00b7  up to {{hi}} mph in view")
     ALLP = {k: dict(v) for k, v in prods.items()}   # before the per-model filter (ensemble picks shared products below)
     for v in ALLP.values(): v.pop("only", None)
-    prods = {k: v for k, v in prods.items() if m in v.pop("only", (m,))}
+    prods = {k: v for k, v in prods.items() if as_model(m) in v.pop("only", (as_model(m),))}
+    if m == "ifs9":   # 9 km: no waves (0.25 deg only) and no anomalies (would need 0.1 deg climatology files: more R2 space)
+        prods = {k: v for k, v in prods.items() if not v.get("clim") and not set(v["fields"]) & IFS9_SKIP}
     if m == "nbm":   # National Blend: its own period fields (1/6 h precip, 6 h snow, 3 h thunder, 12 h max/min)
         prods = {k: prods[k] for k in ("t2m", "gust10", "tcc")}
         prods["gust10"]["extra"] = "NBM gust at the valid time  \u00b7  up to {hi} mph in view"
@@ -1241,7 +1264,7 @@ def static(m, out, views_only=None, x2_only=False):
     if "ptype" in prods: prods["ptype"]["under"] = "#f4f5f7"
     for k in ("nqpf1", "nqpf6", "nsnow6"):
         if k in prods: prods[k]["min_show"] = prods[k]["levels"][0]
-    if m in ("ifs", "aifs") and "snow" in prods:
+    if as_model(m) in ("ifs", "aifs") and "snow" in prods:
         prods["snow"]["extra"] = "ECMWF snowfall water x 10 (10:1)  \u00b7  since the run started  \u00b7  max {hi} in in view"
         prods["snow"]["title"] = "Snowfall Total (10:1)"
     for k in ("kuchera", "kuch24", "fzra"):

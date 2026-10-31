@@ -46,7 +46,10 @@ def main():
     ap.add_argument("--workers", type=int, default=4); ap.add_argument("--out", default=os.path.join(HERE, "data")); ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args(); t_end = time.time() + a.minutes * 60; D = a.out; os.makedirs(D, exist_ok=True)
     s3 = client(); s3.download_file(BUCKET, "manifest.json", f"{D}/manifest.json")
-    for m in a.models.split(","):
+    models = a.models.split(",")
+    # ECMWF 9 km (ifs9) rides the ECMWF job (no workflow change): after "ifs", once its static layers are in the manifest
+    if "ifs" in models and "ifs9" not in models: models.insert(models.index("ifs") + 1, "ifs9")
+    for m in models:
         if time.time() > t_end - 120: print("time budget used up", flush=True); MORE.add(m); continue
         if m not in json.load(open(f"{D}/manifest.json")).get("models", {}): print(m, "no static layers in R2 yet, skipped", flush=True); continue
         c = target_cycle(m)
@@ -66,7 +69,7 @@ def main():
             nxt = [s for s in want if s not in have][:chunk]
             if not nxt or not avail(m, c, nxt[0]): break
             nxt = [s for s in nxt if avail(m, c, s)] if not avail(m, c, nxt[-1]) else nxt
-            run, new = FE.steps(m, cyc, nxt, D, a.workers)
+            run, new = FE.steps(m, cyc, nxt, D, min(a.workers, 2) if m == "ifs9" else a.workers)   # 9 km: ~3 GB per worker (global 0.1 deg fields)
             # steps() kept only the unbroken run of the chunk; rebuild the full list with the old steps
             full = json.load(open(f"{rd}/run.json")); old = {x["f"]: x for x in ((r0 or {}).get("steps", []))}
             for x in full["steps"]: old[x["f"]] = x

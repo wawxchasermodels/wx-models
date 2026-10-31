@@ -142,7 +142,7 @@ async function boot() {
                                    document.fonts.load("800 20px Montserrat"), document.fonts.load("500 12px Montserrat")]);
   S.man = man;
   // runs: "model/cycle", newest first per model; models in a fixed order
-  const order = ["hrrr", "rrfs", "nbm", "gfs", "ifs", "aifs", "eps", "aens"].filter(m => S.man.models[m] && (S.man.runs[m] || []).length);
+  const order = ["hrrr", "rrfs", "nbm", "gfs", "ifs", "ifs9", "aifs", "eps", "aens"].filter(m => S.man.models[m] && (S.man.runs[m] || []).length);
   const all = []; for (const m of order) for (const c of [...S.man.runs[m]].reverse()) all.push(`${m}/${c}`);
   const qr = Q.get("run"), qm = Q.get("model");
   S.run = all.includes(qr) ? qr : (all.find(r => qm && r.startsWith(qm + "/")) || all[0]);
@@ -1058,7 +1058,7 @@ const MG = { open: null, town: Q.get("town") || "Seattle", run: null, cache: new
 const PTZ = "America/Los_Angeles";
 const fmtPT = (iso, o) => new Intl.DateTimeFormat("en-US", Object.assign({ timeZone: PTZ }, o)).format(new Date(iso));
 function mgRuns() {   // newest run of each model that carries town points
-  const order = ["hrrr", "rrfs", "nbm", "gfs", "ifs", "aifs", "eps", "aens"], out = [];
+  const order = ["hrrr", "rrfs", "nbm", "gfs", "ifs", "ifs9", "aifs", "eps", "aens"], out = [];
   for (const m of order) for (const c of [...(S.man.runs[m] || [])].reverse()) { const r = `${m}/${c}`; if (S.runs[r] && !S.runs[r].points) continue; out.push(r); break; }
   return out;
 }
