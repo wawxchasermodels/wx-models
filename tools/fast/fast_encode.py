@@ -429,6 +429,7 @@ FIELDS = {   # name: (getter, units)
     "u925": (_f("U:925", lambda v: v * 1.94384), "kt"), "v925": (_f("V:925", lambda v: v * 1.94384), "kt"), "t925": (_f("T:925", lambda k: k - 273.15), "C"),
     "u700": (_f("U:700", lambda v: v * 1.94384), "kt"), "v700": (_f("V:700", lambda v: v * 1.94384), "kt"), "t500": (_f("T:500", lambda k: k - 273.15), "C"),
     "u300": (_f("U:300", lambda v: v * 1.94384), "kt"), "v300": (_f("V:300", lambda v: v * 1.94384), "kt"), "t300": (_f("T:300", lambda k: k - 273.15), "C"),
+    "z300": (_f("Z:300", lambda z: z), "m"),   # 10-30 8 PM (Benjamin: "add 300mb wind to the products on the global maps"): height lines
     "z1000": (_f("Z:1000", lambda z: z), "m"),
     "d2m": (_f("td2m", lambda k: (k - 273.15) * 1.8 + 32), "F"),
     "pw": (_f("pwat", lambda v: v / 25.4), "in"),
@@ -839,6 +840,7 @@ def static(m, out, views_only=None, x2_only=False):
     T8A_L = np.arange(-15, 16, 1)
     CM.update(t2ma=TM.t2a_cmap(), t850a=HS.cmap([HS._anom_color(27.0 * x) for x in (T8A_L[:-1] + T8A_L[1:]) / 2.0], HS.ANOM_UNDER, HS.ANOM_OVER))
     CM.update(w500=M.ramp(M.W500_LEVELS, M.W500_ANCH), w250=M.ramp(M.JET_LEVELS, M.JET_ANCH), z500anom=HS.anom_cmap())
+    CM["w300"] = CM["w250"]   # 300 mb wind: jet colors
     CM.update(mucape=M.ramp(CAPE_L, CAPE_A), sbcape=M.ramp(CAPE_L, CAPE_A), ltng=M.ramp(LTNG_L, LTNG_A), ltgp=HS.cmap(LTGP_C, LTGP_C[0], LTGP_C[-1]))
     CM["ltng6"] = CM["ltng"]
     DS_L = [-36, -24, -18, -12, -8, -6, -4, -2, -1, -0.5, 0.5, 1, 2, 4, 6, 8, 12, 18, 24, 36]
@@ -937,6 +939,16 @@ def static(m, out, views_only=None, x2_only=False):
                      isobars=dict(field="z250", scale=0.1, every=12, sigma=7.0 if m == "hrrr" else 1.5, color="#101114", lw=1.1, halo=2.6),
                      barbs=dict(u="u250", v="v250", color=HS.BARB_COLOR, length=HS.BARB_LENGTH, lw=HS.BARB_LW),
                      extra="speed in kt  \u00b7  shaded from 50 kt  \u00b7  heights every 12 dam  \u00b7  up to {hi} kt in view", pct=[0.5, 99.9], towns="names"),
+        # 10-30 8 PM (Benjamin: "Please add 300mb wind to the products on the global maps"): same look as the 250 mb jet map
+        # (jet colors from 50 kt, barbs in kt); height lines every 12 dam (old site's 300 mb interval) from z300, which runs
+        # encoded before 10-30 8 PM lack: the viewer then draws wind + barbs only (opt fields)
+        "w300": dict(title="300 mb Wind (jet)", fields=["u300", "v300"], opt=["z300"], fill="wspd", wind=["u300", "v300"], spd_mult=1.0, key="Wind (kt)",
+                     ticks=list(range(50, 201, 25)), tickfmt=True, **table(JET_L, CM["w250"], "max"), spd_sigma=0.8,
+                     isobars=dict(field="z300", scale=0.1, every=12, sigma=1.5, color="#101114", lw=1.1, halo=2.6),
+                     barbs=dict(u="u300", v="v300", color=HS.BARB_COLOR, length=HS.BARB_LENGTH, lw=HS.BARB_LW),
+                     extra="speed in kt  \u00b7  shaded from 50 kt  \u00b7  heights every 12 dam  \u00b7  up to {hi} kt in view",
+                     extra_noh="speed in kt  \u00b7  shaded from 50 kt  \u00b7  up to {hi} kt in view", pct=[0.5, 99.9], towns="names",
+                     only=("gfs", "ifs", "aifs")),
         "z500anom": dict(title="500 mb Height Anomaly", fields=["z500"], fill="z500anom", key="Anomaly (m)", ticks=HS.ANOM_TICKS, tickfmt=True,
                          **table(HS.ANOM_LEVELS, CM["z500anom"], "both"),
                          isobars=dict(field="z500", scale=0.1, every=6, sigma=1.5, color="#101114", lw=1.25, halo=2.4),
@@ -1164,7 +1176,7 @@ def static(m, out, views_only=None, x2_only=False):
     if "ep32" in prods: prods["ep32"]["min_show"] = 5
     for k, v in (("eqpf90", None), ("esnow", None), ("esnow90", None), ("epcape", 10)):
         if k in prods: prods[k]["min_show"] = v if v is not None else prods[k]["levels"][0]
-    for k in ("w500", "w250"):
+    for k in ("w500", "w250", "w300"):
         if k in prods: prods[k]["under"] = "#f4f5f7"   # light below the first level so barbs and height lines stay readable
     if "mslpqpf" in prods: prods["mslpqpf"]["under"] = "#f4f5f7"
     if "w850" in prods: prods["w850"]["under"] = "#f4f5f7"   # light below 10 kt (was black)   # light background so the dark isobars read (no blanking)
@@ -1200,7 +1212,9 @@ def static(m, out, views_only=None, x2_only=False):
             HS.credit(fig, TM.CREDIT_NOAA if (pid == "t2m" and m in NOAA) else (M.credit(m) if m in M.MODELS else M.credit("gfs") if minfo(m).get("noaa") else TM.CREDIT.format(name=minfo(m)["name"])))
             sizes[f"key_{m}_{pid}_{vid}"] = save(fig, f"{out}/{fn}")
         P["ticks"] = [float(t) for t in tk0]
-    if x2_only: print(f"{m} x2 layers done (no clim / manifest)", flush=True); return
+    if x2_only:
+        json.dump(prods, open(f"{out}/products_{m}.json", "w"), indent=1)   # for a targeted manifest merge (tools: add_product.py)
+        print(f"{m} x2 layers done (no clim / manifest)", flush=True); return
     clim = {}
     for var in sorted({P["clim"] for P in prods.values() if P.get("clim")}):
         clim[var] = clim_static(m, out, crop_la, crop_lo, var, None if oro is None else oro[i0:i1, j0:j1] / 3.28084)
