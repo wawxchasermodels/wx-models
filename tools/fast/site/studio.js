@@ -63,15 +63,27 @@ const LOGOS = { wa: "brand/wawx.png", usa: "brand/usawx.png", wawc: "brand/wawc.
 // links (make=loop, clean OBS) ignore saved settings and only brand when the link says brand=1 (or card=1 / lower=1).
 try { localStorage.removeItem("studio:brand"); } catch (e) { /* private */ }
 const BR = Object.assign({ card: false, lower: false, logo: "wa", title: "", storm: "" }, (() => { if (SQ.get("make") || CLEAN) return {};
-  try { const o = JSON.parse(localStorage.getItem("studio:brand3") || "{}"); delete o.card; delete o.lower; return o; } catch (e) { return {}; } })());
+  try { const o = JSON.parse(localStorage.getItem("studio:brand3") || "{}"); delete o.card; delete o.lower; delete o.corner; return o; } catch (e) { return {}; } })());
 if (SQ.get("brand") === "1") { BR.card = true; BR.lower = true; }
+// corner logo (10-31 4:51 PM, Benjamin: "a smaller logo in one of the top corners ... under the F+ hours", "Just the logo"):
+// only the logo image, no text / panel. Off on every load (never remembered as on); corner + logo choice are remembered.
+// Links: &corner=1, &cornerpos=tl|tr (default tr, under the F+ badge), &brandlogo=.
+BR.corner = SQ.get("corner") === "1"; BR.cpos = SQ.get("cornerpos") === "tl" ? "tl" : SQ.get("cornerpos") === "tr" ? "tr" : (BR.cpos === "tl" ? "tl" : "tr");
 for (const [q, k_] of [["card", "card"], ["lower", "lower"]]) if (SQ.has(q)) BR[k_] = SQ.get(q) === "1";
 if (SQ.has("title")) BR.title = SQ.get("title"); if (SQ.has("storm")) BR.storm = SQ.get("storm"); if (SQ.has("brandlogo")) BR.logo = SQ.get("brandlogo");
-const saveBR = () => { if (!SQ.get("make") && !CLEAN) try { localStorage.setItem("studio:brand3", JSON.stringify({ logo: BR.logo, title: BR.autoT ? "" : BR.title, storm: BR.autoS ? "" : BR.storm })); } catch (e) { /* private */ } };
+const saveBR = () => { if (!SQ.get("make") && !CLEAN) try { localStorage.setItem("studio:brand3", JSON.stringify({ logo: BR.logo, cpos: BR.cpos, title: BR.autoT ? "" : BR.title, storm: BR.autoS ? "" : BR.storm })); } catch (e) { /* private */ } };
 const logoImg = {};
 function getLogo() { const u = LOGOS[BR.logo]; if (!u) return null; if (!logoImg[u]) { const im = new Image(); im.src = u; logoImg[u] = im; im.onload = () => renderAll(); } const im = logoImg[u]; return im.complete && im.naturalWidth ? im : null; }
 const ptTime = (iso, o) => { try { return new Date(iso).toLocaleString("en-US", Object.assign({ timeZone: "America/Los_Angeles" }, o)); } catch (e) { return iso; } };
 function runText() { const [m, c] = last.cur.run.split("/"), site = (S.man.models[m] || {}).site || m; return `${site} ${c.slice(8)}Z ${c.slice(4, 6)}-${c.slice(6, 8)} run`; }
+// just the logo image: ~10 % (9:16) / 8 % (16:9) of frame width, 88 % opacity, soft dark shadow so the white ring reads on light maps.
+// tr: right-aligned under the F+ badge; tl: under the header text (title + valid line).
+function cornerLogo(k, c, badgeBot, headBot) {
+  const lg = getLogo(); if (!lg) return; const f = F[k], s = Math.round(f.W * (k === "v" ? 0.10 : 0.08)), gap = k === "v" ? 18 : 14;
+  const x = BR.cpos === "tl" ? f.pad : f.W - f.pad - s, y = Math.round((BR.cpos === "tl" ? headBot : badgeBot) + gap);
+  c.save(); c.globalAlpha = 0.88; c.shadowColor = "rgba(0,0,0,0.55)"; c.shadowBlur = Math.round(s * 0.09); c.shadowOffsetY = Math.round(s * 0.02);
+  c.drawImage(lg, x, y, s, s); c.restore();
+}
 function lowerThird(k, c) {
   const f = F[k], step = last.step, lg = getLogo(), h = k === "v" ? 150 : 118, w = k === "v" ? f.W - 2 * f.pad : 860, x = f.pad, y = f.H - f.bot - h - (k === "v" ? 40 : 26);
   c.save(); c.fillStyle = "rgba(13,15,19,0.84)"; c.beginPath(); c.roundRect ? c.roundRect(x, y, w, h, 16) : c.rect(x, y, w, h); c.fill();
@@ -118,11 +130,12 @@ async function render(k, frO) {   // frO: camera override (MP4 storm-track pan)
   for (const w_ of words) { const t = line ? line + " " + w_ : w_; if (c.measureText(t).width > maxW && line) { lines.push(line); line = w_; } else line = t; } lines.push(line);
   lines.forEach((t, i) => c.fillText(t, x, y + i * f.title * 1.08)); y += (lines.length - 1) * f.title * 1.08 + f.valid * 1.4;
   c.font = `700 ${f.valid}px Montserrat`; c.fillStyle = "#ffc24d"; c.fillText((step.valid_line || "").replace(/^Valid /, ""), x, y);
-  c.shadowBlur = 0;
+  c.shadowBlur = 0; const headBot = y + f.valid * 0.45;
   // F+ badge (top right)
   c.font = `800 ${Math.round(f.valid * 1.1)}px Montserrat`; const bt = `F+${step.f}`, bw = c.measureText(bt).width + 40, bx = f.W - f.pad - bw, by = k === "v" ? 120 : 34;
   c.fillStyle = "rgba(17,19,22,0.85)"; c.strokeStyle = "rgba(255,255,255,0.35)"; c.lineWidth = 2; c.beginPath(); c.roundRect ? c.roundRect(bx, by, bw, f.valid * 1.9, 14) : c.rect(bx, by, bw, f.valid * 1.9); c.fill(); c.stroke();
   c.fillStyle = "#fff"; c.textAlign = "center"; c.fillText(bt, bx + bw / 2, by + f.valid * 1.32); c.textAlign = "left";
+  if (BR.corner) cornerLogo(k, c, by + f.valid * 1.9, headBot);
   // bottom: color bar + credit
   band(c, f.H - f.bot - 40, f.H, false);
   const cbW = k === "v" ? f.W - 2 * f.pad : Math.min(1100, f.W * 0.58), cbY = f.H - f.bot + (k === "v" ? 110 : 62), cbS = k === "v" ? 28 : 24;
@@ -342,6 +355,7 @@ async function makeMp4() {
   if (!last || REC.on) return;
   const k = $s("mpk").value, f = F[k], pan = $s("mpmode").value === "pan", pins = getPins(), idx = pickIdx(), steps = S.runs[S.run].steps;
   if (idx.length < 2) { mpSt("Pick an end hour after the start hour."); return; }
+  if ((BR.corner || BR.card || BR.lower) && LOGOS[BR.logo]) { const t_ = performance.now(); while (!getLogo() && performance.now() - t_ < 4000) await sleep(50); }   // logo on frame 1
   if (pan && !(pins.a && pins.b)) { mpSt("Track storm needs pins: tap the frame where the loop starts (A), then where it ends (B)."); startPin(pins.a ? "b" : "a"); return; }
   const T = loopTimes(idx.length), holdN = Math.round(+$s("mph").value * FPS), panN = Math.max(1, Math.round(T[idx.length] * FPS) - 1);
   // 10-31 1:35 PM (Benjamin: "starting zoom and ending zoom ... start zoom out a bit but zoom in slowly on the storm"): the zoom
@@ -388,7 +402,7 @@ async function makeMp4() {
     const nm = `${run.replace("/", "_")}_${last.cur.pid}_${S.view}_F${steps[idx[0]].f}-F${steps[idx[idx.length - 1]].f}_${k === "v" ? "1080x1920" : "1920x1080"}${pan ? "_track" : ""}.${blob.type.includes("mp4") ? "mp4" : "webm"}`;
     const u = URL.createObjectURL(blob), v = $s("mpv"), dl = $s("mpdl"); if (v.dataset.u) URL.revokeObjectURL(v.dataset.u); v.dataset.u = u; v.src = u; dl.href = u; dl.download = nm;
     const file = new File([blob], nm, { type: blob.type }); $s("mpshare").hidden = !(navigator.canShare && navigator.canShare({ files: [file] })); $s("mpshare").onclick = () => navigator.share({ files: [file] }).catch(() => {});
-    n += cardN; $s("mpout").hidden = false; window.__mp4 = { name: nm, bytes: blob.size, frames: n, seconds: n / FPS, branded: !!(BR.card || BR.lower), how, ms: Math.round(performance.now() - t0), blob };
+    n += cardN; $s("mpout").hidden = false; window.__mp4 = { name: nm, bytes: blob.size, frames: n, seconds: n / FPS, branded: !!(BR.card || BR.lower), corner: !!(BR.corner && LOGOS[BR.logo]) ? BR.cpos : null, how, ms: Math.round(performance.now() - t0), blob };
     mpSt(`Done: ${(blob.size / 1e6).toFixed(1)} MB, ${(n / FPS).toFixed(1)} s, made in ${((performance.now() - t0) / 1000).toFixed(0)} s`);
   } catch (e) { if (enc) enc.abort(); mpSt(e.message === "stopped" ? "Stopped." : "Could not make the video: " + (e.message || e)); window.__mp4 = { error: String(e.message || e) }; }
   finally { REC.on = false; window.__vjNoJump = false; $s("mpgo").disabled = false; $s("mpstop").hidden = true; $s("mpprog").hidden = true; document.body.classList.remove("rec"); if (S.run === run) { S.i = keep; $("step").value = keep; } draw(); }
@@ -466,7 +480,7 @@ function applyStorm(n) {
     `Loop F+${P_.startF} to F+${P_.endF}. A = start, B = ${lf ? "landfall" : "end"}. Change any of it below, or Set pin A / B by hand.`;
   mpSt(`Found ${TRK.list.length} storm track${TRK.list.length === 1 ? "" : "s"}; using the deepest.`); mpInfo();
 }
-function brSync() { if (!$s("brcard")) return; $s("brcard").checked = BR.card; $s("brlower").checked = BR.lower; $s("brlogo").value = LOGOS[BR.logo] ? BR.logo : "none"; $s("brtitle").value = BR.title || ""; $s("brstorm").value = BR.storm || ""; }
+function brSync() { if (!$s("brcard")) return; $s("brcard").checked = BR.card; $s("brlower").checked = BR.lower; if ($s("brcorner")) { $s("brcorner").checked = BR.corner; $s("brcpos").value = BR.cpos; } $s("brlogo").value = LOGOS[BR.logo] ? BR.logo : "none"; $s("brtitle").value = BR.title || ""; $s("brstorm").value = BR.storm || ""; }
 // ---- batch export (10-31 3:49 PM, Benjamin: "Yes to 2"): tick models / products / views / frame shapes, one button makes every
 // MP4 with the panel's settings (hours by forecast hour, speed, zoom, mode / pins of each view, preset; "Auto storm track" finds
 // the storm per map) and packs them in one .zip (stored, MP4s don't compress). Result: window.__batchResult.
@@ -605,6 +619,8 @@ if (!CLEAN && $s("mp4p")) {
   $s("mpsfl").addEventListener("change", (e) => applyStorm(+e.target.value));
   brSync();
   for (const id of ["brcard", "brlower"]) $s(id).addEventListener("change", (e) => { BR[id === "brcard" ? "card" : "lower"] = e.target.checked; saveBR(); renderAll(); });
+  $s("brcorner").addEventListener("change", (e) => { BR.corner = e.target.checked; if (BR.corner && !LOGOS[BR.logo]) { BR.logo = "wa"; brSync(); } saveBR(); renderAll(); });
+  $s("brcpos").addEventListener("change", (e) => { BR.cpos = e.target.value; saveBR(); renderAll(); });
   $s("brlogo").addEventListener("change", (e) => { BR.logo = e.target.value; saveBR(); renderAll(); });
   $s("brtitle").addEventListener("input", (e) => { BR.title = e.target.value; BR.autoT = false; saveBR(); renderAll(); });
   $s("brstorm").addEventListener("input", (e) => { BR.storm = e.target.value; BR.autoS = false; saveBR(); renderAll(); });
