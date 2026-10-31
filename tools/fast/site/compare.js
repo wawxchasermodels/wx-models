@@ -26,7 +26,8 @@ function push(from) {   // send the synced parts of `from` to the other frame
 }
 let urlT = 0;
 addEventListener("message", (e) => {
-  const d = e.data; if (!d || d.wx !== "state" || !ST.hasOwnProperty(d.id)) return;
+  const d = e.data; if (d && d.wx === "size" && SLIM && ST.hasOwnProperty(d.id) && e.source === frame(d.id)) { $(d.id).style.height = Math.max(120, Math.min(1400, d.h)) + "px"; return; }
+  if (!d || d.wx !== "state" || !ST.hasOwnProperty(d.id)) return;
   if (e.source !== frame(d.id)) return;
   const first = !ST[d.id]; ST[d.id] = d;
   if (SLIM && d.h) $(d.id).style.height = Math.max(150, Math.min(1400, d.h)) + "px";

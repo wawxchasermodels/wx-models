@@ -155,7 +155,8 @@ async function boot() {
   // hour slider replaces this frame's own, the map is sized to the frame width (the page sizes the frame to the map)
   if (Q.get("slim")) { document.body.classList.add("cslim"); const b = document.createElement("button"); b.id = "cgear"; b.type = "button"; b.textContent = "Menus";
     b.title = "Show / hide this map's model, product and view menus"; b.onclick = () => { document.body.classList.toggle("cshow"); fitPhone(); setTimeout(() => S.cur && postCompare(S.cur.run, S.cur.pid, S.view, S.runs[S.run].steps[S.i]), 50); };
-    document.body.appendChild(b); }
+    document.body.appendChild(b);
+    let lh = 0; new ResizeObserver(() => { const h = cslimH(); if (Math.abs(h - lh) > 2 && parent !== window) { lh = h; parent.postMessage({ wx: "size", id: Q.get("id"), h }, "*"); } }).observe(document.body); }
   // 10-29: manifest, fonts and the shown run's run.json in parallel; other runs load when picked
   const [man] = await Promise.all([fetch(DATA + "manifest.json", { cache: "no-cache" }).then(r => r.json()),
                                    document.fonts.load("800 20px Montserrat"), document.fonts.load("500 12px Montserrat")]);
