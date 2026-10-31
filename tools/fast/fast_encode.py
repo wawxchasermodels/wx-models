@@ -1037,6 +1037,10 @@ def static(m, out, views_only=None, x2_only=False):
         "wavemax": dict(title="Estimated Max Wave Height", fields=["swh"], fill="hmax", key="Max wave (ft)", ticks=[0, 4, 8, 14, 20, 28, 40], tickfmt=True,
                         **table(WV_L, CM["wavemax"], "max"), extra="1.86 x significant height (largest of ~1000 waves, Rayleigh; as the old site)"
                         "  \u00b7  up to {hi} ft in view", pct=[0, 99.9], only=("ifs",)),
+        "wavemax24": dict(title="24 h Max Wave Height (est.)", fields=["swh"], window=24, wmax=True, wfield="swh", wscale=1.86, fill="window", cmap_of="wavemax",
+                          key="Max wave (ft)", ticks=[0, 4, 8, 14, 20, 28, 40], tickfmt=True, **table(WV_L, CM["wavemax"], "max"),
+                          extra="1.86 x the highest significant height over the model hours in the 24 h ending at the valid time  \u00b7  up to {hi} ft in view",
+                          pct=[0, 99.9], only=("ifs",)),
         "fog": dict(title="Fog Risk Index", fields=["t2m", "d2m", "u10", "v10"], fill="fog", key="Fog risk", ticks=[20, 40, 60, 80, 100], tickfmt=True,
                     **table(FOG_L, CM["fog"], "neither"), extra="our index: dewpoint spread + light wind (+ model visibility on HRRR/RRFS), damped in rain"
                     "  ·  not a model fog forecast", pct=[0, 100], only=("hrrr", "rrfs", "gfs", "ifs", "aifs")),

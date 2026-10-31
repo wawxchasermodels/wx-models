@@ -337,6 +337,7 @@ async function productFields(run, pid, f) {
       if (P.wsum) { for (const a of ok.slice(1)) for (let k = 0; k < o.length; k++) o[k] += a[k]; }   // per-interval amounts -> total
       else if (P.wmin) { for (const a of ok.slice(1)) for (let k = 0; k < o.length; k++) if (a[k] < o[k]) o[k] = a[k]; }
       else for (const a of ok.slice(1)) for (let k = 0; k < o.length; k++) if (a[k] > o[k]) o[k] = a[k];
+      if (P.wscale) for (let k = 0; k < o.length; k++) if (o[k] >= 0) o[k] *= P.wscale;   // e.g. max wave = 1.86 x significant height (land stays < 0)
       out.fill = o;
     } else if (P.window) {   // amount in the last N hours = run total now minus run total N hours ago (stage 2, browser-only)
       const fld = P.wfield || "apcp", a = F[fld].v, prev = f - P.window;
