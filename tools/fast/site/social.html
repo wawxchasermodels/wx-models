@@ -32,6 +32,8 @@ html,body{margin:0;background:#15171c;color:#f4f2ee;font:14px Montserrat,system-
 #lphint{position:fixed;left:50%;top:10px;transform:translateX(-50%);z-index:13;background:#2f8cff;color:#fff;font-weight:700;padding:8px 14px;border-radius:8px;box-shadow:0 4px 16px #0008;max-width:90vw;text-align:center}
 .lpin{position:absolute;width:30px;height:30px;margin:-15px 0 0 -15px;border-radius:50%;border:3px solid #fff;color:#fff;font:800 15px/24px Montserrat;text-align:center;pointer-events:none;box-shadow:0 2px 6px #0009}
 .lpin.a{background:#16a34a}.lpin.b{background:#dc2626}
+.lptrk{position:absolute;width:9px;height:9px;margin:-4.5px 0 0 -4.5px;border-radius:50%;background:#ffd65a;pointer-events:none;box-shadow:0 0 0 2px #0008}.lptrk.lf{width:22px;height:22px;margin:-11px 0 0 -11px;background:none;border:3px solid #ffd65a}
+#lpsf{border-color:#ffd65a!important}#lpsfl{max-width:100%}#lpsfi{flex-basis:100%}
 @media (max-width:820px){#lp{margin:8px}#lp select{max-width:62vw}#lps{width:150px}#lp .mp-hint{flex-basis:100%;order:3}}
 @media (max-width:820px){#main{flex-direction:column}#fv{flex:none}#fh{flex:none}#fv img{height:auto;width:100%}#fh img{max-height:none}#bar{gap:6px;padding:6px}#bar select{max-width:44vw}#msg{flex:1 1 100%;order:9}}
 @media (hover:none),(max-width:820px){#lpkeys{display:none!important}}   /* key hints only where there is a keyboard */
@@ -48,8 +50,9 @@ html,body{margin:0;background:#15171c;color:#f4f2ee;font:14px Montserrat,system-
   <span id="msg">Loading…</span>
 </div>
 <div id="lp" hidden><div class="mp-h"><b>MP4 loop</b><span class="mp-hint">Hour menu, thumbnails and arrow keys still work while this is open</span><span><button type="button" data-m="min" aria-label="Minimize">&ndash;</button> <button type="button" data-m="x" aria-label="Close">&times;</button></span></div>
-  <div class="mp-row"><label>Preset <select id="lppre" title="Fill in the settings for a common loop"><option value="">choose&hellip;</option><option value="landfall">Landfall zoom-in (pan A &rarr; B, slows down)</option><option value="overview">Quick overview (all hours)</option><option value="zoomin">Slow zoom-in (centre)</option></select></label>
+  <div class="mp-row"><label>Preset <select id="lppre" title="Fill in the settings for a common loop"><option value="">choose&hellip;</option><option value="landfall">Landfall zoom-in (pan A &rarr; B, slows down)</option><option value="overview">Quick overview (all hours)</option><option value="zoomin">Slow zoom-in (centre)</option><option value="storm">Auto storm track (finds the strongest low)</option></select></label>
   <button type="button" data-m="pv" id="lppv" title="Play the camera move (pins / zoom) once on the start hour. Nothing is saved.">Preview move</button></div>
+  <div class="mp-row"><button type="button" data-m="sf" id="lpsf" title="Find the strongest low in this view from the ECMWF run's sea-level pressure, and fill in the hours, pins A / B and landfall for you">Find storm</button><select id="lpsfl" hidden title="Other storm tracks found, deepest first"></select><span id="lpsfi" class="mp-note"></span></div>
   <div class="mp-row"><label>Frame <select id="lpk"><option value="v">9:16 (1080&times;1920)</option><option value="h">16:9 (1920&times;1080)</option></select></label>
   <label>Mode <select id="lpmode"><option value="loop">Plain loop</option><option value="pan">Track storm (pan A &rarr; B)</option></select></label></div>
   <div class="mp-row"><label>Step <select id="lpstep"><option value="24">24 h (4K stills)</option></select></label><span id="lpsteph" class="mp-note"></span></div>
@@ -76,5 +79,6 @@ html,body{margin:0;background:#15171c;color:#f4f2ee;font:14px Montserrat,system-
 </div>
 <div id="strip" aria-label="All hours"></div>
 <script src="social.js"></script>
-<script src="socialloop.js?v=20261031e"></script>
+<script src="stormfind.js?v=20261031a"></script>
+<script src="socialloop.js?v=20261031f"></script>
 </body></html>

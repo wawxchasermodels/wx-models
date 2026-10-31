@@ -146,6 +146,7 @@ for (const k of ["v", "h"]) {
 // MediaRecorder on the frame canvas (real time; MP4 where the browser offers it, otherwise WebM). Track mode: pins A and B are
 // stored in map coordinates per view; the camera starts on A and eases (smoothstep) to B over the loop while the hours advance.
 const REC = { on: false, cancel: false }, PIN = { mode: null, show: false }, FPS = 30;
+const TRK = { list: [], sel: -1, run: null, view: null };   // storm finder tracks (see findStorms)
 const $s = (id) => document.getElementById(id), sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const lerp = (a, b, t) => a + (b - a) * t, ease = (t) => t * t * (3 - 2 * t);
 const pinKey = () => `studio:pins:${S.view}`;
@@ -157,6 +158,13 @@ function frAt(k, x, y, zoom) {   // camera centred on map point (x, y) at this z
 }
 function drawPins(k, c, r) {
   const p = getPins(), f = F[k], pos = (q) => [f.W / 2 + (q.x - r.cx) * r.kk, f.H / 2 + (q.y - r.cy) * r.kk], R = k === "v" ? 30 : 26;
+  const T = TRK.sel >= 0 && TRK.run === S.run && TRK.view === S.view ? TRK.list[TRK.sel] : null;
+  if (T) {   // the found storm's track: dotted line + a dot per hour, landfall ringed (not in the video)
+    c.strokeStyle = "rgba(255,214,90,0.95)"; c.lineWidth = 4; c.setLineDash([3, 9]); c.beginPath();
+    T.pts.forEach((q, i) => { const [x, y] = pos(q); if (i) c.lineTo(x, y); else c.moveTo(x, y); }); c.stroke(); c.setLineDash([]);
+    for (const q of T.pts) { const [x, y] = pos(q); c.fillStyle = "#ffd65a"; c.beginPath(); c.arc(x, y, 6, 0, 7); c.fill(); }
+    if (T.landfall) { const [x, y] = pos(T.landfall); c.strokeStyle = "#ffd65a"; c.lineWidth = 5; c.beginPath(); c.arc(x, y, R + 14, 0, 7); c.stroke(); }
+  }
   if (p.a && p.b) { const [x0, y0] = pos(p.a), [x1, y1] = pos(p.b); c.setLineDash([18, 12]); c.strokeStyle = "rgba(255,255,255,0.9)"; c.lineWidth = 5;
     c.beginPath(); c.moveTo(x0, y0); c.lineTo(x1, y1); c.stroke(); c.setLineDash([]); }
   for (const [n, col] of [["a", "#16a34a"], ["b", "#dc2626"]]) {
@@ -323,6 +331,108 @@ async function makeMp4() {
   } catch (e) { if (enc) enc.abort(); mpSt(e.message === "stopped" ? "Stopped." : "Could not make the video: " + (e.message || e)); window.__mp4 = { error: String(e.message || e) }; }
   finally { REC.on = false; window.__vjNoJump = false; $s("mpgo").disabled = false; $s("mpstop").hidden = true; $s("mpprog").hidden = true; document.body.classList.remove("rec"); if (S.run === run) { S.i = keep; $("step").value = keep; } draw(); }
 }
+// ---- storm finder (10-31 3:17 PM, Benjamin: "Oh I like this idea, yes develop that"): the lows in this view (the same L
+// centres the map draws, from this model's sea-level pressure) are linked hour to hour into tracks; the deepest track gives the
+// loop: start / end hour, pin A (where the low is at the start), pin B (landfall, else where it is at the end), landfall hour.
+// It fills in the panel like a preset; everything stays editable. Land / sea from the ECMWF wave field (stormfind.js).
+const lutC = {};
+async function ifsLut(vid) {   // ECMWF 0.25 LUT of a view: figure px <-> lat / lon (every model's view has the same panel)
+  const Vi = ((S.man.models.ifs || {}).views || {})[vid]; if (!Vi) return null;
+  if (!lutC[vid]) lutC[vid] = fetch(DATA + Vi.lut + SV()).then((r) => r.arrayBuffer()).then((b) => new Float32Array(b)).catch(() => { delete lutC[vid]; return null; });
+  const lut = await lutC[vid]; return lut ? { Vi, lut } : null;
+}
+async function llToFig(lat, lon) {
+  const L = await ifsLut(S.view), st = await viewStatic(S.view); if (!L) return null;
+  const [fi, fj] = StormFind.IFS.ij(lat, lon), p = gridInv(L.Vi, { lut: L.lut, W: st.W, H: st.H }, fi, fj, null);
+  return p ? { x: st.x0 + p[0], y: st.y0 + p[1] } : null;
+}
+const stormLbl = (P_) => `${Math.round(P_.minP)} mb low \u00b7 F+${P_.pts[0].f}\u2013F+${P_.pts[P_.pts.length - 1].f} in view \u00b7 ` +
+  (P_.landfall ? `landfall F+${P_.landfall.f}` : "no landfall");
+async function findStorms() {
+  if (!last || REC.on || TRK.busy) return [];
+  const run = S.run, vid = S.view, R_ = S.runs[run];
+  if (!R_.fields.includes("mslp")) { mpSt("This model has no sea-level pressure, so the storm finder can't run on it. Try ECMWF or GFS."); return []; }
+  TRK.busy = true; $s("mpsf").disabled = true; mpSt("Finding storms\u2026");
+  try {
+    const V = VIEWS()[vid], st = await viewStatic(vid), steps = R_.steps, L = await ifsLut(vid);
+    const use = steps.length > 48 ? steps.filter((x) => x.f % 6 === 0) : steps, hours = [];
+    for (let n = 0; n < use.length; n++) {
+      if (S.run !== run || S.view !== vid) throw new Error("the run or view changed");
+      let Fm; try { Fm = await getField(run, "mslp", use[n].f); } catch (e) { continue; }
+      const lows = hlGeom(st, { raw: { mslp: Fm }, w: Fm.w, h: Fm.h }, V).filter((o) => !o[3]).map(([x, y, p]) => {
+        const q = { x, y, p }; if (L) { const [fi, fj] = gridFwd(L.Vi, L.lut, x - st.x0, y - st.y0); q.lat = StormFind.IFS.lat(fi); q.lon = StormFind.IFS.lon(fj); } return q; });
+      hours.push({ f: use[n].f, lows }); if (n % 4 === 0) mpSt(`Finding storms\u2026 F+${use[n].f}`);
+    }
+    // without lat / lon (HRRR-only views): distance in map px, reach a tenth of the panel per 6 h
+    const tr = StormFind.track(hours, L ? {} : { dist: (a, b) => Math.hypot(a.x - b.x, a.y - b.y), reach: (dh) => V.panel[2] * (0.04 + 0.016 * dh) });
+    const land = L ? await StormFind.landMask(DATA) : () => null;
+    TRK.list = tr.map((T) => StormFind.plan(T, StormFind.landfall(T, land))); TRK.run = run; TRK.view = vid; TRK.sel = -1;
+    const sel = $s("mpsfl");
+    sel.innerHTML = TRK.list.map((P_, i) => `<option value="${i}">${i + 1}. ${stormLbl(P_)}</option>`).join(""); sel.hidden = TRK.list.length < 2;
+    if (!TRK.list.length) { mpSt("No closed low stays in this view for 3+ maps in this run. Pick pins by hand, or try a bigger view."); $s("mpsfi").textContent = ""; return []; }
+    applyStorm(0); return TRK.list;
+  } catch (e) { mpSt("Storm finder: " + (e.message || e)); return []; }
+  finally { TRK.busy = false; $s("mpsf").disabled = false; }
+}
+function applyStorm(n) {
+  const P_ = TRK.list[n]; if (!P_ || TRK.run !== S.run) return; TRK.sel = n; $s("mpsfl").value = String(n);
+  const steps = S.runs[S.run].steps, ix = (f) => steps.findIndex((x) => x.f === f);
+  setPins({ a: { x: P_.a.x, y: P_.a.y }, b: { x: P_.b.x, y: P_.b.y } });
+  for (const [id, v] of Object.entries(PRESETS.landfall)) $s(id).value = v;   // the landfall look: pan A -> B, zoom in, slow down
+  $s("mpa").value = String(ix(P_.startF)); $s("mpb").value = String(ix(P_.endF)); $s("mppre").value = "storm";
+  mpMode(); saveOpts();
+  const fi = ix(P_.landfall ? P_.landfall.f : P_.fMin); if (fi >= 0 && !REC.on) { S.i = fi; $("step").value = fi; draw(); }
+  const lf = P_.landfall;
+  $s("mpsfi").textContent = `Deepest ${Math.round(P_.minP)} mb at F+${P_.fMin}. ` + (lf ? `Landfall F+${lf.f}${lf.lat !== undefined ? " near " + StormFind.fmtLL(lf) : ""}. ` : "No landfall in this view: B is where the track ends. ") +
+    `Loop F+${P_.startF} to F+${P_.endF}. A = start, B = ${lf ? "landfall" : "end"}. Change any of it below, or Set pin A / B by hand.`;
+  mpSt(`Found ${TRK.list.length} storm track${TRK.list.length === 1 ? "" : "s"}; using the deepest.`); mpInfo();
+}
+// ---- instant loop link (10-31 3:38 PM, Benjamin: "Yes go ahead and add the api"): studio.html?make=loop&model=ecmwf&product=mslp
+// &view=na&from=24&to=144&shape=h [&step=6&speed=4&endspeed=1&startzoom=1.2&endzoom=2&pinA=lat,lon&pinB=lat,lon&preset=landfall|
+// overview|smooth|zoomin|storm&hold=1&run=ifs/2026103112]. Builds the MP4 on open with no clicks; the result is in
+// window.__loopResult ({state: loading|making|done|error, ok, name, bytes, seconds, url (blob), ...}), body[data-loop], and a
+// download link (#loopdl, plus the panel's Save MP4). model / product aliases are mapped in studio.html before viewer.js boots.
+function setSel(id, v) { const el = $s(id); v = String(v); if (el.type !== "range" && ![...el.options].some((o) => o.value === v)) { const o = document.createElement("option"); o.value = v; o.textContent = v; el.appendChild(o); } el.value = v; }
+async function autoLoop() {
+  const res = window.__loopResult = { state: "loading" }; document.body.dataset.loop = "loading";
+  const num = (n) => (SQ.has(n) && SQ.get(n) !== "" && isFinite(+SQ.get(n)) ? +SQ.get(n) : null);
+  try {
+    for (let t = 0; !(window.__ready && last); t++) { if (t > 900) throw new Error("the map did not load"); await sleep(100); }
+    const k = SQ.get("shape") === "v" ? "v" : "h", pre = SQ.get("preset") || ""; openMp4(k);
+    const steps = S.runs[S.run].steps;
+    if (PRESETS[pre]) { for (const [id, v] of Object.entries(PRESETS[pre])) if (id !== "span") $s(id).value = v; $s("mppre").value = pre; }
+    if (pre === "storm") { const l = await findStorms(); if (!l.length && !SQ.get("pinA")) throw new Error("storm finder: " + $s("mpst").textContent); }
+    const from = num("from"), to = num("to");
+    if (from !== null) { const i = steps.findIndex((x) => x.f >= from); if (i >= 0) $s("mpa").value = String(i); }
+    if (to !== null) { let i = -1; steps.forEach((x, j) => { if (x.f <= to) i = j; }); if (i >= 0) $s("mpb").value = String(i); }
+    else if (pre === "overview") { const a = +$s("mpa").value, e = steps.findIndex((x) => x.f >= steps[a].f + 120); $s("mpb").value = String(e > a ? e : steps.length - 1); }
+    else if (pre !== "storm" && from !== null) $s("mpb").value = String(steps.length - 1);
+    if (num("step") !== null) setSel("mpe", num("step"));
+    if (num("speed") !== null) $s("mps").value = String(Math.min(15, Math.max(0.5, num("speed"))));
+    if (num("endspeed") !== null) setSel("mps1", num("endspeed"));
+    if (num("hold") !== null) setSel("mph", num("hold"));
+    if (num("startzoom") !== null) setSel("mpz0", num("startzoom"));
+    if (num("endzoom") !== null) setSel("mpz1", num("endzoom"));
+    const pin = async (n) => { const q = (SQ.get(n) || "").split(",").map(Number); return q.length === 2 && q.every(isFinite) ? llToFig(q[0], q[1]) : null; };
+    const pa = await pin("pinA"), pb = await pin("pinB");
+    if (SQ.get("pinA") || SQ.get("pinB")) {
+      if (!pa || !pb) throw new Error("pinA and pinB need lat,lon inside this view (e.g. pinA=46.5,-131&pinB=47.9,-124.6)");
+      setPins({ a: pa, b: pb }); $s("mpmode").value = "pan";
+    }
+    mpMode(); mpInfo();
+    if (+$s("mpb").value <= +$s("mpa").value) throw new Error(`no hours between from=${from} and to=${to} in ${S.run}`);
+    res.state = "making"; document.body.dataset.loop = "making";
+    await makeMp4();
+    const m = window.__mp4 || {}; if (m.error || !m.bytes) throw new Error(m.error || "no video was made");
+    const u = $s("mpdl").href, a = document.createElement("a"); a.id = "loopdl"; a.href = u; a.download = m.name; a.textContent = `Download ${m.name} (${(m.bytes / 1e6).toFixed(1)} MB)`;
+    const bar = document.createElement("div"); bar.id = "loopbar"; bar.append("Loop ready: ", a); document.body.appendChild(bar);
+    Object.assign(res, { state: "done", ok: true, name: m.name, bytes: m.bytes, seconds: m.seconds, frames: m.frames, how: m.how, ms: m.ms, url: u,
+      run: S.run, prod: S.prod, view: S.view, shape: k, from: steps[+$s("mpa").value].f, to: steps[+$s("mpb").value].f, mode: $s("mpmode").value, pins: getPins(),
+      storm: TRK.sel >= 0 ? { minP: TRK.list[TRK.sel].minP, landfall: TRK.list[TRK.sel].landfall && TRK.list[TRK.sel].landfall.f } : null });
+    document.body.dataset.loop = "done";
+  } catch (e) { Object.assign(res, { state: "error", ok: false, error: String(e.message || e) }); document.body.dataset.loop = "error"; mpSt("Instant loop: " + res.error); }
+  return res;
+}
 if (!CLEAN && $s("mp4p")) {
   $s("mp4p").addEventListener("click", (e) => { const b = e.target.closest("button[data-m]"); if (!b) return; const m_ = b.dataset.m;
     if (m_ === "x") { if (!REC.on) { $s("mp4p").hidden = true; PIN.show = false; document.body.classList.remove("mprange"); render("v"); render("h"); } }
@@ -333,11 +443,13 @@ if (!CLEAN && $s("mp4p")) {
       mpInfo(); }
     else if (m_ === "a" || m_ === "b") startPin(m_);
     else if (m_ === "pv") previewMove();
+    else if (m_ === "sf") findStorms();
     else if (m_ === "c") { setPins({}); mpInfo(); render("v"); render("h"); }
     else if (m_ === "go") makeMp4(); else if (m_ === "stop") REC.cancel = true; });
   for (const id of ["mpa", "mpb", "mpe", "mps", "mps1", "mph", "mpz0", "mpz1"]) $s(id).addEventListener("change", mpInfo);
   for (const id of OPT_IDS) $s(id).addEventListener("change", (e) => { saveOpts(); if (e.isTrusted) $s("mppre").value = ""; });
-  $s("mppre").addEventListener("change", (e) => applyPreset(e.target.value));
+  $s("mppre").addEventListener("change", (e) => { if (e.target.value === "storm") findStorms(); else applyPreset(e.target.value); });
+  $s("mpsfl").addEventListener("change", (e) => applyStorm(+e.target.value));
   $s("mpk").addEventListener("change", () => { mpInfo(); });
   // Enter = Make MP4 (not while typing in a menu that uses Enter itself)
   $s("mp4p").addEventListener("keydown", (e) => { if (e.key === "Enter" && e.target.tagName !== "SELECT" && e.target.tagName !== "BUTTON" && e.target.tagName !== "A") { e.preventDefault(); makeMp4(); } });
@@ -359,7 +471,8 @@ if (!CLEAN && $s("mp4p")) {
     if (PIN.mode) { PIN.mode = null; $s("pinhint").hidden = true; $s("mp4p").hidden = false; mpInfo(); render("v"); render("h"); }
     else if (REC.on) REC.cancel = true;
     else if (!$s("mp4p").hidden) { $s("mp4p").hidden = true; PIN.show = false; document.body.classList.remove("mprange"); render("v"); render("h"); } });
-  window.__studioMp4 = { getPins, setPins, makeMp4, openMp4 };
+  window.__studioMp4 = { getPins, setPins, makeMp4, openMp4, findStorms, applyStorm, llToFig, TRK };
+  if (SQ.get("make") === "loop") autoLoop();
 }
 // auto-advance (clean mode or ?play=1): next hour after each finished frame + dwell; loops (or holds); newest run on loop when model= is used
 const PLAY = { on: SQ.get("play") === "1", t: 0, next() {

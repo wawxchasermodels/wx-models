@@ -17,7 +17,7 @@ cp $SRC/wamaps.js public/; cp -r $SRC/wamaps public/
 # Compare (10-31): side-by-side page (two frames of index.html)
 cp $SRC/compare.html $SRC/compare.js public/
 # Studio (10-31): 9:16 + 16:9 video frames (viewer.js off-screen + studio.js)
-cp $SRC/studio.js public/
+cp $SRC/studio.js $SRC/stormfind.js public/   # stormfind.js: storm finder for Studio + Social (10-31)
 rm -rf public/vendor && cp -r $SRC/vendor public/   # Studio MP4 export: mp4-muxer (MIT), loaded only when "Save MP4" is used
 # Social (10-31): browse / save the ECMWF social graphics (R2 social/, made by tools/fast/social/)
 cp $SRC/social.js $SRC/socialloop.js public/   # socialloop.js: MP4 loops of the social frames (10-31)

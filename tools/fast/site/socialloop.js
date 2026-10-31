@@ -53,9 +53,12 @@ function pinsFor(k) { const p = getPins(); return { a: p[k + "a"], b: p[k + "b"]
 function drawPins() {
   for (const k of ["v", "h"]) {
     const img = $s("i" + k), box = img.parentNode; box.style.position = "relative";
-    box.querySelectorAll(".lpin").forEach((e) => e.remove());
+    box.querySelectorAll(".lpin,.lptrk").forEach((e) => e.remove());
     if (!P.on || $s("lpmode").value !== "pan") continue;
     const p = pinsFor(k), r = img.getBoundingClientRect(), br = box.getBoundingClientRect();
+    const T = TRK.sel >= 0 && TRK.key === `${S.run}/${S.view}` ? TRK.list[TRK.sel] : null;
+    if (T) for (const q of T.pts) { const f_ = frac(S.view, k, q.lat, q.lon), d = document.createElement("div"); d.className = "lptrk" + (T.landfall && q.f === T.landfall.f ? " lf" : "");
+      d.style.left = (r.left - br.left + f_.x * r.width) + "px"; d.style.top = (r.top - br.top + f_.y * r.height) + "px"; box.appendChild(d); }
     for (const n of ["a", "b"]) { if (!p[n]) continue; const d = document.createElement("div"); d.className = "lpin " + n; d.textContent = n.toUpperCase();
       d.style.left = (r.left - br.left + p[n].x * r.width) + "px"; d.style.top = (r.top - br.top + p[n].y * r.height) + "px"; box.appendChild(d); }
   }
@@ -177,6 +180,52 @@ function applyPreset(name) {
 function startPin(m, pre) { P.pinMode = m; const h = $s("lphint"); h.hidden = false;
   h.textContent = `${pre || ""}Tap the ${$s("lpk").value === "v" ? "9:16" : "16:9"} picture where the loop should ${m === "a" ? "START (pin A)" : "END (pin B)"}. Esc cancels.`;
   $s("i" + $s("lpk").value).scrollIntoView({ block: "center", behavior: "smooth" }); }
+// ---- storm finder (10-31 3:17 PM, Benjamin: "Oh I like this idea, yes develop that"): lows in the ECMWF run's sea-level pressure
+// (the same L centres make_social.py draws), linked hour to hour over the loop's hours; the deepest track fills in the hours,
+// pins A / B (both frame shapes) and landfall. Positions: make_social.py's Lambert conformal frames (stormfind.js lccProj).
+const SVW = { na: { c: { h: [-108, 44.5], v: [-117, 46.0] }, half: { h: 4.4e6, v: 2.25e6 }, lon0: -110, sp: [33, 55], size: 25 },
+  pnw: { c: { h: [-121.3, 46.4], v: [-121.0, 46.6] }, half: { h: 0.98e6, v: 0.56e6 }, lon0: -121, sp: [42, 50], size: 13 } };
+const SHP = { h: [3840, 2160], v: [2160, 3840] }, TRK = { list: [], sel: -1, key: "" };
+function frac(view, k, lat, lon) {   // lat / lon -> fraction across / down the social frame
+  const V = SVW[view], pr = StormFind.lccProj(V.lon0, 47, V.sp[0], V.sp[1]), [cx, cy] = pr(V.c[k][0], V.c[k][1]), hx = V.half[k], hy = hx * SHP[k][1] / SHP[k][0], [x, y] = pr(lon, lat);
+  return { x: (x - (cx - hx)) / (2 * hx), y: ((cy + hy) - y) / (2 * hy) };
+}
+const inFr = (k, q) => q.x > 0.04 && q.x < 0.96 && q.y > (k === "v" ? 0.30 : 0.28) && q.y < (k === "v" ? 0.80 : 0.76);   // make_social hl() bounds
+async function findStorm() {
+  if (P.busy || TRK.busy) return []; const view = S.view, run = S.run, k = $s("lpk").value;
+  if (!SVW[view]) { st("The storm finder works on the North America and Pacific NW frames."); return []; }
+  TRK.busy = true; $s("lpsf").disabled = true; st("Finding storms\u2026");
+  try {
+    const R = await fetch(`${DATA}runs/ifs/${run}/run.json`).then((r) => { if (!r.ok) throw new Error("this run's model data is no longer kept (newest ECMWF runs only)"); return r.json(); });
+    if (!R.fields.includes("mslp")) throw new Error("no sea-level pressure in this run");
+    const hs = hours(), H = [];
+    for (const f of hs) {
+      if (S.run !== run || S.view !== view) throw new Error("the run or view changed");
+      if (!R.steps.some((x) => x.f === f)) continue;
+      let F; try { F = await StormFind.decode(DATA, R, "mslp", f); } catch (e) { continue; }
+      H.push({ f, lows: StormFind.lowsLL(F.v, F.w, F.h, SVW[view].size).filter((L) => inFr(k, frac(view, k, L.lat, L.lon))) });
+      st(`Finding storms\u2026 F+${f}`);
+    }
+    if (!H.length) throw new Error("this run's model data is no longer kept (newest ECMWF runs only)");
+    const land = await StormFind.landMask(DATA);
+    TRK.list = StormFind.track(H).map((T) => StormFind.plan(T, StormFind.landfall(T, land))); TRK.key = `${run}/${view}`; TRK.sel = -1;
+    const sel = $s("lpsfl"); sel.innerHTML = TRK.list.map((Q, i) => `<option value="${i}">${i + 1}. ${Math.round(Q.minP)} mb low \u00b7 F+${Q.pts[0].f}\u2013F+${Q.pts[Q.pts.length - 1].f} \u00b7 ${Q.landfall ? "landfall F+" + Q.landfall.f : "no landfall"}</option>`).join("");
+    sel.hidden = TRK.list.length < 2;
+    if (!TRK.list.length) { st("No closed low stays in this frame for 3+ of the loop's hours. Set pins by hand, or try a finer Step / the other view."); $s("lpsfi").textContent = ""; return []; }
+    applyStorm(0); return TRK.list;
+  } catch (e) { st("Storm finder: " + (e.message || e)); return []; }
+  finally { TRK.busy = false; $s("lpsf").disabled = false; }
+}
+function applyStorm(n) {
+  const Q = TRK.list[n]; if (!Q || TRK.key !== `${S.run}/${S.view}`) return; TRK.sel = n; $s("lpsfl").value = String(n);
+  const p = getPins(); for (const k of ["v", "h"]) { p[k + "a"] = frac(S.view, k, Q.a.lat, Q.a.lon); p[k + "b"] = frac(S.view, k, Q.b.lat, Q.b.lon); } setPins(p);
+  for (const [id, v] of Object.entries(PRESETS.landfall)) $s(id).value = v;
+  info(); $s("lpa").value = String(Q.startF); $s("lpb").value = String(Q.endF); $s("lppre").value = "storm"; saveOpts(); info();
+  const lf = Q.landfall;
+  $s("lpsfi").textContent = `Deepest ${Math.round(Q.minP)} mb at F+${Q.fMin}. ` + (lf ? `Landfall F+${lf.f} near ${StormFind.fmtLL(lf)}. ` : "No landfall in this frame: B is where the track ends. ") +
+    `Loop F+${Q.startF} to F+${Q.endF}. Change any of it, or Set pin A / B by hand.`;
+  st(`Found ${TRK.list.length} storm track${TRK.list.length === 1 ? "" : "s"}; using the deepest.`);
+}
 let PV = false;
 async function previewMove() {
   if (PV || P.busy) return; const k = $s("lpk").value, hs = pick(), pan = $s("lpmode").value === "pan", pins = pinsFor(k), [W, H] = OUT[k];
@@ -203,13 +252,15 @@ function init() {
     else if (m === "sb") { $s("lpb").value = String(S.hour); if (+$s("lpa").value >= S.hour) { const hs = hours(), i = hs.indexOf(S.hour); $s("lpa").value = String(hs[Math.max(0, i - 1)]); } info(); }
     else if (m === "a" || m === "b") startPin(m);
     else if (m === "pv") previewMove();
+    else if (m === "sf") findStorm();
     else if (m === "c") { const p = getPins(), k = $s("lpk").value; delete p[k + "a"]; delete p[k + "b"]; setPins(p); info(); }
     else if (m === "go") make(); else if (m === "stop") P.cancel = true; });
   $s("lpstep").addEventListener("change", (e) => { e.target.dataset.v = e.target.value; info(); });
   for (const id of ["lpa", "lpb", "lps1", "lph", "lpz0", "lpz1", "lpx", "lpmode", "lpk"]) $s(id).addEventListener("change", info);
   $s("lps").addEventListener("input", info);
   for (const id of OPT_IDS) $s(id).addEventListener("change", (e) => { saveOpts(); if (e.isTrusted) $s("lppre").value = ""; });
-  $s("lppre").addEventListener("change", (e) => applyPreset(e.target.value));
+  $s("lppre").addEventListener("change", (e) => { if (e.target.value === "storm") findStorm(); else applyPreset(e.target.value); });
+  $s("lpsfl").addEventListener("change", (e) => applyStorm(+e.target.value));
   $s("lp").addEventListener("keydown", (e) => { if (e.key === "Enter" && !/^(SELECT|BUTTON|A)$/.test(e.target.tagName)) { e.preventDefault(); make(); } });
   addEventListener("keydown", (e) => { if (e.key !== "Escape" || !P.on) return;
     if (P.pinMode) { P.pinMode = null; $s("lphint").hidden = true; info(); } else if (P.busy) P.cancel = true; else { P.on = false; $s("lp").hidden = true; drawPins(); } });
@@ -217,7 +268,7 @@ function init() {
   for (const k of ["v", "h"]) $s("i" + k).addEventListener("click", (e) => onImgClick(k, e));
   addEventListener("resize", drawPins);
   window.__socialShown = () => { if (P.on) info(); };   // social.js calls this after every show()
-  window.__socialLoop = { getPins, setPins, make, open, info, hours, useHD };
+  window.__socialLoop = { getPins, setPins, make, open, info, hours, useHD, findStorm, applyStorm, TRK, frac };
 }
 init();
 })();

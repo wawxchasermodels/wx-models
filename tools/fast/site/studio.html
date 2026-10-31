@@ -118,6 +118,7 @@ body.clean .sfr{display:none}body.clean .sfr.on{display:block}
 #mpv{display:block;max-width:100%;max-height:46vh;margin-top:6px;background:#000}
 #pinhint{position:fixed;left:50%;top:10px;transform:translateX(-50%);z-index:13;background:#2f8cff;color:#fff;font-weight:700;padding:8px 14px;border-radius:8px;box-shadow:0 4px 16px #0008;max-width:90vw;text-align:center}
 body.rec .sfr .shd button,body.rec #bar{pointer-events:none;opacity:.55}
+#mpsf{border-color:#ffd65a!important}#mpsfl{max-width:100%}#mpsfi{flex-basis:100%}#loopbar{position:fixed;right:14px;top:14px;z-index:20;background:#16a34a;color:#fff;font-weight:700;padding:10px 14px;border-radius:8px;box-shadow:0 4px 16px #0008}#loopbar a{color:#fff}
 #mpprog{width:120px;accent-color:#2f8cff}#mp4p .mp-h{cursor:move;user-select:none}#mpkeys{color:#8e939c!important;font-size:11.5px}
 #mp4p .mp-h{gap:8px}#mp4p .mp-hint{flex:1;color:#8e939c;font-size:11.5px}#mp4p.min > :not(.mp-h){display:none!important}#mp4p.min .mp-hint{display:none}
 #mps{width:170px;accent-color:#2f8cff}#mpsv{min-width:80px}
@@ -148,8 +149,9 @@ body.clean .sfr canvas,body.clean #fv canvas,body.clean #fh canvas{width:auto!im
 </div>
 <div id="wrap"><canvas id="map"></canvas><div id="tip" hidden></div></div>
 <div id="mp4p" hidden><div class="mp-h"><b>Save MP4 loop</b><span class="mp-hint">The hour slider, &lsaquo; &rsaquo;, arrow keys and Play still work while this is open</span><span><button type="button" data-m="min" id="mpmin" aria-label="Minimize" title="Minimize">&ndash;</button> <button type="button" data-m="x" aria-label="Close">&times;</button></span></div>
-  <div class="mp-row"><label>Preset <select id="mppre" title="Fill in the settings for a common loop"><option value="">choose&hellip;</option><option value="landfall">Landfall zoom-in (pan A &rarr; B, slows down)</option><option value="overview">Quick 5-day overview</option><option value="smooth">Smooth every-hour loop</option><option value="zoomin">Slow zoom-in on the framing</option></select></label>
+  <div class="mp-row"><label>Preset <select id="mppre" title="Fill in the settings for a common loop"><option value="">choose&hellip;</option><option value="landfall">Landfall zoom-in (pan A &rarr; B, slows down)</option><option value="overview">Quick 5-day overview</option><option value="smooth">Smooth every-hour loop</option><option value="zoomin">Slow zoom-in on the framing</option><option value="storm">Auto storm track (finds the strongest low)</option></select></label>
   <button type="button" data-m="pv" id="mppv" title="Play the camera move (pins / zoom) once on the frame, at the hour shown now. Nothing is saved.">Preview move</button></div>
+  <div class="mp-row" id="mpsfr"><button type="button" data-m="sf" id="mpsf" title="Find the strongest low in this view from this run's sea-level pressure, and fill in the hours, pins A / B and landfall for you">Find storm</button><select id="mpsfl" hidden title="Other storm tracks found, deepest first"></select><span id="mpsfi" class="mp-note"></span></div>
   <div class="mp-row"><label>Frame <select id="mpk"><option value="v">9:16 (1080&times;1920)</option><option value="h">16:9 (1920&times;1080)</option></select></label>
   <label>Mode <select id="mpmode"><option value="loop">Plain loop</option><option value="pan">Track storm (pan A &rarr; B)</option></select></label></div>
   <div class="mp-row"><label>Start <select id="mpa"></select></label><button type="button" data-m="sa" title="Use the hour the map is on now">Start = now</button></div>
@@ -173,6 +175,17 @@ body.clean .sfr canvas,body.clean #fv canvas,body.clean #fh canvas{width:auto!im
 </div>
 <div id="pinhint" hidden></div>
 <div id="dock"></div>
+<script>
+// instant loop link (10-31): friendly names -> the viewer's own params, before viewer.js reads the address
+(() => { const q = new URLSearchParams(location.search); if (q.get("make") !== "loop") return;
+  const M = { ecmwf: "ifs", euro: "ifs", ifs: "ifs", ecmwf9: "ifs9", "ecmwf-9km": "ifs9", ifs9: "ifs9", gfs: "gfs", hrrr: "hrrr", rrfs: "rrfs", nbm: "nbm", aifs: "aifs", eps: "eps", aens: "aens" };
+  const P = { mslp: "mslpqpf", pressure: "slp", precip: "qpf6" };
+  if (q.get("model")) q.set("model", M[q.get("model").toLowerCase()] || q.get("model"));
+  if (q.get("product") && !q.get("prod")) q.set("prod", P[q.get("product")] || q.get("product"));
+  if (q.get("from") && !q.get("f")) q.set("f", q.get("from"));
+  history.replaceState(null, "", location.pathname + "?" + q.toString()); })();
+</script>
 <script src="viewer.js?v=20261031y"></script>
-<script src="studio.js?v=20261031i"></script>
+<script src="stormfind.js?v=20261031a"></script>
+<script src="studio.js?v=20261031j"></script>
 </body></html>
