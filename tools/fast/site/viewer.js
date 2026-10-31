@@ -216,8 +216,11 @@ function setLists() {   // products this run carries (all their fields present),
   if (!prods.some(([k]) => k === S.prod)) {   // not in this run: stay in the same tab when it can
     const t = tabs.find(t => t[0] === tabOf(S.prod)); S.prod = (t ? t[2][0] : prods[0])[0]; }
   const cur = tabOf(S.prod); S.lastTab[cur] = S.prod;
-  $("tabs").innerHTML = tabs.map(([id, label]) => `<button type="button" role="tab" data-t="${id}" aria-selected="${id === cur}"${id === cur ? ' class="on"' : ""}>${label}</button>`).join("");
-  $("tabs").onclick = e => { const b = e.target.closest("button[data-t]"); if (!b || b.dataset.t === tabOf(S.prod)) return;
+  $("tabs").innerHTML = tabs.map(([id, label]) => `<button type="button" role="tab" data-t="${id}" aria-selected="${id === cur}"${id === cur ? ' class="on"' : ""}>${label}</button>`).join("") +
+    // WA Maps (10-31, Benjamin 8:58 AM): the posted Washington state-view maps, own page (wamaps.html)
+    `<button type="button" data-t="wamaps" title="Washington state-view forecast maps">WA Maps</button>`;
+  $("tabs").onclick = e => { const b = e.target.closest("button[data-t]"); if (b && b.dataset.t === "wamaps") { location.href = "wamaps.html"; return; }
+    if (!b || b.dataset.t === tabOf(S.prod)) return;
     const t = tabs.find(x => x[0] === b.dataset.t), keep = S.lastTab[t[0]];
     S.prod = t[2].some(([k]) => k === keep) ? keep : t[2][0][0]; setLists(); draw(); };
   if (!V[S.view]) S.view = V.wa ? "wa" : Object.keys(V)[0];

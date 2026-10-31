@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>WX Models · WA Maps</title>
+<link rel="preload" href="fonts/Montserrat-sub.woff2" as="font" type="font/woff2" crossorigin>
+<style>
+@font-face{font-family:Montserrat;src:url(fonts/Montserrat-sub.woff2) format("woff2"),url(fonts/Montserrat.ttf) format("truetype");font-weight:100 900}
+html,body{margin:0;background:#15171c;color:#f4f2ee;font:14px Montserrat,system-ui,sans-serif;height:100%;overflow:hidden;overscroll-behavior:none}
+body{display:flex;flex-direction:column;height:100vh;height:100dvh}
+#bar{flex:0 0 auto;display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:8px 12px;background:#1d2027;border-bottom:1px solid #2c3039}
+#bar select,#bar button,#bar a{background:#262931;color:#f4f2ee;border:1px solid #7d828c;border-radius:6px;padding:4px 8px;font:inherit;text-decoration:none;touch-action:manipulation}
+#bar b{font-weight:800}
+#msg{color:#a7abb3;font-size:12px;flex:1;min-width:200px}
+#wrap{position:relative;flex:1 1 auto;min-height:0;display:flex;align-items:center;justify-content:center;padding:4px;box-sizing:border-box;overflow:auto}
+canvas{display:block}
+@media (max-width:700px){#bar{gap:6px;padding:6px}#bar select{max-width:44vw}#msg{flex:1 1 100%;order:9}#wrap{align-items:flex-start;padding:2px}}
+</style></head>
+<body>
+<div id="bar">
+  <a href="./" title="Back to the model maps">&larr; <span>Maps</span></a>
+  <b>WA Maps</b>
+  <select id="kind" aria-label="Map"></select>
+  <select id="day" aria-label="Day"></select>
+  <select id="view" aria-label="View"></select>
+  <select id="run" aria-label="Run"></select>
+  <button id="save" type="button">Save image</button>
+  <span id="msg">Loading…</span>
+</div>
+<div id="wrap"><canvas id="map" width="2400" height="1600"></canvas></div>
+<script src="wamaps.js"></script>
+</body></html>

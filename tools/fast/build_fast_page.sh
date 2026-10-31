@@ -12,5 +12,10 @@ sed -e 's#<script src="meteograms.js"></script>#<script>window.WX_DATA="/d/"</sc
 sed -e 's#<script src="viewer.js#<script>window.WX_DATA="/d/"</script><script src="viewer.js#' \
     -e 's#,url(fonts/Montserrat.ttf) format("truetype")##' \
     -e 's#<head>#<head><meta name="robots" content="noindex,nofollow">#' $SRC/index.html > public/index.html
-printf '/*\n  X-Robots-Tag: noindex\n/viewer.js\n  Cache-Control: no-cache\n/index.html\n  Cache-Control: no-cache\n/meteograms*\n  Cache-Control: no-cache\n/fonts/*\n  Cache-Control: public, max-age=31536000, immutable\n' > public/_headers
+# WA Maps (10-31): page + kit (static layers made by tools/fast/wamaps/build_kit.py + package_kit.py)
+cp $SRC/wamaps.js public/; cp -r $SRC/wamaps public/
+sed -e 's#<script src="wamaps.js"></script>#<script>window.WX_DATA="/d/"</script><script src="wamaps.js"></script>#' \
+    -e 's#,url(fonts/Montserrat.ttf) format("truetype")##' \
+    -e 's#<head>#<head><meta name="robots" content="noindex,nofollow">#' $SRC/wamaps.html > public/wamaps.html
+printf '/*\n  X-Robots-Tag: noindex\n/viewer.js\n  Cache-Control: no-cache\n/index.html\n  Cache-Control: no-cache\n/meteograms*\n  Cache-Control: no-cache\n/wamaps.*\n  Cache-Control: no-cache\n/fonts/*\n  Cache-Control: public, max-age=31536000, immutable\n' > public/_headers
 printf '{"version":1,"include":["/d/*"],"exclude":[]}\n' > public/_routes.json
