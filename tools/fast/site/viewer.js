@@ -528,6 +528,7 @@ async function render(lite) {
   const pc = p => fin[Math.min(fin.length - 1, Math.max(0, Math.round(p / 100 * (fin.length - 1))))];
   const extra = (P.isobars && !D.iso && P.extra_noh ? P.extra_noh : P.extra).replace("{lo}", pc(P.pct[0]).toFixed(P.dec || 0)).replace("{hi}", pc(P.pct[1]).toFixed(P.dec || 0));
   header(ctx, V, P.title, step.valid_line, `${S.runs[run].runline}  \u00b7  ${V.label}  \u00b7  ${extra}`, step.badge);
+  S.peak = GUST_PIDS.test(pid) ? drawPeak(ctx, st, vals) : null;
   const t3 = performance.now();
   S.cur = { st, D, vals, P, pid, V, run, f };
   S.last = { data_ms: t1 - t0, fill_ms: t2 - t1, overlay_ms: t3 - t2, total_ms: t3 - t0 };
@@ -668,6 +669,21 @@ function showSaveView(blob, name) {   // fallback: full-screen image to press an
 async function share() {
   const u = location.href;
   try { if (navigator.share) await navigator.share({ title: document.title, url: u }); else { await navigator.clipboard.writeText(u); $("share").textContent = "Copied"; setTimeout(() => $("share").textContent = "Share", 1500); } } catch (e) {}
+}
+// Peak gust tag (Benjamin 10-31 1:53 AM "on the wind gust maps, include a peak wind gust number in one corner of the map"): the
+// highest value of the plotted field over the visible map (every drawn pixel, so it follows the view's crop), rounded to mph,
+// in a dark box in the map's lower-right corner, clear of the title, key, F badge and Save/Share (those sit above the map).
+const GUST_PIDS = /^(gust(6|10|12|24|max)|egust90)$/;
+function drawPeak(ctx, st, vals) {
+  let hi = -Infinity; for (let k = 0; k < vals.length; k++) { const v = vals[k]; if (v > hi) hi = v; }
+  if (!isFinite(hi)) return null;
+  const v = Math.round(hi), s = `Peak gust: ${v} mph`, pad = pt(5), fs = pt(16);
+  ctx.font = `800 ${fs}px Montserrat`; const w = ctx.measureText(s).width + 2 * pad, h = fs + 2 * pad;
+  const x = st.x0 + st.W - w - pt(5), y = st.y0 + st.H - h - pt(5);
+  ctx.fillStyle = "rgba(20,22,28,0.82)"; ctx.strokeStyle = "rgba(255,255,255,0.85)"; ctx.lineWidth = pt(0.8);
+  ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y, w, h, pt(4)); else ctx.rect(x, y, w, h); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = "#ffffff"; ctx.textAlign = "left"; ctx.textBaseline = "middle"; ctx.fillText(s, x + pad, y + h / 2 + pt(0.5));
+  return v;
 }
 function haloText(ctx, s, x, y, font, color, halo, align, base) {
   ctx.font = font; ctx.textAlign = align; ctx.textBaseline = base; ctx.lineJoin = "round";
