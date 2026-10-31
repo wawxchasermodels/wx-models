@@ -17,7 +17,7 @@ cp $SRC/wamaps.js public/; cp -r $SRC/wamaps public/
 # Compare (10-31): side-by-side page (two frames of index.html)
 cp $SRC/compare.html $SRC/compare.js public/
 # Studio (10-31): 9:16 + 16:9 video frames (viewer.js off-screen + studio.js)
-cp $SRC/studio.js $SRC/stormfind.js public/   # stormfind.js: storm finder for Studio + Social (10-31)
+cp $SRC/studio.js $SRC/stormfind.js $SRC/reqbox.js public/   # stormfind.js: storm finder for Studio + Social (10-31)
 rm -rf public/vendor && cp -r $SRC/vendor public/   # Studio MP4 export: mp4-muxer (MIT), loaded only when "Save MP4" is used
 # Social (10-31): browse / save the ECMWF social graphics (R2 social/, made by tools/fast/social/)
 cp $SRC/social.js $SRC/socialloop.js public/   # socialloop.js: MP4 loops of the social frames (10-31)
@@ -31,4 +31,4 @@ sed -e 's#<script src="wamaps.js"></script>#<script>window.WX_DATA="/d/"</script
     -e 's#,url(fonts/Montserrat.ttf) format("truetype")##' \
     -e 's#<head>#<head><meta name="robots" content="noindex,nofollow">#' $SRC/wamaps.html > public/wamaps.html
 printf '/*\n  X-Robots-Tag: noindex\n/viewer.js\n  Cache-Control: no-cache\n/index.html\n  Cache-Control: no-cache\n/meteograms*\n  Cache-Control: no-cache\n/wamaps.*\n  Cache-Control: no-cache\n/compare.*\n  Cache-Control: no-cache\n/studio.*\n  Cache-Control: no-cache\n/social.*\n  Cache-Control: no-cache\n/fonts/*\n  Cache-Control: public, max-age=31536000, immutable\n' > public/_headers
-printf '{"version":1,"include":["/d/*"],"exclude":[]}\n' > public/_routes.json
+printf '{"version":1,"include":["/d/*","/req"],"exclude":[]}\n' > public/_routes.json
