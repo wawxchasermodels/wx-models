@@ -888,17 +888,23 @@ function mgChart(cv, T, box) {
   c.font = `500 ${small ? 10 : 12}px Montserrat`; c.fillStyle = "#a7abb3";
   c.fillText(`Times are Pacific. ${T.P.c !== undefined ? "Temperature corrected to pass summit height. " : ""}${T.snowEst ? "Snow estimated 10:1 where 2 m temp \u2264 33\u00b0F." : ""}`, L, small ? 26 : 30);
   let y = top;
-  const tAxis = yb => {   // hours row + day row (Pacific) under one panel
+  const tAxis = yb => {   // hours row + day row (Pacific) under one panel; ticks from clock time, so 3 h / 6 h steps label too
+    const x0 = Date.parse(T.t[0]), x1 = Date.parse(T.t[n - 1]), span = (x1 - x0) / 36e5, every = span <= 30 ? 3 : span <= 54 ? 6 : span <= 100 ? 12 : 0;
+    const Xm = ms => L + (ms - t0) / Math.max(1, t1 - t0) * (W - L - Rm);
     c.font = `600 ${small ? 9 : 11}px Montserrat`; c.fillStyle = "#cfd3da"; c.textBaseline = "top"; c.textAlign = "center";
-    for (let k = 0; k < days.length; k++) { const xa = X(T.t[days[k].k]), xb = k + 1 < days.length ? X(T.t[days[k + 1].k]) : W - Rm; if (xb - xa > (small ? 34 : 50)) c.fillText(days[k].d, (xa + xb) / 2, yb + 13); }
-    const hrs = n > 60 ? [0, 12] : n > 24 ? [0, 6, 12, 18] : null;
-    let lastX = -1e9; T.t.forEach((t, k) => { if (X(t) - lastX < (small ? 30 : 40)) return; const hh = +fmtPT(t, { hour: "numeric", hourCycle: "h23" }); if (hrs ? hrs.includes(hh) && (k === 0 || +fmtPT(T.t[k - 1], { hour: "numeric", hourCycle: "h23" }) !== hh) : k % Math.max(1, Math.ceil(n / 12)) === 0)
-      { c.fillText(fmtPT(t, { hour: "numeric" }).replace(" ", "").toLowerCase(), X(t), yb); lastX = X(t); } });
+    const mids = []; let lastX = -1e9;
+    for (let t = Math.ceil(x0 / 36e5) * 36e5; t <= x1; t += 36e5) { const h = +fmtPT(t, { hour: "numeric", hourCycle: "h23" }) % 24; if (h === 0) mids.push(t);
+      if (every && h % every === 0 && Xm(t) - lastX > (small ? 30 : 40)) { c.fillText(fmtPT(t, { hour: "numeric" }).replace(" ", "").toLowerCase(), Xm(t), yb); lastX = Xm(t); } }
+    const dy = every ? 13 : 0, edges = [x0, ...mids, x1], dw = mids.length > 1 ? Xm(mids[1]) - Xm(mids[0]) : W;
+    const long = d => fmtPT(d, { weekday: "short", month: "numeric", day: "numeric" }), short = d => fmtPT(d, { month: "numeric", day: "numeric" });
+    if (dw > c.measureText("Wed, 10/28").width + 8) { for (let k = 0; k + 1 < edges.length; k++) { const xa = Xm(edges[k]), xb = Xm(edges[k + 1]), lab = long(edges[k] + 1); if (xb - xa > c.measureText(lab).width + 4) c.fillText(lab, (xa + xb) / 2, yb + dy); } }
+    else { const kk = Math.max(1, Math.ceil((c.measureText("10/28").width + 10) / dw)); mids.forEach((m, k) => { if (k % kk) return; c.fillRect(Xm(m) - 0.5, yb - 4, 1, 4); c.fillText(short(m + 1), Xm(m), yb + dy); }); }
     c.textAlign = "left";
   };
   const days = []; for (let k = 0; k < n; k++) { const d = fmtPT(T.t[k], { weekday: "short", month: "numeric", day: "numeric" }); if (!days.length || days[days.length - 1].d !== d) days.push({ d, k }); }
   for (const [kind, wt] of panels) {
     const h = wt * ph, y0 = y, y1 = y + h; y += h + gap;
+    c.save(); c.beginPath(); c.rect(0, y0 - 8, W, h + 10); c.clip();   // nothing from one panel draws into the next
     c.fillStyle = "#1d2027"; c.fillRect(L, y0, W - L - Rm, h);
     c.strokeStyle = "#2c3039"; c.lineWidth = 1; for (const dd of days) { const x = X(T.t[dd.k]); c.beginPath(); c.moveTo(x, y0); c.lineTo(x, y1); c.stroke(); }
     const scale = (lo, hi) => v => y1 - (v - lo) / (hi - lo || 1) * h;
@@ -907,7 +913,7 @@ function mgChart(cv, T, box) {
         c.fillText(+v.toFixed(2) + unit, right ? W - Rm + 4 : L - 4, yy); } c.textAlign = "left"; };
     const line = (a, sc, color, lw, dash) => { c.strokeStyle = color; c.lineWidth = lw; c.setLineDash(dash || []); c.beginPath(); let on = false;
       a.forEach((v, k) => { if (v == null) { on = false; return; } const xx = X(T.t[k]), yy = sc(v); on ? c.lineTo(xx, yy) : c.moveTo(xx, yy); on = true; }); c.stroke(); c.setLineDash([]); };
-    const label = (s, color, dx) => { c.font = `700 ${small ? 10 : 12}px Montserrat`; c.fillStyle = color; c.textBaseline = "top"; c.fillText(s, L + 6 + (dx || 0), y0 + 4); return c.measureText(s).width + 14; };
+    const label = (s, color, dx, dy) => { c.font = `700 ${small ? 10 : 12}px Montserrat`; c.fillStyle = color; c.textBaseline = "top"; c.fillText(s, L + 6 + (dx || 0), y0 + 4 + (dy || 0)); return c.measureText(s).width + 14; };
     const bars = (a, sc, color, wfrac) => { c.fillStyle = color; const bw = Math.max(1.5, (W - L - Rm) / n * (wfrac || 0.7)); a.forEach((v, k) => { if (v == null || v <= 0) return; const xx = X(T.t[k]); c.fillRect(xx - bw / 2, sc(v), bw, y1 - sc(v)); }); };
     if (kind === "temp") {
       const a = T.t2m.filter(v => v != null), sd = T.t2sd;
@@ -917,7 +923,7 @@ function mgChart(cv, T, box) {
         for (let k = n - 1; k >= 0; k--) c.lineTo(X(T.t[k]), sc(T.t2m[k] - sd[k])); c.fill(); }
       line(T.t2m.map(() => 32), sc, "#5aa9ff", 1.5, [6, 4]); line(T.t2m, sc, "#ff5a5f", 2.5);
       let dx = label(sd ? "Temperature \u00b0F (ens. mean, shading = \u00b11 spread)" : "Temperature \u00b0F", "#ff8a8e"); label("32\u00b0F", "#5aa9ff", dx);
-      if (T.p32) { const s2 = scale(0, 100); line(T.p32, s2, "#7fd1ff", 1.5, [2, 3]); axis(0, 100, s2, "%", true, "#7fd1ff"); label("chance \u2264 32\u00b0F", "#7fd1ff", dx + 60); }
+      if (T.p32) { const s2 = scale(0, 100); line(T.p32, s2, "#7fd1ff", 1.5, [2, 3]); axis(0, 100, s2, "%", true, "#7fd1ff"); { c.font = `700 ${small ? 10 : 12}px Montserrat`; const lab = "chance \u2264 32\u00b0F (right axis)", fits = L + 6 + dx + 60 + c.measureText(lab).width < W - Rm - 4; label(lab, "#7fd1ff", fits ? dx + 60 : 0, fits ? 0 : (small ? 14 : 16)); } }
       const mx = [], mn = []; // daily hi/lo labels
       for (const dd of days) { const ks = T.t.map((t, k) => k).filter(k => fmtPT(T.t[k], { weekday: "short", month: "numeric", day: "numeric" }) === dd.d && T.t2m[k] != null);
         if (ks.length < 3) continue; const kH = ks.reduce((a, b) => T.t2m[b] > T.t2m[a] ? b : a), kL = ks.reduce((a, b) => T.t2m[b] < T.t2m[a] ? b : a);
@@ -932,12 +938,12 @@ function mgChart(cv, T, box) {
     } else if (kind === "pcp") {
       const pc = T.pcp6 && !T.pcp ? null : T.pcp, sn = T.snow || null, sn6 = T.snow6 || null, p6 = T.pcp6 || null;
       const hiP = Math.max(0.1, ...(pc || []).filter(v => v != null), ...(p6 || []).filter(v => v != null)), scP = scale(0, niceStep(hiP) * Math.ceil(hiP / niceStep(hiP)));
-      const anySnow = (sn || sn6 || []).some(v => v > 0.05), hiS = Math.max(1, ...(sn || sn6 || []).filter(v => v != null)), topS = niceStep(hiS) * Math.ceil(hiS / niceStep(hiS)), scS = scale(0, topS);
+      const runS = sn ? sn.reduce((acc, v, k) => (acc.push((acc[k - 1] || 0) + (v || 0)), acc), []) : sn6 ? (() => { let q = 0; return sn6.map((v, k) => T.f[k] % 6 === 0 ? (q += v || 0) : null); })() : [];
+      const anySnow = (sn || sn6 || []).some(v => v > 0.05), hiS = Math.max(1, ...runS.filter(v => v != null)), topS = niceStep(hiS) * Math.ceil(hiS / niceStep(hiS)), scS = scale(0, topS);
       const pTop = niceStep(hiP) * Math.ceil(hiP / niceStep(hiP)); axis(0, pTop, scP, "\u2033", false, "#6fd38a");
       if (p6 && T.pcp) bars(p6.map((v, k) => T.f[k] % 6 === 0 && T.f[k] > 36 ? v : null), scP, "#3ea95888", 2.2);
       if (pc) bars(pc, scP, "#3ea958"); else if (p6) bars(p6.map((v, k) => T.f[k] % 6 === 0 ? v : null), scP, "#3ea958", 2.2);
-      if (anySnow) { axis(0, topS, scS, "\u2033", true, "#d9ecff"); if (sn) line(sn.reduce((acc, v, k) => (acc.push((acc[k - 1] || 0) + (v || 0)), acc), []), scS, "#d9ecff", 2);
-        else { let s = 0; line(sn6.map((v, k) => T.f[k] % 6 === 0 ? (s += v || 0) : null), scS, "#d9ecff", 2); } }
+      if (anySnow) { axis(0, topS, scS, "\u2033", true, "#d9ecff"); line(runS, scS, "#d9ecff", 2); }
       const tot = pc ? pc.reduce((a, v) => a + (v || 0), 0) : sum6(T, p6, -1, 1e9) || 0;
       let dx = label(`Precip per ${pc ? (T.f[1] - T.f[0] || 1) + " h" : "6 h"} (total ${tot.toFixed(2)}\u2033)`, "#6fd38a");
       if (anySnow) { const ts = (sn || []).reduce((a, v) => a + (v || 0), 0) || sum6(T, sn6, -1, 1e9) || 0; label(`Snow running total ${ts.toFixed(1)}\u2033${T.snowEst ? " (est.)" : ""}`, "#d9ecff", dx); }
@@ -945,7 +951,7 @@ function mgChart(cv, T, box) {
       const sc = scale(0, 100); c.fillStyle = "#9aa3b2"; c.beginPath(); c.moveTo(X(T.t[0]), y1); T.tcc.forEach((v, k) => c.lineTo(X(T.t[k]), sc(v || 0))); c.lineTo(X(T.t[n - 1]), y1); c.closePath(); c.globalAlpha = 0.55; c.fill(); c.globalAlpha = 1;
       axis(0, 100, sc, "%"); label("Cloud cover", "#cfd3da");
     }
-    tAxis(y1 + 4);
+    c.restore(); tAxis(y1 + 4);
   }
   c.textAlign = "left";
 }

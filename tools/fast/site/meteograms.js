@@ -151,8 +151,9 @@ function timeAxis(c, X, x0, x1, L, R, yb, small) {
     if (h === 0) mids.push(t);
     if (every && h % every === 0 && X(t) - lastX > (small ? 30 : 38)) { c.fillText(ptHm(t), X(t), yb); lastX = X(t); }
   }
-  const edges = [x0, ...mids, x1], dy = every ? (small ? 12 : 14) : 0;
-  for (let k = 0; k + 1 < edges.length; k++) { const xa = X(edges[k]), xb = X(edges[k + 1]); const lab = ptDay(edges[k] + 1); if (xb - xa > c.measureText(lab).width + 6) c.fillText(lab, (xa + xb) / 2, yb + dy); }
+  const edges = [x0, ...mids, x1], dy = every ? (small ? 12 : 14) : 0, dw = mids.length > 1 ? X(mids[1]) - X(mids[0]) : R + 1e4;
+  if (dw > c.measureText("Wed 10/28").width + 8) { for (let k = 0; k + 1 < edges.length; k++) { const xa = X(edges[k]), xb = X(edges[k + 1]); const lab = ptDay(edges[k] + 1); if (xb - xa > c.measureText(lab).width + 6) c.fillText(lab, (xa + xb) / 2, yb + dy); } }
+  else { const kk = Math.max(1, Math.ceil((c.measureText("10/28").width + 10) / dw)); mids.forEach((m, k) => { if (k % kk) return; c.fillRect(X(m) - 0.5, yb - 4, 1, 4); c.fillText(fmt({ month: "numeric", day: "numeric" }).format(m + 1), X(m), yb + dy); }); }   // long runs on phones: every k-th midnight
   c.textAlign = "left";
   return mids;
 }
