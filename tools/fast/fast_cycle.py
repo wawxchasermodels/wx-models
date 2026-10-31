@@ -87,9 +87,34 @@ def main():
                 publish_manifest(s3, D, m)
             print(f"{m} {cyc}: uploaded {len(files)} files, {len(ordered)}/{len(want)} steps live", flush=True)
             for f in files: os.remove(f"{D}/{f}")   # keep the runner disk small
-            if full["complete"]: break
+            if full["complete"]:
+                if not a.dry_run:
+                    try: write_agg(s3, m, cyc, full, f"{rd}/run.json", key)
+                    except Exception as e: print(m, cyc, "aggregate town files failed (site falls back to per-step files):", e, flush=True)
+                break
 
 MG_KEEP = 4   # runs per model with town data for the meteograms page
+def write_agg(s3, m, cyc, full, local, key):
+    """Complete run -> one single/{pts,mem}_all.json ({"f": [...], "d": [...]}) so a meteogram / the Pass Forecaster
+    fetches 1 file instead of ~50. run.json "agg" lists the names; the site falls back to per-step files without it."""
+    from concurrent.futures import ThreadPoolExecutor
+    agg = []
+    for name in ("pts", "mem"):
+        fs = [x["f"] for x in full["steps"]]
+        def get(f):
+            try: return json.loads(s3.get_object(Bucket=BUCKET, Key=f"runs/{m}/{cyc}/single/{name}_f{f:03d}.json")["Body"].read())
+            except Exception: return None
+        with ThreadPoolExecutor(16) as ex: d = list(ex.map(get, fs))
+        if not all(x is not None for x in d): continue
+        s3.put_object(Bucket=BUCKET, Key=f"runs/{m}/{cyc}/single/{name}_all.json", Body=json.dumps({"f": fs, "d": d}, separators=(",", ":")).encode(),
+                      ContentType="application/json")
+        agg.append(name)
+    if agg:
+        full["agg"] = agg; json.dump(full, open(local, "w"), indent=1)
+        s3.upload_file(local, BUCKET, key, ExtraArgs={"ContentType": "application/json"})
+        print(m, cyc, "aggregate town files:", agg, flush=True)
+
+
 def publish_manifest(s3, D, m):
     keep = FE.MODELS[m]["keep"]
     pre = {o["Prefix"].split("/")[2] for o in s3.list_objects_v2(Bucket=BUCKET, Prefix=f"runs/{m}/", Delimiter="/").get("CommonPrefixes", [])}

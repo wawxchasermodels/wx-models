@@ -1008,7 +1008,11 @@ async function mgSeries(r) {   // {points, steps:[{f, valid}], v: {field: [[town
   const p = (async () => {
     const R_ = await loadRun(r); if (!R_.points) return null;
     const st = R_.steps, out = new Array(st.length); let k = 0;
-    const one = async () => { while (k < st.length) { const i = k++; const f = String(st[i].f).padStart(3, "0");
+    if ((R_.agg || []).includes("pts")) try {   // complete runs: one aggregated file (single/pts_all.json) instead of ~50
+      const A = await (await fetch(`${DATA}runs/${r}/single/pts_all.json`)).json(), by = new Map(A.f.map((f, i) => [f, A.d[i]]));
+      st.forEach((s, i) => { out[i] = by.get(s.f) || null; });
+    } catch (e) { out.fill(null); }
+    const one = async () => { while (k < st.length) { const i = k++; if (out[i]) continue; const f = String(st[i].f).padStart(3, "0");
       try { out[i] = await (await fetch(`${DATA}runs/${r}/single/pts_f${f}.json`)).json(); } catch (e) { out[i] = null; } } };
     await Promise.all(Array.from({ length: 8 }, one));
     const ok = st.map((s, i) => [s, out[i]]).filter(x => x[1]);

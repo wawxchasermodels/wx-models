@@ -121,7 +121,11 @@ const runsOf = (m) => [...new Set([...((S.man && S.man.runs[m]) || []), ...((S.m
 const loadRun = (m, c) => memo(`run/${m}/${c}`, () => getJSON(`${DATA}runs/${m}/${c}/run.json`, true));
 async function perStep(m, c, name, maxF) {   // [{f, valid, d}] for steps whose file exists
   const R = await loadRun(m, c), st = (R.steps || []).filter((s) => maxF == null || s.f <= maxF), out = new Array(st.length); let k = 0;
-  const one = async () => { while (k < st.length) { const i = k++; const f = String(st[i].f).padStart(3, "0");
+  if ((R.agg || []).includes(name)) try {   // complete runs: one aggregated file ({name}_all.json) instead of ~50
+    const A = await getJSON(`${DATA}runs/${m}/${c}/single/${name}_all.json`), by = new Map(A.f.map((f, i) => [f, A.d[i]]));
+    st.forEach((s, i) => { out[i] = by.get(s.f) || null; });
+  } catch (e) { out.fill(null); }
+  const one = async () => { while (k < st.length) { const i = k++; if (out[i]) continue; const f = String(st[i].f).padStart(3, "0");
     try { out[i] = await getJSON(`${DATA}runs/${m}/${c}/single/${name}_f${f}.json`); } catch (e) { out[i] = null; } } };
   await Promise.all(Array.from({ length: 8 }, one));
   return st.map((s, i) => ({ f: s.f, valid: s.valid, d: out[i] })).filter((x) => x.d);
@@ -129,7 +133,7 @@ async function perStep(m, c, name, maxF) {   // [{f, valid, d}] for steps whose 
 const ptsSeries = (m, c) => memo(`pts/${m}/${c}`, async () => { const R = await loadRun(m, c); if (!R.points) return null; const st = await perStep(m, c, "pts"); return st.length ? { R, points: R.points, st } : null; });
 const memSeries = (m, c) => memo(`mem/${m}/${c}`, async () => {   // probe the first step: runs encoded before 10-30 evening have no member files
   const R = await loadRun(m, c), s0 = (R.steps || [])[0]; if (!s0) return null;
-  const ok = await fetch(`${DATA}runs/${m}/${c}/single/mem_f${String(s0.f).padStart(3, "0")}.json`, { method: "HEAD" }).then((r) => r.ok).catch(() => false);
+  const ok = (R.agg || []).includes("mem") || await fetch(`${DATA}runs/${m}/${c}/single/mem_f${String(s0.f).padStart(3, "0")}.json`, { method: "HEAD" }).then((r) => r.ok).catch(() => false);
   if (!ok) return null; const st = await perStep(m, c, "mem"); return st.length ? { st } : null; });
 
 function townSeries(D, name) {   // per-step values of one place (same derivations as the map viewer's Meteogram)
