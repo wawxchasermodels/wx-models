@@ -859,7 +859,7 @@ function gridInv(V, st, fi, fj, guess) {   // [fi, fj] -> panel px, or null when
 // the number is the raw (unsmoothed) min / max near the centre. Drawn on every map with MSLP isobars except ensemble lows.
 const HL_VIEW = { na: [800, 3.0, 75], pnw: [400, 2.0, 50], pnwt: [400, 2.0, 50], pnwhr: [400, 2.0, 45] };   // radius km, prominence mb, smoothing km
 const HL_WA = [250, 1.5, 35];   // Washington-type frames (old HL_RADIUS_KM / HL_PROMINENCE_MB "wa")
-const HL_LOW_COLOR = "#d7191c", HL_HIGH_COLOR = "#d7191c";   // both red as asked (old site drew H in blue #1747c9)
+const HL_LOW_COLOR = "#d7191c", HL_HIGH_COLOR = "#1747c9";   // L red, H blue (Benjamin 10-31 1:42 AM; old site H blue #1747c9)
 function drawHL(ctx, st, D, V, gk) {
   const out = geo(`hl/${gk}`, () => hlGeom(st, D, V));
   paintHL(ctx, out);
