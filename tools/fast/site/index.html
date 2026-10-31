@@ -29,6 +29,8 @@ body.phone #dock #step{min-width:90px}
    rasterizes a will-change:transform layer once at 1x and stretches it (3x on an iPhone), so the canvas showed at a third of its res. */
 canvas{display:block;width:auto;height:auto;max-width:100%;max-height:100%;touch-action:none}
 #zreset{position:absolute;right:10px;top:10px;z-index:2;background:#262931ee;color:#f4f2ee;border:1px solid #7d828c;border-radius:6px;padding:5px 10px;font:inherit;font-size:13px;cursor:pointer}
+#jumpnote{position:absolute;left:50%;top:44px;transform:translateX(-50%);z-index:4;background:#1d2027f0;color:#ffd27a;border:1px solid #6b5a2e;border-radius:8px;padding:5px 12px;font-weight:700;font-size:13px;max-width:90%;text-align:center}
+#jumpnote[hidden]{display:none}#jumpnote button{margin-left:8px;background:#2f8cff;color:#fff;border:0;border-radius:6px;padding:3px 9px;font:inherit;cursor:pointer}
 #tip{position:absolute;pointer-events:none;background:#1d2027ee;color:#fff;border:1px solid #7d828c;border-radius:6px;padding:3px 8px;font-weight:700;font-size:14px;white-space:nowrap}
 @media (max-width:1500px){#stat{display:none}}
 @media (max-width:700px){#wrap{align-items:flex-start}}
@@ -41,7 +43,7 @@ body.embed #share,body.embed #obsbtn,body.embed #stat,body.embed #pfbtn{display:
 body.embed #bar{gap:6px;padding:6px 8px}
 body.cslim #bar,body.cslim #dock,body.cslim #stepctl,body.cslim #loadnote{display:none!important}body.cslim.cshow #bar{display:flex!important}
 body.cslim #wrap{padding:0!important}body.cslim{min-height:0!important;height:auto!important}
-#cgear{position:fixed;right:6px;top:6px;z-index:20;background:#262931e0;color:#f4f2ee;border:1px solid #7d828c;border-radius:6px;padding:3px 8px;font:12px Montserrat,system-ui,sans-serif;cursor:pointer}
+#cgear{position:fixed;right:6px;bottom:6px;z-index:20;background:#262931e0;color:#f4f2ee;border:1px solid #7d828c;border-radius:6px;padding:3px 8px;font:12px Montserrat,system-ui,sans-serif;cursor:pointer}
 body.cslim.cshow #cgear{position:static;margin:4px 8px}
 /* 10-29 9:01 PM (Benjamin): on phones the hour slider + step buttons sit UNDER the map (thumb no longer covers it);
    the map hugs the slider at the bottom of the screen, menus stay on top. Desktop unchanged. viewer.js moves #stepctl. */
@@ -105,5 +107,5 @@ table.pf td small.el{color:#a7abb3;font-weight:500;font-size:11px}table.pf td.fz
 </div>
 <div id="wrap"><canvas id="map"></canvas><div id="tip" hidden></div></div>
 <div id="dock"></div>
-<script src="viewer.js?v=20261031v"></script>
+<script src="viewer.js?v=20261031x"></script>
 </body></html>

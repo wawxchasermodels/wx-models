@@ -243,10 +243,12 @@ async function refreshPartial() {
 // Side-by-side viewer (10-31, Benjamin: "a side by side viewer"): compare.html shows two of these pages in frames (?embed=compare&id=L|R).
 // Each frame tells the page what it shows after every draw; the page sends "set" to the other frame when sync is on.
 let cmpEcho = false;
+const cslimH = () => { const m = $("map"), b = $("bar"), bot = (e) => e ? e.getBoundingClientRect().bottom + scrollY : 0;   // content height for the slim compare frame
+  return Math.ceil(Math.max(bot(m), document.body.classList.contains("cshow") ? bot(b) : 0)) + 2; };
 function postCompare(run, pid, vid, step) {
   if (!Q.get("embed") || parent === window) return;
   parent.postMessage({ wx: "state", id: Q.get("id"), run, prod: pid, tab: S.tab, view: vid, f: step.f, valid: step.valid, echo: cmpEcho,
-    i: S.i, n: S.runs[run].steps.length, vline: step.valid_line || "", h: Math.ceil(document.documentElement.scrollHeight) }, "*");   // i / n / vline: shared hour slider; h: frame height (slim phone layout)
+    i: S.i, n: S.runs[run].steps.length, vline: step.valid_line || "", h: cslimH() }, "*");   // i / n / vline: shared hour slider; h: frame height (slim phone layout)
   cmpEcho = false;
 }
 async function onCompareMsg(e) {
@@ -256,10 +258,11 @@ async function onCompareMsg(e) {
   if (d.prod && P[d.prod] && P[d.prod].fields.every(x => has.has(x))) { S.prod = d.prod; S.tab = null; }
   if (d.view && VIEWS()[d.view]) S.view = d.view;
   setLists();
-  if (typeof d.i === "number") { S.i = Math.max(0, Math.min(S.runs[S.run].steps.length - 1, d.i)); $("step").value = S.i; d.valid = null; }   // shared slider (compare page)
+  const lead = typeof d.i === "number";   // shared slider (compare page): this frame leads, so its new state is passed on to the other map
+  if (lead) { S.i = Math.max(0, Math.min(S.runs[S.run].steps.length - 1, d.i)); $("step").value = S.i; d.valid = null; }
   if (d.valid) { const st = S.runs[S.run].steps, vt = Date.parse(d.valid); let b = 0;
     st.forEach((x, k) => { if (Math.abs(Date.parse(x.valid) - vt) < Math.abs(Date.parse(st[b].valid) - vt)) b = k; }); S.i = b; $("step").value = b; }
-  cmpEcho = true; draw(); loadNote();
+  cmpEcho = !lead; draw(); loadNote();
 }
 async function loadRun(r) { if (!S.runs[r]) S.runs[r] = await (await fetch(`${DATA}runs/${r}/${runFile(r)}`, { cache: "no-cache" })).json(); return S.runs[r]; }
 const SV = () => (S.man.static_v ? `?v=${S.man.static_v}` : "");   // cache-buster for static layers (they are cached 1 day)
@@ -536,8 +539,33 @@ async function pump() {
   finally { S.busy = false; ws.forEach(r => r()); if (S.again || S.waiters.length) { S.again = false; if (!rafOn) { rafOn = true; requestAnimationFrame(pump); } } }
 }
 let drawSeq = 0, urlTimer = null;
+// 10-31 3:18 PM (Benjamin: "make it jump to the next model run and not show the 'not in this model run'"): an hour where the product
+// has no map (6 h precip at F+3, NBM 6 h sums off the 6-hourly times, ...) jumps to the nearest hour that has it, in the direction you
+// were stepping (forward first otherwise). Only a product missing from the whole run shows a message, with a button to the nearest
+// run of that model that has it. Studio recording turns this off (window.__vjNoJump) so a video never repeats hours.
+async function findHour(run, pid, i, dir) {
+  const st = S.runs[run].steps, order = [];
+  const fw = [], bw = []; for (let j = i + 1; j < st.length; j++) fw.push(j); for (let j = i - 1; j >= 0; j--) bw.push(j);
+  order.push(...(dir < 0 ? bw.concat(fw) : fw.concat(bw)));
+  for (const j of order) {
+    try { await productFields(run, pid, st[j].f); return j; }
+    catch (e) { S.derived.delete(`${run}/${pid}/${st[j].f}`); if (!String(e && e.message).startsWith("nodata:")) throw e; }
+  }
+  return null;
+}
+function jumpNote(html, ms) {
+  let n = $("jumpnote"); if (!n) { n = document.createElement("div"); n.id = "jumpnote"; $("wrap").appendChild(n); }
+  n.innerHTML = html; n.hidden = false; clearTimeout(n._t); if (ms) n._t = setTimeout(() => { n.hidden = true; }, ms); return n;
+}
+async function otherRunWith(run, pid) {   // nearest run of the same model (newest first) whose fields cover this product
+  const [m, c] = run.split("/"), need = (PRODS()[pid] || {}).fields || [], rs = [...(S.man.runs[m] || [])].filter(x => x !== c).sort((a, b) => Math.abs(+a.slice(0, 10) - +c.slice(0, 10)) - Math.abs(+b.slice(0, 10) - +c.slice(0, 10)) || (b > a ? 1 : -1));
+  for (const x of rs.slice(0, 4)) { try { const R_ = await loadRun(`${m}/${x}`), has = new Set(R_.fields || []); if (need.every(f_ => has.has(f_))) return `${m}/${x}`; } catch (e) { /* skip */ } }
+  return null;
+}
+let lastI = null, lastKey = "";
 async function render(lite) {
   const seq = ++drawSeq, t0 = performance.now();
+  const dir = lastKey === S.run && lastI !== null && S.i < lastI ? -1 : 1; lastI = S.i; lastKey = S.run;
   const run = S.run, vid = S.view, pid = S.prod, step = S.runs[run].steps[S.i], f = step.f;
   let st, D, key;
   try { [st, D, key] = await Promise.all([viewStatic(vid), productFields(run, pid, f), getKey(pid, vid)]); }
@@ -545,9 +573,21 @@ async function render(lite) {
     if (seq !== drawSeq) return;
     if (!String(e && e.message).startsWith("nodata:")) throw e;
     S.derived.delete(`${run}/${pid}/${f}`);
+    if (!window.__vjNoJump && !S.dragging) {   // while dragging the slider: no jumping under the finger (it jumps when you let go)
+      let alt = null; try { alt = await findHour(run, pid, S.i, dir); } catch (err) { /* network: fall through to the message */ }
+      if (seq !== drawSeq || S.run !== run || S.prod !== pid) return;
+      if (alt !== null) {
+        const f2 = S.runs[run].steps[alt].f; S.i = alt; $("step").value = alt; lastI = alt;
+        jumpNote(`No ${PRODS()[pid].title} map at F+${f}; showing F+${f2}`, 2500); if (typeof loadNote === "function") loadNote();
+        return render(lite);
+      }
+      otherRunWith(run, pid).then((r2) => { if (S.run !== run || S.prod !== pid) return;
+        const n = jumpNote(`This run has no ${PRODS()[pid].title} maps.` + (r2 ? ` <button type="button" id="jumprun">Open ${r2.split("/")[1].slice(8)}Z ${r2.split("/")[1].slice(4, 6)}-${r2.split("/")[1].slice(6, 8)} run</button>` : " Try another run in the Runs menu."), 0);
+        const b = n.querySelector("#jumprun"); if (b) b.onclick = async () => { await loadRun(r2); S.run = r2; $("run").value = r2; n.hidden = true; setLists(); draw(); }; });
+    }
     const V = VIEWS()[vid], cv = $("map"), st2 = await viewStatic(vid);
     const ctx = sizeMap(cv, V, lite), [LW, LH] = V.fig; ctx.fillStyle = S.man.style.BG; ctx.fillRect(0, 0, LW, LH); ctx.drawImage(layer(st2.base, st2.baseU, cv._rs), 0, 0, LW, LH);
-    header(ctx, V, PRODS()[pid].title, step.valid_line, `${S.runs[run].runline}  \u00b7  ${V.label}  \u00b7  not in this model run at this hour`, step.badge);
+    header(ctx, V, PRODS()[pid].title, step.valid_line, `${S.runs[run].runline}  \u00b7  ${V.label}  \u00b7  ${window.__vjNoJump || S.dragging ? "no map at this hour" : "not in this model run"}`, step.badge);
     S.cur = null; window.__drawn = `${pid}/${vid}/${f}`; if (window.onStudioSkip) window.onStudioSkip();
     postCompare(run, pid, vid, step);   // 10-31: still report to the side-by-side page (else sync never starts when a frame opens on such an hour)
     return;
