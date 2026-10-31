@@ -39,6 +39,10 @@ body.bare #bar{display:none}
 /* side-by-side frames (compare.html): no page-level extras, smaller bar */
 body.embed #share,body.embed #obsbtn,body.embed #stat,body.embed #pfbtn{display:none}
 body.embed #bar{gap:6px;padding:6px 8px}
+body.cslim #bar,body.cslim #dock,body.cslim #stepctl,body.cslim #loadnote{display:none!important}body.cslim.cshow #bar{display:flex!important}
+body.cslim #wrap{padding:0!important}body.cslim{min-height:0!important;height:auto!important}
+#cgear{position:fixed;right:6px;top:6px;z-index:20;background:#262931e0;color:#f4f2ee;border:1px solid #7d828c;border-radius:6px;padding:3px 8px;font:12px Montserrat,system-ui,sans-serif;cursor:pointer}
+body.cslim.cshow #cgear{position:static;margin:4px 8px}
 /* 10-29 9:01 PM (Benjamin): on phones the hour slider + step buttons sit UNDER the map (thumb no longer covers it);
    the map hugs the slider at the bottom of the screen, menus stay on top. Desktop unchanged. viewer.js moves #stepctl. */
 #stepctl{display:contents}
@@ -101,5 +105,5 @@ table.pf td small.el{color:#a7abb3;font-weight:500;font-size:11px}table.pf td.fz
 </div>
 <div id="wrap"><canvas id="map"></canvas><div id="tip" hidden></div></div>
 <div id="dock"></div>
-<script src="viewer.js?v=20261031u"></script>
+<script src="viewer.js?v=20261031v"></script>
 </body></html>

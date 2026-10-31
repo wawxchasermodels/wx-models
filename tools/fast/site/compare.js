@@ -7,8 +7,9 @@ const Q = new URLSearchParams(location.search), $ = (id) => document.getElementB
 const ST = { L: null, R: null }, SYNC = { time: true, prod: true, view: true };
 try { Object.assign(SYNC, JSON.parse(localStorage.getItem("cmpSync") || "{}")); } catch (e) { /* defaults */ }
 for (const k of ["time", "prod", "view"]) { const b = $("s_" + k); b.checked = SYNC[k]; b.onchange = () => { SYNC[k] = b.checked; localStorage.setItem("cmpSync", JSON.stringify(SYNC)); if (b.checked) push("L"); }; }
+const SLIM = matchMedia("(max-width:820px)").matches;   // phones: menus folded in each map, maps sized to their frames
 function src(id, run) {
-  const u = new URLSearchParams({ embed: "compare", id });
+  const u = new URLSearchParams({ embed: "compare", id }); if (SLIM) u.set("slim", "1");
   if (run) u.set("run", run);
   for (const k of ["prod", "view"]) if (Q.get(k)) u.set(k, Q.get(k));
   return "./?" + u;
@@ -28,6 +29,8 @@ addEventListener("message", (e) => {
   const d = e.data; if (!d || d.wx !== "state" || !ST.hasOwnProperty(d.id)) return;
   if (e.source !== frame(d.id)) return;
   const first = !ST[d.id]; ST[d.id] = d;
+  if (SLIM && d.h) $(d.id).style.height = Math.max(150, Math.min(1400, d.h)) + "px";
+  if (d.id === "R") hsync();
   if (first && Q.get("valid") && firstR) {   // opened from the map page: both frames start at that valid time
     frame(d.id).postMessage({ wx: "set", valid: Q.get("valid") }, "*"); return;
   }
@@ -39,6 +42,20 @@ addEventListener("message", (e) => {
     $("back").href = `./?run=${encodeURIComponent(ST.L.run)}&prod=${ST.L.prod}&view=${ST.L.view}&f=${ST.L.f}`;
   }, 500);
 });
+// shared hour slider: drives the main (right) map; with Valid-time sync on the other map follows
+function hsync() { const r = ST.R; if (!r || !r.n) return; const s = $("hstep"); s.max = String(r.n - 1); if (!HP.drag) s.value = String(r.i); $("hlbl").textContent = `F+${r.f} \u00b7 ${(r.vline || "").replace(/^Valid /, "")}`; }
+const HP = { t: 0, drag: false };
+const hset = (i) => { const r = ST.R; if (!r) return; frame("R").postMessage({ wx: "set", i: (i + r.n) % r.n }, "*"); };
+$("hstep").addEventListener("input", (e) => { HP.drag = true; hset(+e.target.value); });
+$("hstep").addEventListener("change", () => { HP.drag = false; });
+$("hprev").onclick = () => ST.R && hset(ST.R.i - 1); $("hnext").onclick = () => ST.R && hset(ST.R.i + 1);
+$("hplay").onclick = () => { if (HP.t) { clearInterval(HP.t); HP.t = 0; $("hplay").textContent = "Play"; return; }
+  $("hplay").textContent = "Stop"; HP.t = setInterval(() => ST.R && hset(ST.R.i + 1), 800); };
+addEventListener("keydown", (e) => { if (e.target.tagName === "INPUT" && e.target.type !== "range") return; if (e.key === "ArrowRight") { e.preventDefault(); $("hnext").click(); } if (e.key === "ArrowLeft") { e.preventDefault(); $("hprev").click(); } });
+$("syncbtn").onclick = () => $("cbar").classList.toggle("open");
+$("tv").onclick = () => { const r = ST.R; if (!r) return;
+  const u = new URL("studio.html", location.href); u.search = new URLSearchParams({ clean: "1", out: "h", run: r.run, model: r.run.split("/")[0], prod: r.prod, view: r.view, f: String(r.f), play: "1", dwell: "700", loop: "1" }).toString();
+  window.open(u.toString(), "_blank"); };
 $("swap").onclick = () => {
   if (!ST.L || !ST.R) return; const a = ST.L, b = ST.R;
   frame("L").postMessage({ wx: "set", run: b.run, prod: b.prod, view: b.view, valid: b.valid }, "*");

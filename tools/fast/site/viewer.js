@@ -47,7 +47,7 @@ function fitPhone() {   // phones: map as large as fits between the menus and th
   if (!document.body.classList.contains("phone") || !cv.width) { cv.style.width = cv.style.height = ""; schedSharp(); return; }
   const wr = $("wrap"), cs = getComputedStyle(wr), padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight), padY = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
   const vh = window.visualViewport ? visualViewport.height : innerHeight;
-  const availW = document.documentElement.clientWidth - padX, availH = vh - $("bar").offsetHeight - $("dock").offsetHeight - padY;
+  const availW = document.documentElement.clientWidth - padX, availH = document.body.classList.contains("cslim") ? 1e5 : vh - $("bar").offsetHeight - $("dock").offsetHeight - padY;
   const k = Math.max(0.05, Math.min(availW / LW, availH / LH));
   cv.style.width = Math.floor(LW * k) + "px"; cv.style.height = Math.floor(LH * k) + "px"; schedSharp();
 }
@@ -151,6 +151,11 @@ const runFile = (r) => XR.has(r) ? "run_x.json" : "run.json";
 async function boot() {
   if (Q.get("bare")) document.body.classList.add("bare");
   if (Q.get("embed")) { document.body.classList.add("embed"); addEventListener("message", onCompareMsg); }
+  // 10-31 3:17 PM slim compare (Benjamin: "a slimmer phone compare"): menus folded behind a small button, the compare page's shared
+  // hour slider replaces this frame's own, the map is sized to the frame width (the page sizes the frame to the map)
+  if (Q.get("slim")) { document.body.classList.add("cslim"); const b = document.createElement("button"); b.id = "cgear"; b.type = "button"; b.textContent = "Menus";
+    b.title = "Show / hide this map's model, product and view menus"; b.onclick = () => { document.body.classList.toggle("cshow"); fitPhone(); setTimeout(() => S.cur && postCompare(S.cur.run, S.cur.pid, S.view, S.runs[S.run].steps[S.i]), 50); };
+    document.body.appendChild(b); }
   // 10-29: manifest, fonts and the shown run's run.json in parallel; other runs load when picked
   const [man] = await Promise.all([fetch(DATA + "manifest.json", { cache: "no-cache" }).then(r => r.json()),
                                    document.fonts.load("800 20px Montserrat"), document.fonts.load("500 12px Montserrat")]);
@@ -240,7 +245,8 @@ async function refreshPartial() {
 let cmpEcho = false;
 function postCompare(run, pid, vid, step) {
   if (!Q.get("embed") || parent === window) return;
-  parent.postMessage({ wx: "state", id: Q.get("id"), run, prod: pid, tab: S.tab, view: vid, f: step.f, valid: step.valid, echo: cmpEcho }, "*");
+  parent.postMessage({ wx: "state", id: Q.get("id"), run, prod: pid, tab: S.tab, view: vid, f: step.f, valid: step.valid, echo: cmpEcho,
+    i: S.i, n: S.runs[run].steps.length, vline: step.valid_line || "", h: Math.ceil(document.documentElement.scrollHeight) }, "*");   // i / n / vline: shared hour slider; h: frame height (slim phone layout)
   cmpEcho = false;
 }
 async function onCompareMsg(e) {
@@ -250,6 +256,7 @@ async function onCompareMsg(e) {
   if (d.prod && P[d.prod] && P[d.prod].fields.every(x => has.has(x))) { S.prod = d.prod; S.tab = null; }
   if (d.view && VIEWS()[d.view]) S.view = d.view;
   setLists();
+  if (typeof d.i === "number") { S.i = Math.max(0, Math.min(S.runs[S.run].steps.length - 1, d.i)); $("step").value = S.i; d.valid = null; }   // shared slider (compare page)
   if (d.valid) { const st = S.runs[S.run].steps, vt = Date.parse(d.valid); let b = 0;
     st.forEach((x, k) => { if (Math.abs(Date.parse(x.valid) - vt) < Math.abs(Date.parse(st[b].valid) - vt)) b = k; }); S.i = b; $("step").value = b; }
   cmpEcho = true; draw(); loadNote();
