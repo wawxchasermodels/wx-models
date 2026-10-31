@@ -149,6 +149,7 @@ function mergeRunsX(man) {
 const runFile = (r) => XR.has(r) ? "run_x.json" : "run.json";
 async function boot() {
   if (Q.get("bare")) document.body.classList.add("bare");
+  if (Q.get("embed")) { document.body.classList.add("embed"); addEventListener("message", onCompareMsg); }
   // 10-29: manifest, fonts and the shown run's run.json in parallel; other runs load when picked
   const [man] = await Promise.all([fetch(DATA + "manifest.json", { cache: "no-cache" }).then(r => r.json()),
                                    document.fonts.load("800 20px Montserrat"), document.fonts.load("500 12px Montserrat")]);
@@ -233,6 +234,25 @@ async function refreshPartial() {
   const newF = N.fields.join() !== R_.fields.join();
   S.runs[r] = N; if (newF) setLists(); $("step").max = N.steps.length - 1; $("step").value = S.i; loadNote();
 }
+// Side-by-side viewer (10-31, Benjamin: "a side by side viewer"): compare.html shows two of these pages in frames (?embed=compare&id=L|R).
+// Each frame tells the page what it shows after every draw; the page sends "set" to the other frame when sync is on.
+let cmpEcho = false;
+function postCompare(run, pid, vid, step) {
+  if (!Q.get("embed") || parent === window) return;
+  parent.postMessage({ wx: "state", id: Q.get("id"), run, prod: pid, tab: S.tab, view: vid, f: step.f, valid: step.valid, echo: cmpEcho }, "*");
+  cmpEcho = false;
+}
+async function onCompareMsg(e) {
+  const d = e.data; if (!d || d.wx !== "set" || e.source !== parent) return;
+  if (d.run && d.run !== S.run) { try { await loadRun(d.run); S.run = d.run; $("run").value = d.run; } catch (err) { return; } }
+  const P = PRODS(), has = new Set(S.runs[S.run].fields);
+  if (d.prod && P[d.prod] && P[d.prod].fields.every(x => has.has(x))) { S.prod = d.prod; S.tab = null; }
+  if (d.view && VIEWS()[d.view]) S.view = d.view;
+  setLists();
+  if (d.valid) { const st = S.runs[S.run].steps, vt = Date.parse(d.valid); let b = 0;
+    st.forEach((x, k) => { if (Math.abs(Date.parse(x.valid) - vt) < Math.abs(Date.parse(st[b].valid) - vt)) b = k; }); S.i = b; $("step").value = b; }
+  cmpEcho = true; draw(); loadNote();
+}
 async function loadRun(r) { if (!S.runs[r]) S.runs[r] = await (await fetch(`${DATA}runs/${r}/${runFile(r)}`, { cache: "no-cache" })).json(); return S.runs[r]; }
 const SV = () => (S.man.static_v ? `?v=${S.man.static_v}` : "");   // cache-buster for static layers (they are cached 1 day)
 const MD = () => S.man.models[S.run.split("/")[0]];
@@ -265,8 +285,12 @@ function setLists() {   // products this run carries (all their fields present),
   const cur = S.tab && inTab(S.tab) ? S.tab : tabOf(S.prod); S.tab = cur; S.lastTab[cur] = S.prod;
   $("tabs").innerHTML = tabs.map(([id, label]) => `<button type="button" role="tab" data-t="${id}" aria-selected="${id === cur}"${id === cur ? ' class="on"' : ""}>${label}</button>`).join("") +
     // WA Maps (10-31, Benjamin 8:58 AM): the posted Washington state-view maps, own page (wamaps.html)
-    `<button type="button" data-t="wamaps" title="Washington state-view forecast maps">WA Maps</button>`;
+    (Q.get("embed") ? "" : `<button type="button" data-t="wamaps" title="Washington state-view forecast maps">WA Maps</button>` +
+      `<button type="button" data-t="compare" title="Two maps side by side: two models, or two runs of one model">Compare</button>`);
   $("tabs").onclick = e => { const b = e.target.closest("button[data-t]"); if (b && b.dataset.t === "wamaps") { location.href = "wamaps.html"; return; }
+    if (b && b.dataset.t === "compare") { const R_ = S.runs[S.run], st = R_.steps[S.i], [m] = S.run.split("/"), rs = (S.man.runs[m] || []);
+      const other = rs.length > 1 ? `${m}/${rs[rs.length - 1] === S.run.split("/")[1] ? rs[rs.length - 2] : rs[rs.length - 1]}` : S.run;
+      location.href = `compare.html?l=${encodeURIComponent(S.run)}&r=${encodeURIComponent(other)}&prod=${S.prod}&view=${S.view}&valid=${encodeURIComponent(st.valid)}`; return; }
     if (!b || b.dataset.t === S.tab) return;
     const t = tabs.find(x => x[0] === b.dataset.t), keep = S.lastTab[t[0]];
     S.tab = t[0]; S.prod = t[2].some(([k]) => k === keep) ? keep : t[2][0][0]; setLists(); draw(); };
@@ -584,6 +608,7 @@ async function render(lite) {
   S.last = { data_ms: t1 - t0, fill_ms: t2 - t1, overlay_ms: t3 - t2, total_ms: t3 - t0 };
   $("stat").textContent = `F+${f}  data ${S.last.data_ms.toFixed(0)} ms · fill ${S.last.fill_ms.toFixed(0)} ms · lines/labels ${S.last.overlay_ms.toFixed(0)} ms`;
   window.__drawn = `${pid}/${vid}/${f}` + (lite ? "~" : ""); window.__rs = rs;
+  postCompare(run, pid, vid, step);
   if (lite) return;
   // iOS Safari throws after 100 history.replaceState calls in 10 s: update the URL once things settle
   clearTimeout(urlTimer); urlTimer = setTimeout(() => { const u = new URL(location); u.searchParams.set("prod", pid); u.searchParams.set("view", vid);
