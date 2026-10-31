@@ -1133,12 +1133,15 @@ def static(m, out, views_only=None, x2_only=False):
         if m == "eps":
             prods["epcape"] = dict(title="Chance of MUCAPE 500+ J/kg", fields=["pcape"], key="Chance (%)", ticks=PC_L, tickfmt=True, **table(PC_L, CM["epcape"], "neither"),
                                    extra="share of the 50 members with most-unstable CAPE of 500 J/kg or more", pct=[0, 100], towns="names")
-        LP_L = [5, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
-        CM["elows"] = M.ramp(LP_L, [(5, "#eef3fb"), (20, "#bcd3f0"), (40, "#7fa7e0"), (60, "#e8a0c8"), (80, "#c2357a"), (100, "#6b0f3f")])
-        prods["elows"] = dict(title="Ensemble Low Centers", fields=["lowp", "mslp"], fill="lowp", key="Low within ~300 km (%)", ticks=[5, 10, 20, 40, 60, 80, 100], tickfmt=True,
+        # 10-30 8:30 PM (Benjamin: "the ensemble low centers had the top 10 strongest, the weakest, and the ensemble mean pressure
+        # at the center of the bullseye"): old site's look (ens_maps.py p_lows): blue "low within R km" fill, navy "within 25 km"
+        # swatch in the key, dots colored by central pressure, red mean L + pressure and the strongest / weakest list (viewer).
+        LP_L = [5, 10, 15, 20, 25, 30, 40, 50, 60, 70, 80, 90, 100]   # ens_maps.STRIKE_LEVELS / STRIKE_ANCH
+        CM["elows"] = M.ramp(LP_L, [(5, "#eef4fa"), (15, "#c9def0"), (30, "#8fbfe2"), (50, "#4f97cf"), (70, "#2a6db5"), (100, "#1d3f8f")])
+        prods["elows"] = dict(title="Ensemble Low Centers", fields=["lowp", "mslp"], fill="lowp", key="Low within 300 km (%)", ticks=[5, 10, 20, 30, 50, 70, 90], tickfmt=True,
                               **table(LP_L, CM["elows"], "neither"),
                               isobars=dict(field="mslp", every=4, sigma=1.0, color=HS.ISOBAR_COLOR, lw=HS.ISOBAR_LW, halo=HS.ISOBAR_HALO),
-                              lows=True, extra="dots = member lows (darker = deeper)  \u00b7  colors = % of members with a low nearby  \u00b7  lines = mean MSLP",
+                              lows=True, core=dict(km=25, min=5, color="#0a1442"), extra="dots = member lows (color = mb), L = mean low (mb)",
                               pct=[0, 100], towns="names")
         prods["elows"]["under"] = "#f4f5f7"
         prods["spag"] = dict(title="500 mb Spaghetti (552 / 576 dam)", fields=["z500", "z5sd"], fill="z5sd", key="Spread (m)", ticks=[0, 20, 40, 60, 80, 100, 120, 140, 160],
@@ -1205,10 +1208,15 @@ def static(m, out, views_only=None, x2_only=False):
             if pid == "vis": ext = "max"
             cs = ax.contourf(X, Y, np.full((2, 2), np.nan), levels=L, cmap=cm, norm=BoundaryNorm(L, cm.N), extend=ext, transform=ax.projection)
             cs.set_visible(False)
+            kx1 = {"x1": 0.872} if P.get("core") else {}   # elows: room for the old site's "within 25 km" swatch
             if P.get("tickfmt"):
-                cb = HS.hbar(fig, cs, [], P["key"], ky); cb.set_ticks(P["ticks"])
+                cb = HS.hbar(fig, cs, [], P["key"], ky, **kx1); cb.set_ticks(P["ticks"])
                 cb.ax.set_xticklabels(P.get("ticklabels") or [f"{t:g}" for t in P["ticks"]], fontproperties=HS.font(700, 13))
             else: HS.hbar(fig, cs, tk0, P["key"], ky)
+            if P.get("core"):
+                hh = 0.27 / fig.get_size_inches()[1]; import matplotlib.patches as mpa   # a patch, not the axes face: savefig(transparent=True) blanks axes faces
+                fig.patches.append(mpa.Rectangle((0.888, ky), 0.088, hh, transform=fig.transFigure, facecolor=P["core"]["color"], edgecolor=HS.PANEL_EDGE, lw=1.0))
+                fig.text(0.932, ky - 0.008, f"within {P['core']['km']} km", color=HS.INK, fontproperties=HS.font(700, HS.BAR_LABEL_SIZE), ha="center", va="top")
             HS.credit(fig, TM.CREDIT_NOAA if (pid == "t2m" and m in NOAA) else (M.credit(m) if m in M.MODELS else M.credit("gfs") if minfo(m).get("noaa") else TM.CREDIT.format(name=minfo(m)["name"])))
             sizes[f"key_{m}_{pid}_{vid}"] = save(fig, f"{out}/{fn}")
         P["ticks"] = [float(t) for t in tk0]

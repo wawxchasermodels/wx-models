@@ -336,6 +336,7 @@ async function productFields(run, pid, f) {
     } else if (P.fill === "thick") { const a = F.z500.v, b = F.z1000.v, o = new Float32Array(a.length); for (let k = 0; k < a.length; k++) o[k] = (a[k] - b[k]) / 10; out.fill = blur(o, g.w, g.h, 1.0);
     } else if (P.fill === "snowlvl") { const a = F.frz.v, o = new Float32Array(a.length); for (let k = 0; k < a.length; k++) o[k] = Math.max(0, a[k] - 1000); out.fill = o; }
     else out.fill = F[P.fill] ? F[P.fill].v : g.v;
+    if (P.lows && F.mslp) out.mslpRaw = F.mslp.v;   // ensemble-mean lows (L + central pressure)
     if (P.lows || P.spag) out.ens = await fetch(`${DATA}runs/${run}/single/ens_f${String(f).padStart(3, "0")}.json`).then(r => r.ok ? r.json() : null, () => null);
     if (P.isobars && F[P.isobars.field || "mslp"]) { const I = P.isobars, src = F[I.field || "mslp"].v, sc = I.scale || 1, a = new Float32Array(src.length);
       for (let k = 0; k < a.length; k++) a[k] = src[k] * sc; out.iso = blur(a, g.w, g.h, I.sigma); }
@@ -466,6 +467,7 @@ async function render(lite) {
   const gk = `${run}/${pid}/${vid}/${f}`;
   if (P.isobars && D.iso) drawIsobars(ctx, st, D, P, gk);
   if (P.barbs) drawBarbs(ctx, st, D, P, V);
+  S.lowPanel = null;
   if (P.lows || P.spag) drawEns(ctx, st, D, P, V, gk);
   if (P.hl) drawHL(ctx, st, D, V, gk);
   ctx.restore();
@@ -478,6 +480,7 @@ async function render(lite) {
     if (pid === "t2m" && t.t2m_corr !== undefined) v += t.t2m_corr;          // pass summit height correction (temp_maps)
     haloText(ctx, fmtVal(P, v), t.x * LW, t.y * LH, `800 ${pt(t.size)}px Montserrat`, t.color, pt(3.0), "left", "middle");
   }
+  if (P.lows && S.lowPanel) paintLowPanel(ctx, st, V, S.lowPanel);
   // 5. key + header text
   ctx.drawImage(L2.key, 0, 0, LW, LH);
   const [r0, r1, c0, c1] = V.cut;                                            // same rows/cols temp_maps.cut() keeps
@@ -852,10 +855,110 @@ function drawEns(ctx, st, D, P, V, gk) {
       for (const lines of zl) { strokeLines(ctx, lines, "#ffffff", pt(3.4), null); strokeLines(ctx, lines, "#101114", pt(1.8), null); } }
   }
   if (P.lows) {
-    const col = mb => mb <= 970 ? "#4b0f6b" : mb <= 980 ? "#b3123c" : mb <= 990 ? "#e8692f" : mb <= 1000 ? "#f2c12e" : "#8a919c";
-    for (const [mem, fi, fj, mb] of E.lows) { const p = gridInv(V, st, fi, fj, null); if (!p || p[0] < 0 || p[1] < 0 || p[0] > st.W || p[1] > st.H) continue;
-      ctx.beginPath(); ctx.arc(st.x0 + p[0], st.y0 + p[1], pt(3.2), 0, 2 * Math.PI); ctx.fillStyle = col(mb); ctx.fill(); ctx.lineWidth = pt(0.8); ctx.strokeStyle = "#ffffff"; ctx.stroke(); }
+    // 10-30 8:30 PM (Benjamin: "the ensemble low centers had the top 10 strongest, the weakest, and the ensemble mean pressure
+    // at the center of the bullseye"): the old site's ens_maps.p_lows look. Navy core where 5+ members put a low within 25 km,
+    // member dots in the old 8 pressure colors (deepest on top), red L + mean central pressure at each ensemble-mean low,
+    // and the left list: mean lows, 10 strongest and 10 weakest member lows in view ("pressure #member").
+    const g = geo(`elows/${gk}`, () => lowGeom(st, D, P, V));
+    if (g.core.length) { ctx.fillStyle = (P.core && P.core.color) || "#0a1442";
+      for (const [x, y, w, h] of g.core) ctx.fillRect(x - w / 2 - 0.5, y - h / 2 - 0.5, w + 1, h + 1); }
+    const r = pt(V.label === "North America" ? 2.9 : 3.3);
+    for (const [x, y, mb] of g.dots) { ctx.beginPath(); ctx.arc(x, y, r, 0, 2 * Math.PI); ctx.fillStyle = dotCol(mb); ctx.fill();
+      ctx.lineWidth = pt(0.7); ctx.strokeStyle = "#ffffff"; ctx.stroke(); }
+    for (const [x, y, v] of g.means) {
+      haloText(ctx, "L", x, y, `900 ${pt(18)}px Montserrat`, "#d7191c", pt(2.4), "center", "middle");
+      haloText(ctx, String(Math.round(v)), x, y + pt(14), `900 ${pt(11)}px Montserrat`, "#1b1d22", pt(2.4), "center", "top"); }
+    S.lowPanel = g;
   }
+}
+const DOT_BOUNDS = [850, 920, 950, 970, 980, 988, 996, 1004, 1100];   // ens_maps.DOT_BOUNDS / DOT_COLS / DOT_LABELS
+const DOT_COLS = ["#0b0010", "#2a2a9e", "#6a1b7a", "#b0186a", "#d7191c", "#ef6c2f", "#f2b134", "#9aa0a6"];
+const DOT_LABELS = ["under 920", "920-949", "950-969", "970-979", "980-987", "988-995", "996-1003", "1004+"];
+const dotCol = mb => { let k = 0; while (k < DOT_COLS.length - 1 && mb >= DOT_BOUNDS[k + 1]) k++; return DOT_COLS[k]; };
+const LOWV = { na: [800, 4.0, 1.2], pnw: [400, 1.5, 0.8], pnwt: [300, 1.2, 0.6] };   // ens_maps.LOW: radius km, prominence mb, smoothing
+function lowGeom(st, D, P, V) {
+  const E = D.ens, m = S.run.split("/")[0], cr = S.man.models[m].crop || [0, 0, 0, 0];
+  const lat = fi => 90 - (fi + cr[0]) * 0.25, lon = fj => (fj + cr[2]) * 0.25;
+  const km = (a1, o1, a2, o2) => { const p1 = a1 * Math.PI / 180, p2 = a2 * Math.PI / 180, dl = (o2 - o1) * Math.PI / 180;
+    return 6371 * Math.acos(Math.min(1, Math.max(-1, Math.sin(p1) * Math.sin(p2) + Math.cos(p1) * Math.cos(p2) * Math.cos(dl)))); };
+  const inView = p => p && p[0] >= 0 && p[1] >= 0 && p[0] <= st.W && p[1] <= st.H;
+  // member lows: pixel position, in view only (same rule as the old list: "in view")
+  const L = [];
+  for (const [mem, fi, fj, mb] of E.lows) { const p = gridInv(V, st, fi, fj, null); if (!inView(p)) continue;
+    L.push({ mem: mem + 1, fi, fj, mb, la: lat(fi), lo: lon(fj), x: st.x0 + p[0], y: st.y0 + p[1] }); }
+  const dots = L.slice().sort((a, b) => b.mb - a.mb).map(o => [o.x, o.y, o.mb]);   // deepest drawn last (on top)
+  // core: points where 5+ different members have a low within 25 km (old: contourf of that member count, navy)
+  const C = P.core || { km: 25, min: 5 }, core = [], seen = new Set(), step = 0.05;
+  const cand = L.filter(a => new Set(L.filter(b => km(a.la, a.lo, b.la, b.lo) <= 2 * C.km).map(b => b.mem)).size >= C.min);
+  for (const a of cand) for (let di = -0.4; di <= 0.4 + 1e-6; di += step / 0.25) for (let dj = -0.8; dj <= 0.8 + 1e-6; dj += step / 0.25) {
+    const fi = Math.round((a.fi + di) * 20) / 20, fj = Math.round((a.fj + dj) * 20) / 20, k = fi + "," + fj; if (seen.has(k)) continue; seen.add(k);
+    const la = lat(fi), lo = lon(fj), mems = new Set();
+    for (const b of L) if (Math.abs(b.la - la) < 0.3 && km(la, lo, b.la, b.lo) <= C.km) mems.add(b.mem);
+    if (mems.size < C.min) continue;
+    const p = gridInv(V, st, fi, fj, null), q = gridInv(V, st, fi + 0.2, fj + 0.2, null); if (!p || !q) continue;
+    core.push([st.x0 + p[0], st.y0 + p[1], Math.abs(q[0] - p[0]) + 0.6, Math.abs(q[1] - p[1]) + 0.6]); }
+  // ensemble-mean lows (old: find_centers on the smoothed mean MSLP, radius / prominence per view, value = raw min nearby)
+  const means = [], raw = D.mslpRaw;
+  if (raw) { const vid = S.view, [rk, prom, sm] = LOWV[vid] || [300, 1.2, 0.6], w = D.w, h = D.h, a = blur(raw, w, h, sm);
+    const vlat = lat((h - 1) / 2), ry = Math.max(2, Math.round(rk / (111.2 * 0.25))), rx = Math.max(2, Math.round(rk / (111.2 * 0.25 * Math.max(0.25, Math.cos(vlat * Math.PI / 180)))));
+    const cands = [], [r0, r1, c0, c1] = V.cut || [1, h - 1, 1, w - 1];   // only the view's own rows / cols
+    for (let i = Math.max(1, r0); i < Math.min(h - 1, r1); i++) for (let j = Math.max(1, c0); j < Math.min(w - 1, c1); j++) { const v = a[i * w + j];
+      if (v > a[i * w + j - 1] || v > a[i * w + j + 1] || v > a[(i - 1) * w + j] || v > a[(i + 1) * w + j]) continue;   // quick 3x3 minimum first
+      cands.push([v, i, j]); }
+    cands.sort((x, y) => x[0] - y[0]); const placed = [];
+    for (const [v, i, j] of cands) {
+      let ok = true;
+      for (let di = -ry; di <= ry && ok; di++) for (let dj = -rx; dj <= rx; dj++) { const ii = i + di, jj = j + dj;
+        if (ii < 0 || jj < 0 || ii >= h || jj >= w) continue; if (a[ii * w + jj] < v) { ok = false; break; } }
+      if (!ok) continue;
+      const cl = Math.max(0.25, Math.cos(lat(i) * Math.PI / 180)), ring = [];
+      for (let t = 0; t < 48; t++) { const th = t / 48 * 2 * Math.PI, ii = Math.round(i + ry * Math.sin(th)), jj = Math.round(j + rx * Math.cos(vlat * Math.PI / 180) / cl * Math.cos(th));
+        if (ii >= 0 && jj >= 0 && ii < h && jj < w) ring.push(a[ii * w + jj]); }
+      if (ring.length < 29) continue; ring.sort((x, y) => x - y); if (ring[ring.length >> 1] - v < prom) continue;
+      if (placed.some(([a_, b_]) => (i - a_) ** 2 / ry ** 2 + (j - b_) ** 2 / rx ** 2 < 1)) continue;
+      const p = gridInv(V, st, i, j, null); if (!inView(p)) continue;
+      placed.push([i, j]); let mn = Infinity;
+      for (let di = -2; di <= 2; di++) for (let dj = -2; dj <= 2; dj++) { const ii = i + di, jj = j + dj; if (ii >= 0 && jj >= 0 && ii < h && jj < w) mn = Math.min(mn, raw[ii * w + jj]); }
+      means.push([st.x0 + p[0], st.y0 + p[1], mn]); }
+  }
+  const tagged = L.map(o => [o.mb, o.mem]).sort((x, y) => x[0] - y[0]);
+  // list box on the side that hides fewer member dots / mean lows (old site: box outside the map, which a fixed basemap can't do)
+  const PW = 0.092 * V.fig[0] + 0.03 * V.fig[0], hid = x0_ => dots.filter(d => d[0] >= x0_ && d[0] <= x0_ + PW).length + 10 * means.filter(d => d[0] >= x0_ && d[0] <= x0_ + PW).length;
+  const side = hid(st.x0) <= hid(st.x0 + st.W - PW) ? "left" : "right";
+  return { side, dots, core, means, strong: tagged.slice(0, 10), weak: tagged.slice().reverse().slice(0, 10), n: E.n || 50,
+           meanVals: means.map(x => x[2]).sort((x, y) => x - y) };
+}
+function paintLowPanel(ctx, st, V, g) {   // ens_maps.low_panel, drawn inside the left edge of the map + the dot legend
+  const [LW, LH] = V.fig, PW = Math.round(0.092 * LW), x0 = g.side === "right" ? st.x0 + st.W - PW - pt(3) : st.x0 + pt(3), y0 = st.y0 + pt(3), H = st.H - pt(6);
+  const ms = g.meanVals.slice(0, 4), mrows = Math.max(1, Math.ceil(ms.length / 2));
+  const need = 1.2 + 1.4 + 1.05 + 1.2 * mrows + 0.4 + 2 * (1.05 + 10) + 0.5, lh = Math.min(pt(20.2), H / (need + 0.5));
+  ctx.save(); ctx.globalAlpha = 0.95; ctx.fillStyle = "#f6f3ec"; ctx.strokeStyle = "#c9c4b8"; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x0, y0, PW, H, pt(3)) : ctx.rect(x0, y0, PW, H); ctx.fill(); ctx.stroke(); ctx.globalAlpha = 1;
+  ctx.textAlign = "left"; ctx.textBaseline = "top";
+  const t = (x, y, s, w, sz, col) => { ctx.font = `${w} ${pt(sz)}px Montserrat`; ctx.fillStyle = col || "#1b1d22"; ctx.fillText(s, x, y); };
+  const xl = x0 + 0.007 * LW, cw = (PW - 0.014 * LW) / 2; let y = y0 + 0.3 * lh;
+  t(xl, y, "Lows (mb)", 800, 13.6); y += lh * 1.2;
+  t(xl, y, `in view \u00b7 ${g.n} mem.`, 500, 10.0, "#5b5e66"); y += lh * 1.4;
+  t(xl, y, "Mean (red L)", 800, 12.0); y += lh * 1.05;
+  if (!ms.length) { t(xl, y, "none", 500, 11, "#5b5e66"); y += lh; }
+  ms.forEach((v, k) => { t(xl + (k % 2) * cw, y, String(Math.round(v)), 900, 15.0, "#d7191c"); if (k % 2 === 1 || k === ms.length - 1) y += lh * 1.2; });
+  y += lh * 0.4;
+  for (const [head, rows] of [["10 strongest", g.strong], ["10 weakest", g.weak]]) {
+    t(xl, y, head, 800, 12.0); y += lh * 1.05;
+    if (!rows.length) { t(xl, y, "none", 500, 11, "#5b5e66"); y += lh; }
+    for (const [p, m] of rows) {
+      ctx.beginPath(); ctx.arc(xl + 0.004 * LW, y + 0.42 * lh, 0.0031 * LW, 0, 2 * Math.PI); ctx.fillStyle = dotCol(p); ctx.fill();
+      ctx.lineWidth = 0.6; ctx.strokeStyle = "#ffffff"; ctx.stroke();
+      t(xl + 0.011 * LW, y, String(Math.round(p)), 800, 11.7); t(xl + 0.041 * LW, y, `#${m}`, 500, 10.6, "#5b5e66"); y += lh; }
+    y += lh * 0.5;
+  }
+  // "Member low (mb)" legend, lower left of the map just right of the list (old: matplotlib legend, lower left)
+  const lw = pt(78), rh = pt(11), lhgt = rh * (DOT_LABELS.length + 1) + pt(8), lx = g.side === "right" ? x0 - lw - pt(5) : x0 + PW + pt(5), ly = st.y0 + st.H - lhgt - pt(5);
+  ctx.globalAlpha = 0.92; ctx.fillStyle = "#ffffff"; ctx.fillRect(lx, ly, lw, lhgt); ctx.globalAlpha = 1; ctx.strokeStyle = "#c9c4b8"; ctx.strokeRect(lx, ly, lw, lhgt);
+  t(lx + pt(5), ly + pt(4), "Member low (mb)", 700, 7.5);
+  DOT_LABELS.forEach((s, k) => { const yy = ly + pt(4) + rh * (k + 1); ctx.beginPath(); ctx.arc(lx + pt(9), yy + rh * 0.42, pt(2.8), 0, 2 * Math.PI);
+    ctx.fillStyle = DOT_COLS[k]; ctx.fill(); ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 0.6; ctx.stroke(); t(lx + pt(16), yy, s, 500, 7.2); });
+  ctx.restore();
 }
 // ---- Stage 5 (10-30): meteograms + Pass Forecaster. The runner samples every town / pass slot at full precision each step
 // (single/pts_fFFF.json, order = run.json "points"), so a meteogram is ~1 small JSON per step, never map images.
