@@ -169,7 +169,7 @@ async function boot() {
   setupPointer(); $("share") && ($("share").onclick = share); $("save") && ($("save").onclick = saveImage);
   $("obsbtn") && ($("obsbtn").onclick = obsOpen);
   $("mgbtn") && ($("mgbtn").onclick = () => mgOpen("town")); $("pfbtn") && ($("pfbtn").onclick = () => mgOpen("pass"));
-  $("prod").onchange = e => { S.prod = e.target.value; S.lastTab[tabOf(S.prod)] = S.prod; draw(); };
+  $("prod").onchange = e => { S.prod = e.target.value; S.lastTab[S.tab || tabOf(S.prod)] = S.prod; draw(); };
   $("view").onchange = e => { S.view = e.target.value; resetZoom(); draw(); };
   const sl = $("step"), endDrag = () => { if (S.dragging) { S.dragging = false; draw(); } };
   sl.addEventListener("pointerdown", () => { S.dragging = true; });
@@ -193,7 +193,9 @@ async function boot() {
 async function loadRun(r) { if (!S.runs[r]) S.runs[r] = await (await fetch(`${DATA}runs/${r}/run.json`, { cache: "no-cache" })).json(); return S.runs[r]; }
 const SV = () => (S.man.static_v ? `?v=${S.man.static_v}` : "");   // cache-buster for static layers (they are cached 1 day)
 const MD = () => S.man.models[S.run.split("/")[0]];
-const PRODS = () => MD().products, VIEWS = () => MD().views;
+// Severe tab (10-31): new products are published under the manifest's products_x (production's older viewer only reads "products")
+const allProds = md => md._allP || (md._allP = Object.assign({}, md.products, md.products_x || {}));
+const PRODS = () => allProds(MD()), VIEWS = () => MD().views;
 // Product tabs (Benjamin 10-30 8:04 PM: "upper air tab, surface tab, precipitation tab, snow tab", Pivotal Weather style).
 // The Product menu lists only the open tab's products, in the order below (Pivotal: winds by level, 250 -> 850 mb);
 // product ids / URLs are unchanged (?prod= picks its tab). Products not listed here land in an "Other" tab.
@@ -204,7 +206,8 @@ const TABS = [
                      "qpfa", "qpfpct"]],
   ["snow", "Snow", ["snow", "kuchera", "esnow", "esnow90", "snow1", "snow6", "snow12", "snow24", "snow48", "nsnow6", "nsnow12", "nsnow24", "nsnow48", "nsnowtot", "esnow6", "esnow12", "esnow24", "esnow48", "kuch6", "kuch12", "kuch24", "kuch48", "dsnod", "fzra", "fzra6", "fzra12", "fzra24", "fzra48", "snowlvl", "frz", "thick"]],
   ["ua", "Upper Air", ["w250", "w300", "w500", "w850", "t300w", "t500w", "t700w", "t850w", "t925w", "t850", "t700", "t850a", "z500anom", "ez500", "spag"]],
-  ["svr", "Severe", ["mucape", "sbcape", "epcape", "ltng", "ltng6", "ltgp", "ntstm"]],
+  // 10-31 (Benjamin 9:15 AM): simulated radar (also listed under Precip), radar + UH, UH, UH streaks, CAPEs, SRH, lapse rates
+  ["svr", "Severe", ["refc", "refuh", "uh", "uhs", "sbcape", "mucape", "cape3", "srh03", "lr03", "lr75", "epcape", "ltng", "ltng6", "ltgp", "ntstm"]],
 ];
 const tabOf = pid => (TABS.find(t => t[2].includes(pid)) || ["other"])[0];
 S.lastTab = {};
@@ -212,17 +215,18 @@ function setLists() {   // products this run carries (all their fields present),
   const R_ = S.runs[S.run], has = new Set(R_.fields), P = PRODS(), V = VIEWS();
   const prods = Object.entries(P).filter(([k, p]) => p.fields.every(f => has.has(f)));
   const tabs = [...TABS, ["other", "Other", []]].map(([id, label, ids]) => [id, label,
-    prods.filter(([k]) => tabOf(k) === id).sort((a, b) => ids.indexOf(a[0]) - ids.indexOf(b[0]))]).filter(t => t[2].length);
+    prods.filter(([k]) => id === "other" ? tabOf(k) === "other" : ids.includes(k)).sort((a, b) => ids.indexOf(a[0]) - ids.indexOf(b[0]))]).filter(t => t[2].length);
   if (!prods.some(([k]) => k === S.prod)) {   // not in this run: stay in the same tab when it can
-    const t = tabs.find(t => t[0] === tabOf(S.prod)); S.prod = (t ? t[2][0] : prods[0])[0]; }
-  const cur = tabOf(S.prod); S.lastTab[cur] = S.prod;
+    const t = tabs.find(t => t[0] === (S.tab || tabOf(S.prod))) || tabs.find(t => t[0] === tabOf(S.prod)); S.prod = (t ? t[2][0] : prods[0])[0]; }
+  const inTab = id => tabs.some(t => t[0] === id && t[2].some(([k]) => k === S.prod));
+  const cur = S.tab && inTab(S.tab) ? S.tab : tabOf(S.prod); S.tab = cur; S.lastTab[cur] = S.prod;
   $("tabs").innerHTML = tabs.map(([id, label]) => `<button type="button" role="tab" data-t="${id}" aria-selected="${id === cur}"${id === cur ? ' class="on"' : ""}>${label}</button>`).join("") +
     // WA Maps (10-31, Benjamin 8:58 AM): the posted Washington state-view maps, own page (wamaps.html)
     `<button type="button" data-t="wamaps" title="Washington state-view forecast maps">WA Maps</button>`;
   $("tabs").onclick = e => { const b = e.target.closest("button[data-t]"); if (b && b.dataset.t === "wamaps") { location.href = "wamaps.html"; return; }
-    if (!b || b.dataset.t === tabOf(S.prod)) return;
+    if (!b || b.dataset.t === S.tab) return;
     const t = tabs.find(x => x[0] === b.dataset.t), keep = S.lastTab[t[0]];
-    S.prod = t[2].some(([k]) => k === keep) ? keep : t[2][0][0]; setLists(); draw(); };
+    S.tab = t[0]; S.prod = t[2].some(([k]) => k === keep) ? keep : t[2][0][0]; setLists(); draw(); };
   if (!V[S.view]) S.view = V.wa ? "wa" : Object.keys(V)[0];
   fill($("prod"), tabs.find(t => t[0] === cur)[2].map(([k, p]) => [k, p.title]), S.prod);
   fill($("view"), Object.entries(V).map(([k, v]) => [k, v.label]), S.view);
@@ -312,7 +316,7 @@ function blur(a, w, h, sigma) {               // separable gaussian (scipy gauss
   return o;
 }
 async function productFields(run, pid, f) {
-  const P = S.man.models[run.split("/")[0]].products[pid], key = `${run}/${pid}/${f}`;
+  const P = allProds(S.man.models[run.split("/")[0]])[pid], key = `${run}/${pid}/${f}`;
   if (S.derived.has(key)) return S.derived.get(key);
   const p = (async () => {
     const F = {}; for (const n of P.fields) F[n] = await getField(run, n, f);
@@ -827,7 +831,7 @@ function isoGeom(ctx, st, D, I) {
   for (let k = 0; k < iso.length; k++) { const v = iso[k]; if (v < lo) lo = v; if (v > hi) hi = v; }
   const labels = [], all = [];
   ctx.save(); ctx.font = `700 ${pt(10)}px Montserrat`;
-  for (let L = Math.ceil(lo / I.every) * I.every; L <= hi; L += I.every) {
+  for (let L = Math.max(Math.ceil(lo / I.every) * I.every, I.min ?? -Infinity); L <= hi; L += I.every) {   // min: Radar + UH rings start at 75
     const lines = contourG(st, G, L); all.push(lines);
     for (const l of lines) {   // one label per ~600 px of line, inline (line cut under the label)
       let len = 0; const cum = [0]; for (let k = 1; k < l.length; k++) { len += Math.hypot(l[k][0] - l[k - 1][0], l[k][1] - l[k - 1][1]); cum.push(len); }

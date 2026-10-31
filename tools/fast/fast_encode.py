@@ -278,6 +278,30 @@ def _ltng(R, m):
     if m == "hrrr": return np.clip(np.asarray(R._idx("LTNG:entire atmosphere", R.url)[2], float), 0, None)
     if m == "rrfs": return np.clip(np.asarray(R._idx("LTNG:entire atmosphere", R.url, (f"{R.s - 1}-{R.s} hour max fcst",))[2], float), 0, None)   # hourly max
     raise KeyError("ltng")
+# Severe tab (Benjamin 10-31 9:15 AM "simulated radar + updraft helicity ... helicity streaks. 0-3km cape, surface cape, lapse rates",
+# 9:30 AM "Severe tab, then ensembles"): HRRR / RRFS only, all from the files already read (checked 10-31 .idx: wrfsfc / RRFS 2dfld + prslev)
+def _uh(R, m):   # 2-5 km updraft helicity, max over the hour ending at the step (RRFS past F48 is 3-hourly: only the last hour of each 3 h)
+    if m not in ("hrrr", "rrfs"): raise KeyError("uh")
+    return np.clip(np.asarray(R._idx("MXUPHL:5000-2000 m above ground", R.url, (f"{R.s - 1}-{R.s} hour max fcst",))[2], float), 0, None)
+def _cape3(R, m):
+    if m not in ("hrrr", "rrfs"): raise KeyError("cape3")
+    return np.clip(np.asarray(R._idx("CAPE:0-3000 m above ground", R.url)[2], float), 0, None)
+def _srh03(R, m):   # 0-3 km storm-relative helicity (same files, fills the third channel of the "svr" pack)
+    if m not in ("hrrr", "rrfs"): raise KeyError("srh03")
+    return np.asarray(R._idx("HLCY:3000-0 m above ground", R.url)[2], float)
+def _lr75(R, m):   # 700-500 mb lapse rate, C/km
+    if m not in ("hrrr", "rrfs"): raise KeyError("lr75")
+    t7, t5 = (np.asarray(R.f(k)[2], float) for k in ("T:700", "T:500")); z7, z5 = (np.asarray(R.f(k)[2], float) for k in ("Z:700", "Z:500"))
+    return (t7 - t5) / np.maximum((z5 - z7) / 1000.0, 0.5)
+def _lr03(R, m):   # 0-3 km AGL lapse rate, C/km: 2 m temp vs the temperature 3 km above the model ground (pressure levels, linear in height)
+    if m not in ("hrrr", "rrfs"): raise KeyError("lr03")
+    zs = np.asarray(R.f("orog")[2], float); ts = np.asarray(R.f("t2m")[2], float); zt = zs + 3000.0
+    levs = (1000, 925, 850, 700, 500); Z = [np.asarray(R.f(f"Z:{p}")[2], float) for p in levs]; T = [np.asarray(R.f(f"T:{p}")[2], float) for p in levs]
+    t3 = np.full(zs.shape, np.nan)
+    for k in range(len(levs) - 1):
+        hit = np.isnan(t3) & (Z[k] <= zt) & (Z[k + 1] >= zt); w = (zt - Z[k]) / np.maximum(Z[k + 1] - Z[k], 1.0)
+        t3 = np.where(hit, T[k] + w * (T[k + 1] - T[k]), t3)
+    return (ts - t3) / 3.0
 def _asnow(R, m):
     if m == "ifs": return np.clip(_ec("sf")(R, m), 0, None) * 393.701   # ECMWF snowfall (m water) at 10:1, run total
     # AIFS (Benjamin 10-31 1:49 AM "verify snow map and just use that"): its open data has sf too, in kg/m2 (mm water), not m;
@@ -440,6 +464,7 @@ FIELDS = {   # name: (getter, units)
     "sbcape": (_raw("CAPE:surface", lambda v: v), "J/kg"),
     "ltng": (_ltng, "fl/km2/5min"),
     "ltgp": (_ltgp, "in"),
+    "uh": (_uh, "m2/s2"), "cape3": (_cape3, "J/kg"), "srh03": (_srh03, "m2/s2"), "lr03": (_lr03, "C/km"), "lr75": (_lr75, "C/km"),   # Severe tab 10-31
     # 10-30 (Benjamin): 500 mb wind (AIFS and every model), 250 mb jet, 500 mb heights (for the height anomaly)
     "u500": (_f("U:500", lambda v: v * 1.94384), "kt"), "v500": (_f("V:500", lambda v: v * 1.94384), "kt"), "z500": (_f("Z:500", lambda z: z), "m"),
     "u250": (_f("U:250", lambda v: v * 1.94384), "kt"), "v250": (_f("V:250", lambda v: v * 1.94384), "kt"), "z250": (_f("Z:250", lambda z: z), "m"),
@@ -473,7 +498,7 @@ PACKS = {"wind": ("mslp", "u10", "v10"), "aloft": ("t850", "t700", "frz"), "accu
          "emsl": ("mslp", "t850", "lowp"), "ecape": ("mucape", "pcape"),
          "w850": ("u850", "v850", "t925"), "w925": ("u925", "v925", "z1000"), "w700": ("u700", "v700", "t500"), "w300": ("u300", "v300", "t300"),
          "etx": ("maxt", "mint"), "moist": ("d2m", "pw", "prt"), "kfz": ("kinc", "fzinc"), "ivt": ("ivtu", "ivtv"), "wave": ("swh", "wdu", "wdv"),
-         "nbm1": ("t2m", "gust", "tcc"), "nbm2": ("nq1", "nq6", "ns6"), "nbm3": ("tstm", "maxt", "mint")}
+         "nbm1": ("t2m", "gust", "tcc"), "svr": ("uh", "cape3", "srh03"), "lapse": ("lr03", "lr75"), "nbm2": ("nq1", "nq6", "ns6"), "nbm3": ("tstm", "maxt", "mint")}
 
 IFS9_SKIP = {"swh", "wdu", "wdv"}   # ECMWF waves are 0.25 deg only (separate WAM files): not on the 9 km grid
 SQRT_FIELDS = {"apcp", "asnow", "apcp90", "asnow90", "nq1", "nq6", "ns6", "ltgp", "kinc", "fzinc"}
@@ -1143,6 +1168,36 @@ def static(m, out, views_only=None, x2_only=False):
     for h in (12, 24):
         prods[f"gust{h}"] = dict(prods["gust6"], cmap_of="gust10", title=f"{h} h Max Wind Gust", window=h,
                                  extra=f"highest gust over the model hours in the {h} h ending at the valid time  \u00b7  up to {{hi}} mph in view")
+    # Severe tab (10-31): HRRR / RRFS. "xprod": published under the manifest's products_x (only the new viewer lists them,
+    # so the production page keeps its product list until Benjamin's go)
+    UH_L = [25, 50, 75, 100, 150, 200, 250, 300, 400]
+    UH_A = [(25, "#9be7ff"), (50, "#2ec7f0"), (75, "#3fcf4f"), (100, "#f4e04d"), (150, "#f39a2c"), (200, "#e03a2f"), (300, "#b5179e"), (400, "#5c1a8c")]
+    C3_L = [25, 50, 75, 100, 150, 200, 250, 300, 400]
+    C3_A = [(25, "#d9e8c3"), (50, "#9fd27a"), (100, "#f2e34b"), (150, "#f4a43a"), (250, "#e2462f"), (400, "#8c1450")]
+    LR_L = [4, 5, 5.5, 6, 6.5, 7, 7.5, 8, 8.5, 9, 9.5, 10]
+    LR_A = [(4, "#2c3e7a"), (5.5, "#5b7fc0"), (6.5, "#c9d3df"), (7, "#f2e34b"), (7.5, "#f4a43a"), (8.5, "#e2462f"), (9.5, "#8c1450"), (10, "#5c1a8c")]
+    SRH_L = [50, 100, 150, 200, 250, 300, 400, 500, 600]
+    SRH_A = [(50, "#d9e8f5"), (100, "#9cc3e6"), (150, "#9fd27a"), (200, "#f2e34b"), (300, "#f4a43a"), (400, "#e2462f"), (600, "#8c1450")]
+    CM.update(uh=M.ramp(UH_L, UH_A), cape3=M.ramp(C3_L, C3_A), lr03=M.ramp(LR_L, LR_A), srh03=M.ramp(SRH_L, SRH_A))
+    CM.update(uhs=CM["uh"], lr75=CM["lr03"], refuh=CM["refc"])
+    SV = dict(only=("hrrr", "rrfs"), xprod=True, towns="names")
+    prods["uh"] = dict(title="2-5 km Updraft Helicity", fields=["uh"], key="Updraft helicity (m\u00b2/s\u00b2)", ticks=UH_L, tickfmt=True,
+                       **table(UH_L, CM["uh"], "max"), extra="highest in the hour ending at the valid time  \u00b7  75+ = rotating storm (supercell)  \u00b7  up to {hi} in view",
+                       pct=[0, 100], **SV)
+    prods["uhs"] = dict(prods["uh"], title="Updraft Helicity Streaks", window=9999, wmax=True, wfield="uh", fill="window", sofar=True,
+                        extra="highest hourly 2-5 km updraft helicity since the run started = storm tracks  \u00b7  RRFS past F48: 1 h in each 3 h  \u00b7  up to {hi} in view")
+    prods["refuh"] = dict(prods["refc"], title="Simulated Radar + Updraft Helicity", fields=["refc", "uh"], fill="refc", cmap_of="refc",
+                          isobars=dict(field="uh", every=75, min=75, sigma=0.7, color="#101114", lw=1.6, halo=2.2),
+                          extra="composite reflectivity  \u00b7  black rings = 2-5 km updraft helicity 75, 150, 225 m\u00b2/s\u00b2 (rotating storms)", **SV)
+    prods["cape3"] = dict(title="0-3 km CAPE", fields=["cape3"], key="0-3 km CAPE (J/kg)", ticks=C3_L, tickfmt=True, **table(C3_L, CM["cape3"], "max"),
+                          extra="low-level instability (surface parcel, lowest 3 km)  \u00b7  blank under 25 J/kg  \u00b7  up to {hi} J/kg in view", pct=[0, 99.9], **SV)
+    prods["srh03"] = dict(title="0-3 km Storm-Relative Helicity", fields=["srh03"], key="SRH (m\u00b2/s\u00b2)", ticks=SRH_L, tickfmt=True,
+                          **table(SRH_L, CM["srh03"], "max"), extra="spin available to storms in the lowest 3 km  \u00b7  blank under 50  \u00b7  up to {hi} in view", pct=[0, 99.9], **SV)
+    prods["lr03"] = dict(title="0-3 km Lapse Rate", fields=["lr03"], key="Lapse rate (\u00b0C/km)", ticks=[4, 5, 6, 7, 8, 9, 10], tickfmt=True,
+                         **table(LR_L, CM["lr03"], "both"), extra="temperature drop per km, ground to 3 km above it  \u00b7  9.8 = dry adiabatic  \u00b7  {lo} to {hi} in view",
+                         pct=[0.5, 99.5], dec=1, **SV)
+    prods["lr75"] = dict(prods["lr03"], title="700-500 mb Lapse Rate", fields=["lr75"], cmap_of="lr03",
+                         extra="temperature drop per km between 700 and 500 mb  \u00b7  7+ = steep (stronger updrafts, hail)  \u00b7  {lo} to {hi} in view")
     ALLP = {k: dict(v) for k, v in prods.items()}   # before the per-model filter (ensemble picks shared products below)
     for v in ALLP.values(): v.pop("only", None)
     prods = {k: v for k, v in prods.items() if as_model(m) in v.pop("only", (as_model(m),))}
@@ -1257,6 +1312,8 @@ def static(m, out, views_only=None, x2_only=False):
     if "mslpqpf" in prods: prods["mslpqpf"]["under"] = "#f4f5f7"
     if "w850" in prods: prods["w850"]["under"] = "#f4f5f7"   # light below 10 kt (was black)   # light background so the dark isobars read (no blanking)
     if "ntstm" in prods: prods["ntstm"]["min_show"] = 10
+    for k in ("uh", "uhs", "cape3", "srh03", "refuh"):
+        if k in prods: prods[k]["min_show"] = prods[k]["levels"][0]
     for k in ("waves", "wavemax"):   # land (swh -0.5) drawn in the basemap land tone
         if k in prods: prods[k]["under"] = "#ece8df"
     for k in ("fog", "ivt"):   # light below the first level (old site: clear over the light basemap)
@@ -1297,8 +1354,10 @@ def static(m, out, views_only=None, x2_only=False):
             HS.credit(fig, TM.CREDIT_NOAA if (pid == "t2m" and m in NOAA) else (M.credit(m) if m in M.MODELS else M.credit("gfs") if minfo(m).get("noaa") else TM.CREDIT.format(name=minfo(m)["name"])))
             sizes[f"key_{m}_{pid}_{vid}"] = save(fig, f"{out}/{fn}")
         P["ticks"] = [float(t) for t in tk0]
+    prods_x = {k: prods.pop(k) for k in [k for k, v in prods.items() if v.pop("xprod", False)]}   # Severe tab 10-31: manifest products_x
     if x2_only:
-        json.dump(prods, open(f"{out}/products_{m}.json", "w"), indent=1)   # for a targeted manifest merge (tools: add_product.py)
+        json.dump(prods, open(f"{out}/products_{m}.json", "w"), indent=1)
+        json.dump(prods_x, open(f"{out}/products_x_{m}.json", "w"), indent=1)   # for a targeted manifest merge (tools: add_product.py)
         if os.environ.get("WX_X2_CLIM"):   # also build the named climatologies (comma list) for a targeted manifest clim merge
             clim = {var: clim_static(m, out, crop_la, crop_lo, var, None if oro is None else oro[i0:i1, j0:j1] / 3.28084) for var in os.environ["WX_X2_CLIM"].split(",")}
             json.dump(clim, open(f"{out}/clim_{m}.json", "w"), indent=1)
@@ -1310,7 +1369,7 @@ def static(m, out, views_only=None, x2_only=False):
     man.update(dpi=DPI, style=dict(BG=HS.BG, INK=HS.INK, MUTED=HS.MUTED, ACCENT=HS.ACCENT))
     MI = minfo(m)
     man.setdefault("models", {})[m] = dict(name=MI["name"], site=MI["site"], res=MI["res"], grid=MD["grid"],
-                                          crop=[i0, i1, j0, j1], views=views, products=prods, clim=clim)
+                                          crop=[i0, i1, j0, j1], views=views, products=prods, clim=clim, **({"products_x": prods_x} if prods_x else {}))
     man.setdefault("runs", {}).setdefault(m, [])
     json.dump(man, open(mp, "w"), indent=1)
     print(f"{m} static done, crop {[i0, i1, j0, j1]}", flush=True)
