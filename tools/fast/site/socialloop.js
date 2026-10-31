@@ -42,7 +42,8 @@ function info() {
   fillStep(); fillHours();
   const s0 = +$s("lps").value, s1 = $s("lps1").value, hs = pick(), T = times(hs.length), hold = +$s("lph").value, p = getPins(), pan = $s("lpmode").value === "pan";
   $s("lpsv").textContent = `${s0} map${s0 === 1 ? "" : "s"}/s`; $s("lpnow").textContent = `Showing now: F+${S.hour}`;
-  $s("lppan").hidden = !pan; $s("lppins").textContent = pan ? `${p.a ? "A set" : "A not set"} \u00b7 ${p.b ? "B set" : "B not set"}` : "";
+  const pk = pinsFor($s("lpk").value);   // pins are kept per frame shape (va/vb, ha/hb)
+  $s("lppan").hidden = !pan; $s("lppins").textContent = pan ? `${pk.a ? "A set" : "A not set"} \u00b7 ${pk.b ? "B set" : "B not set"}` : "";
   $s("lpinfo").textContent = hs.length < 2 ? "Pick an end hour after the start hour." :
     `${hs.length} maps, F+${hs[0]} to F+${hs[hs.length - 1]} \u00b7 ${(T[hs.length] + hold).toFixed(1)} s of video${s1 && +s1 !== s0 ? ` (speed ${s0} \u2192 ${s1} maps/s)` : ""} \u00b7 zoom ${$s("lpz0").value}\u00d7 \u2192 ${$s("lpz1").value === "s" ? $s("lpz0").value : $s("lpz1").value}\u00d7`;
   drawPins();
@@ -62,6 +63,7 @@ function drawPins() {
 function onImgClick(k, e) {
   if (!P.pinMode) return; e.preventDefault(); const r = $s("i" + k).getBoundingClientRect(), p = getPins();
   p[k + P.pinMode] = { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height }; setPins(p);
+  if (P.pinMode === "a" && !p[k + "b"]) { P.pinMode = "b"; $s("lphint").textContent = "Pin A set. Now tap where the loop should END (pin B). Esc cancels."; info(); return; }   // straight on to B
   P.pinMode = null; $s("lphint").hidden = true; info();
 }
 async function loadBmp(u) { const b = await fetch(u).then((r) => { if (!r.ok) throw new Error(`${r.status} ${u.split("/").pop()}`); return r.blob(); }); return createImageBitmap(b); }
@@ -117,14 +119,14 @@ function paint(c, k, A, B, mix, cx, cy, z, tmp) {
 async function make() {
   if (P.busy) return; const k = $s("lpk").value, hs = pick(), [W, H] = OUT[k], pan = $s("lpmode").value === "pan", pins = pinsFor(k);
   if (hs.length < 2) { st("Pick an end hour after the start hour."); return; }
-  if (pan && !(pins.a && pins.b)) { st("Tap Set pin A / Set pin B, then tap the " + (k === "v" ? "9:16" : "16:9") + " picture."); return; }
+  if (pan && !(pins.a && pins.b)) { st("Track storm needs pins: tap where the loop starts (A), then where it ends (B)."); startPin(pins.a ? "b" : "a"); return; }
   const T = times(hs.length), holdN = Math.round(+$s("lph").value * FPS), xf = +$s("lpx").value, panN = Math.max(1, Math.round(T[hs.length] * FPS) - 1);
   const z0 = +$s("lpz0").value, z1 = $s("lpz1").value === "s" ? z0 : +$s("lpz1").value, zoomAt = (t) => z0 * Math.pow(z1 / z0, ease(t));
   const cv = document.createElement("canvas"); cv.width = W; cv.height = H; const tmp = document.createElement("canvas"); tmp.width = W; tmp.height = H; const c = cv.getContext("2d");
   const pv = $s("lpprev"); pv.width = W / 4; pv.height = H / 4; const pc = pv.getContext("2d"); pv.hidden = false;
   const t0 = performance.now(), C = cur(); let enc = null, A = null, B = null; P.busy = true; P.cancel = false; $s("lpgo").disabled = true; $s("lpstop").hidden = false; $s("lpout").hidden = true;
   try {
-    enc = await makeEncoder(cv, W, H); let n = 0;
+    enc = await makeEncoder(cv, W, H); let n = 0; const totN = Math.round(T[hs.length] * FPS) + holdN, pg = $s("lpprog"); pg.hidden = false; pg.value = 0;
     const hd = useHD(), src = (f) => hd ? `${DATA}social/${C.run}/loop/${nm(k, f, C.prod, C.view)}.jpg` : url(nm(k, f, C.prod, C.view));
     A = await loadBmp(src(hs[0]));
     for (let j = 0; j < hs.length; j++) {
@@ -137,7 +139,7 @@ async function make() {
         const tt = Math.min(1, n / panN), q = (n - n0) / Math.max(1, nm_), mix = B ? Math.max(0, Math.min(1, (q - (1 - xf)) / xf)) : 0;
         const cx = pan ? lerp(pins.a.x, pins.b.x, ease(tt)) : 0.5, cy = pan ? lerp(pins.a.y, pins.b.y, ease(tt)) : 0.5;
         paint(c, k, A, B, ease(mix), cx, cy, zoomAt(tt), tmp); await enc.add(n);
-        if (n % 3 === 0) pc.drawImage(cv, 0, 0, pv.width, pv.height);
+        if (n % 3 === 0) { pc.drawImage(cv, 0, 0, pv.width, pv.height); pg.value = n / totN; }
       }
       if (A && A.close) A.close(); A = B || (j + 1 < hs.length ? await loadBmp(src(hs[j + 1])) : null); B = null;
     }
@@ -150,10 +152,48 @@ async function make() {
     window.__lmp4 = { name, bytes: blob.size, frames: n, seconds: n / FPS, how, ms: Math.round(performance.now() - t0) };
     st(`Done: ${(blob.size / 1e6).toFixed(1)} MB, ${(n / FPS).toFixed(1)} s, made in ${((performance.now() - t0) / 1000).toFixed(0)} s`);
   } catch (e) { if (enc) enc.abort(); st(e.message === "stopped" ? "Stopped." : "Could not make the video: " + (e.message || e)); window.__lmp4 = { error: String(e.message || e) }; }
-  finally { P.busy = false; $s("lpgo").disabled = false; $s("lpstop").hidden = true; if (A && A.close) A.close(); }
+  finally { P.busy = false; $s("lpgo").disabled = false; $s("lpstop").hidden = true; $s("lpprog").hidden = true; if (A && A.close) A.close(); }
 }
 const st = (t) => { $s("lpst").textContent = t; };
-function open() { P.on = true; $s("lp").hidden = false; fillStep(); fillHours(); if (!$s("lpa").dataset.init) { $s("lpa").value = String(S.hour); $s("lpa").dataset.init = 1; fillHours(); } info(); }
+// ---- usability (10-31 2:24 PM): remembered settings, presets, camera-move preview, progress bar, Enter / Esc
+const OPT_IDS = ["lpk", "lpmode", "lpstep", "lps", "lps1", "lpx", "lph", "lpz0", "lpz1"], OPT_KEY = "social:loopopts";
+function saveOpts() { const o = {}; for (const id of OPT_IDS) o[id] = $s(id).value; try { localStorage.setItem(OPT_KEY, JSON.stringify(o)); } catch (e) { /* private */ } }
+function loadOpts() { let o = {}; try { o = JSON.parse(localStorage.getItem(OPT_KEY) || "{}"); } catch (e) { /* none */ }
+  if (o.lpstep) $s("lpstep").dataset.v = o.lpstep;
+  for (const id of OPT_IDS) { const el = $s(id); if (o[id] === undefined || id === "lpstep") continue; if (el.type === "range" || [...el.options].some((x) => x.value === o[id])) el.value = o[id]; } }
+const PRESETS = {
+  landfall: { lpmode: "pan", lps: "2", lps1: "1", lph: "2", lpz0: "1.2", lpz1: "2", lpx: "0.6" },
+  overview: { lpmode: "loop", lps: "4", lps1: "", lph: "1", lpz0: "1", lpz1: "s", lpx: "0.3", all: true },
+  zoomin: { lpmode: "loop", lps: "2", lps1: "", lph: "1.5", lpz0: "1", lpz1: "1.8", lpx: "0.6" },
+};
+function applyPreset(name) {
+  const Q = PRESETS[name]; if (!Q) return;
+  for (const [id, v] of Object.entries(Q)) if (id !== "all") $s(id).value = v;
+  if (Q.all) { const hs = hours(); $s("lpa").value = String(hs[0]); $s("lpb").value = String(hs[hs.length - 1]); }
+  saveOpts(); info(); $s("lppre").value = name;
+  const k = $s("lpk").value, pk = pinsFor(k);
+  if (Q.lpmode === "pan" && !(pk.a && pk.b)) startPin(pk.a ? "b" : "a", "Landfall zoom-in: ");
+}
+function startPin(m, pre) { P.pinMode = m; const h = $s("lphint"); h.hidden = false;
+  h.textContent = `${pre || ""}Tap the ${$s("lpk").value === "v" ? "9:16" : "16:9"} picture where the loop should ${m === "a" ? "START (pin A)" : "END (pin B)"}. Esc cancels.`;
+  $s("i" + $s("lpk").value).scrollIntoView({ block: "center", behavior: "smooth" }); }
+let PV = false;
+async function previewMove() {
+  if (PV || P.busy) return; const k = $s("lpk").value, hs = pick(), pan = $s("lpmode").value === "pan", pins = pinsFor(k), [W, H] = OUT[k];
+  if (pan && !(pins.a && pins.b)) { st("Set pin A and pin B first."); startPin(pins.a ? "b" : "a"); return; }
+  if (!hs.length) return; PV = true; st("Previewing the camera move\u2026");
+  try {
+    const hd = useHD(), A = await loadBmp(hd ? `${DATA}social/${S.run}/loop/${nm(k, hs[0], S.prod, S.view)}.jpg` : url(nm(k, hs[0], S.prod, S.view)));
+    const cv = document.createElement("canvas"); cv.width = W; cv.height = H; const tmp = document.createElement("canvas"); tmp.width = W; tmp.height = H;
+    const pv = $s("lpprev"); pv.width = W / 4; pv.height = H / 4; pv.hidden = false; const pc = pv.getContext("2d"); pv.scrollIntoView({ block: "nearest" });
+    const z0 = +$s("lpz0").value, z1 = $s("lpz1").value === "s" ? z0 : +$s("lpz1").value, N = 60;
+    for (let n = 0; n <= N; n++) { const tt = n / N, t = ease(tt);
+      paint(cv.getContext("2d"), k, A, null, 0, pan ? lerp(pins.a.x, pins.b.x, t) : 0.5, pan ? lerp(pins.a.y, pins.b.y, t) : 0.5, z0 * Math.pow(z1 / z0, ease(tt)), tmp);
+      pc.drawImage(cv, 0, 0, pv.width, pv.height); await sleep(1000 / 30); }
+    if (A.close) A.close(); await sleep(600); st("Preview done (start hour only). Make MP4 runs the hours too.");
+  } catch (e) { st("Could not preview: " + (e.message || e)); } finally { PV = false; }
+}
+function open() { P.on = true; $s("lp").hidden = false; if (!P.loaded) { loadOpts(); P.loaded = true; } fillStep(); fillHours(); if (!$s("lpa").dataset.init) { $s("lpa").value = String(S.hour); $s("lpa").dataset.init = 1; fillHours(); } info(); }
 function init() {
   $s("loopbtn").onclick = () => { if ($s("lp").hidden) open(); else { P.on = false; $s("lp").hidden = true; drawPins(); } };
   $s("lp").addEventListener("click", (e) => { const b = e.target.closest("button[data-m]"); if (!b) return; const m = b.dataset.m;
@@ -161,12 +201,18 @@ function init() {
     else if (m === "min") { const mn = $s("lp").classList.toggle("min"); b.innerHTML = mn ? "+" : "&ndash;"; }
     else if (m === "sa") { $s("lpa").value = String(S.hour); if (+$s("lpb").value <= S.hour) { const hs = hours(), i = hs.indexOf(S.hour); $s("lpb").value = String(hs[Math.min(hs.length - 1, i + 1)]); } info(); }
     else if (m === "sb") { $s("lpb").value = String(S.hour); if (+$s("lpa").value >= S.hour) { const hs = hours(), i = hs.indexOf(S.hour); $s("lpa").value = String(hs[Math.max(0, i - 1)]); } info(); }
-    else if (m === "a" || m === "b") { P.pinMode = m; const h = $s("lphint"); h.hidden = false; h.textContent = `Tap the ${$s("lpk").value === "v" ? "9:16" : "16:9"} picture where the loop should ${m === "a" ? "START (pin A)" : "END (pin B)"}.`; }
+    else if (m === "a" || m === "b") startPin(m);
+    else if (m === "pv") previewMove();
     else if (m === "c") { const p = getPins(), k = $s("lpk").value; delete p[k + "a"]; delete p[k + "b"]; setPins(p); info(); }
     else if (m === "go") make(); else if (m === "stop") P.cancel = true; });
   $s("lpstep").addEventListener("change", (e) => { e.target.dataset.v = e.target.value; info(); });
   for (const id of ["lpa", "lpb", "lps1", "lph", "lpz0", "lpz1", "lpx", "lpmode", "lpk"]) $s(id).addEventListener("change", info);
   $s("lps").addEventListener("input", info);
+  for (const id of OPT_IDS) $s(id).addEventListener("change", (e) => { saveOpts(); if (e.isTrusted) $s("lppre").value = ""; });
+  $s("lppre").addEventListener("change", (e) => applyPreset(e.target.value));
+  $s("lp").addEventListener("keydown", (e) => { if (e.key === "Enter" && !/^(SELECT|BUTTON|A)$/.test(e.target.tagName)) { e.preventDefault(); make(); } });
+  addEventListener("keydown", (e) => { if (e.key !== "Escape" || !P.on) return;
+    if (P.pinMode) { P.pinMode = null; $s("lphint").hidden = true; info(); } else if (P.busy) P.cancel = true; else { P.on = false; $s("lp").hidden = true; drawPins(); } });
   $s("lp").addEventListener("keydown", (e) => { if (/^(SELECT|INPUT)$/.test(e.target.tagName) && /^Arrow/.test(e.key)) e.stopPropagation(); }, true);
   for (const k of ["v", "h"]) $s("i" + k).addEventListener("click", (e) => onImgClick(k, e));
   addEventListener("resize", drawPins);

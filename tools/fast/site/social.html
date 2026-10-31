@@ -27,7 +27,7 @@ html,body{margin:0;background:#15171c;color:#f4f2ee;font:14px Montserrat,system-
 #lp .mp-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:6px 0;font-size:13px}
 #lp select,#lp button,#lp a{background:#262931;color:#f4f2ee;border:1px solid #7d828c;border-radius:6px;padding:4px 8px;font:inherit;font-size:13px;text-decoration:none;touch-action:manipulation;cursor:pointer}
 #lp button.pri{background:#2f8cff;border-color:#2f8cff;font-weight:700}#lp button:disabled{opacity:.5}
-#lp .mp-note,#lpst{color:#cfd3da}#lpst{font-weight:600}#lps{width:170px;accent-color:#2f8cff}
+#lp .mp-note,#lpst{color:#cfd3da}#lpst{font-weight:600}#lps{width:170px;accent-color:#2f8cff}#lpprog{width:120px;accent-color:#2f8cff}#lpkeys{color:#8e939c!important;font-size:11.5px}
 #lpv,#lpprev{display:block;max-width:100%;max-height:50vh;margin-top:6px;background:#000}
 #lphint{position:fixed;left:50%;top:10px;transform:translateX(-50%);z-index:13;background:#2f8cff;color:#fff;font-weight:700;padding:8px 14px;border-radius:8px;box-shadow:0 4px 16px #0008;max-width:90vw;text-align:center}
 .lpin{position:absolute;width:30px;height:30px;margin:-15px 0 0 -15px;border-radius:50%;border:3px solid #fff;color:#fff;font:800 15px/24px Montserrat;text-align:center;pointer-events:none;box-shadow:0 2px 6px #0009}
@@ -47,6 +47,8 @@ html,body{margin:0;background:#15171c;color:#f4f2ee;font:14px Montserrat,system-
   <span id="msg">Loading…</span>
 </div>
 <div id="lp" hidden><div class="mp-h"><b>MP4 loop</b><span class="mp-hint">Hour menu, thumbnails and arrow keys still work while this is open</span><span><button type="button" data-m="min" aria-label="Minimize">&ndash;</button> <button type="button" data-m="x" aria-label="Close">&times;</button></span></div>
+  <div class="mp-row"><label>Preset <select id="lppre" title="Fill in the settings for a common loop"><option value="">choose&hellip;</option><option value="landfall">Landfall zoom-in (pan A &rarr; B, slows down)</option><option value="overview">Quick overview (all hours)</option><option value="zoomin">Slow zoom-in (centre)</option></select></label>
+  <button type="button" data-m="pv" id="lppv" title="Play the camera move (pins / zoom) once on the start hour. Nothing is saved.">Preview move</button></div>
   <div class="mp-row"><label>Frame <select id="lpk"><option value="v">9:16 (1080&times;1920)</option><option value="h">16:9 (1920&times;1080)</option></select></label>
   <label>Mode <select id="lpmode"><option value="loop">Plain loop</option><option value="pan">Track storm (pan A &rarr; B)</option></select></label></div>
   <div class="mp-row"><label>Step <select id="lpstep"><option value="24">24 h (4K stills)</option></select></label><span id="lpsteph" class="mp-note"></span></div>
@@ -60,8 +62,9 @@ html,body{margin:0;background:#15171c;color:#f4f2ee;font:14px Montserrat,system-
   <label>End zoom <select id="lpz1"><option value="s">same as start</option><option>1</option><option>1.2</option><option>1.4</option><option>1.6</option><option>1.8</option><option>2</option><option>2.5</option></select></label></div>
   <div class="mp-row" id="lppan" hidden><button type="button" data-m="a">Set pin A (start)</button><button type="button" data-m="b">Set pin B (end)</button><button type="button" data-m="c">Clear pins</button><span id="lppins" class="mp-note"></span></div>
   <div class="mp-row mp-note" id="lpinfo"></div>
+  <div class="mp-row mp-note" id="lpkeys">Keys: Esc closes / cancels a pin &middot; Enter makes the MP4</div>
   <div class="mp-row mp-note">Step 6 h uses the HD loop frames (1920&times;1080 / 1080&times;1920, newest run); 24 h uses the 4K stills. When zoomed, the title and color bar stay put.</div>
-  <div class="mp-row"><button type="button" data-m="go" id="lpgo" class="pri">Make MP4</button><button type="button" data-m="stop" id="lpstop" hidden>Stop</button><span id="lpst"></span></div>
+  <div class="mp-row"><button type="button" data-m="go" id="lpgo" class="pri">Make MP4</button><button type="button" data-m="stop" id="lpstop" hidden>Stop</button><progress id="lpprog" max="1" value="0" hidden></progress><span id="lpst"></span></div>
   <canvas id="lpprev" hidden></canvas>
   <div id="lpout" hidden><video id="lpv" controls loop muted playsinline></video><div class="mp-row"><a id="lpdl" download>Save MP4</a><button type="button" id="lpshare" hidden>Share / Save to Photos</button></div></div>
 </div>
@@ -72,5 +75,5 @@ html,body{margin:0;background:#15171c;color:#f4f2ee;font:14px Montserrat,system-
 </div>
 <div id="strip" aria-label="All hours"></div>
 <script src="social.js"></script>
-<script src="socialloop.js?v=20261031d"></script>
+<script src="socialloop.js?v=20261031e"></script>
 </body></html>
