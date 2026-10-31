@@ -685,6 +685,7 @@ function setupPointer() {
   cv.addEventListener("pointermove", e => {
     if (e.pointerType === "mouse" && !P.size) readout(e);
     if (!P.has(e.pointerId)) return; const p0 = P.get(e.pointerId); P.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (TP.on) { moved = true; return; }   // a touch pinch is handled by the touch handlers below (iPhone)
     if (P.size >= 2 && pinch) {
       const [a, b] = [...P.values()], d = Math.hypot(a.x - b.x, a.y - b.y), mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
       zoomAt(pinch.mx, pinch.my, pinch.k * d / pinch.d); Z.x += mx - pinch.mx; Z.y += my - pinch.my; pinch.mx = mx; pinch.my = my; pinch.k = Z.k; pinch.d = d; applyZoom();
@@ -714,6 +715,36 @@ function setupPointer() {
   };
   cv.addEventListener("pointerup", up); cv.addEventListener("pointercancel", up);
   addEventListener("resize", applyZoom);
+  setupTouchPinch(wr, () => { moved = true; down = null; pinch = null; });
+}
+// 10-31 1:39 PM (Benjamin, iPhone: "zoom in and out on the map by pulling my thumbs apart or closer together"). The pointer pinch
+// above only saw fingers that landed on the map canvas, and on a phone the map is ~250 px tall, so the second thumb often landed
+// beside it and Safari zoomed the whole page instead. Touch pinch now: two fingers anywhere on the map area (#wrap, plus a 40 px
+// margin around it) zoom the map about the midpoint of the fingers, and moving both fingers pans it; Safari's page zoom is
+// blocked only while a map pinch is running (and for gestures that start on the map), so page zoom elsewhere is unchanged.
+// One finger is untouched: swipe steps hours at 1x, drags when zoomed, tap reads the value, double-tap zooms.
+const TP = { on: false, d: 0, mx: 0, my: 0 };
+function setupTouchPinch(wr, onStart) {
+  if (!("ontouchstart" in window)) return;
+  const near = (t) => { const r = wr.getBoundingClientRect(), m = 40; return t.clientX > r.left - m && t.clientX < r.right + m && t.clientY > r.top - m && t.clientY < r.bottom + m; };
+  const mid = (a, b) => [(a.clientX + b.clientX) / 2, (a.clientY + b.clientY) / 2];
+  document.addEventListener("touchstart", (e) => {
+    if (e.touches.length !== 2 || (!TP.on && !(near(e.touches[0]) || near(e.touches[1])))) return;
+    if (document.body.classList.contains("embed") && !wr.contains(e.target)) return;
+    const [a, b] = e.touches; [TP.mx, TP.my] = mid(a, b); if (!TP.on && !near({ clientX: TP.mx, clientY: TP.my })) return;
+    TP.on = true; TP.d = Math.max(10, Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY)); onStart(); e.preventDefault();
+    if ($("tip")) $("tip").hidden = true;
+  }, { passive: false });
+  document.addEventListener("touchmove", (e) => {
+    if (!TP.on) return; e.preventDefault(); if (e.touches.length < 2) return;
+    const [a, b] = e.touches, d = Math.max(10, Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY)), [mx, my] = mid(a, b);
+    zoomAt(TP.mx, TP.my, Z.k * d / TP.d); Z.x += mx - TP.mx; Z.y += my - TP.my; applyZoom();
+    TP.d = d; TP.mx = mx; TP.my = my; window.__pinch = { k: Z.k, x: Z.x, y: Z.y };
+  }, { passive: false });
+  const end = (e) => { if (TP.on && e.touches.length < 2) { TP.on = false; if (e.cancelable) e.preventDefault(); } };
+  document.addEventListener("touchend", end, { passive: false }); document.addEventListener("touchcancel", end, { passive: false });
+  // iOS Safari page-zoom gesture: cancel it while a map pinch runs or when it starts on the map
+  for (const ev of ["gesturestart", "gesturechange"]) document.addEventListener(ev, (e) => { if (TP.on || wr.contains(e.target)) e.preventDefault(); }, { passive: false });
 }
 // "Save image" (Benjamin 10-29-26 7:48 PM): the map exactly as drawn (base, data, towns, key, title/time; no controls)
 // as a PNG at the map's full size. Phones: share sheet with the file (iOS "Save Image"); no file sharing: long-press view
