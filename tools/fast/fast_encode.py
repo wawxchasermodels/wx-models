@@ -13,7 +13,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 for p in (os.environ.get("WX_FORECAST_TOOLS"), os.path.join(HERE, "..", "forecast"), "/workspace/wx-models-site/live_main/tools/forecast"):
     if p and os.path.exists(os.path.join(p, "menu_maps.py")): sys.path.insert(0, os.path.abspath(p)); break
 
-DPI = 100; STRIDE = 8
+DPI = 100; STRIDE = 8; X2 = 2   # X2: hi-res copies of the fixed layers (static/x2/)
 HRRR_LCC = dict(central_longitude=-97.5, central_latitude=38.5, standard_parallels=(38.5, 38.5))
 GLOBAL_VIEWS = ("puget", "wa", "wwa", "ewa", "passes", "newa", "lm", "bc", "pnwt", "pnw", "na")
 MODELS = {   # grid "lcc" = HRRR 3 km, "ll" = 0.25 deg global (lat 90 -> -90, lon rolled to 0..360)
@@ -696,7 +696,7 @@ def latest_published(m):
         c = now - dt.timedelta(hours=b)
         if c.hour in MODELS[m]["cycles"]: return c
 
-def static(m, out, views_only=None):
+def static(m, out, views_only=None, x2_only=False):
     import matplotlib; matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     import cartopy.crs as ccrs, cartopy.feature as cf
@@ -752,7 +752,14 @@ def static(m, out, views_only=None):
         views[vid]["lut"] = f"static/lut_{m}_{vid}.bin"
     def layer_fig(vid):
         fig, ax, ky = TM.frame(vid); fig.patch.set_alpha(0); ax.patch.set_alpha(0); return fig, ax, ky
-    def save(fig, path): fig.savefig(path, dpi=DPI, transparent=True); plt.close(fig); return os.path.getsize(path)
+    # 10-30 7:30 PM (Benjamin: "images are still blurry on the phone view"): every fixed layer (base, towns, key) is also saved
+    # at 2x (static/x2/<same name>, e.g. 3200 px wide) from the same figure, so placement is identical; the viewer uses the x2
+    # file only when its map bitmap is drawn above 1x (zoomed phone, retina desktop). 1x files are unchanged.
+    os.makedirs(f"{out}/static/x2", exist_ok=True)
+    def save(fig, path):
+        fig.savefig(path, dpi=DPI, transparent=True)
+        fig.savefig(path.replace("/static/", "/static/x2/"), dpi=DPI * X2, transparent=True)
+        plt.close(fig); return os.path.getsize(path)
     def town_call(ax, vid, field):
         if vid in WA_LIKE and vid != "wa":   # zoomed Washington frames: the Washington town list, only places inside the frame
             l0, l1, a0, a1 = TM.VIEWS[vid]["ll"]; ins = lambda la_, lo_: a0 + 0.05 <= la_ <= a1 - 0.05 and l0 + 0.05 <= lo_ <= l1 - 0.05
@@ -1193,6 +1200,7 @@ def static(m, out, views_only=None):
             HS.credit(fig, TM.CREDIT_NOAA if (pid == "t2m" and m in NOAA) else (M.credit(m) if m in M.MODELS else M.credit("gfs") if minfo(m).get("noaa") else TM.CREDIT.format(name=minfo(m)["name"])))
             sizes[f"key_{m}_{pid}_{vid}"] = save(fig, f"{out}/{fn}")
         P["ticks"] = [float(t) for t in tk0]
+    if x2_only: print(f"{m} x2 layers done (no clim / manifest)", flush=True); return
     clim = {}
     for var in sorted({P["clim"] for P in prods.values() if P.get("clim")}):
         clim[var] = clim_static(m, out, crop_la, crop_lo, var, None if oro is None else oro[i0:i1, j0:j1] / 3.28084)
@@ -1245,8 +1253,10 @@ def steps(m, cycle, want, out, workers, only_missing=True, deadline=None):
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("cmd", choices=["static", "steps"]); ap.add_argument("--model", required=True)
     ap.add_argument("--cycle"); ap.add_argument("--steps"); ap.add_argument("--out", default=os.path.join(HERE, "data"))
-    ap.add_argument("--workers", type=int, default=4); ap.add_argument("--all", action="store_true"); a = ap.parse_args()
-    if a.cmd == "static": static(a.model, a.out, views_only=a.all)
+    ap.add_argument("--workers", type=int, default=4); ap.add_argument("--all", action="store_true")
+    ap.add_argument("--x2-only", action="store_true", help="static: layers (1x + x2) only, no climatology, manifest untouched (use a scratch --out)")
+    a = ap.parse_args()
+    if a.cmd == "static": static(a.model, a.out, views_only=a.all or a.x2_only, x2_only=a.x2_only)
     else:
         full = steps_for(a.model, int(a.cycle[8:10]))
         want = full if not a.steps else (lambda x, y: [s for s in full if x <= s <= y])(*map(int, a.steps.split("-")))

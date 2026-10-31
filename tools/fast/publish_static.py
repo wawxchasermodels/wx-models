@@ -7,7 +7,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from upload_r2 import client, BUCKET, CT
 ap = argparse.ArgumentParser(); ap.add_argument("--data", required=True); ap.add_argument("--runs-from-local", action="store_true"); a = ap.parse_args()
 s3 = client(); D = a.data.rstrip("/")
-fs = [f"static/{f}" for f in sorted(os.listdir(f"{D}/static"))]
+fs = [os.path.relpath(os.path.join(r, f), D) for r, _, n in os.walk(f"{D}/static") for f in sorted(n)]   # incl. static/x2/ (hi-res layers)
 with ThreadPoolExecutor(16) as ex: list(ex.map(lambda k: s3.upload_file(f"{D}/{k}", BUCKET, k, ExtraArgs={"ContentType": CT.get(os.path.splitext(k)[1], "application/octet-stream")}), fs))
 loc = json.load(open(f"{D}/manifest.json"))
 import time; sv = time.strftime("%Y%m%d%H%M%S", time.gmtime())   # viewer cache-buster for static/

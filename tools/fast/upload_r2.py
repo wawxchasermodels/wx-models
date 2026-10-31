@@ -28,7 +28,7 @@ def main():
         if a.dry_run: return
         s3.upload_file(p, BUCKET, rel, ExtraArgs={"ContentType": CT.get(os.path.splitext(p)[1], "application/octet-stream")})
     files = []
-    if a.static: files += [f"static/{f}" for f in sorted(os.listdir(f"{D}/static"))]
+    if a.static: files += [os.path.relpath(os.path.join(r, f), D) for r, _, n in os.walk(f"{D}/static") for f in sorted(n)]   # incl. static/x2/
     for r in a.run:
         rd = f"runs/{a.model}/{r}"; files += [f"{rd}/single/{f}" for f in sorted(os.listdir(f"{D}/{rd}/single")) if f.endswith(".png")]
     with ThreadPoolExecutor(16) as ex: list(ex.map(put, files))
