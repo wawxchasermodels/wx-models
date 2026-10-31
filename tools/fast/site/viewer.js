@@ -138,7 +138,7 @@ async function boot() {
   setupPointer(); $("share") && ($("share").onclick = share); $("save") && ($("save").onclick = saveImage);
   $("obsbtn") && ($("obsbtn").onclick = obsOpen);
   $("mgbtn") && ($("mgbtn").onclick = () => mgOpen("town")); $("pfbtn") && ($("pfbtn").onclick = () => mgOpen("pass"));
-  $("prod").onchange = e => { S.prod = e.target.value; draw(); };
+  $("prod").onchange = e => { S.prod = e.target.value; S.lastTab[tabOf(S.prod)] = S.prod; draw(); };
   $("view").onchange = e => { S.view = e.target.value; resetZoom(); draw(); };
   const sl = $("step"), endDrag = () => { if (S.dragging) { S.dragging = false; draw(); } };
   sl.addEventListener("pointerdown", () => { S.dragging = true; });
@@ -159,12 +159,34 @@ async function loadRun(r) { if (!S.runs[r]) S.runs[r] = await (await fetch(`${DA
 const SV = () => (S.man.static_v ? `?v=${S.man.static_v}` : "");   // cache-buster for static layers (they are cached 1 day)
 const MD = () => S.man.models[S.run.split("/")[0]];
 const PRODS = () => MD().products, VIEWS = () => MD().views;
+// Product tabs (Benjamin 10-30 8:04 PM: "upper air tab, surface tab, precipitation tab, snow tab", Pivotal Weather style).
+// The Product menu lists only the open tab's products, in the order below (Pivotal: winds by level, 250 -> 850 mb);
+// product ids / URLs are unchanged (?prod= picks its tab). Products not listed here land in an "Other" tab.
+const TABS = [
+  ["sfc", "Surface", ["t2m", "feels", "d2m", "t2ma", "nmaxt", "nmint", "ehigh", "elow", "et2sd", "ep32", "gust10", "gust6", "gustmax", "egust90",
+                      "aifswind", "slp", "elows", "tcc", "vis", "fog", "ir", "waves", "wavemax"]],
+  ["pcp", "Precip", ["qpf", "qpf1", "nqpf1", "qpf3", "qpf6", "nqpf6", "qpf12", "qpf24", "qpf48", "eqpf90", "mslpqpf", "ptype", "refc", "pw", "pwa", "ivt",
+                     "qpfa", "qpfpct"]],
+  ["snow", "Snow", ["snow", "kuchera", "esnow", "esnow90", "snow1", "snow6", "nsnow6", "kuch24", "dsnod", "fzra", "snowlvl", "frz", "thick"]],
+  ["ua", "Upper Air", ["w250", "w300", "w500", "w850", "t300w", "t500w", "t700w", "t850w", "t925w", "t850", "t700", "t850a", "z500anom", "ez500", "spag"]],
+  ["svr", "Severe", ["mucape", "sbcape", "epcape", "ltng", "ltng6", "ltgp", "ntstm"]],
+];
+const tabOf = pid => (TABS.find(t => t[2].includes(pid)) || ["other"])[0];
+S.lastTab = {};
 function setLists() {   // products this run carries (all their fields present), views this model has
   const R_ = S.runs[S.run], has = new Set(R_.fields), P = PRODS(), V = VIEWS();
   const prods = Object.entries(P).filter(([k, p]) => p.fields.every(f => has.has(f)));
-  if (!prods.some(([k]) => k === S.prod)) S.prod = prods[0][0];
+  const tabs = [...TABS, ["other", "Other", []]].map(([id, label, ids]) => [id, label,
+    prods.filter(([k]) => tabOf(k) === id).sort((a, b) => ids.indexOf(a[0]) - ids.indexOf(b[0]))]).filter(t => t[2].length);
+  if (!prods.some(([k]) => k === S.prod)) {   // not in this run: stay in the same tab when it can
+    const t = tabs.find(t => t[0] === tabOf(S.prod)); S.prod = (t ? t[2][0] : prods[0])[0]; }
+  const cur = tabOf(S.prod); S.lastTab[cur] = S.prod;
+  $("tabs").innerHTML = tabs.map(([id, label]) => `<button type="button" role="tab" data-t="${id}" aria-selected="${id === cur}"${id === cur ? ' class="on"' : ""}>${label}</button>`).join("");
+  $("tabs").onclick = e => { const b = e.target.closest("button[data-t]"); if (!b || b.dataset.t === tabOf(S.prod)) return;
+    const t = tabs.find(x => x[0] === b.dataset.t), keep = S.lastTab[t[0]];
+    S.prod = t[2].some(([k]) => k === keep) ? keep : t[2][0][0]; setLists(); draw(); };
   if (!V[S.view]) S.view = V.wa ? "wa" : Object.keys(V)[0];
-  fill($("prod"), prods.map(([k, p]) => [k, p.title]), S.prod);
+  fill($("prod"), tabs.find(t => t[0] === cur)[2].map(([k, p]) => [k, p.title]), S.prod);
   fill($("view"), Object.entries(V).map(([k, v]) => [k, v.label]), S.view);
   $("step").max = R_.steps.length - 1; S.i = Math.min(S.i, R_.steps.length - 1);
 }
@@ -256,6 +278,7 @@ async function productFields(run, pid, f) {
   if (S.derived.has(key)) return S.derived.get(key);
   const p = (async () => {
     const F = {}; for (const n of P.fields) F[n] = await getField(run, n, f);
+    for (const n of P.opt || []) { const x = await getField(run, n, f).catch(() => null); if (x) F[n] = x; }   // optional (e.g. 300 mb heights: newer runs only)
     const g = F[P.fields[0]]; const out = { w: g.w, h: g.h, raw: F };
     if (P.fill === "wspd") {   // wind speed from u/v (kt); MSLP + 10 m wind shows mph, upper-level winds kt
       const [un, vn] = P.wind || ["u10", "v10"], u = F[un].v, v = F[vn].v, sp = new Float32Array(u.length), mul = P.spd_mult ?? (2.23694 / 1.94384);
@@ -278,7 +301,6 @@ async function productFields(run, pid, f) {
       if (f - P.window < 0 && !P.sofar) throw new Error(`nodata:${fld}`);
       const arrs = await Promise.all(fs.map(x => getField(run, fld, x).then(r => r.v, () => null))), ok = arrs.filter(Boolean);
       if (!ok.length) throw new Error(`nodata:${fld}`);
-    for (const n of P.opt || []) { const x = await getField(run, n, f).catch(() => null); if (x) F[n] = x; }   // optional (e.g. 300 mb heights: newer runs only)
       const o = new Float32Array(ok[0]);
       if (P.wsum) { for (const a of ok.slice(1)) for (let k = 0; k < o.length; k++) o[k] += a[k]; }   // per-interval amounts -> total
       else if (P.wmin) { for (const a of ok.slice(1)) for (let k = 0; k < o.length; k++) if (a[k] < o[k]) o[k] = a[k]; }
@@ -1004,6 +1026,7 @@ async function passTable(body, D) {
   const passes = D.points.filter(p => p.k === "pass"); if (!passes.length) { body.innerHTML = `<div class="mg-msg">No passes in this model's views.</div>`; return; }
   const T0 = mgTown(D, passes[0].n), fmax = T0.f[T0.f.length - 1], wins = [[0, 24], [24, 48], [48, 72]].filter(w => fmax > w[0]).map(([a, b]) => [a, Math.min(b, fmax)]);
   const f1 = x => x == null ? "\u2013" : x.toFixed(1), f2 = x => x == null ? "\u2013" : x.toFixed(2), r0 = x => x == null ? "\u2013" : Math.round(x);
+  const ft = x => x == null || !isFinite(x) ? "\u2013" : (Math.round(x / 100) * 100).toLocaleString("en-US");
   const hdr = wins.map(([a, b]) => `${fmtPT(new Date(Date.parse(T0.t[0]) + (a - T0.f[0]) * 36e5).toISOString(), { weekday: "short", hour: "numeric" })}\u2013${fmtPT(new Date(Date.parse(T0.t[0]) + (b - T0.f[0]) * 36e5).toISOString(), { weekday: "short", hour: "numeric" })}`);
   const span = Math.min(fmax, 48), runAt = MG.run;
   // lowest freezing level over the first `span` hours: this run, or the newest HRRR / RRFS / GFS run over the same valid times
@@ -1041,7 +1064,6 @@ function showErr(e) { const p = document.createElement("pre"); p.id = "err"; p.s
 addEventListener("error", e => showErr(e.error || e.message)); addEventListener("unhandledrejection", e => showErr(e.reason));
 boot();
 
-  const ft = x => x == null || !isFinite(x) ? "\u2013" : (Math.round(x / 100) * 100).toLocaleString("en-US");
 // ---- Observations (old site's live obs module, unchanged: browser-drawn from NWS/IEM + Environment Canada, loaded on first open)
 let obsLoad = null;
 function obsOpen() {

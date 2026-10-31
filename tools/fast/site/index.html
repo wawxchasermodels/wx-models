@@ -71,10 +71,16 @@ table.pf td{padding:6px 8px;text-align:right;border-bottom:1px solid #262931;whi
 table.pf tr[data-n]{cursor:pointer}table.pf tr[data-n]:hover td{background:#262931}
 table.pf td small.el{color:#a7abb3;font-weight:500;font-size:11px}table.pf td.fzb{background:#1e4f7a;font-weight:800}table.pf th small{font-weight:500;color:#a7abb3}table.pf td.s1{background:#1f3b5c}table.pf td.s2{background:#2a5d96}table.pf td.s3{background:#4a3a9a;font-weight:800}
 @media (max-width:700px){table.pf{font-size:12px}table.pf th,table.pf td{padding:5px 6px}#mg .mg-top{gap:6px;padding:6px}#mg .mg-top label{font-size:12px}#mg select{max-width:42vw}}
+/* 10-30 8 PM product tabs (Surface / Precip / Snow / Upper Air / Severe): pills before the Product menu; phones: own row, fits 390 px */
+#tabs{display:flex;gap:4px;flex:0 0 auto}
+#tabs button{background:#262931;color:#cfd3da;border:1px solid #4a4f5a;border-radius:15px;padding:4px 11px;font:inherit;font-size:13px;font-weight:600;white-space:nowrap;touch-action:manipulation;cursor:pointer}
+#tabs button.on{background:#2f8cff;border-color:#2f8cff;color:#fff}
+@media (max-width:700px){#tabs{flex:1 1 100%;gap:4px;overflow-x:auto;scrollbar-width:none}#tabs::-webkit-scrollbar{display:none}#tabs button{padding:5px 9px;font-size:12.5px}}
 </style></head>
 <body>
 <div id="bar">
   <label>Runs <select id="run" aria-label="Runs"></select></label>
+  <div id="tabs" role="tablist" aria-label="Product groups"></div>
   <label>Product <select id="prod"></select></label>
   <label>View <select id="view"></select></label>
   <span id="stepctl"><button id="prev">&lsaquo;</button><button id="play">Play</button><button id="next">&rsaquo;</button>
@@ -88,5 +94,5 @@ table.pf td small.el{color:#a7abb3;font-weight:500;font-size:11px}table.pf td.fz
 </div>
 <div id="wrap"><canvas id="map"></canvas><div id="tip" hidden></div></div>
 <div id="dock"></div>
-<script src="viewer.js?v=20261030b"></script>
+<script src="viewer.js?v=20261030c"></script>
 </body></html>
