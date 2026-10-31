@@ -263,6 +263,9 @@ def _ltng(R, m):
     raise KeyError("ltng")
 def _asnow(R, m):
     if m == "ifs": return np.clip(_ec("sf")(R, m), 0, None) * 393.701   # ECMWF snowfall (m water) at 10:1, run total
+    # AIFS (Benjamin 10-31 1:49 AM "verify snow map and just use that"): its open data has sf too, in kg/m2 (mm water), not m;
+    # same 10:1 (mm / 25.4 x 10). Checked 00Z 10-31 F24: global mean 0.45 mm vs IFS 0.43 mm.
+    if m == "aifs": return np.clip(_ec("sf")(R, m), 0, None) * 0.393701
     if m not in ("hrrr", "rrfs"): raise KeyError("asnow")
     return np.asarray(R.acc0("ASNOW:surface")[2], float) / 0.0254
 def _prev_step(m, c, s):
@@ -1104,8 +1107,8 @@ def static(m, out, views_only=None, x2_only=False):
     # Overnight 10-30 (go-live audit gap 5): the old site's period variants. All browser-side sums / maxima of fields every run
     # already stores (snow water, Kuchera and freezing-rain increments, gust), so no new R2 data per run; only keys are added.
     SNOW_T = {6: [0.1, 1, 3, 6, 10, 15, 24], 12: [0.1, 1, 3, 6, 10, 15, 24], 24: [0.1, 1, 3, 6, 10, 15, 24, 36], 48: [0.1, 1, 3, 6, 10, 15, 24, 36, 48]}
-    snow_how = "ECMWF snowfall water x 10 (10:1)" if m in ("ifs", "eps", "aens") else "model snow density"
-    prods["snow6"]["only"] = ("hrrr", "rrfs", "ifs")
+    snow_how = "ECMWF snowfall water x 10 (10:1)" if m in ("ifs", "aifs", "eps", "aens") else "model snow density"
+    prods["snow6"]["only"] = ("hrrr", "rrfs", "ifs", "aifs")
     prods["snow6"]["extra"] = f"snowfall in the 6 h ending at the valid time ({snow_how})  \u00b7  max {{hi}} in in view"
     for h in (12, 24, 48):
         prods[f"snow{h}"] = dict(prods["snow6"], cmap_of="snow", title=f"{h} h Snowfall", window=h, ticks=SNOW_T[h],
@@ -1238,7 +1241,9 @@ def static(m, out, views_only=None, x2_only=False):
     if "ptype" in prods: prods["ptype"]["under"] = "#f4f5f7"
     for k in ("nqpf1", "nqpf6", "nsnow6"):
         if k in prods: prods[k]["min_show"] = prods[k]["levels"][0]
-    if m == "ifs" and "snow" in prods: prods["snow"]["extra"] = "ECMWF snowfall water x 10 (10:1)  \u00b7  since the run started  \u00b7  max {hi} in in view"
+    if m in ("ifs", "aifs") and "snow" in prods:
+        prods["snow"]["extra"] = "ECMWF snowfall water x 10 (10:1)  \u00b7  since the run started  \u00b7  max {hi} in in view"
+        prods["snow"]["title"] = "Snowfall Total (10:1)"
     for k in ("kuchera", "kuch24", "fzra"):
         if k in prods: prods[k]["min_show"] = prods[k]["levels"][0]
     for k in ("qpf", "snow", "refc", "qpf1", "qpf3", "qpf6", "qpf12", "qpf24", "qpf48", "snow1", "snow6", "ltng6"):
