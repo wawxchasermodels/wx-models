@@ -1186,13 +1186,17 @@ async function mgDraw() {
 }
 function mgChart(cv, T, box) {
   const dpr = Math.min(2, devicePixelRatio || 1), W = box.clientWidth, sm0 = W < 600;
-  const npan = [T.t2m, T.wind || T.gust, T.pcp || T.snow || T.snow6 || T.pcp6, T.tcc].filter(Boolean).length;   // each panel has its own time axis (Benjamin 10-30)
+  // Benjamin 10-31 8:58 AM "A snowfall graph on the pass meteograms would be cool": passes with snow data get their own Snow panel
+  // (bars = snow per 6 h, inches; line = running total, right axis); the precip panel then shows precip only. Towns unchanged.
+  const snowPan = !!(T.P && T.P.k === "pass" && (T.snow || T.snow6));
+  const npan = [T.t2m, T.wind || T.gust, T.pcp || T.snow || T.snow6 || T.pcp6, snowPan, T.tcc].filter(Boolean).length;   // each panel has its own time axis (Benjamin 10-30)
   const H = Math.max(sm0 ? 520 : 560, 52 + 40 * npan + (sm0 ? 52 : 60) * 8, box.clientHeight - 4);
   cv.width = W * dpr; cv.height = H * dpr; cv.style.width = W + "px"; cv.style.height = H + "px";
   const c = cv.getContext("2d"); c.scale(dpr, dpr); c.fillStyle = "#15171c"; c.fillRect(0, 0, W, H);
   const [m] = MG.run.split("/"), site = S.man.models[m].site, small = W < 600;
   const L = small ? 38 : 52, Rm = small ? 34 : 50, top = small ? 46 : 52, bot = 34, n = T.f.length;   // bot / gap = room for the time axis under each panel
-  const panels = [["temp", 3], ["wind", 2], ["pcp", 2], ["cloud", 1]].filter(([k]) => k === "temp" ? T.t2m : k === "wind" ? (T.wind || T.gust) : k === "pcp" ? (T.pcp || T.snow || T.snow6 || T.pcp6) : T.tcc);
+  const panels = [["temp", 3], ["wind", 2], ["pcp", 2], ["snow", 2], ["cloud", 1]].filter(([k]) => k === "temp" ? T.t2m : k === "wind" ? (T.wind || T.gust) :
+    k === "pcp" ? (T.pcp || T.snow || T.snow6 || T.pcp6) : k === "snow" ? snowPan : T.tcc);
   const wsum = panels.reduce((a, p) => a + p[1], 0), gap = 40, ph = (H - top - bot - gap * (panels.length - 1)) / wsum;
   const t0 = Date.parse(T.t[0]), t1 = Date.parse(T.t[n - 1]), X = iso => L + (Date.parse(iso) - t0) / Math.max(1, t1 - t0) * (W - L - Rm);
   c.font = `800 ${small ? 14 : 17}px Montserrat`; c.fillStyle = "#f4f2ee"; c.textBaseline = "top";
@@ -1266,10 +1270,26 @@ function mgChart(cv, T, box) {
       const pTop = niceStep(hiP) * Math.ceil(hiP / niceStep(hiP)); axis(0, pTop, scP, "\u2033", false, "#6fd38a");
       if (p6 && T.pcp) bars(p6.map((v, k) => T.f[k] % 6 === 0 && T.f[k] > 36 ? v : null), scP, "#3ea95888", 2.2);
       if (pc) bars(pc, scP, "#3ea958"); else if (p6) bars(p6.map((v, k) => T.f[k] % 6 === 0 ? v : null), scP, "#3ea958", 2.2);
-      if (anySnow) { axis(0, topS, scS, "\u2033", true, "#d9ecff"); line(runS, scS, "#d9ecff", 2); }
+      if (anySnow && !snowPan) { axis(0, topS, scS, "\u2033", true, "#d9ecff"); line(runS, scS, "#d9ecff", 2); }
       const tot = pc ? pc.reduce((a, v) => a + (v || 0), 0) : sum6(T, p6, -1, 1e9) || 0;
       let dx = label(`Precip per ${pc ? (T.f[1] - T.f[0] || 1) + " h" : "6 h"} (total ${tot.toFixed(2)}\u2033)`, "#6fd38a");
-      if (anySnow) { const ts = (sn || []).reduce((a, v) => a + (v || 0), 0) || sum6(T, sn6, -1, 1e9) || 0; label(`Snow running total ${ts.toFixed(1)}\u2033${T.snowEst ? " (est.)" : ""}`, "#d9ecff", dx); }
+      if (anySnow && !snowPan) { const ts = (sn || []).reduce((a, v) => a + (v || 0), 0) || sum6(T, sn6, -1, 1e9) || 0; label(`Snow running total ${ts.toFixed(1)}\u2033${T.snowEst ? " (est.)" : ""}`, "#d9ecff", dx); }
+    } else if (kind === "snow") {   // pass Snow panel: 6 h snowfall bars (each spans its 6 h window, ending at the step) + running total line
+      const sn = T.snow || null, sn6 = T.snow6 || null;
+      const s6 = T.f.map((f, k) => f % 6 !== 0 ? null : sn ? sumWin(T, sn, f - 6, f) : sn6[k]);
+      let q = 0; const runS = sn ? sn.map(v => (q += v || 0)) : sn6.map((v, k) => T.f[k] % 6 === 0 ? (q += v || 0) : null), tot = q;
+      const hiB = Math.max(1, ...s6.filter(v => v != null)), topB = niceStep(hiB) * Math.ceil(hiB / niceStep(hiB)), scB = scale(0, topB);
+      const hiR = Math.max(1, ...runS.filter(v => v != null)), topR = niceStep(hiR) * Math.ceil(hiR / niceStep(hiR)), scR = scale(0, topR);
+      axis(0, topB, scB, "\u2033", false, "#9fc8ff"); axis(0, topR, scR, "\u2033", true, "#f4f2ee");
+      c.fillStyle = "#5b9dff"; const gap6 = Math.max(1, (X(T.t[n - 1]) - X(T.t[0])) / Math.max(1, (t1 - t0) / 216e5) * 0.12);
+      s6.forEach((v, k) => { if (v == null || v < 0.05) return; const xb = X(T.t[k]), xa = X(new Date(Date.parse(T.t[k]) - 216e5).toISOString());
+        const x0 = Math.max(L, xa + gap6 / 2), x1 = xb - gap6 / 2; if (x1 > x0) c.fillRect(x0, scB(v), x1 - x0, y1 - scB(v));
+        if (x1 - x0 > (small ? 16 : 22) && v >= 0.5) { c.font = `700 ${small ? 9 : 11}px Montserrat`; c.fillStyle = "#d9ecff"; c.textAlign = "center"; c.textBaseline = "bottom";
+          c.fillText(v.toFixed(v < 10 ? 1 : 0), (x0 + x1) / 2, scB(v) - 2); c.textAlign = "left"; c.fillStyle = "#5b9dff"; } });
+      line(runS, scR, "#f4f2ee", 2);
+      let dx = label(`Snow per 6 h, inches${T.snowEst ? " (est.)" : ""}`, "#9fc8ff");
+      label(`Running total ${tot.toFixed(1)}\u2033 (right axis)`, "#f4f2ee", dx);
+      if (!(tot >= 0.05)) label("No snow in this run", "#a7abb3", 0, small ? 16 : 18);
     } else {
       const sc = scale(0, 100); c.fillStyle = "#9aa3b2"; c.beginPath(); c.moveTo(X(T.t[0]), y1); T.tcc.forEach((v, k) => c.lineTo(X(T.t[k]), sc(v || 0))); c.lineTo(X(T.t[n - 1]), y1); c.closePath(); c.globalAlpha = 0.55; c.fill(); c.globalAlpha = 1;
       axis(0, 100, sc, "%"); label("Cloud cover", "#cfd3da");
