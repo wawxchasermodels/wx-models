@@ -1120,8 +1120,17 @@ function mgChart(cv, T, box) {
       if (sd) { c.fillStyle = "#e0484d33"; c.beginPath(); T.t2m.forEach((v, k) => { const xx = X(T.t[k]); k ? c.lineTo(xx, sc(v + sd[k])) : c.moveTo(xx, sc(v + sd[k])); });
         for (let k = n - 1; k >= 0; k--) c.lineTo(X(T.t[k]), sc(T.t2m[k] - sd[k])); c.fill(); }
       line(T.t2m.map(() => 32), sc, "#5aa9ff", 1.5, [6, 4]); line(T.t2m, sc, "#ff5a5f", 2.5);
-      let dx = label(sd ? "Temperature \u00b0F (ens. mean, shading = \u00b11 spread)" : "Temperature \u00b0F", "#ff8a8e"); label("32\u00b0F", "#5aa9ff", dx);
-      if (T.p32) { const s2 = scale(0, 100); line(T.p32, s2, "#7fd1ff", 1.5, [2, 3]); axis(0, 100, s2, "%", true, "#7fd1ff"); { c.font = `700 ${small ? 10 : 12}px Montserrat`; const lab = "chance \u2264 32\u00b0F (right axis)", fits = L + 6 + dx + 60 + c.measureText(lab).width < W - Rm - 4; label(lab, "#7fd1ff", fits ? dx + 60 : 0, fits ? 0 : (small ? 14 : 16)); } }
+      let dx = label(sd ? "Temperature \u00b0F (ens. mean, shading = \u00b11 spread)" : "Temperature \u00b0F", "#ff8a8e");
+      // Benjamin 10-31 1:20 AM: say what the dashed blue line is (dash sample + "= freezing (32°F)"), next to the title or on the next row
+      const rowH = small ? 14 : 16; c.font = `700 ${small ? 10 : 12}px Montserrat`;
+      const fzT = "= freezing (32\u00b0F)", fzW = 22 + c.measureText(fzT).width + 14, fzOn1 = L + 6 + dx + fzW < W - Rm - 4, fzX = fzOn1 ? dx : 0, fzY = fzOn1 ? 0 : rowH;
+      const fzNote = () => {   // drawn after the data lines so nothing crosses it
+        { const yy = y0 + 4 + fzY + (small ? 5 : 6); c.fillStyle = "rgba(24,26,31,0.85)"; c.fillRect(L + 3 + fzX, y0 + 2 + fzY, fzW - 8, rowH);   // backing so lines under it don't hide the note
+        c.strokeStyle = "#5aa9ff"; c.lineWidth = 1.5; c.setLineDash([6, 4]); c.beginPath(); c.moveTo(L + 6 + fzX, yy); c.lineTo(L + 6 + fzX + 18, yy); c.stroke(); c.setLineDash([]); }
+        label(fzT, "#5aa9ff", fzX + 22, fzY);
+      };
+      if (!T.p32) fzNote();
+      if (T.p32) { const s2 = scale(0, 100); line(T.p32, s2, "#7fd1ff", 1.5, [2, 3]); axis(0, 100, s2, "%", true, "#7fd1ff"); fzNote(); { c.font = `700 ${small ? 10 : 12}px Montserrat`; const lab = "chance \u2264 32\u00b0F (right axis)", px0 = fzX + fzW + 10, fits = L + 6 + px0 + c.measureText(lab).width < W - Rm - 4; label(lab, "#7fd1ff", fits ? px0 : 0, fits ? fzY : fzY + rowH); } }
       const mx = [], mn = []; // daily hi/lo labels
       for (const dd of days) { const ks = T.t.map((t, k) => k).filter(k => fmtPT(T.t[k], { weekday: "short", month: "numeric", day: "numeric" }) === dd.d && T.t2m[k] != null);
         if (ks.length < 3) continue; const kH = ks.reduce((a, b) => T.t2m[b] > T.t2m[a] ? b : a), kL = ks.reduce((a, b) => T.t2m[b] < T.t2m[a] ? b : a);

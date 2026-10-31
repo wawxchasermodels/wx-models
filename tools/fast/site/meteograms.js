@@ -472,7 +472,7 @@ async function build(sec, prod, town) {
     const runL = runLine(sec, c, every);
     if (k === "summary") {
       const panels = [];
-      if (T.t2m) panels.push({ ylab: "\u00b0F", legend: "upper right", items: [{ t: "line", x, y: cut(T.t2m), color: K.WARM, lw: 2.5, label: "Temp" }, ...(T.d2m ? [{ t: "line", x, y: cut(T.d2m), color: K.RAIN, lw: 2, label: "Dew point" }] : []), { t: "hline", y: 32, color: K.COLD, dash: "--", lw: 1.3 }] });
+      if (T.t2m) panels.push({ ylab: "\u00b0F", legend: "upper right", items: [{ t: "line", x, y: cut(T.t2m), color: K.WARM, lw: 2.5, label: "Temp" }, ...(T.d2m ? [{ t: "line", x, y: cut(T.d2m), color: K.RAIN, lw: 2, label: "Dew point" }] : []), { t: "hline", y: 32, label: "Freezing (32\u00b0F)", color: K.COLD, dash: "--", lw: 1.3 }] });
       if (T.gust || T.wind) panels.push({ ylab: "mph", legend: "upper right", items: [...(T.gust ? [{ t: "line", x, y: cut(T.gust), color: K.WARM, lw: 2, label: "Gust" }] : []), ...(T.wind ? [{ t: "line", x, y: cut(T.wind), color: K.INK, lw: 1.6, label: "Sustained" }] : [])] });
       if (A) panels.push({ ylab: "in", legend: "upper right", ylim: () => [0, Math.max(0.05, A[A.length - 1] * 1.15)], items: [{ t: "bars", x, y: Pinc, w: w[1] || w[0], color: K.RAIN, label: `${every}-hour precip` }, { t: "line", x, y: A, color: K.MEAN, lw: 2, label: `Total ${A[A.length - 1].toFixed(2)} in` }] });
       if (T.tcc) panels.push({ ylab: "%", legend: "upper right", ylim: () => [0, 100], items: [{ t: "fill", x, lo: x.map(() => 0), hi: cut(T.tcc), color: K.MUTED, alpha: 0.6, label: "Cloud cover" }] });
@@ -482,7 +482,7 @@ async function build(sec, prod, town) {
     if (k === "winter") {
       if (!T.t2m && !A) return { empty: ["Not enough data", "This model has no temperature or precipitation at this place."] };
       const panels = [];
-      if (T.t2m) panels.push({ ylab: "\u00b0F", legend: "upper left", items: [{ t: "line", x, y: cut(T.t2m), color: K.WARM, lw: 2.5, label: "Temp" }, ...(T.d2m ? [{ t: "line", x, y: cut(T.d2m), color: K.RAIN, lw: 1.8, label: "Dew point" }] : []), { t: "hline", y: 32, color: K.COLD, dash: "--", lw: 1.3 }] });
+      if (T.t2m) panels.push({ ylab: "\u00b0F", legend: "upper left", items: [{ t: "line", x, y: cut(T.t2m), color: K.WARM, lw: 2.5, label: "Temp" }, ...(T.d2m ? [{ t: "line", x, y: cut(T.d2m), color: K.RAIN, lw: 1.8, label: "Dew point" }] : []), { t: "hline", y: 32, label: "Freezing (32\u00b0F)", color: K.COLD, dash: "--", lw: 1.3 }] });
       if (A) {   // precip by type: the fast data has snow (water = snow / 10) and freezing rain amounts, the rest is rain
         const sn = T.snow ? cut(T.snow) : null, fz = T.fzinc ? cut(T.fzinc) : null;
         const sw = Pinc.map((p, i) => Math.min(p, sn ? (sn[i] || 0) / 10 : 0)), fr = Pinc.map((p, i) => Math.min(p - sw[i], fz ? fz[i] || 0 : 0)), rn = Pinc.map((p, i) => Math.max(0, p - sw[i] - fr[i]));
@@ -505,7 +505,7 @@ async function build(sec, prod, town) {
   const fr = (pid, title, ylab, items, legendLoc, ylim, extra) => Object.assign(base, { fig: "frame", title: `${name} ${title}`, sub: run, panels: [Object.assign({ ylab, legend: legendLoc || "upper right", ylim, items: expand(items) }, extra || {})] });
   const noField = (what) => ({ empty: ["Not in this model", `${sec.label} open data has no ${what} for the members.`] });
   if (k === "lines_t2m") { const t2 = get("2t", (v) => v + corr); if (!t2) return memEmpty(sec, "Member lines");
-    return fr(k, "2 m Temperature: Members and Mean", "\u00b0F", [...membersItems(t2, K.MUTED), { t: "hline", y: 32, color: K.COLD, lw: 1.4, dash: "--" }]); }
+    return fr(k, "2 m Temperature: Members and Mean", "\u00b0F", [...membersItems(t2, K.MUTED), { t: "hline", y: 32, label: "Freezing (32\u00b0F)", color: K.COLD, lw: 1.4, dash: "--" }]); }
   if (k === "plume_tp" || k === "plume_sf") {
     const S0 = get(k === "plume_tp" ? "tp" : "sf"); if (!S0) return memEmpty(sec, "Plumes"); const A = withZero(S0, c), col = k === "plume_tp" ? K.RAIN : K.SNOW;
     const mu = colStat(A, nanmean), md = colStat(A, (a) => pct(a, 0.5)), lastM = nanmean(A.m.map((a) => a[a.length - 1])), lastD = pct(A.m.map((a) => a[a.length - 1]), 0.5);
@@ -532,10 +532,10 @@ async function build(sec, prod, town) {
         items.push({ t: "vlines", x: xs, lo: q[0], hi: q[4], color: col, lw: 1.6 }, { t: "bars", x: xs, y: q[3].map((v, i) => v - q[1][i]), base: q[1], w: 0.3, color: col, alpha: 0.55, label: `${lab}: 25-75% box, 10-90% whisker` },
           { t: "scatter", x: xs, y: q[2], color: K.MEAN, s: 26 }, { t: "text", x: xs, y: q[2].map((v) => v + 1), s: q[2].map((v) => String(Math.round(v))), color: K.INK, pt: 9 });
       }
-      items.push({ t: "hline", y: 32, color: K.COLD, lw: 1.2, dash: "--" });
+      items.push({ t: "hline", y: 32, label: "Freezing (32\u00b0F)", color: K.COLD, lw: 1.2, dash: "--" });
       return Object.assign(base, { fig: "frame", title: `${name} Daily High / Low Temperature`, sub: run + `  \u00b7  dots = median of ${nm(mx)} members`, panels: [{ ylab: "\u00b0F", legend: "upper left", xmode: "cats", ticks, items }] });
     }
-    if (k === "spread_mx") return fr(k, "Spread: Daily High and Low", "\u00b0F", [...bandsItems(HI.noon, HI.v, K.WARM, "High"), ...bandsItems(LO.noon, LO.v, K.COLD, "Low"), { t: "hline", y: 32, color: K.COLD, lw: 1.2, dash: "--" }], "upper left");
+    if (k === "spread_mx") return fr(k, "Spread: Daily High and Low", "\u00b0F", [...bandsItems(HI.noon, HI.v, K.WARM, "High"), ...bandsItems(LO.noon, LO.v, K.COLD, "Low"), { t: "hline", y: 32, label: "Freezing (32\u00b0F)", color: K.COLD, lw: 1.2, dash: "--" }], "upper left");
     const D_ = k === "grid_mx" ? HI : LO, hi = k === "grid_mx";
     return Object.assign(base, { fig: "grid", g: gridSpec(sec, name, run, `${hi ? "Daily High" : "Daily Low"} Temperature: Each Member + Mean`, "\u00b0F",
       `${hi ? "Highest of the 6 h max" : "Lowest of the 6 h min"} temps in each PT day`, D_.noon.map((t) => [dayLab(t), ""]), D_.v, (v) => v.toFixed(0), TL, TC) });
@@ -556,7 +556,7 @@ async function build(sec, prod, town) {
   if (k === "z500t850") { const z = get("gh", (v) => v / 10), t8 = get("t850"); if (!z || !t8) return noField("500 mb height / 850 mb temperature");
     return Object.assign(base, { fig: "z500", title: `${name} 500 mb Height and 850 mb Temperature`, sub: run + "  \u00b7  850 mb: 0\u00b0C dashed, -5\u00b0C dotted (lowland snow rule of thumb)",
       panels: [{ ylab: "500 mb height (dam)", legend: "upper right", items: expand(membersItems(z, K.MUTED)) },
-        { ylab: "850 mb temp (\u00b0C)", legend: "upper right", items: expand([...membersItems(t8, K.COLD), { t: "hline", y: 0, color: K.COLD, lw: 1.2, dash: "--" }, { t: "hline", y: -5, color: K.SNOW, lw: 1, dash: ":" }]) }] }); }
+        { ylab: "850 mb temp (\u00b0C)", legend: "upper right", items: expand([...membersItems(t8, K.COLD), { t: "hline", y: 0, label: "Freezing (0\u00b0C)", color: K.COLD, lw: 1.2, dash: "--" }, { t: "hline", y: -5, color: K.SNOW, lw: 1, dash: ":" }]) }] }); }
   return { empty: ["Not available yet", prod.note || "This chart is not drawn on the fast site yet."] };
 }
 const TL = [-20, 0, 10, 20, 32, 40, 50, 60, 70, 80, 90, 100];
@@ -591,11 +591,11 @@ async function multiRun(sec, prod, town, runs, base) {
   if (ensM) {
     const what = { mr_t2m: "2 m Temperature", mr_tmax: "Max Temperature (6 h window ending each step)", mr_tmin: "Min Temperature (6 h window ending each step)", mr_qpf6: "6-Hour Precipitation", mr_snow6: "6-Hour Snow (10:1)", mr_qpf24: "24-Hour Precipitation", mr_snow24: "24-Hour Snow (10:1)", mr_qpf: "Total Precipitation", mr_snow: "Total Snow (10:1)" }[k];
     return Object.assign(base, { fig: "frame", title: `${town.label} Multi-run: ${what}`, sub: `Ensemble mean of the last ${n} ${sec.id === "eps" ? "ENS" : sec.label} runs, newest bold`,
-      panels: [{ ylab: temp ? "\u00b0F" : "inches", legend: "upper left", ylim: temp ? null : floor0(0.25), items: [...items, ...(temp ? [{ t: "hline", y: 32, color: K.COLD, lw: 1.2, dash: "--" }] : [])] }] });
+      panels: [{ ylab: temp ? "\u00b0F" : "inches", legend: "upper left", ylim: temp ? null : floor0(0.25), items: [...items, ...(temp ? [{ t: "hline", y: 32, label: "Freezing (32\u00b0F)", color: K.COLD, lw: 1.2, dash: "--" }] : [])] }] });
   }
   const what = { mr_t2m: "2 m Temperature", mr_qpf6: "6-Hour Precipitation", mr_snow6: "6-Hour Snow", mr_qpf24: "24-Hour Precipitation", mr_qpf: "Total Precipitation", mr_snow: "Total Snow" }[k];
   return Object.assign(base, { fig: "frame", hourly: !!sec.hrs, title: `${town.label} ${sec.tag} Multi-run: ${what}`, sub: `Last ${n} ${sec.hrs ? "long " : ""}${sec.tag} runs, newest bold`,
-    panels: [{ ylab: temp ? "\u00b0F" : "in", legend: "upper left", ylim: temp ? null : bottom0, items: [...items, ...(temp ? [{ t: "hline", y: 32, color: K.COLD, lw: 1.3, dash: "--" }] : [])] }] });
+    panels: [{ ylab: temp ? "\u00b0F" : "in", legend: "upper left", ylim: temp ? null : bottom0, items: [...items, ...(temp ? [{ t: "hline", y: 32, label: "Freezing (32\u00b0F)", color: K.COLD, lw: 1.3, dash: "--" }] : [])] }] });
 }
 
 /* ---------------- page (old forecast.js renderMeteo) ---------------- */
