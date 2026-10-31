@@ -589,8 +589,10 @@ def step_job(args):
 # ------------------------------------------------------------------------------------------------ climatology
 CLIM_NPZ = {"z500": ("ncep_hgt500_mon_ltm_1991_2020.npz", "hgt"), "t850": ("ncep_t850_mon_ltm_1991_2020.npz", "t850"),
             "t2m": ("ncep_t2m_6h_ltm_1991_2020.npz", "t2m"), "pr": ("precip_mon_ltm_1991_2020.npz", "pr"),
-            "pw": ("ncep_pw_mon_ltm_1991_2020.npz", "pw")}
-CLIM_UNITS = {"z500": "m", "t850": "C", "t2m": "F", "pr": "mm/day", "pw": "in"}
+            "pw": ("ncep_pw_mon_ltm_1991_2020.npz", "pw"),
+            # 10-31 (Benjamin 12:35 PM "give me true mslp"): NCEP/NCAR R1 sea-level pressure monthly normals (PSL slp.mon.ltm.1991-2020.nc)
+            "slp": ("ncep_slp_mon_ltm_1991_2020.npz", "slp")}
+CLIM_UNITS = {"z500": "m", "t850": "C", "t2m": "F", "pr": "mm/day", "pw": "in", "slp": "mb"}
 CLIM_SOURCE = {"pr": "PRISM 1991-2020 normals (US, 4 km) + CPC Global Unified Gauge 1991-2020 (land, 0.5 deg) + GPCP v2.3 1991-2020 (ocean, 2.5 deg); "
                      "built by clim/src/build_precip_clim.py"}
 def _clim_src(fn):
@@ -896,8 +898,9 @@ def static(m, out, views_only=None, x2_only=False):
     JET_L = list(M.JET_LEVELS); W5_L = list(M.W500_LEVELS)
     CM.update(qpf1=CM["qpf"], qpf3=CM["qpf"], qpf6=CM["qpf"], qpf12=CM["qpf"], qpf24=CM["qpf"], qpf48=CM["qpf"], mslpqpf=CM["qpf"],
               snow1=CM["snow"], snow6=CM["snow"], gust6=CM["gust10"])
-    T8A_L = np.arange(-15, 16, 1)
+    T8A_L = np.arange(-15, 16, 1); SLPA_L = np.arange(-30, 31, 2)
     CM.update(t2ma=TM.t2a_cmap(), t850a=HS.cmap([HS._anom_color(27.0 * x) for x in (T8A_L[:-1] + T8A_L[1:]) / 2.0], HS.ANOM_UNDER, HS.ANOM_OVER))
+    CM.update(mslpa=HS.cmap([HS._anom_color(15.0 * x) for x in (SLPA_L[:-1] + SLPA_L[1:]) / 2.0], HS.ANOM_UNDER, HS.ANOM_OVER))   # +-30 mb onto the +-450 m anomaly ramp
     CM.update(w500=M.ramp(M.W500_LEVELS, M.W500_ANCH), w250=M.ramp(M.JET_LEVELS, M.JET_ANCH), z500anom=HS.anom_cmap())
     CM["w300"] = CM["w250"]   # 300 mb wind: jet colors
     CM.update(mucape=M.ramp(CAPE_L, CAPE_A), sbcape=M.ramp(CAPE_L, CAPE_A), ltng=M.ramp(LTNG_L, LTNG_A), ltgp=HS.cmap(LTGP_C, LTGP_C[0], LTGP_C[-1]))
@@ -1066,6 +1069,14 @@ def static(m, out, views_only=None, x2_only=False):
                       ticks=list(range(-15, 16, 3)), tickfmt=True, **table(T8A_L, CM["t850a"], "both"),
                       extra="vs 1991-2020 NCEP/NCAR monthly normal  \u00b7  {lo} to {hi}\u00b0C in view", pct=[0.5, 99.5], towns="none",
                       only=("hrrr", "rrfs", "gfs", "ifs", "aifs")),
+        # 10-31 (Benjamin 12:35 PM "give me true mslp"): MSLP anomaly vs the 1991-2020 NCEP/NCAR monthly normal, isobars on top.
+        # Preview-only (manifest products_x) until the go. Over high terrain both pressures are reduced to sea level differently
+        # (ECMWF vs NCEP), so plateau anomalies carry a few mb of method bias.
+        "mslpa": dict(title="MSLP Anomaly", fields=["mslp"], fill="anom", anom="mslp", clim="slp", key="Anomaly (mb)", ticks=list(range(-30, 31, 6)),
+                      tickfmt=True, **table(SLPA_L, CM["mslpa"], "both"),
+                      isobars=dict(field="mslp", every=4, sigma=2.5 if m == "ifs9" else 1.0, color=HS.ISOBAR_COLOR, lw=HS.ISOBAR_LW, halo=HS.ISOBAR_HALO), hl=True,
+                      extra="vs 1991-2020 NCEP/NCAR monthly normal  \u00b7  isobars every 4 mb  \u00b7  {lo} to {hi} mb in view", pct=[0.5, 99.5],
+                      towns="names", only=("gfs", "ifs", "aifs"), xprod=True),
         # 10-30 (Benjamin 1:05 PM): precipitation anomaly vs 1991-2020 normals for the same days (see CLIM_SOURCE["pr"])
         "qpfa": dict(title="Precipitation Anomaly", fields=["apcp"], fill="panom", anom="pr", clim="pr", key="Departure from normal (in)",
                      ticks=[-12, -8, -4, -2, -1, -0.25, 0.25, 1, 2, 4, 8, 12], tickfmt=True, **table(PA_L, CM["qpfa"], "both"),

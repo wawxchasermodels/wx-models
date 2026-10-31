@@ -114,6 +114,12 @@ def product(D, R, prod, f):
         return dict(title="850 mb Temperature Anomaly", value=a, show=a, unit="°C", key="850 mb temperature anomaly (°C) vs 1991-2020",
                     levels=lv, colors=cols, under=un, over=ov, ticks=[-15, -9, -3, 3, 9, 15],
                     cont=blur(t, 1.0), cint=5, clab="{:.0f}°", cstyle="dashed", zero=True, valid=valid)
+    if prod == "mslpa":   # true MSLP anomaly (10-31, Benjamin "give me true mslp"): mslp - 1991-2020 NCEP/NCAR monthly normal (manifest clim "slp")
+        m = D.field(R, "mslp", f); a = m - D.clim_at("slp", valid)
+        lv = list(np.arange(-30, 30.1, 2)); cols, un, ov = diverging(lv, 1.0)
+        return dict(title="MSLP Anomaly", value=a, show=a, unit="mb", key="Sea-level pressure anomaly (mb) vs 1991-2020  ·  isobars every 4 mb",
+                    levels=lv, colors=cols, under=un, over=ov, ticks=list(range(-30, 31, 10)),
+                    cont=blur(m, 1.0), cint=4, clab="{:.0f}", cstyle="solid", hl=blur(m, 2.0), valid=valid)
     if prod == "mslpqpf":
         P = D.man["models"]["ifs"]["products"]["mslpqpf"]
         a = D.field(R, "apcp", f); b = D.field(R, "apcp", f - 6) if f > 6 else 0 * a; q = np.maximum(0, a - b)   # 6 h precip (in)
@@ -313,7 +319,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", default=os.environ.get("WX_DATA_BASE", "http://localhost:8779/d/"))
     ap.add_argument("--run", default=""); ap.add_argument("--out", required=True)
-    ap.add_argument("--prods", default="z500anom,t2ma,t850a,mslpqpf"); ap.add_argument("--views", default="na,pnw")
+    ap.add_argument("--prods", default="z500anom,mslpa,t2ma,t850a,mslpqpf"); ap.add_argument("--views", default="na,pnw")
     ap.add_argument("--hours", default="72,144"); ap.add_argument("--aspects", default="h,v"); ap.add_argument("--logo", default="")
     ap.add_argument("--skip-existing", action="store_true")
     a = ap.parse_args(); D = Data(a.base); F = fonts()
