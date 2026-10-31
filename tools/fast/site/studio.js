@@ -81,8 +81,9 @@ function runText() { const [m, c] = last.cur.run.split("/"), site = (S.man.model
 function cornerLogo(k, c, badgeBot, headBot) {
   const lg = getLogo(); if (!lg) return; const f = F[k], s = Math.round(f.W * (k === "v" ? 0.10 : 0.08)), gap = k === "v" ? 18 : 14;
   const x = BR.cpos === "tl" ? f.pad : f.W - f.pad - s, y = Math.round((BR.cpos === "tl" ? headBot : badgeBot) + gap);
-  c.save(); c.globalAlpha = 0.88; c.shadowColor = "rgba(0,0,0,0.55)"; c.shadowBlur = Math.round(s * 0.09); c.shadowOffsetY = Math.round(s * 0.02);
-  c.drawImage(lg, x, y, s, s); c.restore();
+  // two shadow passes = a soft dark halo hugging the logo's edge (no panel), so the white ring still reads on white land / light precip
+  c.save(); c.globalAlpha = 0.92; c.shadowColor = "rgba(0,0,0,0.7)"; c.shadowBlur = Math.round(s * 0.08); c.shadowOffsetY = Math.round(s * 0.015);
+  c.drawImage(lg, x, y, s, s); c.shadowBlur = Math.round(s * 0.03); c.drawImage(lg, x, y, s, s); c.restore();
 }
 function lowerThird(k, c) {
   const f = F[k], step = last.step, lg = getLogo(), h = k === "v" ? 150 : 118, w = k === "v" ? f.W - 2 * f.pad : 860, x = f.pad, y = f.H - f.bot - h - (k === "v" ? 40 : 26);
@@ -126,7 +127,7 @@ async function render(k, frO) {   // frO: camera override (MP4 storm-track pan)
   c.font = `600 ${f.run}px Montserrat`; c.fillStyle = "#b9c0cc"; c.fillText(`${cur.run.split("/")[1].slice(8)}Z run`, x + pw + 14, y + f.run * 1.08);
   y += f.run * 1.55 + f.title * 1.02;
   c.font = `800 ${f.title}px Montserrat`; c.fillStyle = "#fff"; c.shadowColor = "rgba(0,0,0,0.6)"; c.shadowBlur = 8;
-  const words = P.title.split(" "), maxW = f.W - 2 * f.pad - (k === "h" ? 260 : 0); let line = "", lines = [];
+  const words = P.title.split(" "), maxW = f.W - 2 * f.pad - (k === "h" ? 260 : BR.corner && BR.cpos === "tr" && LOGOS[BR.logo] ? Math.round(f.W * 0.10) + 24 : 0);   // 9:16: keep the title clear of a top-right logo let line = "", lines = [];
   for (const w_ of words) { const t = line ? line + " " + w_ : w_; if (c.measureText(t).width > maxW && line) { lines.push(line); line = w_; } else line = t; } lines.push(line);
   lines.forEach((t, i) => c.fillText(t, x, y + i * f.title * 1.08)); y += (lines.length - 1) * f.title * 1.08 + f.valid * 1.4;
   c.font = `700 ${f.valid}px Montserrat`; c.fillStyle = "#ffc24d"; c.fillText((step.valid_line || "").replace(/^Valid /, ""), x, y);
