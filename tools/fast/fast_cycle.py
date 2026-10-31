@@ -27,8 +27,8 @@ def target_cycle(m):
         if c.hour in FE.MODELS[m]["cycles"] and avail(m, c, FE.MODELS[m]["steps"][0]): return c
 
 MORE = set(); WORK = {}
-# first chunk per model (steps): small so the first hours go live fast
-FIRST_CHUNK = {"hrrr": 3, "rrfs": 3, "nbm": 6, "gfs": 4, "ifs": 4, "ifs9": 4, "aifs": 4, "eps": 2, "aens": 2}
+LASTMAN = {}
+MAN_EVERY = 300   # s between manifest rewrites while a run is coming in (run.json is updated every chunk)
 # --watch: minutes after the cycle time when the first step is usually out (measured 10-31 from R2 upload times and the
 # NOAA / ECMWF open-data files); watching starts WATCH_EARLY min before that, and stops WATCH_SPAN h after it or when complete
 DUE_MIN = {"hrrr": 45, "rrfs": 60, "nbm": 55, "gfs": 200, "ifs": 330, "ifs9": 420, "aifs": 320, "eps": 380, "aens": 350}
@@ -81,18 +81,21 @@ def main():
         except Exception: r0 = None
         print(m, cyc, "has", len((r0 or {}).get("steps", [])), "steps in R2", flush=True)
         want = FE.steps_for(m, c.hour)
-        # encode in chunks so the site gets new hours every few minutes (progressive publishing)
-        # 10-31 (Benjamin: "make it so the first forecast hours show for a new run in every model"): a small first chunk so a new
-        # run is on the site minutes after its first hours are out, then bigger chunks (ensembles: 6, each step is 50 members)
-        chunk = 12 if m == "hrrr" else 6 if m in ("eps", "aens") else 24
-        if not (r0 or {}).get("steps"): chunk = FIRST_CHUNK.get(m, 3)
+        # 10-31 frame at a time (Benjamin 11:48 AM "roll hour data one frame at a time the moment the data is available"): a chunk is
+        # only as many hours as there are workers, all encoded in parallel, so each chunk takes about one hour's encode time; when
+        # the job is caught up with the source only the hours that are out are in the chunk (usually one), and each goes live
+        # (step files + run.json) as soon as it is encoded. The manifest (run list) is rewritten for a new run, at completion and at
+        # most every MAN_EVERY s in between (the viewer follows an open run through its run.json), to keep R2 writes low.
+        W = min(a.workers, 2) if m == "ifs9" else a.workers
+        chunk = W
         while True:
             if time.time() >= t_end - 60: MORE.add(m); break   # budget ran out with hours left -> ask for a re-dispatch
             have = {x["f"] for x in (json.load(open(f"{rd}/run.json"))["steps"] if os.path.exists(f"{rd}/run.json") else [])}
             nxt = [s for s in want if s not in have][:chunk]
             if not nxt or not avail(m, c, nxt[0]): break
             nxt = [s for s in nxt if avail(m, c, s)] if not avail(m, c, nxt[-1]) else nxt
-            run, new = FE.steps(m, cyc, nxt, D, min(a.workers, 2) if m == "ifs9" else a.workers)   # 9 km: ~3 GB per worker (global 0.1 deg fields)
+            first = not (r0 or {}).get("steps")
+            run, new = FE.steps(m, cyc, nxt, D, W)   # 9 km: ~3 GB per worker (global 0.1 deg fields)
             # steps() kept only the unbroken run of the chunk; rebuild the full list with the old steps
             full = json.load(open(f"{rd}/run.json")); old = {x["f"]: x for x in ((r0 or {}).get("steps", []))}
             for x in full["steps"]: old[x["f"]] = x
@@ -110,7 +113,8 @@ def main():
                 from concurrent.futures import ThreadPoolExecutor
                 with ThreadPoolExecutor(16) as ex: list(ex.map(lambda k: s3.upload_file(f"{D}/{k}", BUCKET, k, ExtraArgs={"ContentType": "application/json" if k.endswith(".json") else "image/png"}), files))
                 s3.upload_file(f"{rd}/run.json", BUCKET, key, ExtraArgs={"ContentType": "application/json"})
-                publish_manifest(s3, D, m, prog=(cyc, ordered[-1]["f"] if ordered else None, want[-1], full["complete"]))
+                if first or full["complete"] or time.time() - LASTMAN.get(m, 0) >= MAN_EVERY:
+                    publish_manifest(s3, D, m, prog=(cyc, ordered[-1]["f"] if ordered else None, want[-1], full["complete"])); LASTMAN[m] = time.time()
             print(f"{m} {cyc}: uploaded {len(files)} files, {len(ordered)}/{len(want)} steps live", flush=True); WORK[m] = WORK.get(m, 0) + len(new)
             for f in files: os.remove(f"{D}/{f}")   # keep the runner disk small
             if full["complete"]:

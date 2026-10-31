@@ -162,8 +162,18 @@ async function boot() {
   // "Runs" menu (Benjamin 10-29 7:10 PM): every available run, grouped by model, newest first; picking one keeps the valid time
   const runLabel = r => { const [m, c] = r.split("/"), p = ((S.man.progress || {})[m] || {})[c];
     return `${S.man.models[m].site} ${c.slice(8)}Z ${c.slice(4, 6)}-${c.slice(6, 8)}${p ? ` (loading, to F+${p[0]})` : ""}`; };
-  $("run").innerHTML = order.map(m => `<optgroup label="${S.man.models[m].site}">` +
-    all.filter(r => r.startsWith(m + "/")).map(r => `<option value="${r}"${r === S.run ? " selected" : ""}>${runLabel(r)}</option>`).join("") + "</optgroup>").join("");
+  const runMenu = (ord, al) => { $("run").innerHTML = ord.map(m => `<optgroup label="${S.man.models[m].site}">` +
+    al.filter(r => r.startsWith(m + "/")).map(r => `<option value="${r}"${r === S.run ? " selected" : ""}>${runLabel(r)}</option>`).join("") + "</optgroup>").join(""); };
+  runMenu(order, all);
+  // 10-31 frame at a time: every 2 min re-read the manifest so a run that just started shows up in the Runs menu without a reload
+  setInterval(async () => {
+    if (document.hidden) return; let M2; try { M2 = await (await fetch(DATA + "manifest.json", { cache: "no-cache" })).json(); } catch (e) { return; }
+    mergeRunsX(M2); if (JSON.stringify([M2.runs, M2.progress]) === JSON.stringify([S.man.runs, S.man.progress])) return;
+    S.man.runs = M2.runs; S.man.progress = M2.progress; S.man.mgruns = M2.mgruns;
+    const o2 = order.filter(m => (S.man.runs[m] || []).length), a2 = []; for (const m of o2) for (const c of [...S.man.runs[m]].reverse()) a2.push(`${m}/${c}`);
+    if (!a2.includes(S.run)) a2.push(S.run);
+    runMenu(o2, a2); loadNote();
+  }, 120e3);
   setLists();
   const f0 = Q.get("f"), steps = S.runs[S.run].steps; S.i = f0 ? Math.max(0, steps.findIndex(s => s.f == +f0)) : 0;
   const vq = Date.parse(Q.get("valid") || ""); if (!f0 && vq) { let b = 0; steps.forEach((x, k) => { if (Math.abs(Date.parse(x.valid) - vq) < Math.abs(Date.parse(steps[b].valid) - vq)) b = k; }); S.i = b; }   // old-site links
@@ -193,7 +203,7 @@ async function boot() {
   $("play").onclick = () => { if (S.timer) { clearInterval(S.timer); S.timer = null; $("play").textContent = "Play"; }
                               else { S.timer = setInterval(() => go(1, true), 250); $("play").textContent = "Stop"; } };
   addEventListener("keydown", e => { if (e.key === "Escape") mgClose(); if (MG.open) return; if (e.key === "ArrowRight") go(1); if (e.key === "ArrowLeft") go(-1); });
-  await draw(); loadNote(); setInterval(refreshPartial, 90e3);
+  await draw(); loadNote(); setInterval(refreshPartial, 60e3);
   // ?mg= / ?obs= open the panel once (meteograms page "Pass Forecaster" tab links to ./?mg=pass) and are then dropped from the
   // address: they used to stay in it after Close, so every reload / iOS tab restore / shared link reopened Pass Forecaster
   // ("the website glitches into pass mode every so often", Benjamin 10-31 2:01 AM).
