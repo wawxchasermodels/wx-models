@@ -296,7 +296,7 @@ async function makeMp4() {
   const ramp = pan || Math.abs(z1 - z0) > 1e-6 || $s("mpz0").value !== "f", c0 = crop(k, fr0);
   const zoomAt = (t) => z0 * Math.pow(z1 / z0, ease(t));
   const run = S.run, keep = S.i, t0 = performance.now(); let enc = null;
-  REC.on = true; REC.cancel = false; PLAY.on = false; $s("mpout").hidden = true; $s("mpgo").disabled = true; $s("mpstop").hidden = false; document.body.classList.add("rec");
+  REC.on = true; REC.cancel = false; PLAY.on = false; window.__vjNoJump = true;   // a video never repeats hours: missing hours keep the previous map $s("mpout").hidden = true; $s("mpgo").disabled = true; $s("mpstop").hidden = false; document.body.classList.add("rec");
   try {
     enc = await makeEncoder(f.cv, f.W, f.H); const totN = Math.round(T[idx.length] * FPS) + holdN, pg = $s("mpprog"); pg.hidden = false; pg.value = 0;
     S.i = idx[0]; $("step").value = idx[0]; await draw(); await sleep(500); await draw();   // let this view's sharp (x2) layers land first
@@ -321,7 +321,7 @@ async function makeMp4() {
     $s("mpout").hidden = false; window.__mp4 = { name: nm, bytes: blob.size, frames: n, seconds: n / FPS, how, ms: Math.round(performance.now() - t0) };
     mpSt(`Done: ${(blob.size / 1e6).toFixed(1)} MB, ${(n / FPS).toFixed(1)} s, made in ${((performance.now() - t0) / 1000).toFixed(0)} s`);
   } catch (e) { if (enc) enc.abort(); mpSt(e.message === "stopped" ? "Stopped." : "Could not make the video: " + (e.message || e)); window.__mp4 = { error: String(e.message || e) }; }
-  finally { REC.on = false; $s("mpgo").disabled = false; $s("mpstop").hidden = true; $s("mpprog").hidden = true; document.body.classList.remove("rec"); if (S.run === run) { S.i = keep; $("step").value = keep; } draw(); }
+  finally { REC.on = false; window.__vjNoJump = false; $s("mpgo").disabled = false; $s("mpstop").hidden = true; $s("mpprog").hidden = true; document.body.classList.remove("rec"); if (S.run === run) { S.i = keep; $("step").value = keep; } draw(); }
 }
 if (!CLEAN && $s("mp4p")) {
   $s("mp4p").addEventListener("click", (e) => { const b = e.target.closest("button[data-m]"); if (!b) return; const m_ = b.dataset.m;
