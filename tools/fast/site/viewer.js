@@ -991,17 +991,39 @@ function mgChart(cv, T, box) {
   c.textAlign = "left";
 }
 function niceStep(x) { const p = Math.pow(10, Math.floor(Math.log10(x || 1))), r = x / p; return (r <= 1 ? 1 : r <= 2 ? 2 : r <= 2.5 ? 2.5 : r <= 5 ? 5 : 10) * p; }
-function passTable(body, D) {
+// Pass summit elevations, ft (WSDOT MountainPass feed, wsdot.com/Travel/Real-time/Service/api/MountainPass/Details/<id>, read
+// 10-30-26 8:15 PM; same as temp_maps.WA_PASSES, checked 10-24 against USGS 3DEP). BC: DriveBC summit heights (fast_encode).
+const PASS_ELEV = { Snoqualmie: 3022, Stevens: 4061, White: 4500, Chinook: 5430, Blewett: 4102, Sherman: 5575, Satus: 3107, Wauconda: 4310,
+                    Disautel: 3252, Coquihalla: 4081, Allison: 4403, Duffey: 4199 };
+// 10-30 8:10 PM (Benjamin: "I don't see it on the phone. Show the lowest freezing level in feet. Next to every pass, show the
+// elevation of the pass."): elevation under each pass name; lowest freezing level is the 2nd column (it was the last one, off
+// the right edge of a phone); blue when it drops below the summit. Models without a freezing level (ECMWF IFS / AIFS / ensembles
+// / NBM) borrow it from the newest HRRR, RRFS or GFS run over the same hours, and the header says which.
+async function passTable(body, D) {
   const passes = D.points.filter(p => p.k === "pass"); if (!passes.length) { body.innerHTML = `<div class="mg-msg">No passes in this model's views.</div>`; return; }
   const T0 = mgTown(D, passes[0].n), fmax = T0.f[T0.f.length - 1], wins = [[0, 24], [24, 48], [48, 72]].filter(w => fmax > w[0]).map(([a, b]) => [a, Math.min(b, fmax)]);
   const f1 = x => x == null ? "\u2013" : x.toFixed(1), f2 = x => x == null ? "\u2013" : x.toFixed(2), r0 = x => x == null ? "\u2013" : Math.round(x);
   const hdr = wins.map(([a, b]) => `${fmtPT(new Date(Date.parse(T0.t[0]) + (a - T0.f[0]) * 36e5).toISOString(), { weekday: "short", hour: "numeric" })}\u2013${fmtPT(new Date(Date.parse(T0.t[0]) + (b - T0.f[0]) * 36e5).toISOString(), { weekday: "short", hour: "numeric" })}`);
-  const span = Math.min(fmax, 48);
-  let h = `<div class="mg-note">Run start ${fmtPT(new Date(Date.parse(T0.t[0]) - T0.f[0] * 36e5).toISOString(), { weekday: "short", month: "numeric", day: "numeric", hour: "numeric" })} PT. Temperatures corrected to summit height. ${T0.snowEst ? "Snow estimated 10:1 where 2 m temp \u2264 33\u00b0F. " : ""}Tap a pass for its meteogram.</div>
-  <div class="mg-scroll"><table class="pf"><thead><tr><th>Pass</th>${wins.map((w, k) => `<th>Snow \u2033<br><small>${hdr[k]}</small></th>`).join("")}${T0.kuch ? wins.map((w, k) => `<th>Kuchera \u2033<br><small>${hdr[k]}</small></th>`).join("") : ""}<th>Precip \u2033<br><small>first ${span} h</small></th><th>Low \u00b0F<br><small>first ${span} h</small></th><th>High \u00b0F<br><small>first ${span} h</small></th><th>Max gust<br><small>mph, ${span} h</small></th>${T0.frz ? `<th>Freezing lvl<br><small>lowest ft</small></th>` : ""}</tr></thead><tbody>`;
-  for (const p of passes) { const T = mgTown(D, p.n), sn = wins.map(([a, b]) => snowWin(T, a, b));
+  const span = Math.min(fmax, 48), runAt = MG.run;
+  // lowest freezing level over the first `span` hours: this run, or the newest HRRR / RRFS / GFS run over the same valid times
+  let frzOf = p => ext(mgTown(D, p.n), mgTown(D, p.n).frz, -1, span, Math.min), frzSrc = "";
+  if (!T0.frz) {
+    frzOf = () => null;
+    const vt0 = Date.parse(T0.t[0]) - 1, vt1 = Date.parse(T0.t[0]) + (span - T0.f[0]) * 36e5 + 1;
+    for (const m of ["hrrr", "rrfs", "gfs"]) {
+      const c = (S.man.runs[m] || []).slice(-1)[0]; if (!c) continue;
+      const D2 = await mgSeries(`${m}/${c}`).catch(() => null); if (MG.run !== runAt || MG.open !== "pass") return;
+      if (!D2 || !mgTown(D2, passes[0].n) || !mgTown(D2, passes[0].n).frz) continue;
+      const lo = p => { const T = mgTown(D2, p.n); if (!T || !T.frz) return null; const v = T.frz.filter((x, k) => x != null && Date.parse(T.t[k]) >= vt0 && Date.parse(T.t[k]) <= vt1); return v.length ? Math.min(...v) : null; };
+      if (passes.some(p => lo(p) != null)) { frzOf = lo; frzSrc = `${S.man.models[m].site} ${c.slice(8)}Z`; break; }
+    }
+  }
+  let h = `<div class="mg-note">Run start ${fmtPT(new Date(Date.parse(T0.t[0]) - T0.f[0] * 36e5).toISOString(), { weekday: "short", month: "numeric", day: "numeric", hour: "numeric" })} PT. Elevation = highway summit (WSDOT). Temperatures corrected to summit height. Freezing level shaded blue when it is below the pass. ${T0.snowEst ? "Snow estimated 10:1 where 2 m temp \u2264 33\u00b0F. " : ""}Tap a pass for its meteogram.</div>
+  <div class="mg-scroll"><table class="pf"><thead><tr><th>Pass<br><small>summit ft</small></th><th>Freezing lvl<br><small>lowest ft, ${span} h${frzSrc ? `<br>from ${frzSrc}` : ""}</small></th>${wins.map((w, k) => `<th>Snow \u2033<br><small>${hdr[k]}</small></th>`).join("")}${T0.kuch ? wins.map((w, k) => `<th>Kuchera \u2033<br><small>${hdr[k]}</small></th>`).join("") : ""}<th>Low \u00b0F<br><small>first ${span} h</small></th><th>High \u00b0F<br><small>first ${span} h</small></th><th>Precip \u2033<br><small>first ${span} h</small></th><th>Max gust<br><small>mph, ${span} h</small></th></tr></thead><tbody>`;
+  for (const p of passes) { const T = mgTown(D, p.n), sn = wins.map(([a, b]) => snowWin(T, a, b)), el = PASS_ELEV[p.n], fz = frzOf(p);
     const col = x => x == null ? "" : x >= 12 ? ' class="s3"' : x >= 6 ? ' class="s2"' : x >= 1 ? ' class="s1"' : "";
-    h += `<tr data-n="${p.n}"><td>${p.n}</td>${sn.map(x => `<td${col(x)}>${f1(x)}</td>`).join("")}${T0.kuch ? wins.map(([a, b]) => { const x = sumWin(T, T.kuch, a, b); return `<td${col(x)}>${f1(x)}</td>`; }).join("") : ""}<td>${f2(pcpWin(T, -1, span))}</td><td>${r0(ext(T, T.t2m, -1, span, Math.min))}</td><td>${r0(ext(T, T.t2m, -1, span, Math.max))}</td><td>${r0(ext(T, T.gust, -1, span, Math.max))}</td>${T0.frz ? `<td>${r0(ext(T, T.frz, -1, span, Math.min))}</td>` : ""}</tr>`; }
+    const fzc = fz != null && el && fz <= el ? ' class="fzb"' : "";
+    h += `<tr data-n="${p.n}"><td>${p.n}<br><small class="el">${el ? el.toLocaleString("en-US") + " ft" : ""}</small></td><td${fzc}>${ft(fz)}</td>${sn.map(x => `<td${col(x)}>${f1(x)}</td>`).join("")}${T0.kuch ? wins.map(([a, b]) => { const x = sumWin(T, T.kuch, a, b); return `<td${col(x)}>${f1(x)}</td>`; }).join("") : ""}<td>${r0(ext(T, T.t2m, -1, span, Math.min))}</td><td>${r0(ext(T, T.t2m, -1, span, Math.max))}</td><td>${f2(pcpWin(T, -1, span))}</td><td>${r0(ext(T, T.gust, -1, span, Math.max))}</td></tr>`; }
   body.innerHTML = h + "</tbody></table></div>";
   body.querySelectorAll("tr[data-n]").forEach(tr => tr.onclick = () => { MG.town = tr.dataset.n; const r = MG.run; mgOpen("town"); MG.run = r; $("mgrun").value = r; mgDraw(); });
 }
@@ -1018,6 +1040,7 @@ function showErr(e) { const p = document.createElement("pre"); p.id = "err"; p.s
 addEventListener("error", e => showErr(e.error || e.message)); addEventListener("unhandledrejection", e => showErr(e.reason));
 boot();
 
+  const ft = x => x == null || !isFinite(x) ? "\u2013" : (Math.round(x / 100) * 100).toLocaleString("en-US");
 // ---- Observations (old site's live obs module, unchanged: browser-drawn from NWS/IEM + Environment Canada, loaded on first open)
 let obsLoad = null;
 function obsOpen() {
