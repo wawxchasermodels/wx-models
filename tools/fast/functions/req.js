@@ -15,7 +15,7 @@ async function accessUser(request) {
   const jwk = certs.find((k) => k.kid === head.kid); if (!jwk) return null;
   const key = await crypto.subtle.importKey("jwk", jwk, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]);
   const ok = await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, b64u(s), new TextEncoder().encode(`${h}.${p}`));
-  return ok ? (body.email || body.common_name || "service-token") : null;
+  return ok ? (body.email || "service-token") : null;   // service tokens: never store their client id
 }
 const J = (o, st = 200) => new Response(JSON.stringify(o), { status: st, headers: { "content-type": "application/json", "cache-control": "no-store" } });
 export async function onRequest({ request, env }) {

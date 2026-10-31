@@ -13,9 +13,9 @@ const css = `#rqb{position:fixed;left:12px;bottom:12px;z-index:30;background:#26
 #rqp button.pri{background:#2f8cff;border-color:#2f8cff;font-weight:700}#rqst{margin-left:8px;color:#9fe3b0;font-weight:600}#rqst.err{color:#ff9b9b}
 #rqctx{color:#8e939c;font-size:11.5px;margin:4px 0}#rql{margin:8px 0 0;padding:0;list-style:none;max-height:180px;overflow:auto;border-top:1px solid #4a4f5a}
 #rql li{padding:5px 0;border-bottom:1px solid #2e323a;font-size:12px}#rql small{color:#8e939c}
-body.rec #rqb,body.phone.cslim #rqb{display:none}@media (max-width:820px){#rqb{bottom:auto;top:auto;left:auto;right:12px;bottom:12px}#rqp{left:12px;right:12px;bottom:54px}}`;
+body.rec #rqb,body.phone.cslim #rqb{display:none}@media (max-width:820px){#rqb{left:auto;right:10px;bottom:10px;padding:6px 10px;font-size:15px;opacity:.85}#rqb .rqw{display:none}#rqp{left:12px;right:12px;bottom:54px}}`;
 const st = document.createElement("style"); st.textContent = css; document.head.appendChild(st);
-const b = document.createElement("button"); b.id = "rqb"; b.type = "button"; b.textContent = "\u270e Request a change"; b.title = "Ask for a change to this website (queued for your agent)";
+const b = document.createElement("button"); b.id = "rqb"; b.type = "button"; b.innerHTML = "\u270e<span class=\"rqw\"> Request a change</span>"; b.setAttribute("aria-label", "Request a change"); b.title = "Ask for a change to this website (queued for your agent)";
 const p = document.createElement("div"); p.id = "rqp"; p.hidden = true;
 p.innerHTML = `<div class="rh"><b>Request a change</b><button type="button" id="rqx" aria-label="Close">&times;</button></div>
 <textarea id="rqt" maxlength="2000" placeholder="What should change on this page? e.g. &quot;make the L markers bigger on the 9:16 frame&quot;"></textarea>
