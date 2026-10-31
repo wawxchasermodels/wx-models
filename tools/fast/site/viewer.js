@@ -646,7 +646,10 @@ function saveName() {
 function closeSaveView() { const o = $("saveview"); if (o) { URL.revokeObjectURL(o.dataset.url || ""); o.remove(); } }
 function saveImage() {
   const cv = $("map"); if (!cv.width) return;
-  const name = saveName();
+  saveCanvas(cv, saveName(), $("save"));
+}
+// shared by the map, the meteogram and the Pass Forecaster (Benjamin 10-31 8:49 AM "push to save passes meteograms graphics")
+function saveCanvas(cv, name, btn) {
   // synchronous encode keeps the tap's user activation for navigator.share (iOS Safari is strict about it)
   const durl = cv.toDataURL("image/png"), bin = atob(durl.split(",")[1]), u8 = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
@@ -659,7 +662,56 @@ function saveImage() {
   if (touch) { showSaveView(blob, name); return; }
   const a = document.createElement("a"), url = URL.createObjectURL(blob); a.href = url; a.download = name;
   document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000);
-  $("save").textContent = "Saved"; setTimeout(() => $("save").textContent = "Save image", 1500);
+  if (btn) { btn.textContent = "Saved"; setTimeout(() => btn.textContent = "Save image", 1500); }
+}
+// ---- meteogram / Pass Forecaster "Save image": the graphic plus a header with place, model and run time, as a PNG
+const fileClean = t => String(t).replace(/[^A-Za-z0-9.+-]+/g, "-").replace(/^-|-$/g, "");
+function mgRunText(run) {
+  const [m, c] = run.split("/"), t = new Date(Date.UTC(+c.slice(0, 4), +c.slice(4, 6) - 1, +c.slice(6, 8), +c.slice(8)));
+  return `${S.man.models[m].site} ${c.slice(8)}Z run ${fmtPT(t.toISOString(), { month: "numeric", day: "numeric", year: "2-digit" }).replace(/\//g, "-")} (${fmtPT(t.toISOString(), { hour: "numeric" })} PT)`;
+}
+function mgHeader(c, W, title, sub) {
+  c.fillStyle = "#15171c"; c.fillRect(0, 0, W, 64); c.textBaseline = "top";
+  c.font = "800 20px Montserrat"; c.fillStyle = "#f4f2ee"; c.fillText(title, 16, 10);
+  c.font = "600 13px Montserrat"; c.fillStyle = "#ffd27a"; c.fillText(sub, 16, 38);
+  c.font = "600 12px Montserrat"; c.fillStyle = "#a7abb3"; c.textAlign = "right"; c.fillText("WX Models", W - 16, 12); c.textAlign = "left";
+  c.fillStyle = "#2c3039"; c.fillRect(0, 63, W, 1);
+}
+function passCanvas(body, title, sub) {   // the Pass Forecaster table (cells, colors, notes) redrawn on a canvas
+  const tb = body.querySelector("table.pf"); if (!tb) return null;
+  const note = [...body.querySelectorAll(".mg-note")].map(e => e.innerText.trim()).filter(Boolean).join("  ").replace(/\s*Tap a pass for its meteogram\.?/i, "");
+  const rows = [...tb.rows].map(r => [...r.cells].map(td => { const cs = getComputedStyle(td); return { t: td.innerText.trim().split("\n"), bg: cs.backgroundColor, fg: cs.color, th: td.tagName === "TH" }; }));
+  const m = document.createElement("canvas").getContext("2d"), F = (th, i) => `${th || i === 0 ? 700 : 500} 13px Montserrat`, SM = "500 11px Montserrat";
+  const nc = Math.max(...rows.map(r => r.length)), cw = Array(nc).fill(60);
+  rows.forEach(r => r.forEach((cell, j) => cell.t.forEach((ln, k) => { m.font = k ? SM : F(cell.th, j); cw[j] = Math.max(cw[j], m.measureText(ln).width + 18); })));
+  const rh = r => 10 + Math.max(...r.map(cell => cell.t.length)) * 16, W = Math.max(720, Math.ceil(cw.reduce((a, b) => a + b, 0)) + 32);
+  m.font = "500 12px Montserrat"; const words = note.split(/\s+/), lines = []; let ln = "";
+  for (const w of words) { const t = ln ? ln + " " + w : w; if (m.measureText(t).width > W - 32 && ln) { lines.push(ln); ln = w; } else ln = t; } if (ln) lines.push(ln);
+  const H = 64 + 12 + lines.length * 17 + 10 + rows.reduce((a, r) => a + rh(r), 0) + 16, dpr = 2;
+  const cv = document.createElement("canvas"); cv.width = W * dpr; cv.height = H * dpr; const c = cv.getContext("2d"); c.scale(dpr, dpr);
+  c.fillStyle = "#15171c"; c.fillRect(0, 0, W, H); mgHeader(c, W, title, sub);
+  let y = 76; c.font = "500 12px Montserrat"; c.fillStyle = "#a7abb3"; c.textBaseline = "top"; lines.forEach(l => { c.fillText(l, 16, y); y += 17; }); y += 10;
+  for (const r of rows) { const h = rh(r); let x = 16;
+    r.forEach((cell, j) => { const bg = cell.bg && !/rgba\(0, 0, 0, 0\)|transparent/.test(cell.bg) ? cell.bg : (cell.th ? "#1d2027" : "#15171c");
+      c.fillStyle = bg; c.fillRect(x, y, cw[j], h); c.strokeStyle = "#2c3039"; c.strokeRect(x + 0.5, y + 0.5, cw[j], h);
+      cell.t.forEach((t, k) => { c.font = k ? SM : F(cell.th, j); c.fillStyle = k ? "#a7abb3" : (cell.fg || "#f4f2ee"); c.fillText(t, x + 9, y + 6 + k * 16); });
+      x += cw[j]; });
+    y += h; }
+  return cv;
+}
+function mgSave() {
+  const btn = $("mgsave"), sub = mgRunText(MG.run), [m, c] = MG.run.split("/");
+  if (MG.open === "pass") {
+    const cv = passCanvas($("mgbody"), "Pass Forecaster \u2013 Washington mountain passes", sub); if (!cv) return;
+    return saveCanvas(cv, `Pass-Forecaster_${fileClean(S.man.models[m].site)}_${c}Z.png`, btn);
+  }
+  const ch = $("mgc"); if (!ch || !ch.width) return;
+  const dpr = ch.width / ch.clientWidth || 1, W = ch.clientWidth, H = ch.clientHeight, cv = document.createElement("canvas");
+  cv.width = W * dpr; cv.height = (H + 64) * dpr; const g = cv.getContext("2d"); g.scale(dpr, dpr);
+  const isPass = /pass/i.test($("mgtown") && $("mgtown").selectedOptions[0] && $("mgtown").selectedOptions[0].parentNode.label || "");
+  const place = isPass && !/pass/i.test(MG.town) ? `${MG.town} Pass` : MG.town;
+  mgHeader(g, W, `${place} meteogram`, sub); g.drawImage(ch, 0, 64, W, H);
+  saveCanvas(cv, `${fileClean(place)}_${fileClean(S.man.models[m].site)}_${c}Z.png`, btn);
 }
 function showSaveView(blob, name) {   // fallback: full-screen image to press and hold (Save to Photos / Download Image)
   closeSaveView(); const url = URL.createObjectURL(blob), o = document.createElement("div"); o.id = "saveview"; o.dataset.url = url;
@@ -1107,8 +1159,8 @@ function mgOpen(kind) {
   const o = document.createElement("div"); o.id = "mg";
   o.innerHTML = `<div class="mg-top"><b>${kind === "pass" ? "Pass Forecaster" : "Meteogram"}</b>
     <label>Model <select id="mgrun"></select></label>${kind === "pass" ? "" : `<label>Place <select id="mgtown"></select></label>`}
-    <a id="mgpage" href="meteograms" title="Full meteograms page (old-site layout: plumes, member grids, multi-run)"><span class="lg">Meteograms page</span><span class="sm">Full page</span></a><button type="button" id="mgx">Close</button></div><div id="mgbody"><div class="mg-msg">Loading\u2026</div></div>`;
-  document.body.appendChild(o); $("mgx").onclick = mgClose;
+    <a id="mgpage" href="meteograms" title="Full meteograms page (old-site layout: plumes, member grids, multi-run)"><span class="lg">Meteograms page</span><span class="sm">Full page</span></a><button type="button" id="mgsave" title="Save this graphic as a picture (phones: Share / Save Image)">Save image</button><button type="button" id="mgx">Close</button></div><div id="mgbody"><div class="mg-msg">Loading\u2026</div></div>`;
+  document.body.appendChild(o); $("mgx").onclick = mgClose; $("mgsave").onclick = mgSave;
   const runLabel = r => { const [m, c] = r.split("/"); return `${S.man.models[m].site} ${c.slice(8)}Z ${c.slice(4, 6)}-${c.slice(6, 8)}`; };
   const rs = mgRuns(); if (!rs.includes(MG.run)) rs.unshift(MG.run);
   fill($("mgrun"), rs.map(r => [r, runLabel(r)]), MG.run);

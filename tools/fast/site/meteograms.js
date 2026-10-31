@@ -686,8 +686,17 @@ async function render_(tok, sec) {
   empty.hidden = true; img.alt = `${sec.label} ${prod.label}, ${T.label}`;
   await new Promise((r) => { img.onload = r; img.onerror = r; img.src = u; }); img.hidden = false;
   $("mcap-right").textContent = capRun(sec, spec.run);
-  dl.href = u; dl.download = `${S.sec}_${S.prod}_${S.town.replace(/\W+/g, "_")}.png`; dl.removeAttribute("aria-disabled");
+  const name = `${T.label.replace(/[^A-Za-z0-9.+-]+/g, "-").replace(/^-|-$/g, "")}_${sec.tag.replace(/[^A-Za-z0-9.+-]+/g, "-")}_${S.prod}_${spec.run}Z.png`;
+  dl.href = u; dl.download = name; dl.removeAttribute("aria-disabled"); DL = { blob, name };
 }
+// phones: Download image opens the share sheet with the PNG (iOS "Save Image"); desktop keeps the plain download (Benjamin 10-31 8:49 AM)
+let DL = null;
+document.addEventListener("click", (e) => {
+  const a = e.target.closest && e.target.closest("#dl-meteo"); if (!a || !DL || a.getAttribute("aria-disabled") === "true") return;
+  if (!matchMedia("(pointer: coarse)").matches || !navigator.share || !navigator.canShare) return;
+  const file = new File([DL.blob], DL.name, { type: "image/png" }); if (!navigator.canShare({ files: [file] })) return;
+  e.preventDefault(); navigator.share({ files: [file], title: DL.name }).catch(() => {});
+});
 function sameKind(pid, s) { const cur = SECTIONS.flatMap((x) => x.products).find((p) => p.id === pid); const m = cur && s.products.find((p) => p.kind && p.kind === cur.kind); return (m || s.products.find((p) => p.kind) || s.products[0]).id; }
 function altProducts(sec) { return sec.products.filter((p) => p.kind && p.id !== S.prod).slice(0, 6).map((p) => [p.label, () => { S.prod = p.id; render(); }]); }
 function memTowns(towns) { return towns.filter((t) => ["seattle", "spokane", "yakima", "bellingham", "snoqualmie", "stevens"].includes(t.id) && t.id !== S.town).map((t) => [t.label, () => { S.town = t.id; render(); }]); }
