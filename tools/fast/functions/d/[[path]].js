@@ -7,6 +7,7 @@ export async function onRequest({ request, params, env }) {
   const obj = await env.DATA.get(key, { onlyIf: request.headers, range: request.headers });
   if (!obj) return new Response("not found", { status: 404 });
   const h = new Headers(); obj.writeHttpMetadata(h); h.set("etag", obj.httpEtag);
+  if (obj.uploaded) h.set("last-modified", obj.uploaded.toUTCString());   // meteograms page "Updated" stamp
   const live = key === "manifest.json" || key.endsWith("/run.json");
   h.set("cache-control", live ? "private, max-age=30" : key.startsWith("runs/") ? "private, max-age=31536000, immutable" : "private, max-age=86400");
   if (!("body" in obj) || !obj.body) return new Response(null, { status: 304, headers: h });
