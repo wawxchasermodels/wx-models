@@ -545,6 +545,8 @@ async function autoLoop() {
     for (let t = 0; !(window.__ready && last); t++) { if (t > 900) throw new Error("the map did not load"); await sleep(100); }
     const k = SQ.get("shape") === "v" ? "v" : "h", pre = SQ.get("preset") || ""; openMp4(k);
     const steps = S.runs[S.run].steps;
+    // a link starts from the plain defaults, not from options remembered in this browser
+    for (const [id, v] of Object.entries({ mpmode: "loop", mpe: "0", mps: "4", mps1: "", mph: "1", mpz0: "f", mpz1: "f", mppre: "" })) $s(id).value = v;
     if (PRESETS[pre]) { for (const [id, v] of Object.entries(PRESETS[pre])) if (id !== "span") $s(id).value = v; $s("mppre").value = pre; }
     if (pre === "storm") { const l = await findStorms(); if (!l.length && !SQ.get("pinA")) throw new Error("storm finder: " + $s("mpst").textContent); if (SQ.get("shape")) $s("mpk").value = k; }
     const from = num("from"), to = num("to");
@@ -564,11 +566,12 @@ async function autoLoop() {
       if (!pa || !pb) throw new Error("pinA and pinB need lat,lon inside this view (e.g. pinA=46.5,-131&pinB=47.9,-124.6)");
       setPins({ a: pa, b: pb }); $s("mpmode").value = "pan";
     }
+    if ($s("mpmode").value === "pan" && !(getPins().a && getPins().b)) $s("mpmode").value = "loop";   // e.g. preset=landfall without pins
     mpMode(); mpInfo();
     if (+$s("mpb").value <= +$s("mpa").value) throw new Error(`no hours between from=${from} and to=${to} in ${S.run}`);
     res.state = "making"; document.body.dataset.loop = "making";
-    await makeMp4();
-    const m = window.__mp4 || {}; if (m.error || !m.bytes) throw new Error(m.error || "no video was made");
+    window.__mp4 = null; await makeMp4();
+    const m = window.__mp4 || {}; if (m.error || !m.bytes) throw new Error(m.error || $s("mpst").textContent || "no video was made");
     const u = $s("mpdl").href, a = document.createElement("a"); a.id = "loopdl"; a.href = u; a.download = m.name; a.textContent = `Download ${m.name} (${(m.bytes / 1e6).toFixed(1)} MB)`;
     const bar = document.createElement("div"); bar.id = "loopbar"; bar.append("Loop ready: ", a); document.body.appendChild(bar);
     Object.assign(res, { state: "done", ok: true, name: m.name, bytes: m.bytes, seconds: m.seconds, frames: m.frames, how: m.how, ms: m.ms, url: u,
