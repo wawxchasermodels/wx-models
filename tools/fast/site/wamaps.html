@@ -9,6 +9,7 @@ body{display:flex;flex-direction:column;height:100vh;height:100dvh}
 #bar{flex:0 0 auto;display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:8px 12px;background:#1d2027;border-bottom:1px solid #2c3039}
 #bar select,#bar button,#bar a{background:#262931;color:#f4f2ee;border:1px solid #7d828c;border-radius:6px;padding:4px 8px;font:inherit;text-decoration:none;touch-action:manipulation}
 #bar b{font-weight:800}
+#win{display:inline-flex;gap:6px;align-items:center;font-size:12.5px;color:#cfd3da}#win select{padding:3px 6px;font-size:12.5px}#win .utc{font-weight:700;color:#ffc24d}#bar select:disabled{opacity:.5}
 #msg{color:#a7abb3;font-size:12px;flex:1;min-width:200px}
 #wrap{position:relative;flex:1 1 auto;min-height:0;display:flex;align-items:center;justify-content:center;padding:4px;box-sizing:border-box;overflow:auto}
 canvas{display:block}
@@ -19,7 +20,9 @@ canvas{display:block}
   <a href="./" title="Back to the model maps">&larr; <span>Maps</span></a>
   <b>WA Maps</b>
   <select id="kind" aria-label="Map"></select>
+  <select id="model" aria-label="Model"></select>
   <select id="day" aria-label="Day"></select>
+  <span id="win" style="display:none"><label>From <select id="from" aria-label="Start (UTC)"></select></label> <label>to <select id="to" aria-label="End (UTC)"></select></label> <span class="utc">UTC</span></span>
   <select id="view" aria-label="View"></select>
   <select id="run" aria-label="Run"></select>
   <button id="save" type="button">Save image</button>
