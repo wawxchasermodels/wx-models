@@ -34,6 +34,7 @@ function show() {
   const u = new URL(location); u.searchParams.set("run", S.run); u.searchParams.set("prod", S.prod); u.searchParams.set("view", S.view); u.searchParams.set("f", S.hour);
   try { history.replaceState(null, "", u); } catch (e) {}
   window.__shown = (window.__shown || 0) + 1;
+  if (window.__socialShown) window.__socialShown();
 }
 async function boot() {
   S.idx = await fetch(DATA + "social/index.json", { cache: "no-cache" }).then(r => { if (!r.ok) throw new Error("index " + r.status); return r.json(); });

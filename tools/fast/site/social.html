@@ -19,6 +19,20 @@ html,body{margin:0;background:#15171c;color:#f4f2ee;font:14px Montserrat,system-
 #strip button{flex:0 0 auto;background:#262931;border:1px solid #3a3f49;border-radius:6px;padding:3px;color:#cfd3da;font:12px Montserrat;cursor:pointer}
 #strip button.on{border-color:#2f8cff;outline:1px solid #2f8cff}
 #strip img{display:block;width:160px;height:90px;object-fit:cover;border-radius:4px}
+/* MP4 loop panel (10-31) */
+#lp{margin:10px 14px 0;background:#1d2027;border:1px solid #4a4f5a;border-radius:10px;padding:10px 12px;max-width:760px}
+#lp[hidden],#lphint[hidden],#lpout[hidden],#lppan[hidden],#lpprev[hidden],#lp [hidden]{display:none!important}
+#lp .mp-h{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:15px}#lp .mp-hint{flex:1;color:#8e939c;font-size:11.5px}
+#lp.min > :not(.mp-h){display:none!important}
+#lp .mp-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:6px 0;font-size:13px}
+#lp select,#lp button,#lp a{background:#262931;color:#f4f2ee;border:1px solid #7d828c;border-radius:6px;padding:4px 8px;font:inherit;font-size:13px;text-decoration:none;touch-action:manipulation;cursor:pointer}
+#lp button.pri{background:#2f8cff;border-color:#2f8cff;font-weight:700}#lp button:disabled{opacity:.5}
+#lp .mp-note,#lpst{color:#cfd3da}#lpst{font-weight:600}#lps{width:170px;accent-color:#2f8cff}
+#lpv,#lpprev{display:block;max-width:100%;max-height:50vh;margin-top:6px;background:#000}
+#lphint{position:fixed;left:50%;top:10px;transform:translateX(-50%);z-index:13;background:#2f8cff;color:#fff;font-weight:700;padding:8px 14px;border-radius:8px;box-shadow:0 4px 16px #0008;max-width:90vw;text-align:center}
+.lpin{position:absolute;width:30px;height:30px;margin:-15px 0 0 -15px;border-radius:50%;border:3px solid #fff;color:#fff;font:800 15px/24px Montserrat;text-align:center;pointer-events:none;box-shadow:0 2px 6px #0009}
+.lpin.a{background:#16a34a}.lpin.b{background:#dc2626}
+@media (max-width:820px){#lp{margin:8px}#lp select{max-width:62vw}#lps{width:150px}#lp .mp-hint{flex-basis:100%;order:3}}
 @media (max-width:820px){#main{flex-direction:column}#fv{flex:none}#fh{flex:none}#fv img{height:auto;width:100%}#fh img{max-height:none}#bar{gap:6px;padding:6px}#bar select{max-width:44vw}#msg{flex:1 1 100%;order:9}}
 </style></head>
 <body>
@@ -29,12 +43,33 @@ html,body{margin:0;background:#15171c;color:#f4f2ee;font:14px Montserrat,system-
   <select id="prod" aria-label="Product"></select>
   <select id="view" aria-label="View"></select>
   <select id="hour" aria-label="Hour"></select>
+  <button type="button" id="loopbtn" title="Make an MP4 loop of these frames">Make loop</button>
   <span id="msg">Loading…</span>
 </div>
+<div id="lp" hidden><div class="mp-h"><b>MP4 loop</b><span class="mp-hint">Hour menu, thumbnails and arrow keys still work while this is open</span><span><button type="button" data-m="min" aria-label="Minimize">&ndash;</button> <button type="button" data-m="x" aria-label="Close">&times;</button></span></div>
+  <div class="mp-row"><label>Frame <select id="lpk"><option value="v">9:16 (1080&times;1920)</option><option value="h">16:9 (1920&times;1080)</option></select></label>
+  <label>Mode <select id="lpmode"><option value="loop">Plain loop</option><option value="pan">Track storm (pan A &rarr; B)</option></select></label></div>
+  <div class="mp-row"><label>Start <select id="lpa"></select></label><button type="button" data-m="sa">Start = now</button></div>
+  <div class="mp-row"><label>End <select id="lpb"></select></label><button type="button" data-m="sb">End = now</button><span id="lpnow" class="mp-note"></span></div>
+  <div class="mp-row"><label>Speed <input type="range" id="lps" min="0.5" max="15" step="0.5" value="2"></label><b id="lpsv">2 maps/s</b>
+  <label>End speed <select id="lps1"><option value="">same</option><option>0.5</option><option>1</option><option>1.5</option><option>2</option><option>3</option><option>4</option><option>6</option><option>8</option><option>10</option><option>15</option></select></label></div>
+  <div class="mp-row"><label>Crossfade <select id="lpx"><option value="0">off (cut)</option><option value="0.3">short</option><option value="0.6" selected>long</option></select></label>
+  <label>Hold end <select id="lph"><option value="0">0 s</option><option value="0.5">0.5 s</option><option value="1" selected>1 s</option><option value="2">2 s</option></select></label></div>
+  <div class="mp-row"><label>Start zoom <select id="lpz0"><option value="1" selected>1&times;</option><option>1.2</option><option>1.4</option><option>1.6</option><option>1.8</option><option>2</option><option>2.5</option></select></label>
+  <label>End zoom <select id="lpz1"><option value="s">same as start</option><option>1</option><option>1.2</option><option>1.4</option><option>1.6</option><option>1.8</option><option>2</option><option>2.5</option></select></label></div>
+  <div class="mp-row" id="lppan" hidden><button type="button" data-m="a">Set pin A (start)</button><button type="button" data-m="b">Set pin B (end)</button><button type="button" data-m="c">Clear pins</button><span id="lppins" class="mp-note"></span></div>
+  <div class="mp-row mp-note" id="lpinfo"></div>
+  <div class="mp-row mp-note">Frames are every 24 h for now (finer hours need more rendering; ask first). When zoomed, the title and color bar stay put.</div>
+  <div class="mp-row"><button type="button" data-m="go" id="lpgo" class="pri">Make MP4</button><button type="button" data-m="stop" id="lpstop" hidden>Stop</button><span id="lpst"></span></div>
+  <canvas id="lpprev" hidden></canvas>
+  <div id="lpout" hidden><video id="lpv" controls loop muted playsinline></video><div class="mp-row"><a id="lpdl" download>Save MP4</a><button type="button" id="lpshare" hidden>Share / Save to Photos</button></div></div>
+</div>
+<div id="lphint" hidden></div>
 <div id="main">
   <div class="fr" id="fv"><div class="hd"><b>9:16</b> 2160×3840 <a id="sv" download>Save PNG</a> <a id="sv1" download>Save 1280 JPG</a></div><img id="iv" alt="vertical frame"></div>
   <div class="fr" id="fh"><div class="hd"><b>16:9</b> 3840×2160 <a id="sh" download>Save PNG</a> <a id="sh1" download>Save 1280 JPG</a></div><img id="ih" alt="16:9 frame"></div>
 </div>
 <div id="strip" aria-label="All hours"></div>
 <script src="social.js"></script>
+<script src="socialloop.js?v=20261031b"></script>
 </body></html>

@@ -20,7 +20,7 @@ cp $SRC/compare.html $SRC/compare.js public/
 cp $SRC/studio.js public/
 rm -rf public/vendor && cp -r $SRC/vendor public/   # Studio MP4 export: mp4-muxer (MIT), loaded only when "Save MP4" is used
 # Social (10-31): browse / save the ECMWF social graphics (R2 social/, made by tools/fast/social/)
-cp $SRC/social.js public/
+cp $SRC/social.js $SRC/socialloop.js public/   # socialloop.js: MP4 loops of the social frames (10-31)
 sed -e 's#<script src="social.js"></script>#<script>window.WX_DATA="/d/"</script><script src="social.js"></script>#' \
     -e 's#,url(fonts/Montserrat.ttf) format("truetype")##' \
     -e 's#<head>#<head><meta name="robots" content="noindex,nofollow">#' $SRC/social.html > public/social.html
