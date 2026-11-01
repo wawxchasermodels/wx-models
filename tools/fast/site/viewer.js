@@ -307,7 +307,8 @@ const MD = () => S.man.models[S.run.split("/")[0]];
 // Severe tab (10-31): new products are published under the manifest's products_x (production's older viewer only reads "products")
 // 11-01 (Benjamin 7:30 AM "max wave height scale ... at least 60'"): changed product scales are published under the manifest's
 // products_p (new key file names), read over products/products_x; production's older viewer keeps the old scale until this ships
-const allProds = md => md._allP || (md._allP = Object.assign({}, md.products, md.products_x || {}, md.products_p || {}));
+// 11-01 neon example (branch wave_scale_neon): products_n (neon max wave keys/colors) read over products_p; only this build reads it
+const allProds = md => md._allP || (md._allP = Object.assign({}, md.products, md.products_x || {}, md.products_p || {}, md.products_n || {}));
 const PRODS = () => allProds(MD()), VIEWS = () => MD().views;
 // Product tabs (Benjamin 10-30 8:04 PM: "upper air tab, surface tab, precipitation tab, snow tab", Pivotal Weather style).
 // The Product menu lists only the open tab's products, in the order below (Pivotal: winds by level, 250 -> 850 mb);
