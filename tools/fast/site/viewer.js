@@ -197,7 +197,9 @@ async function boot() {
   const order = ["hrrr", "rrfs", "nbm", "gfs", "ifs", "ifs9", "aifs", "eps", "aens"].filter(m => S.man.models[m] && (S.man.runs[m] || []).length);
   const all = []; for (const m of order) for (const c of [...S.man.runs[m]].reverse()) all.push(`${m}/${c}`);
   const qr = Q.get("run"), qm = Q.get("model");
-  S.run = all.includes(qr) ? qr : (all.find(r => qm && r.startsWith(qm + "/")) || all[0]);
+  // 11-01: a ?prod= link with no run/model (e.g. ?prod=waves) opens the first model that has that product
+  const qp = !qr && !qm && Q.get("prod"), pm = qp && order.find(m => allProds(S.man.models[m])[qp]);
+  S.run = all.includes(qr) ? qr : (all.find(r => qm && r.startsWith(qm + "/")) || (pm && all.find(r => r.startsWith(pm + "/"))) || all[0]);
   await loadRun(S.run);
   // "Runs" menu (Benjamin 10-29 7:10 PM): every available run, grouped by model, newest first; picking one keeps the valid time
   const runLabel = r => { const [m, c] = r.split("/"), p = ((S.man.progress || {})[m] || {})[c];
@@ -310,13 +312,16 @@ const PRODS = () => allProds(MD()), VIEWS = () => MD().views;
 // product ids / URLs are unchanged (?prod= picks its tab). Products not listed here land in an "Other" tab.
 const TABS = [
   ["sfc", "Surface", ["t2m", "feels", "d2m", "t2ma", "nmaxt", "nmint", "ehigh", "elow", "et2sd", "ep32", "gust10", "gust6", "gust12", "gust24", "gustmax", "egust90",
-                      "aifswind", "slp", "elows", "tcc", "vis", "fog", "ir", "waves", "wavemax", "wavemax24"]],
+                      "aifswind", "slp", "elows", "tcc", "vis", "fog", "ir"]],
   ["pcp", "Precip", ["qpf", "qpf1", "nqpf1", "qpf3", "qpf6", "nqpf6", "qpf12", "qpf24", "qpf48", "nqpf12", "nqpf24", "nqpf48", "nqpftot", "eqpf90", "mslpqpf", "ptype", "refc", "pw", "pwa", "ivt",
                      "qpfa", "qpfpct"]],
   ["snow", "Snow", ["snow", "kuchera", "esnow", "esnow90", "snow1", "snow6", "snow12", "snow24", "snow48", "nsnow6", "nsnow12", "nsnow24", "nsnow48", "nsnowtot", "esnow6", "esnow12", "esnow24", "esnow48", "kuch6", "kuch12", "kuch24", "kuch48", "dsnod", "fzra", "fzra6", "fzra12", "fzra24", "fzra48", "snowlvl", "frz", "thick"]],
   ["ua", "Upper Air", ["w250", "w300", "w500", "w850", "t300w", "t500w", "t700w", "t850w", "t925w", "t850", "t700", "t850a", "z500anom", "ez500", "spag"]],
   // 10-31 (Benjamin 9:15 AM): simulated radar (also listed under Precip), radar + UH, UH, UH streaks, CAPEs, SRH, lapse rates
   ["svr", "Severe", ["refc", "refuh", "uh", "uhs", "sbcape", "mucape", "cape3", "srh03", "lr03", "lr75", "epcape", "ltng", "ltng6", "ltgp", "ntstm"]],
+  // 11-01 (Benjamin 2:02 AM "We should probably make a waves tab"): ECMWF 0.25 wave products, out of Surface.
+  // ECMWF (ifs) only: on other models the tab still shows (dimmed) and opens the newest ECMWF run.
+  ["wav", "Waves", ["waves", "wavemax", "wavemax24"]],
 ];
 const tabOf = pid => (TABS.find(t => t[2].includes(pid)) || ["other"])[0];
 S.lastTab = {};
@@ -330,6 +335,8 @@ function setLists() {   // products this run carries (all their fields present),
   const inTab = id => tabs.some(t => t[0] === id && t[2].some(([k]) => k === S.prod));
   const cur = S.tab && inTab(S.tab) ? S.tab : tabOf(S.prod); S.tab = cur; S.lastTab[cur] = S.prod;
   $("tabs").innerHTML = tabs.map(([id, label]) => `<button type="button" role="tab" data-t="${id}" aria-selected="${id === cur}"${id === cur ? ' class="on"' : ""}>${label}</button>`).join("") +
+    (Q.get("embed") || Q.get("studio") || tabs.some(t => t[0] === "wav") || !(S.man.runs.ifs || []).length ? "" :
+      `<button type="button" data-t="wav" class="dim" title="Waves are ECMWF only: opens the newest ECMWF run">Waves</button>`) +
     // WA Maps (10-31, Benjamin 8:58 AM): the posted Washington state-view maps, own page (wamaps.html)
     (Q.get("embed") || Q.get("studio") ? "" : `<button type="button" data-t="wamaps" title="Washington state-view forecast maps">WA Maps</button>` +
       `<button type="button" data-t="compare" title="Two maps side by side: two models, or two runs of one model">Compare</button>` +
@@ -341,6 +348,8 @@ function setLists() {   // products this run carries (all their fields present),
     if (b && b.dataset.t === "compare") { const R_ = S.runs[S.run], st = R_.steps[S.i], [m] = S.run.split("/"), rs = (S.man.runs[m] || []);
       const other = rs.length > 1 ? `${m}/${rs[rs.length - 1] === S.run.split("/")[1] ? rs[rs.length - 2] : rs[rs.length - 1]}` : S.run;
       location.href = `compare.html?l=${encodeURIComponent(S.run)}&r=${encodeURIComponent(other)}&prod=${S.prod}&view=${S.view}&valid=${encodeURIComponent(st.valid)}`; return; }
+    if (b && b.dataset.t === "wav" && !tabs.some(x => x[0] === "wav")) {   // waves: ECMWF only -> newest ECMWF run, same valid time
+      const rs = S.man.runs.ifs || []; if (!rs.length) return; S.prod = "waves"; S.tab = "wav"; $("run").value = `ifs/${rs[rs.length - 1]}`; $("run").onchange({ target: $("run") }); return; }
     if (!b || b.dataset.t === S.tab) return;
     const t = tabs.find(x => x[0] === b.dataset.t), keep = S.lastTab[t[0]];
     S.tab = t[0]; S.prod = t[2].some(([k]) => k === keep) ? keep : t[2][0][0]; setLists(); draw(); };
