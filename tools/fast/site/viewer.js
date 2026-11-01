@@ -176,6 +176,15 @@ function viewFixes(man, vf) {
     for (const [vid, o] of Object.entries(vs)) if (M.views[vid] && o.towns && o.towns_png) M.views[vid] = Object.assign({}, M.views[vid], { towns: o.towns, towns_png: o.towns_png }); }
   return man;
 }
+// 11-01 9:40 AM (Benjamin t1999u "Make me a new view, just for waves right now, titled west coast"): wave-only views from
+// static/wave_views.json (tools/fast/wave_views.py, not in manifest.json), inserted after their "after" view; offered for wave products only
+function waveViews(man, wv) {
+  for (const [m, vs] of Object.entries((wv && wv.models) || {})) { const M = (man.models || {})[m]; if (!M || !M.views) continue;
+    for (const [vid, e] of Object.entries(vs)) { if (M.views[vid]) continue; const out = {}; let put = false;
+      for (const [k, v] of Object.entries(M.views)) { out[k] = v; if (k === e.after) { out[vid] = e; put = true; } }
+      if (!put) out[vid] = e; M.views = out; } }
+  return man;
+}
 const VSRC = (vid) => { const V = VIEWS()[vid]; return (V && V.src) || vid; };   // file / tuning id of a view (Studio wide view -> its src)
 const runFile = (r) => XR.has(r) ? "run_x.json" : "run.json";
 async function boot() {
@@ -188,11 +197,12 @@ async function boot() {
     document.body.appendChild(b);
     let lh = 0; new ResizeObserver(() => { const h = cslimH(); if (Math.abs(h - lh) > 2 && parent !== window) { lh = h; parent.postMessage({ wx: "size", id: Q.get("id"), h }, "*"); } }).observe(document.body); }
   // 10-29: manifest, fonts and the shown run's run.json in parallel; other runs load when picked
-  const [man, sv, vf] = await Promise.all([fetch(DATA + "manifest.json", { cache: "no-cache" }).then(r => r.json()),
+  const [man, sv, vf, wv] = await Promise.all([fetch(DATA + "manifest.json", { cache: "no-cache" }).then(r => r.json()),
                                    Q.get("studio") ? fetch(DATA + "static/studio_views.json", { cache: "no-cache" }).then(r => r.ok ? r.json() : null, () => null) : null,
                                    fetch(DATA + "static/view_fixes.json", { cache: "no-cache" }).then(r => r.ok ? r.json() : null, () => null),
+                                   fetch(DATA + "static/wave_views.json", { cache: "no-cache" }).then(r => r.ok ? r.json() : null, () => null),
                                    document.fonts.load("800 20px Montserrat"), document.fonts.load("500 12px Montserrat")]);
-  S.man = addStudioViews(viewFixes(mergeRunsX(man), vf), sv);
+  S.man = addStudioViews(waveViews(viewFixes(mergeRunsX(man), vf), wv), sv);
   // runs: "model/cycle", newest first per model; models in a fixed order
   const order = ["hrrr", "rrfs", "nbm", "gfs", "ifs", "ifs9", "aifs", "eps", "aens"].filter(m => S.man.models[m] && (S.man.runs[m] || []).length);
   const all = []; for (const m of order) for (const c of [...S.man.runs[m]].reverse()) all.push(`${m}/${c}`);
@@ -359,8 +369,9 @@ function setLists() {   // products this run carries (all their fields present),
     const t = tabs.find(x => x[0] === b.dataset.t), keep = S.lastTab[t[0]];
     S.tab = t[0]; S.prod = t[2].some(([k]) => k === keep) ? keep : t[2][0][0]; setLists(); draw(); };
   if (!V[S.view]) S.view = V.wa ? "wa" : Object.keys(V)[0];
+  const wavy = WAVE_PIDS.test(S.prod); if (V[S.view].waveOnly && !wavy) S.view = V.pnw ? "pnw" : "wa";
   fill($("prod"), tabs.find(t => t[0] === cur)[2].map(([k, p]) => [k, p.title]), S.prod);
-  fill($("view"), Object.entries(V).map(([k, v]) => [k, v.label]), S.view);
+  fill($("view"), Object.entries(V).filter(([k, v]) => !v.waveOnly || wavy).map(([k, v]) => [k, v.label]), S.view);
   $("step").max = R_.steps.length - 1; S.i = Math.min(S.i, R_.steps.length - 1);
 }
 function fill(sel, opts, cur) { sel.innerHTML = opts.map(([v, t]) => `<option value="${v}"${v === cur ? " selected" : ""}>${t}</option>`).join(""); }
@@ -399,7 +410,7 @@ async function viewStatic(vid) {
   })();
   S.statics[sk] = p; return p;
 }
-const keyImg = {}; const keyURL = (pid, vid) => { const K = PRODS()[pid].keys, V = VIEWS()[vid] || {}; return DATA + (K[VSRC(vid)] || K[V.keysFrom] || K.wa) + SV(); };   // Studio-only view: Washington key
+const keyImg = {}; const keyURL = (pid, vid) => { const K = PRODS()[pid].keys, V = VIEWS()[vid] || {}; return DATA + ((V.keys && V.keys[pid]) || K[VSRC(vid)] || K[V.keysFrom] || K.wa) + SV(); };   // Studio-only view: Washington key
 const getKey = (pid, vid) => { const u = keyURL(pid, vid); return keyImg[u] || (keyImg[u] = img(u)); };
 
 // ---------------------------------------------------------------- data images
@@ -616,6 +627,7 @@ let lastI = null, lastKey = "";
 async function render(lite) {
   const seq = ++drawSeq, t0 = performance.now();
   const dir = lastKey === S.run && lastI !== null && S.i < lastI ? -1 : 1; lastI = S.i; lastKey = S.run;
+  if ((VIEWS()[S.view] || {}).waveOnly && !WAVE_PIDS.test(S.prod)) setLists();   // wave-only view (West Coast) + another product
   const run = S.run, vid = S.view, pid = S.prod, step = S.runs[run].steps[S.i], f = step.f;
   let st, D, key;
   try { [st, D, key] = await Promise.all([viewStatic(vid), productFields(run, pid, f), getKey(pid, vid)]); }
@@ -763,8 +775,10 @@ function fmtVal(P, v) {   // temp_maps fmt_int / fmt_vis
 // Placement: right of the dot, then left / above / below / diagonals; a buoy whose label would touch a city label, another buoy or the
 // map edge is left out. Values: bilinear when the 4 grid points around the buoy are all sea, else the nearest sea point; none -> skipped.
 const WAVE_PIDS = /^(waves|wavemax|wavemax24)$/;
+const WC_BUOYS = ["46041", "46029", "46050", "46006", "46005", "46002", "46059", "46022", "46014", "46013", "46026", "46042", "46028", "46011", "46054",
+  "46025", "46047", "46086", "46087", "46089", "46027", "46015", "46229", "46036", "46214"];
 const LOCAL_VIEWS = new Set(["wa", "puget", "newa", "wwa"]), isWaB = (tag, loc) => tag === "wa" || (loc && /inner/.test(tag || ""));
-const BUOYS = [["46041","Cape Elizabeth",47.351,-124.741,"wa"],["46029","Columbia River Bar",46.148,-124.508,"wa"],["46087","Neah Bay",48.493,-124.727,"wa"],["46005","West Washington",46.147,-131.077,"wa wide"],["46089","Tillamook",45.928,-125.815,"wa"],["46050","Stonewall Bank",44.679,-124.535,"wa"],["46002","West Oregon",42.56,-130.523,"wa wide"],["46211","Grays Harbor",46.857,-124.243,"wa"],["46088","New Dungeness",48.332,-123.179,"inner any"],["46267","Angeles Point",48.171,-123.6,"inner"],["46303","Southern Georgia Strait",49.02,-123.43,"inner"],["46120","Point Wells",47.761,-122.397,"inner"],["46118","Bellingham Bay",48.724,-122.576,"inner"],["46146","Halibut Bank",49.34,-123.73,"sog"],["46229","Umpqua Offshore",43.772,-124.549,""],["46015","Port Orford",42.754,-124.839,""],["46027","St Georges",41.84,-124.382,""],["46022","Eel River",40.716,-124.54,""],["46014","Point Arena",39.225,-123.98,""],["46013","Bodega Bay",38.235,-123.317,""],["46214","Point Reyes",37.944,-123.466,""],["46026","San Francisco",37.75,-122.838,""],["46042","Monterey",36.787,-122.408,""],["46028","Cape San Martin",35.763,-121.9,""],["46011","Santa Maria",34.937,-120.999,""],["46025","Santa Monica Basin",33.765,-119.077,""],["46047","Tanner Bank",32.418,-119.535,""],["46086","San Clemente Basin",32.504,-118.029,""],["46206","La Perouse Bank",48.84,-126.0,""],["46059","West California",38.067,-129.895,"wide"],["46006","Southeast Papa",40.73,-137.42,"wide"],["46036","South Nomad",48.36,-133.94,"wide"],["46004","Middle Nomad",50.93,-136.1,""],["46147","South Moresby",51.83,-131.22,""],["46208","West Moresby",52.52,-132.69,""],["46205","West Dixon Entrance",54.18,-134.32,""],["46184","North Nomad",53.92,-138.85,"wide"],["46246","Station Papa",49.903,-145.246,""],["46084","Cape Edgecumbe",56.614,-136.04,""],["46083","Fairweather Ground",58.276,-138.024,""],["46085","Central Gulf of Alaska",55.84,-142.895,"wide"],["46001","Western Gulf of Alaska",56.296,-148.027,"wide"],["46060","West Orca Bay",60.571,-146.795,""],["46078","Albatross Bank",55.561,-152.599,""],["46066","South Kodiak",52.776,-154.992,"wide"],["51001","NW Hawaii",24.475,-162.03,"wide"],["51000","Northern Hawaii",23.534,-153.752,""],["51003","Western Hawaii",19.151,-160.617,""],["51002","SW Hawaii",17.07,-157.755,""],["51004","SE Hawaii",17.504,-152.197,"wide"],["44025","Long Island",40.258,-73.175,""],["44008","Nantucket",40.5,-69.254,""],["44011","Georges Bank",41.088,-66.546,"wide"],["41001","East Hatteras",34.738,-72.503,"wide"],["41002","South Hatteras",31.743,-74.955,""],["41048","West Bermuda",31.878,-69.722,"wide"],["41010","Canaveral East",28.86,-78.478,"wide"],["41047","NE Bahamas",27.557,-71.48,""],["42002","West Gulf",25.95,-93.78,"wide"],["42001","Mid Gulf",25.922,-89.638,"wide"],["42003","East Gulf",25.925,-85.616,""]];
+const BUOYS = [["46041","Cape Elizabeth",47.351,-124.741,"wa"],["46029","Columbia River Bar",46.148,-124.508,"wa"],["46087","Neah Bay",48.493,-124.727,"wa"],["46005","West Washington",46.147,-131.077,"wa wide"],["46089","Tillamook",45.928,-125.815,"wa"],["46050","Stonewall Bank",44.679,-124.535,"wa"],["46002","West Oregon",42.56,-130.523,"wa wide"],["46211","Grays Harbor",46.857,-124.243,"wa"],["46088","New Dungeness",48.332,-123.179,"inner any"],["46267","Angeles Point",48.171,-123.6,"inner"],["46303","Southern Georgia Strait",49.02,-123.43,"inner"],["46120","Point Wells",47.761,-122.397,"inner"],["46118","Bellingham Bay",48.724,-122.576,"inner"],["46146","Halibut Bank",49.34,-123.73,"sog"],["46054","West Santa Barbara",34.265,-120.477,""],["46229","Umpqua Offshore",43.772,-124.549,""],["46015","Port Orford",42.754,-124.839,""],["46027","St Georges",41.84,-124.382,""],["46022","Eel River",40.716,-124.54,""],["46014","Point Arena",39.225,-123.98,""],["46013","Bodega Bay",38.235,-123.317,""],["46214","Point Reyes",37.944,-123.466,""],["46026","San Francisco",37.75,-122.838,""],["46042","Monterey",36.787,-122.408,""],["46028","Cape San Martin",35.763,-121.9,""],["46011","Santa Maria",34.937,-120.999,""],["46025","Santa Monica Basin",33.765,-119.077,""],["46047","Tanner Bank",32.418,-119.535,""],["46086","San Clemente Basin",32.504,-118.029,""],["46206","La Perouse Bank",48.84,-126.0,""],["46059","West California",38.067,-129.895,"wide"],["46006","Southeast Papa",40.73,-137.42,"wide"],["46036","South Nomad",48.36,-133.94,"wide"],["46004","Middle Nomad",50.93,-136.1,""],["46147","South Moresby",51.83,-131.22,""],["46208","West Moresby",52.52,-132.69,""],["46205","West Dixon Entrance",54.18,-134.32,""],["46184","North Nomad",53.92,-138.85,"wide"],["46246","Station Papa",49.903,-145.246,""],["46084","Cape Edgecumbe",56.614,-136.04,""],["46083","Fairweather Ground",58.276,-138.024,""],["46085","Central Gulf of Alaska",55.84,-142.895,"wide"],["46001","Western Gulf of Alaska",56.296,-148.027,"wide"],["46060","West Orca Bay",60.571,-146.795,""],["46078","Albatross Bank",55.561,-152.599,""],["46066","South Kodiak",52.776,-154.992,"wide"],["51001","NW Hawaii",24.475,-162.03,"wide"],["51000","Northern Hawaii",23.534,-153.752,""],["51003","Western Hawaii",19.151,-160.617,""],["51002","SW Hawaii",17.07,-157.755,""],["51004","SE Hawaii",17.504,-152.197,"wide"],["44025","Long Island",40.258,-73.175,""],["44008","Nantucket",40.5,-69.254,""],["44011","Georges Bank",41.088,-66.546,"wide"],["41001","East Hatteras",34.738,-72.503,"wide"],["41002","South Hatteras",31.743,-74.955,""],["41048","West Bermuda",31.878,-69.722,"wide"],["41010","Canaveral East",28.86,-78.478,"wide"],["41047","NE Bahamas",27.557,-71.48,""],["42002","West Gulf",25.95,-93.78,"wide"],["42001","Mid Gulf",25.922,-89.638,"wide"],["42003","East Gulf",25.925,-85.616,""]];
 function drawBuoys(ctx, st, D, P, V, LW, LH, taken0) {
   const cr = MD().crop || [0, 0, 0, 0], X0 = st.x0, Y0 = st.y0, X1 = st.x0 + st.W, Y1 = st.y0 + st.H;
   if (!st.buoyPx) st.buoyPx = {};
@@ -776,8 +790,10 @@ function drawBuoys(ctx, st, D, P, V, LW, LH, taken0) {
   // 11-01 8:38 AM (Benjamin t1989u: "Make sure it doesn't look excessively crowded, the buoys I care about the most are the ones right off the
   // Washington coast in the PNW views"): Washington offshore buoys first; the North America view shows only the sparse "wide" set; any
   // buoy closer than 30 pt (Washington buoys) / 48 pt (others; na: 60 pt) to one already drawn is left out, so the ocean stays uncrowded. City labels keep priority.
-  const wide = S.view === "na" || VSRC(S.view) === "na", drawn = [], loc = LOCAL_VIEWS.has(VSRC(S.view));
-  for (const [id, , la, lo, tag] of BUOYS) {
+  const wide = S.view === "na" || VSRC(S.view) === "na", drawn = [], loc = LOCAL_VIEWS.has(VSRC(S.view)), wcv = VSRC(S.view) === "wc";
+  // West Coast view (t1999u): Benjamin's buoy list first (offshore + California coast), then the rest; 40 pt spacing
+  const LIST = wcv ? WC_BUOYS.map(id => BUOYS.find(b => b[0] === id)).filter(Boolean).concat(BUOYS.filter(b => !WC_BUOYS.includes(b[0]))) : BUOYS;
+  for (const [id, , la, lo, tag] of LIST) {
     if (wide && !/wide/.test(tag || "")) continue;
     // 11-01 9:31 AM (Benjamin t1998u "See if there are any buoys in the puget sound and strait of Juan de Fuca ... Include a marker in the strait of
     // Georgia"): "inner" = Salish Sea buoys, Washington / Puget views only ("any": also elsewhere as before); "sog" = Halibut Bank, not in the local views
@@ -786,7 +802,7 @@ function drawBuoys(ctx, st, D, P, V, LW, LH, taken0) {
     const fi = (90 - la) / 0.25 - cr[0], fj = ((lo + 360) % 360) / 0.25 - cr[2];
     if (!(fi >= 0 && fj >= 0 && fi < h - 1 && fj < w - 1)) continue;
     if (!(id in st.buoyPx)) { const q = gridInv(V, st, fi, fj, null); st.buoyPx[id] = q && q[0] >= 0 && q[1] >= 0 && q[0] <= st.W && q[1] <= st.H ? [X0 + q[0], Y0 + q[1]] : null; }
-    const minD = pt(wide ? 60 : isWaB(tag, loc) ? 30 : 48), p = st.buoyPx[id]; if (!p || drawn.some(([a, b]) => (a - p[0]) ** 2 + (b - p[1]) ** 2 < minD * minD)) { if (p) (window.__buoyLog = window.__buoyLog || []).push(`${id}: spacing`); continue; }
+    const minD = pt(wide ? 60 : isWaB(tag, loc) ? 30 : wcv ? 40 : 48), p = st.buoyPx[id]; if (!p || drawn.some(([a, b]) => (a - p[0]) ** 2 + (b - p[1]) ** 2 < minD * minD)) { if (p) (window.__buoyLog = window.__buoyLog || []).push(`${id}: spacing`); continue; }
     const r = Math.floor(fi), c = Math.floor(fj); let v;
     if (ok(r, c) && ok(r, c + 1) && ok(r + 1, c) && ok(r + 1, c + 1)) v = sampleRC(F, w, fi, fj);
     else { let bd = Infinity; for (const [rr, cc] of [[r, c], [r, c + 1], [r + 1, c], [r + 1, c + 1]]) { const d = (rr - fi) ** 2 + (cc - fj) ** 2; if (ok(rr, cc) && d < bd) { bd = d; v = F[rr * w + cc]; } } }
@@ -817,7 +833,13 @@ const COAST_TOWNS = { "Neah Bay": [48.37, -124.62, "a"], "La Push": [47.908, -12
   "Port Angeles": [48.12, -123.43, "b"], "Astoria": [46.188, -123.831, "r"], "Cannon Beach": [45.89, -123.96, "r"], "Tacoma": [47.25, -122.44, "r"], "Victoria": [48.43, -123.36, "a"],
   "Port Townsend": [48.117, -122.76, "r"], "Smith Island": [48.321, -122.831, "r"], "Bellingham": [48.75, -122.48, "r"], "Seattle": [47.606, -122.335, "r"],
   "Everett": [47.979, -122.202, "r"], "Olympia": [47.038, -122.9, "b"],
-  "Vancouver": [49.283, -123.12, "r"] };   // BC (the lm / bc town pins for "Vancouver" sit at Vancouver WA)
+  "Vancouver": [49.283, -123.12, "r"],
+  // West Coast view (t1999u): Shore Acres (Cape Arago, OR) + major Oregon / California coast places (labels on the land side)
+  "Shore Acres": [43.326, -124.383, "r"], "Coos Bay": [43.366, -124.217, "r"], "Newport": [44.637, -124.053, "r"], "Crescent City": [41.756, -124.201, "r"],
+  "Eureka": [40.802, -124.164, "r"], "Cape Mendocino": [40.44, -124.409, "r"], "Fort Bragg": [39.446, -123.805, "r"], "Bodega Bay": [38.333, -123.048, "r"],
+  "San Francisco": [37.76, -122.51, "r"], "Half Moon Bay": [37.463, -122.428, "r"], "Santa Cruz": [36.974, -122.03, "r"], "Monterey": [36.6, -121.894, "r"],
+  "Morro Bay": [35.366, -120.85, "r"], "Santa Barbara": [34.42, -119.698, "r"], "Malibu": [34.026, -118.78, "r"], "Los Angeles": [33.99, -118.48, "r"],
+  "San Diego": [32.715, -117.17, "r"] };   // BC (the lm / bc town pins for "Vancouver" sit at Vancouver WA)
 const COAST_VIEWS = {   // order = priority; buoys: "first" = WA buoys placed before the added towns (Pacific NW views), else after
   // 11-01 9:31 AM (Benjamin t1998u "Remove any towns that aren't right on the water from this map. Replace oak harbor with smith island ... Don't
   // really want wave heights for seattle, everett, Tacoma, Olympia"): the Washington wave view drops the static town layer ("own") and draws only
@@ -826,6 +848,9 @@ const COAST_VIEWS = {   // order = priority; buoys: "first" = WA buoys placed be
         order: ["Neah Bay", "La Push", "Ocean Shores", "Westport", "Long Beach", "Port Townsend", "Port Angeles", "Smith Island", "Victoria", "Bellingham",
                 "Seattle", "Everett", "Tacoma", "Olympia", "Cannon Beach"] },
   pnwt: { style: "region", own: true, re: [], add: ["Ocean Shores", "Westport", "La Push", "Long Beach", "Neah Bay"], buoys: "first", big: ["Tacoma", "Seattle", "Vancouver"] },   // Tacoma's name covered buoy 46041
+  wc: { style: "region", re: [], add: ["Shore Acres", "San Francisco", "Los Angeles", "San Diego", "Monterey", "Eureka", "Crescent City", "Newport",
+        "Santa Barbara", "Half Moon Bay", "Santa Cruz", "Morro Bay", "Fort Bragg", "Bodega Bay", "Cape Mendocino", "Malibu", "Westport", "Neah Bay",
+        "Coos Bay", "Cannon Beach", "Long Beach", "Ocean Shores", "La Push"], buoys: "after", side: "r" },
   pnw: { style: "region", re: [], add: ["Ocean Shores", "Long Beach", "La Push", "Westport", "Neah Bay"], buoys: "after", side: "r" } };   // no other city labels here: town names go on the (empty) land side, buoy labels keep the ocean
 const coastPx = (st, V) => (la, lo) => { const cr = MD().crop || [0, 0, 0, 0], k = `${la},${lo}`; if (!st.coastPx) st.coastPx = {};
   if (!(k in st.coastPx)) { const q = gridInv(V, st, (90 - la) / 0.25 - cr[0], ((lo + 360) % 360) / 0.25 - cr[2], null);
