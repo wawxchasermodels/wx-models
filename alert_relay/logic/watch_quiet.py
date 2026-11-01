@@ -36,7 +36,8 @@ Mountain passes: also polls the WSDOT MountainPass JSON (see passes_quiet.py)
 
 SPC Day 1 + Day 2 outlooks (rule 2026-10-20): polls SPC day1 and day2
   categorical GeoJSON (spc_quiet.py) every 30 min. USA item when a non-WA
-  state is SLGT+; WA item when ANY category (incl. TSTM) touches Washington.
+  state is SLGT+; WA item when ANY category (incl. TSTM) touches Washington,
+  except TSTM-only covering < 1% of Washington's area (10-26-26: log only).
   One item per page/day/outlook date; refire only on an upgrade (USA: a state
   rising to ENH+; WA: Washington's category rising). Payload {"source":
   "quiet-watch","kind":"spc-outlook","page":"USA"|"WA","day":1|2,"risk",
@@ -118,6 +119,9 @@ import spc_quiet
 import payload_seen  # 10-21-26: one batched POST per tick + stable payload_id
 import hurricanes_quiet
 import gov_imagery_feeds  # 10-21-26: silent gov imagery check (replaces the X-search routine wakes)
+# 10-24-26 Benjamin: "Turn off the silent satellite imagery watcher." Off by default; the NASA/NOAA/NESDIS feeds are
+# neither fetched nor sent. To turn it back on, start the watcher with QUIET_GOVIMG_ENABLED=1 in its env.
+GOVIMG_ENABLED = os.environ.get("QUIET_GOVIMG_ENABLED", "0") == "1"
 
 # ---------------- config ----------------
 POLL_SECONDS = 300  # master tick: USGS quakes and due checks for the slower sources
@@ -143,8 +147,15 @@ LOG_FILE = BASE + "/watch_quiet.log"
 PID_FILE = BASE + "/watch_quiet.pid"
 SCHEMA = 1
 
-WA_SKIP_EVENTS = {"Small Craft Advisory", "Dense Fog Advisory"}
+WA_SKIP_EVENTS = {"Small Craft Advisory"}
 # USA: always graphic-worthy on a NEW 'Alert' (never on Update).
+def is_ffw_emergency(p):
+    """True only for a Flash Flood Emergency: event name, flashFloodDamageThreat CATASTROPHIC, or the text says FLASH FLOOD EMERGENCY."""
+    if (p.get("event") or "") == "Flash Flood Emergency": return True
+    threat = " ".join((p.get("parameters") or {}).get("flashFloodDamageThreat") or []).upper()
+    text = " ".join(str(p.get(k) or "") for k in ("headline", "description", "instruction")).upper()
+    return "CATASTROPHIC" in threat or "FLASH FLOOD EMERGENCY" in text
+
 USA_ALWAYS = {
     "Winter Storm Warning", "Winter Storm Watch",
     "Blizzard Warning", "Blizzard Watch",
@@ -156,9 +167,55 @@ USA_ALWAYS = {
     "Lake Effect Snow Warning",
     "Hurricane Force Wind Warning",
     "Red Flag Warning",
-    "Freeze Warning",          # previously covered on USA page (freeze graphics exist)
+    # "Freeze Warning" removed 10-24-26 6:16 AM PT: Benjamin wants no Freeze Warnings on the USA page
     "Tornado Watch", "Severe Thunderstorm Watch",
 }
+# 10-26-26 6:09 AM PT (Benjamin): "High surf warnings, coastal flood warnings would be good for the continental US, and only
+# when it's exceptionally severe in Alaska." WARNING level only (advisories, watches and statements stay skipped).
+# Lower 48 + DC: always wake. Alaska: wake only when ak_coastal_exceptional() finds exceptional text; otherwise log only
+# (it can still appear as context in an ALASKA COMBINE post). Hawaii, PR, VI, GU, AS, MP: unchanged (not posted).
+# WA page unchanged (WA land alerts already use the WA path). SURF_CFW_USA=0 in the env turns the rule off.
+SURF_CFW_EVENTS = {"High Surf Warning", "Coastal Flood Warning"}
+SURF_CFW_ON = os.environ.get("SURF_CFW_USA", "1") != "0"
+LOWER48 = set("AL AZ AR CA CO CT DE DC FL GA ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA "
+              "RI SC SD TN TX UT VT VA WA WV WI WY".split())
+AK_SURF_MIN_FT = 20     # Alaska High Surf Warning: breaking waves/surf forecast of 20 ft or more
+AK_SURGE_MIN_FT = 7     # Alaska Coastal Flood / High Surf Warning: water 7 ft or more above the normal high(est) tide line or MHHW
+                        # (western AK advisories already reach 3 to 5 ft, so 5 was too low; Merbok 2022 / Halong 2025 class = 7+)
+AK_EXCEPTIONAL_WORDS = re.compile(r"\b(catastrophic|life[- ]threatening|historic|record|extreme(?:ly)?|devastating|"
+                                  r"major (?:coastal |saltwater )?flooding|severe (?:coastal )?flooding|evacuat\w*|"
+                                  r"particularly dangerous|storm of (?:a )?(?:generation|decade))\b", re.I)
+
+# 10-27-26 8:06 AM PT (Benjamin): "Hold off on coastal flood warnings for the rest of the USA except for California over the
+# next few days." Coastal Flood Warnings outside CA (incl. AK) are logged only until CFW_HOLD_UNTIL (end of Fri 10-30-26 PT).
+# High Surf Warnings are unchanged. Remove the hold early by setting CFW_HOLD_UNTIL=0 in the env or deleting this block.
+CFW_HOLD_UNTIL = os.environ.get("CFW_HOLD_UNTIL", "2026-10-30T23:59:00-07:00")
+def cfw_hold_active():
+    try:
+        from datetime import datetime
+        if CFW_HOLD_UNTIL in ("", "0"): return False
+        return datetime.now().astimezone() < datetime.fromisoformat(CFW_HOLD_UNTIL)
+    except Exception:
+        return False
+
+def ak_coastal_exceptional(p):
+    """Alaska High Surf / Coastal Flood Warning: exceptional only if the headline/description (NOT the boilerplate
+    instruction) has an exceptional word, or surf >= AK_SURF_MIN_FT, or water >= AK_SURGE_MIN_FT above normal high
+    tide / MHHW. Returns a short reason string, or "" when ordinary."""
+    text = " ".join(str(p.get(k) or "") for k in ("headline", "description"))
+    params = p.get("parameters") or {}
+    text += " " + " ".join(str(x) for x in (params.get("NWSheadline") or []))
+    m = AK_EXCEPTIONAL_WORDS.search(text)
+    if m:
+        return "text says '%s'" % m.group(0).lower()
+    for m in re.finditer(r"(?<![\d.])(\d{1,2}(?:\.\d+)?)(?:\s*(?:to|-|and)\s*(\d{1,2}(?:\.\d+)?))?\s*(?:feet|foot|ft)\b([^.\n]{0,80})", text, re.I):
+        hi = float(m.group(2) or m.group(1)); ctx = (text[max(0, m.start() - 80):m.start()] + m.group(3)).lower()
+        if hi >= AK_SURGE_MIN_FT and re.search(r"above (?:the )?(?:normal )?(?:high tide|highest tide|mhhw|mean higher high)|surge|inundation", ctx):
+            return "water %g ft above normal high tide" % hi
+        if hi >= AK_SURF_MIN_FT and re.search(r"surf|breaking wave|waves", ctx):
+            return "surf %g ft" % hi
+    return ""
+
 USA_SKIP_EVENTS = {"Winter Weather Advisory"}  # outside WA; WA WWA handled by WA path
 # ----------------------------------------
 log = logging.getLogger("quiet_watch")
@@ -226,12 +283,29 @@ def classify_quiet(feature):
             if g > 65:
                 out.append(("USA", f"High Wind Watch gusts {g} mph"))
         elif ev == "Flash Flood Warning":
-            threat = " ".join((p.get("parameters") or {}).get("flashFloodDamageThreat") or []).upper()
-            if "CONSIDERABLE" in threat or "CATASTROPHIC" in threat:
-                out.append(("USA", "Flash Flood Warning (considerable/catastrophic)"))
-            else:
-                city = urgent.major_city_hit(p)
-                if city: out.append(("USA", "Flash Flood Warning: " + city))
+            # 10-24-26 12:56 PM PT (Benjamin): USA page skips every Flash Flood Warning unless it is a Flash Flood Emergency
+            # (flashFloodDamageThreat CATASTROPHIC or "FLASH FLOOD EMERGENCY" in the text). Emergencies are woken by the urgent
+            # watcher (watch.py, returned above); considerable / no-tag / major-city FFWs are no longer wakes. WA page unchanged.
+            if is_ffw_emergency(p):
+                out.append(("USA", "Flash Flood Emergency"))
+        elif ev in SURF_CFW_EVENTS and SURF_CFW_ON:
+            if ev == "Coastal Flood Warning" and cfw_hold_active() and "CA" not in non_wa:
+                log.info("Coastal Flood Warning held (Benjamin 10-27-26 8:06 AM, non-CA hold until %s), logged only: %s", CFW_HOLD_UNTIL, (p.get("areaDesc") or "")[:120])
+            elif non_wa & LOWER48:
+                out.append(("USA", f"USA {ev} (continental US)"))
+            elif "AK" in non_wa:
+                why = ak_coastal_exceptional(p)
+                if why:
+                    out.append(("USA", f"Alaska {ev}: exceptional ({why})"))
+                else:
+                    log.info("Alaska %s not exceptional, logged only (Alaska combo context): %s", ev, (p.get("areaDesc") or "")[:120])
+            # Hawaii and territories: unchanged, skipped
+        elif ev == "Flood Warning":
+            # 10-25-26 11:48 AM PT (Benjamin): USA regular Flood Warnings post only when forecast to reach major flood stage or
+            # mentioning catastrophic/emergency/evacuation. The urgent watcher (watch.py classify_flood, polls every 30 s and
+            # also catches Updates that newly qualify) wakes for those and classify() above already returned []. Every other
+            # USA Flood Warning stays skipped here. WA Flood Warnings keep the WA path above. FLOOD_USA=0 turns the rule off.
+            pass
         # Winter Weather Advisory + everything not listed: skip for USA
     return out
 
@@ -242,6 +316,10 @@ def item_for(feature, page, reason):
             "expires": p.get("expires"), "headline": p.get("headline"),
             "sent": p.get("sent"), "reason": reason,
             "sender": p.get("senderName") or p.get("sender")}
+
+_item_for_base = item_for
+def item_for(feature, page, reason):   # 10-30-26 6:25 PM (Benjamin): WA ask-first tag (wa_ask_first.json)
+    return urgent._tag_wa_ask(_item_for_base(feature, page, reason), page, feature.get("properties") or {})
 
 RELEASE_WINDOW_MIN = 5   # one NWS release can stamp segments a minute or two apart
 
@@ -347,6 +425,8 @@ def _ends_soon(p, now):
     return bool(end and end < now + timedelta(minutes=RELEASE_MIN_REMAINING_MIN))
 
 
+_quiet_claim_skip_logged = set()
+
 def seen_key(item): return f'{item["id"]}|{item["page"]}'
 
 def evaluate_quiet(features, seen, other_ids, pending_ids, now, state=None):
@@ -390,10 +470,16 @@ def evaluate_quiet(features, seen, other_ids, pending_ids, now, state=None):
                 continue
             if claim_lock is not None:
                 try:
-                    blocked = claim_lock.is_claimed([it["id"]] + refs, page, p.get("event"), zone_codes(p), sorted(urgent.ugc_states(p)))
+                    _refs, _cont = claim_lock.alert_link_info(p)   # 10-31-26: new vs update (references / VTEC chain)
+                    blocked = claim_lock.is_claimed([it["id"]] + refs, page, p.get("event"), zone_codes(p), sorted(urgent.ugc_states(p)),
+                                                    refs=_refs, continuation=_cont)
                 except Exception:
                     blocked = None
                 if blocked:
+                    if it["id"] not in _quiet_claim_skip_logged:   # 10-31-26: quiet claim skips are logged once per alert too
+                        _quiet_claim_skip_logged.add(it["id"])
+                        log.info("claim_lock skip: %s | %s | %s blocked by claim %s (%s)", p.get("event"), page,
+                                 (p.get("areaDesc") or "")[:80], blocked.get("claim_id"), blocked.get("status"))
                     continue
             if is_update:
                 it["message_type"] = "Update"; it["replaces"] = refs
@@ -416,7 +502,7 @@ def quake_region(lat, lon):
     """Return "WA" | "AK" | "CONUS" | None from coordinates. Pragmatic bbox heuristic:
     - WA: lat 45.5-49.1, lon -125.5..-116.9 (land bbox -124.8..-116.9 plus ~0.7 deg
       just-offshore margin to the west; a few miles offshore WA still counts).
-    - AK: lat >=51 and lon <=-129, or lon >=172 (western Aleutians wrapping past
+    - AK (lat >=50 so ~50 mi south of the Aleutians counts): lat >=50 and lon <=-129, or lon >=172 (western Aleutians wrapping past
       +180 into positive longitudes). NOTE: this bbox also catches parts of
       Yukon/BC and, for lon>0, far-eastern Russia at M7+ -- accepted heuristic,
       the woken routine verifies place before any post.
@@ -432,7 +518,7 @@ def quake_region(lat, lon):
     if lon is None: return None
     if 45.5 <= lat <= 49.1 and -125.5 <= lon <= -116.9:
         return "WA"
-    if lat >= 51.0 and (lon <= -129.0 or lon >= 172.0):
+    if lat >= 50.0 and (lon <= -129.0 or lon >= 172.0):
         return "AK"
     if 23.5 <= lat <= 50.5 and -125.5 <= lon <= -65.5:
         return "CONUS"
@@ -440,7 +526,7 @@ def quake_region(lat, lon):
 
 def quake_item(feature):
     """classify one USGS feature -> payload item or None (thresholds per alert_style.md:
-    WA M3.5+, CONUS (rest of nation) M4.5+, Alaska M7.0+; below = skip entirely)."""
+    WA M3.5+, CONUS (rest of nation) M4.0+, Alaska (incl. ~50 mi offshore) M6.0+; below = skip entirely)."""
     props = feature.get("properties") or {}
     geom = feature.get("geometry") or {}
     coords = geom.get("coordinates") or []
@@ -455,10 +541,10 @@ def quake_item(feature):
         if mag < 3.5: return None
         page = "WA"
     elif region == "AK":
-        if mag < 7.0: return None
+        if mag < 6.0: return None
         page = "USA"
     else:  # CONUS
-        if mag < 4.5: return None
+        if mag < 4.0: return None
         page = "USA"
     t_ms = props.get("time")
     try:
@@ -688,6 +774,9 @@ def run(once=False, dry_run=False):
     url = os.environ.get("QUIET_WEBHOOK_URL", ""); auth = os.environ.get("QUIET_WEBHOOK_AUTH", "")
     if not dry_run and os.environ.get("ALERT_RELAY") != "1":
         with open(PID_FILE, "w") as fh: fh.write(str(os.getpid()))
+    if not dry_run and os.environ.get("ALERT_RELAY") != "1":   # 10-23-26 alert relay: merge ids the GitHub backup already POSTed (never raises)
+        try: import box_sync_seen; box_sync_seen.sync()
+        except Exception: pass
     stop = {"flag": False}
     signal.signal(signal.SIGTERM, lambda *a: stop.update(flag=True))
     session = requests.Session()
@@ -696,6 +785,9 @@ def run(once=False, dry_run=False):
              os.getpid(), dry_run, first_run, bool(url), bool(auth), ALERT_POLL_SECONDS, POLL_SECONDS)
     while not stop["flag"]:
         now = datetime.now(timezone.utc)
+        if not dry_run and not once and os.environ.get("ALERT_RELAY") != "1":   # relaygap 10-31-26: after a freeze, merge relay-sent ids (seen files are re-read below)
+            try: import box_sync_seen; box_sync_seen.resync_after_gap("quiet")
+            except Exception: pass
         # General NWS alerts are due only every ALERT_POLL_SECONDS. The loop
         # still ticks every POLL_SECONDS for USGS quakes, pending flushes,
         # and the 15 min and 30 min due checks for the other sources.
@@ -733,6 +825,7 @@ def run(once=False, dry_run=False):
         saved_pass_doc = load_json(PASSES_FILE, None)
         passes_due = dry_run or (time.time() - float(state.get("last_pass_attempt_ts") or 0) >= PASS_POLL_SECONDS)
         pass_changes = []
+        pass_held = (saved_pass_doc or {}).get("through_hwy_held") or {}
         if passes_due:
             try: pass_snapshot = passes_quiet.fetch_passes(session, urgent.USER_AGENT)
             except Exception as e:
@@ -743,6 +836,11 @@ def run(once=False, dry_run=False):
             if pass_snapshot is not None:
                 if saved_pass_doc and isinstance(saved_pass_doc.get("passes"), dict):
                     pass_changes = passes_quiet.diff_snapshots(saved_pass_doc["passes"], pass_snapshot)
+                    # 10-26-26 12:51 PM (Benjamin): through-highway reopening rule (THROUGH_HWY=0 turns it off)
+                    pass_changes, pass_held, _th_notes = passes_quiet.apply_through_hwy(
+                        pass_changes, saved_pass_doc["passes"], pass_snapshot,
+                        saved_pass_doc.get("through_hwy_held") or {}, now.isoformat())
+                    for _n in _th_notes: log.info("%s%s", "[dry-run] " if dry_run else "", _n)
                 elif not dry_run:
                     pass_changes = []  # first run: seeded silently below
                 else:
@@ -766,6 +864,13 @@ def run(once=False, dry_run=False):
             if spc_by_day:
                 spc_items, spc_meta, spc_seeded_days = spc_quiet.evaluate(spc_by_day, saved_spc_doc, pending_ids)
                 spc_seed = bool(spc_seeded_days)
+                for _d, _p in sorted(spc_by_day.items()):
+                    # 10-26-26 (Benjamin): TSTM-only covering < 1% of WA never wakes for WA; log once per issuance
+                    if _p and spc_quiet.wa_small_tstm(_p):
+                        _prev_iss = (((saved_spc_doc or {}).get("days") or {}).get(str(_d)) or {}).get("issued")
+                        if dry_run or _prev_iss != _p.get("issued") or not (((saved_spc_doc or {}).get("days") or {}).get(str(_d)) or {}).get("wa_tstm_area_frac") is not None:
+                            log.info("SPC Day %d outlook (issued=%s): WA general thunder covers %.2f%% of Washington (< %.0f%%); no WA wake (log only)",
+                                     _d, _p.get("issued"), 100 * float(_p.get("wa_tstm_area_frac") or 0), 100 * spc_quiet.WA_TSTM_MIN_AREA_FRAC)
         # --- NHC hurricane cones (30-min cadence) ---
         saved_nhc_doc = load_json(HURRICANES_FILE, None)
         nhc_due = dry_run or (time.time() - float(state.get("last_nhc_attempt_ts") or 0) >= NHC_POLL_SECONDS)
@@ -780,7 +885,7 @@ def run(once=False, dry_run=False):
             if nhc_storms is not None:
                 nhc_items, nhc_seed = hurricanes_quiet.evaluate_hurricanes(nhc_storms, saved_nhc_doc, pending_ids, now)
         # --- government imagery (30-min cadence, 5:00 AM to 8:30 PM PT only) ---
-        gov_due = dry_run or (gov_imagery_feeds.in_window(now) and time.time() - float(state.get("last_govimg_attempt_ts") or 0) >= gov_imagery_feeds.GOVIMG_POLL_SECONDS)
+        gov_due = GOVIMG_ENABLED and (dry_run or (gov_imagery_feeds.in_window(now) and time.time() - float(state.get("last_govimg_attempt_ts") or 0) >= gov_imagery_feeds.GOVIMG_POLL_SECONDS))
         gov_cands, gov_marks, gov_report, gov_error = [], {}, None, None
         if gov_due:
             try:
@@ -791,7 +896,7 @@ def run(once=False, dry_run=False):
                 log.warning("gov imagery check failed (%s); other sources continue", gov_error)
             if not dry_run: state["last_govimg_attempt_ts"] = time.time()
         if dry_run:
-            return {"gov_imagery_in_window": gov_imagery_feeds.in_window(now),
+            return {"gov_imagery_enabled": GOVIMG_ENABLED, "gov_imagery_in_window": gov_imagery_feeds.in_window(now),
                     "gov_imagery_would_send": (gov_imagery_feeds.payload(gov_cands, now) if gov_cands else None),
                     "gov_imagery_report": gov_report, "gov_imagery_error": gov_error,
                     "active": len(features), "qualifying": items,
@@ -847,14 +952,14 @@ def run(once=False, dry_run=False):
                 p_ok, q_ok = deliver_pass_batch(session, url, auth, pass_changes, state, now)
                 if p_ok or q_ok:
                     save_json(PASSES_FILE, {"passes": pass_snapshot, "seeded_at": saved_pass_doc.get("seeded_at"),
-                                            "last_poll": now.isoformat(), "last_changes": pass_changes})
+                                            "last_poll": now.isoformat(), "last_changes": pass_changes, "through_hwy_held": pass_held})
                     pass_posted, pass_queued = (1 if p_ok else 0), (1 if q_ok else 0)
                     log.info("mountain passes: %d notable change(s) %s", len(pass_changes), "posted" if p_ok else "queued")
                 else:
                     log.warning("mountain passes: delivery neither posted nor queued; state NOT advanced")
             else:
                 save_json(PASSES_FILE, {"passes": pass_snapshot, "seeded_at": saved_pass_doc.get("seeded_at"),
-                                        "last_poll": now.isoformat(), "last_changes": []})
+                                        "last_poll": now.isoformat(), "last_changes": [], "through_hwy_held": pass_held})
         # --- SPC: seed / fire (state advances only on POST success or queueing; silent advance if no fire) ---
         spc_posted = spc_queued = 0
         if spc_due and spc_by_day:
@@ -946,6 +1051,9 @@ def run(once=False, dry_run=False):
                      last_nhc_qualifying=len(nhc_items), last_nhc_posted=nhc_posted, last_nhc_queued=nhc_queued,
                      pending_count=len(load_json(PENDING_FILE, [])))
         save_json(STATE_FILE, state)
+        if not dry_run and os.environ.get("ALERT_RELAY") != "1":   # 10-23-26 alert relay heartbeat (throttled, never raises)
+            try: import box_heartbeat; box_heartbeat.beat("quiet")
+            except Exception: pass
         if once: return {"active": len(features), "qualifying": items, "quakes_active": len(quake_features),
                          "quakes_qualifying": quake_fire, "posted": len(posted), "queued": len(queued),
                          "passes_active": (len(pass_snapshot) if pass_snapshot is not None else None),

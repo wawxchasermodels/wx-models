@@ -1,0 +1,9 @@
+{
+ "_note": "WA ASK-FIRST SWITCH (Benjamin 10-30-26 6:25 PM: 'Let's also switch to ask for permission for the other Washington weather alerts again for now too'). enabled=true: every Washington Weather Chasers NWS alert goes to Slack #washingtonalerts and waits for Benjamin's OK, EXCEPT the keep_auto list. To revert to the 10-21/10-23/10-28 WA auto-post rules set enabled=false (read live, no restart needed). Backups of edited files: *.bak_pre_waask_20261030.",
+ "enabled": true,
+ "since": "2026-10-30T18:25:00-07:00",
+ "keep_auto_events": ["tornado warning", "tornado emergency"],
+ "keep_auto_waterspout": true,
+ "pass_posts_auto": true,
+ "now_ask_first_previously_auto": ["severe thunderstorm warning", "dust advisory", "dust storm warning", "winter weather advisory", "winter storm warning", "wind advisory", "high wind warning"]
+}

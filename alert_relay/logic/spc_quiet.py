@@ -12,6 +12,11 @@ Wake rule (Benjamin 2026-10-20 5:47 AM PT; replaces the 10-18 MDT+ only rule):
     risk = highest category over non-WA states; states = non-WA states at SLGT+.
   WA page: fire whenever ANY category, including TSTM (general thunder), touches Washington.
     risk = Washington's highest category; states = ["WA"].
+    EXCEPTION (Benjamin 2026-10-26 5:52 AM PT): when Washington's highest category is TSTM and the
+    TSTM polygon covers less than 1% of Washington's area (WA_TSTM_MIN_AREA_FRAC), do NOT wake for WA
+    (log only). parsed["wa_tstm_area_frac"] holds the share (Natural Earth WA shape in wa_shape.json,
+    same method as render_alert_map.py wa_risk_area_frac; 0.1-deg grid fallback without shapely).
+    MRGL and higher touching WA still wake regardless of size; the USA page is unchanged.
   Dedupe per (page, day, outlook date): at most one post each, where the outlook date is the
   convective day (EXPIRE_ISO date minus 1 day, so the 01Z Day 1 update keeps the same key). A refire for the
   same key is allowed only on an UPGRADE vs what was last posted:
@@ -52,6 +57,8 @@ RANK_RISK = {v: k for k, v in RISK_RANK.items()}
 USA_FIRE_RANK = 2      # SLGT
 USA_REFIRE_RANK = 3    # an upgrade must reach ENH+ to refire
 WA_FIRE_RANK = 0       # TSTM
+WA_TSTM_MIN_AREA_FRAC = 0.01   # 10-26-26 (Benjamin): TSTM-only covering < 1% of WA = no WA wake (log only)
+WA_SHAPE_FILE = os.path.normpath(os.path.join(_HERE, "..", "data", "wa_shape.json"))   # relay copy of the box file
 FIRE_RANK = USA_FIRE_RANK  # back-compat name
 
 _GRID = None
@@ -106,6 +113,40 @@ def states_for_geom(geom, only=None):
                 hits.append(st); break
     return sorted(hits)
 
+_WA_SHAPE = None
+def _wa_shape():
+    global _WA_SHAPE
+    if _WA_SHAPE is None:
+        from shapely.geometry import shape
+        _WA_SHAPE = shape(json.load(open(WA_SHAPE_FILE))["geometry"]).buffer(0)
+    return _WA_SHAPE
+
+def wa_area_frac(geoms):
+    """Share (0..1) of Washington's area covered by the union of the given GeoJSON geometries.
+    Shapely + Natural Earth WA shape (deg^2 ratio, like render_alert_map.py); falls back to the
+    share of WA 0.1-deg grid points inside if shapely or the shape file is unavailable."""
+    geoms = [g for g in geoms if g]
+    if not geoms: return 0.0
+    try:
+        from shapely.geometry import shape
+        from shapely.ops import unary_union
+        wa = _wa_shape()
+        risk = unary_union([shape(g).buffer(0) for g in geoms])
+        return float(risk.intersection(wa).area / wa.area)
+    except Exception:
+        pts = state_points().get("WA") or []
+        if not pts: return 0.0
+        pps = [_prep(g) for g in geoms]
+        hit = sum(1 for lat, lon in pts if any(point_in_geom(lat, lon, None, pp) for pp in pps))
+        return hit / len(pts)
+
+def wa_small_tstm(parsed):
+    """True when WA's highest category is TSTM and it covers < WA_TSTM_MIN_AREA_FRAC of WA (no WA wake)."""
+    rbs = parsed.get("risk_by_state") or {}
+    if int(rbs.get("WA", -1)) != 0: return False
+    frac = parsed.get("wa_tstm_area_frac")
+    return frac is not None and float(frac) < WA_TSTM_MIN_AREA_FRAC
+
 def _outlook_date(expires, valid, issued):
     """Convective day label: the date the outlook period starts (EXPIRE_ISO 12Z minus 1 day),
     so the 01Z Day 1 update keeps the same key as the 06Z/13Z/1630Z/20Z issuances."""
@@ -119,7 +160,7 @@ def parse_spc(data, day=1):
     """GeoJSON -> {day, issued, valid, expires, outlook_date, max_risk, max_rank, risk_by_state}.
     risk_by_state: highest rank per state; MRGL+ for all states, TSTM tracked for WA only."""
     feats = (data or {}).get("features") or []
-    issued = valid = expires = None; risk_by_state = {}; max_rank = -1
+    issued = valid = expires = None; risk_by_state = {}; max_rank = -1; tstm_geoms = []
     for f in feats:
         p = f.get("properties") or {}
         rank = RISK_RANK.get(str(p.get("LABEL") or "").upper().strip())
@@ -129,10 +170,14 @@ def parse_spc(data, day=1):
         if p.get("VALID_ISO"): valid = str(p["VALID_ISO"])
         if p.get("EXPIRE_ISO"): expires = str(p["EXPIRE_ISO"])
         max_rank = max(max_rank, rank)
+        if rank == 0 and f.get("geometry"): tstm_geoms.append(f.get("geometry"))
         for st in states_for_geom(f.get("geometry"), only=({"WA"} if rank <= 0 else None)):
             if rank > risk_by_state.get(st, -1): risk_by_state[st] = rank
+    wa_frac = None
+    if risk_by_state.get("WA", -1) == 0:   # only needed when WA's highest category is TSTM
+        wa_frac = round(wa_area_frac(tstm_geoms), 5)
     return {"day": int(day), "issued": issued, "valid": valid, "expires": expires,
-            "outlook_date": _outlook_date(expires, valid, issued),
+            "outlook_date": _outlook_date(expires, valid, issued), "wa_tstm_area_frac": wa_frac,
             "max_risk": RANK_RISK.get(max_rank, "NONE"), "max_rank": max_rank,
             "risk_by_state": risk_by_state,
             "fire_states": sorted(s for s, r in risk_by_state.items() if s != "WA" and r >= USA_FIRE_RANK)}
@@ -141,6 +186,7 @@ def page_scope(parsed, page):
     """{ST: rank} relevant to a page."""
     rbs = {k: int(v) for k, v in (parsed.get("risk_by_state") or {}).items()}
     if page == "WA":
+        if wa_small_tstm(parsed): return {}   # 10-26-26: TSTM-only under 1% of WA, no wake (logged by watch_quiet)
         return {"WA": rbs["WA"]} if rbs.get("WA", -1) >= WA_FIRE_RANK else {}
     return {s: r for s, r in rbs.items() if s != "WA" and r >= USA_FIRE_RANK}
 
@@ -259,4 +305,6 @@ if __name__ == "__main__":
         except Exception as e: print("SPC day %d fetch failed: %s" % (d, type(e).__name__))
     items, meta, seeded = evaluate(by_day, saved, set()) if by_day else ([], {}, [])
     print(json.dumps({"mode": "dry-run (no webhook sent, no files written)", "days_fetched": sorted(by_day),
+                      "wa_tstm_area_frac": {d: p.get("wa_tstm_area_frac") for d, p in by_day.items()},
+                      "wa_small_tstm_suppressed": [d for d, p in by_day.items() if wa_small_tstm(p)],
                       "would_seed_days": seeded, "would_wake": items}, indent=1, default=str))

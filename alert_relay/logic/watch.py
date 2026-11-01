@@ -23,7 +23,8 @@ USER_AGENT = "WashingtonWeatherChasers urgent watcher (contact via Grok Bot)"
 # 10-21 2 PM: event filter = exactly the types classify()/classify_update() act on (~12 KB vs ~127 KB per poll).
 # ADD A TYPE HERE whenever classify() learns a new event, or it will never be seen. Names checked against /alerts/types.
 WATCH_EVENTS = ["Tornado Warning", "Flash Flood Warning", "Extreme Wind Warning", "Severe Thunderstorm Warning",
-                "Special Weather Statement", "Special Marine Warning"]
+                "Special Weather Statement", "Special Marine Warning",
+                "Flood Warning"]   # 10-25-26 11:48 AM PT (Benjamin): USA regular Flood Warnings, major stage or catastrophic/emergency/evacuation
 API_URL = "https://api.weather.gov/alerts/active?status=actual&event=" + ",".join(e.replace(" ", "%20") for e in WATCH_EVENTS)   # Alerts + Updates (Cancels ignored)
 ALERT_URL = "https://api.weather.gov/alerts/"
 MAX_REF_FETCHES = 10                # per poll, to look up the prior level of an updated warning
@@ -49,6 +50,7 @@ for _p in (_RELAY, _LOGIC):
 import net as requests
 from cities import CITIES, METRO_COUNTIES
 import payload_seen  # 10-21-26: stable payload_id for resend dedupe
+import flood_rules   # 10-25-26: USA Flood Warning rule (major flood stage or catastrophic/emergency/evacuation); FLOOD_USA=0 turns it off
 try:
     import claim_lock
 except Exception:
@@ -218,6 +220,11 @@ def major_city_hit(p):
     return None
 
 
+FFW_EVAC_RE = re.compile(r"EVACUAT")   # switch: FFW_EVAC=0 env turns it off
+if os.environ.get("FFW_EVAC", "1") == "0":
+    FFW_EVAC_RE = re.compile(r"(?!x)x")
+
+
 def threat_level(p):
     """0 = normal, 2 = PDS/CONSIDERABLE, 3 = Emergency/CATASTROPHIC (Tornado or Flash Flood Warning)."""
     ev = p.get("event") or ""
@@ -236,15 +243,23 @@ def threat_level(p):
         t = " ".join(params.get("flashFloodDamageThreat") or []).upper()
         if "CATASTROPHIC" in t or "FLASH FLOOD EMERGENCY" in text:
             return 3
+        if FFW_EVAC_RE.search(text):   # 10-24-26 10:50 PM (Benjamin): FFW that mentions evacuations posts on USA
+            return 1
         if "PARTICULARLY DANGEROUS SITUATION" in text:
             return 2
+    elif ev == "Flood Warning":   # 10-25-26 (Benjamin): 1 = qualifies for the USA page (major stage or catastrophic/emergency/evacuation)
+        if flood_rules.flood_usa_reason(p):
+            return 1
     return 0
 
 
 LEVEL_NAME = {("Tornado Warning", 3): "Tornado Emergency", ("Tornado Warning", 2): "PDS Tornado Warning", ("Tornado Warning", 1): "Confirmed Tornado Warning",
-              ("Flash Flood Warning", 3): "Flash Flood Emergency", ("Flash Flood Warning", 2): "PDS Flash Flood Warning"}
+              ("Flash Flood Warning", 3): "Flash Flood Emergency", ("Flash Flood Warning", 2): "PDS Flash Flood Warning",
+              ("Flash Flood Warning", 1): "Flash Flood Warning with evacuations",
+              ("Flood Warning", 1): "USA Flood Warning (major stage or catastrophic/emergency/evacuation)"}
 # minimum level an Update must reach to fire
-UPGRADE_MIN = {"Tornado Warning": 1, "Flash Flood Warning": 3}
+UPGRADE_MIN = {"Tornado Warning": 1, "Flash Flood Warning": 1}
+FFW_FIRE_LEVELS = (1, 3)   # FFW Update fires for evacuations (1) or Emergency (3), never PDS-only (2)
 
 
 def classify_update(feature, prior_level):
@@ -257,6 +272,8 @@ def classify_update(feature, prior_level):
         return None
     lvl = threat_level(p)
     if lvl < UPGRADE_MIN[ev] or lvl <= (prior_level or 0):
+        return None
+    if ev == "Flash Flood Warning" and lvl not in FFW_FIRE_LEVELS:
         return None
     scope = "WA" if is_washington(p) else "USA"
     return (scope, f"Upgraded to {LEVEL_NAME[(ev, lvl)]}", True, lvl)
@@ -315,7 +332,7 @@ def svr_population(feature):
             log.warning("SVR population cache write failed (%s)", type(e).__name__)
     log.info("SVR population %s: %s", aid[-20:], n)
     return n
-WA_HOLD_START_HOUR = 21   # WA page overnight hold is 9 PM-5 AM PT (wider than the 10 PM global pause)
+WA_HOLD_START_HOUR = 21   # WA page overnight hold is 9 PM-5 AM PT (USA hold is 9 PM-2 AM, OVERNIGHT_START_HOUR)
 WA_HOLD_END_HOUR = 5      # 10-21-26 final check: own constant; it used OVERNIGHT_END_HOUR, which became 2 at 4:05 PM
 
 
@@ -354,6 +371,27 @@ def vtec_end_only(p):
 
 
 _claim_skip_logged = set()
+_minor_skip_logged = set()   # 10-26-26: USA minor-only Flood Warnings skipped (logged once per id)
+
+
+def classify_flood(feature):
+    """10-25-26 (Benjamin): USA regular Flood Warning rule for an Alert OR an Update (evaluate() decides whether an
+    Update newly qualifies). (scope, reason, urgent) or None. Washington alerts never (WA page unchanged)."""
+    p = feature.get("properties") or {}
+    if (p.get("event") or "") != "Flood Warning" or (p.get("messageType") or "") not in ("Alert", "Update"):
+        return None
+    if (p.get("status") or "Actual") != "Actual" or vtec_end_only(p) or is_washington(p):
+        return None
+    r = flood_rules.flood_usa_reason(p)
+    if not r:
+        ms = flood_rules.minor_skip_reason(p) if flood_rules.FLOOD_USA_ON else None
+        if ms and p.get("id") not in _minor_skip_logged:   # 10-26-26 11:40 AM PT (Benjamin): minor flooding only -> skip, no wake (logged once)
+            _minor_skip_logged.add(p.get("id"))
+            if len(_minor_skip_logged) > 5000:
+                _minor_skip_logged.clear()
+            log.info("minor flood skip: Flood Warning | %s | %s | %s", ms, (p.get("areaDesc") or "")[:80], p.get("id"))
+        return None
+    return ("USA", "USA " + r, flood_rules.flood_usa_urgent(r))
 
 
 def classify(feature):
@@ -392,7 +430,14 @@ def classify(feature):
         threat = " ".join(params.get("flashFloodDamageThreat") or []).upper()
         if "CATASTROPHIC" in threat or "FLASH FLOOD EMERGENCY" in text:
             return ("WA" if wa else "USA", "Flash Flood Emergency", True)
+        if not wa and FFW_EVAC_RE.search(text):   # 10-24-26 10:50 PM (Benjamin): USA FFW with evacuation language posts
+            return ("USA", "Flash Flood Warning with evacuations", True)
         return None
+    if ev == "Flood Warning":
+        # 10-25-26 11:48 AM PT (Benjamin): USA page posts a regular Flood Warning forecast to reach MAJOR flood stage, or one that
+        # mentions catastrophic, emergency or evacuation language. Others stay skipped. WA page unchanged (quiet watcher's WA path).
+        # Text-language ones post any hour like the FFW evacuation rule; major-stage-only ones wait out the 9 PM-2 AM PT hold.
+        return classify_flood(feature)
     if ev == "Extreme Wind Warning":
         return ("WA" if wa else "USA", "Extreme Wind Warning", True)
     if ev == "Severe Thunderstorm Warning" and wa:   # 10-21 7:13 AM: WA SVR auto-posts to WA page (WA overnight hold applies)
@@ -439,6 +484,28 @@ def post_batch(session, url, auth, items, payload_id=None):
     return r.status_code
 
 
+def _tag_wa_ask(item, page, props):
+    """10-30-26 6:25 PM (Benjamin): WA ask-first switch (/workspace/wa_alerts/wa_ask_first.json). Adds needs_benjamin_ok/post_mode to WA wake items."""
+    if (page or "").upper() != "WA": return item
+    try:
+        import wa_ask_first
+        n, why = wa_ask_first.needs_ok("wa", props.get("event"), (props.get("headline") or "") + " " + (props.get("description") or ""))
+    except Exception as e:
+        n, why = True, "WA ask-first check failed (%r); ask first" % (e,)
+    if n:
+        item["needs_benjamin_ok"] = True
+        item["post_mode"] = why
+        # 10-31-26 6:58 PM (Benjamin): Dense Fog Advisory and fog Special Weather Statements are CHAT-QUESTION ONLY:
+        # build NO graphic, take NO claim, post NO Slack until he says yes in chat.
+        _ev = (props.get("event") or "").lower()
+        _tx = ((props.get("headline") or "") + " " + (props.get("description") or "")).lower()
+        if _ev == "dense fog advisory" or (_ev == "special weather statement" and "fog" in _tx):
+            item["ask_chat_only_no_build"] = True
+            item["post_mode"] = ("CHAT QUESTION ONLY (Benjamin 10-31-26): send a one-line text question in chat (event, area, until time); "
+                                 "do NOT run post_alert.py, take a claim, build a graphic or caption, or send Slack until he says yes in chat.")
+    return item
+
+
 def alert_item(feature, scope, reason):
     p = feature.get("properties") or {}
     return {"id": p.get("id") or feature.get("id"), "event": p.get("event"), "headline": p.get("headline"),
@@ -452,10 +519,11 @@ def prune(seen, now):
 
 
 class LevelTracker:
-    """Remembers threat level + chain root for every Tornado/Flash Flood Warning message seen."""
+    """Remembers threat level + chain root for every Tornado/Flash Flood Warning (and, 10-25-26, Flood Warning) message seen."""
     def __init__(self, cache, session=None, fetch=True):
         self.cache = cache            # id -> {"lvl": int, "root": id, "t": iso}
         self.session, self.fetch, self.fetched = session, fetch, 0
+        self.defer = {}               # 10-25-26: Flood Warning update id -> polls deferred because its history was not known yet
 
     def record(self, p, now):
         refs = [r.get("identifier") for r in p.get("references") or [] if r.get("identifier")]
@@ -489,9 +557,14 @@ class LevelTracker:
             log.warning("could not fetch referenced alert (%s)", type(e).__name__)
             return None
 
-    def prior_level(self, p):
-        """Highest level among referenced messages; None if none of them could be determined."""
-        lv = [self.level_of(r.get("identifier")) for r in p.get("references") or [] if r.get("identifier")]
+    def prior_level(self, p, latest_only=False):
+        """Highest level among referenced messages; None if none of them could be determined.
+        latest_only (10-25-26, Flood Warnings): only the most recent referenced message counts (one lookup, and
+        'newly qualifies' means the message right before this one did not)."""
+        refs = [r for r in p.get("references") or [] if r.get("identifier")]
+        if latest_only and refs:
+            refs = [sorted(refs, key=lambda r: r.get("sent") or "")[-1]]
+        lv = [self.level_of(r.get("identifier")) for r in refs]
         lv = [x for x in lv if x is not None]
         return max(lv) if lv else None
 
@@ -504,6 +577,7 @@ def evaluate(features, seen, other, now, overnight, tracker=None):
     """Return (to_send, held). Each item carries a private '_keys' list of seen keys to mark on success."""
     tracker = tracker or LevelTracker({}, fetch=False)
     send, held = [], []
+    flood_batch = set()
     feats = sorted(features, key=lambda f: (f.get("properties") or {}).get("sent") or "")
     for f in feats:
         p = f.get("properties") or {}
@@ -513,7 +587,40 @@ def evaluate(features, seen, other, now, overnight, tracker=None):
         exp = parse_time(p.get("expires") or "")
         expired = bool(exp and exp < now)
         c = None
-        if mt == "Alert":
+        if p.get("event") == "Flood Warning":
+            # 10-25-26 11:48 AM PT (Benjamin): USA Flood Warnings (major stage / catastrophic / emergency / evacuation).
+            # A brand-new warning (Alert, VTEC NEW) fires if it qualifies. An Update, or an Alert that extends an existing
+            # VTEC event (EXT/EXA/EXB), fires only if it NEWLY qualifies (the message right before it did not), same idea as
+            # the 10-24-26 FFW evacuation rule. Keys include the VTEC event so one flood event posts once.
+            if mt not in ("Alert", "Update"):
+                continue
+            refs = [r for r in p.get("references") or [] if r.get("identifier")]
+            vk = flood_rules.vtec_key(p)
+            vkeys = [f"vtec:{vk}|L1"] if vk else []
+            if mt == "Alert" and (flood_rules.vtec_action(p) in (None, "NEW") or not refs):
+                tracker.record(p, now)
+                c = classify_flood(f)
+                if c:
+                    scope, reason, urgent = c
+                    keys = [p["id"], f'{p["id"]}|L1'] + vkeys
+            else:
+                prior = tracker.prior_level(p, latest_only=True)
+                if prior is None and refs:
+                    n = tracker.defer.get(p["id"], 0) + 1
+                    tracker.defer[p["id"]] = n
+                    if n <= 3:      # history lookup capped/failed this poll: retry next poll before judging it
+                        continue
+                    prior = 0       # still unknown after 3 polls: treat as not previously qualifying
+                tracker.defer.pop(p["id"], None)
+                root = tracker.record(p, now)
+                c = classify_flood(f)
+                if c and (prior or 0) < 1:
+                    scope, reason, urgent = c
+                    reason = reason + " (update now qualifies)"
+                    keys = [f"{root}|L1", p["id"]] + vkeys
+                else:
+                    c = None
+        elif mt == "Alert":
             if p.get("event") in UPGRADE_MIN:
                 tracker.record(p, now)
             c = classify(f)
@@ -537,7 +644,9 @@ def evaluate(features, seen, other, now, overnight, tracker=None):
             continue
         if claim_lock is not None:
             try:
-                blocked = claim_lock.is_claimed([p["id"]], scope, p.get("event"), (p.get("geocode") or {}).get("UGC") or [], sorted(ugc_states(p)))
+                _refs, _cont = claim_lock.alert_link_info(p)   # 10-31-26: new vs update (references / VTEC chain)
+                blocked = claim_lock.is_claimed([p["id"]], scope, p.get("event"), (p.get("geocode") or {}).get("UGC") or [], sorted(ugc_states(p)),
+                                                refs=_refs, continuation=_cont)
             except Exception:
                 blocked = None
             if blocked:
@@ -548,12 +657,19 @@ def evaluate(features, seen, other, now, overnight, tracker=None):
                     log.info("claim_lock skip: %s | %s | %s blocked by claim %s (%s, owner %s)", p.get("event"), reason,
                              (p.get("areaDesc") or "")[:80], blocked.get("claim_id"), blocked.get("status"), blocked.get("owner"))
                 continue
+        if p.get("event") == "Flood Warning":   # 10-25-26: two messages of one flood event in the same poll post once
+            if any(k in flood_batch for k in keys):
+                continue
+            flood_batch.update(keys)
         item = alert_item(f, scope, reason)
         item["_keys"] = keys
+        _tag_wa_ask(item, scope, p)   # 10-30-26 6:25 PM WA ask-first
         if reason == WA_SVR_REASON and wa_hold(now):
             held.append(item)
         elif overnight and not (OVERNIGHT_URGENT_ALLOWED and urgent):
             held.append(item)
+            if p.get("event") == "Flood Warning" and p["id"] in tracker.cache:
+                tracker.cache[p["id"]]["lvl"] = 0   # 10-25-26: held, not posted; a later update must still count as newly qualifying
         else:
             send.append(item)
     return send, held
@@ -579,6 +695,9 @@ def run(once=False, dry_run=False):
     if not dry_run and os.environ.get("ALERT_RELAY") != "1":
         with open(PID_FILE, "w") as f:
             f.write(str(os.getpid()))
+    if not dry_run and os.environ.get("ALERT_RELAY") != "1":   # 10-23-26 alert relay: merge ids the GitHub backup already POSTed (never raises)
+        try: import box_sync_seen; box_sync_seen.sync()
+        except Exception: pass
     stop = {"flag": False}
     signal.signal(signal.SIGTERM, lambda *a: stop.update(flag=True))
     session = requests.Session()
@@ -592,6 +711,14 @@ def run(once=False, dry_run=False):
              os.getpid(), dry_run, first_run, bool(url), bool(auth))
     while not stop["flag"]:
         now = datetime.now(timezone.utc)
+        if not dry_run and not once and os.environ.get("ALERT_RELAY") != "1":   # relaygap 10-31-26: after a freeze, merge ids the GitHub relay POSTed meanwhile
+            try:
+                import box_sync_seen
+                if box_sync_seen.resync_after_gap("urgent"):
+                    for _k, _v in load_json(SEEN_FILE, {}).items():
+                        seen.setdefault(_k, _v)
+            except Exception:
+                pass
         try:
             features = fetch_alerts(session)
             fail = 0
@@ -680,6 +807,9 @@ def run(once=False, dry_run=False):
         state["last_active_count"] = len(features)
         state["levels"] = tracker.cache
         save_json(STATE_FILE, state)
+        if not dry_run and os.environ.get("ALERT_RELAY") != "1":   # 10-23-26 alert relay heartbeat (throttled, never raises)
+            try: import box_heartbeat; box_heartbeat.beat("urgent")
+            except Exception: pass
         if once:
             return result
         _sleep(POLL_SECONDS, stop)

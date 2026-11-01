@@ -58,6 +58,12 @@ def _restriction_kind(t):
     if _is_none_restriction(low):
         return "none"
     if "chain" in low and "required" in low:
+        # 10-29-26 (Benjamin): chains wake the assistant only when required for ALL vehicles (AWD may be excepted).
+        # Chains limited to heavy/commercial vehicles (e.g. "over 10,000 gross vehicle weight") are logged only.
+        m = re.search(r"chains?[^.]*", low)
+        clause = m.group(0) if m else low
+        if "all vehicles" not in clause and re.search(r"(?:over|above|exceeding|greater than)\s*[\d,]+|gross vehicle|\bgvw\b|commercial|trucks?\b|semi|combination", clause):
+            return "chains_heavy"
         return "chains"
     if "traction tires required" in low or "traction tire required" in low:
         return "traction_required"
@@ -147,6 +153,12 @@ def snapshot_from_wsdot(data):
             restrictions[direction] = _txt(r.get("publicPage"))
         out[name] = _entry(None, restrictions, c.get("roadCondition"),
                            c.get("weather"), c.get("temperature"), c.get("displayDate"))
+        # 10-26-26: route + mileposts for the through-highway reopening rule (stored only; never diffed)
+        rid = _txt(mp.get("stateRouteId"))
+        if rid:
+            out[name]["route"] = rid.zfill(3) if rid.isdigit() else rid
+        if mp.get("startMP") is not None: out[name]["startMP"] = mp.get("startMP")
+        if mp.get("endMP") is not None: out[name]["endMP"] = mp.get("endMP")
     return out
 
 def snapshot_from_legacy(legacy):
@@ -189,6 +201,8 @@ def diff_snapshots(old, new):
             if _txt(ov).lower() == _txt(nv).lower():
                 continue
             nk, ok = _restriction_kind(nv), _restriction_kind(ov)
+            if nk == "chains_heavy":
+                continue   # 10-29-26: chains for heavy vehicles only: log only, never wakes
             if nk == "chains":
                 label = "Chains required"
             elif nk == "traction_required":
@@ -222,6 +236,144 @@ def pass_item(changes, checked_iso):
     digest = hashlib.sha256(json.dumps(changes, sort_keys=True).encode()).hexdigest()[:16]
     return {"source": "quiet-watch", "kind": "mountain-pass", "page": "WA",
             "id": "mountain-pass:" + digest, "changes": changes, "checked": checked_iso}
+
+
+# ---------------------------------------------------------------------------------------------------------
+# 10-26-26 12:51 PM (Benjamin): THROUGH-HIGHWAY REOPENING RULE. "Let's hold off on making a reopening post,
+# unless the whole highway has reopened all the way through in at least one direction."
+# WSDOT feed entries are grouped by mountainPass.stateRouteId. A reopening ("Pass reopened", or a per-direction
+# "Restriction lifted" from a closure) on a route with more than one feed segment wakes ONLY when every counted
+# segment on that route is open in at least one common direction (a through path). Otherwise it is logged only
+# and remembered in passes_quiet_state.json "through_hwy_held" {route: [held reopenings]}; nothing is lost:
+# when the last closed segment opens and the route is through-open, ONE consolidated "Pass reopened" change
+# wakes for the whole highway (through_highway=True, route, open_directions, segments_reopened, route_segments,
+# through_details). Segments whose report has ended for the season or that carry no condition never count as
+# closed. Single-segment routes (I-90 Snoqualmie, US 2 Stevens, ...) are unchanged. Closures and restrictions
+# other than closure lifts are unchanged. THROUGH_HWY=0 in the env turns the rule off.
+THROUGH_HWY = os.environ.get("THROUGH_HWY", "1").strip() != "0"
+_OFF_SEASON = re.compile(r"ended for (?:the|this) season|report(?:s|ing) (?:have |has )?ended|no current information", re.I)
+_CLOSED_RX = re.compile(r"\bclosed\b|\bclosure\b", re.I)
+_ALL = "*"
+
+def route_of(name, entry):
+    r = _txt((entry or {}).get("route"))
+    if r:
+        return r.zfill(3) if r.isdigit() else r
+    m = re.search(r"(?:\bSR|\bUS|\bI)[- ]?(\d+)\s*$", name or "")
+    return m.group(1).zfill(3) if m else None
+
+def route_label(name):
+    m = re.search(r"\b(SR|US|I)[- ]?(\d+)\s*$", name or "")
+    if not m: return None
+    return (m.group(1) + ("-" if m.group(1) == "I" else " ") + m.group(2))
+
+def segment_counts(entry):
+    """False when the segment's report has ended for the season or it has no condition: never counted as closed."""
+    e = entry or {}
+    road = _txt(e.get("roadCondition"))
+    if _OFF_SEASON.search(road):
+        return False
+    if not road and not _txt(e.get("weather")) and all(_is_none_restriction(v) for v in (e.get("restrictions") or {}).values()):
+        return False
+    return True
+
+def open_directions(entry):
+    """Directions open on one segment: _ALL when fully open, else the set of directions without closure text."""
+    e = entry or {}
+    if e.get("status") != "closed":
+        return _ALL
+    r = e.get("restrictions") or {}
+    closed = {d for d, v in r.items() if _CLOSED_RX.search(v or "")}
+    if not closed:
+        return set()      # closed from road text: every direction closed
+    return set(r) - closed
+
+def route_segments(snap, route):
+    return {n: e for n, e in (snap or {}).items() if route_of(n, e) == route}
+
+def route_through(snap, route):
+    """(through_open, common open directions (sorted list, or ['all']))."""
+    common = _ALL
+    for n, e in route_segments(snap, route).items():
+        if not segment_counts(e):
+            continue
+        od = open_directions(e)
+        if od == _ALL:
+            continue
+        common = set(od) if common == _ALL else (common & od)
+        if not common:
+            return False, []
+    return True, (["all"] if common == _ALL else sorted(common))
+
+def _lift_from_closure(c):
+    if c.get("change") != "Restriction lifted":
+        return False
+    m = re.match(r"^(.*?): (.*?) -> ", c.get("details") or "")
+    return bool(m and _CLOSED_RX.search(m.group(2)))
+
+def apply_through_hwy(changes, old, new, held=None, now_iso=None, enabled=None):
+    """-> (changes to wake, through_hwy_held to save, log notes). Pure; see the rule comment above."""
+    enabled = THROUGH_HWY if enabled is None else enabled
+    held = {k: list(v) for k, v in (held or {}).items()}
+    if not enabled:
+        return list(changes or []), held, []
+    notes = []
+    # a held segment that closed again (or vanished) is no longer reopened
+    for rt in list(held):
+        keep = [h for h in held[rt] if (new or {}).get(h.get("pass"), {}).get("status") == "open"]
+        if len(keep) != len(held[rt]):
+            notes.append(f"through-highway: route {rt}: dropped {len(held[rt]) - len(keep)} held reopening(s) (segment closed again)")
+        if keep: held[rt] = keep
+        else: held.pop(rt)
+    reopen_pass = {c["pass"] for c in (changes or []) if c.get("change") == "Pass reopened"}
+    by_route = {}
+    for c in (changes or []):
+        if c.get("change") == "Pass reopened" or _lift_from_closure(c):
+            rt = route_of(c["pass"], (new or {}).get(c["pass"]))
+            if rt and len(route_segments(new, rt)) > 1:
+                by_route.setdefault(rt, []).append(c)
+    out = [c for c in (changes or []) if not any(c is x for v in by_route.values() for x in v)]
+    for rt in sorted(set(by_route) | set(held)):
+        cs = by_route.get(rt, [])
+        through, dirs = route_through(new, rt)
+        segs = route_segments(new, rt)
+        if not through:
+            for c in cs:
+                if c["change"] == "Pass reopened" or c["pass"] not in reopen_pass:
+                    held.setdefault(rt, [])
+                    if not any(h.get("pass") == c["pass"] and h.get("change") == c["change"] and h.get("details") == c.get("details") for h in held[rt]):
+                        held[rt].append({"pass": c["pass"], "change": c["change"], "details": c.get("details"), "at": now_iso})
+            if cs:
+                still = sorted(n for n, e in segs.items() if segment_counts(e) and open_directions(e) != _ALL)
+                notes.append(f"through-highway: route {rt}: " + "; ".join(f'{c["pass"]} {c["change"]}' for c in cs)
+                             + f" held, no wake (still closed: {', '.join(still) or 'none'})")
+            continue
+        if not cs and not held.get(rt):
+            continue
+        prior = held.pop(rt, [])
+        reopened = [dict(h, when="earlier (held)") for h in prior] + \
+                   [{"pass": c["pass"], "change": c["change"], "details": c.get("details"), "at": now_iso, "when": "this poll"}
+                    for c in cs if c["change"] == "Pass reopened" or c["pass"] not in reopen_pass]
+        lead = (cs or prior)[-1]["pass"]
+        for c in cs:                      # prefer the segment whose full reopening completed the through path
+            if c["change"] == "Pass reopened": lead = c["pass"]
+        le = segs.get(lead) or {}
+        label = route_label(lead) or ("route " + rt)
+        rs = [{"pass": n, "status": e.get("status"), "startMP": e.get("startMP"), "endMP": e.get("endMP"),
+               "open_directions": (["all"] if open_directions(e) == _ALL else sorted(open_directions(e))),
+               "counted": segment_counts(e)} for n, e in sorted(segs.items(), key=lambda kv: (kv[1].get("startMP") or 0))]
+        names = []
+        for r in reopened:
+            if r["pass"] not in names: names.append(r["pass"])
+        dtxt = "both directions" if dirs == ["all"] else ", ".join(dirs)
+        td = (f"Whole {label} open all the way through ({dtxt}). Segments reopened: "
+              + "; ".join(f'{n} ({", ".join(sorted({r["when"] for r in reopened if r["pass"] == n}))})' for n in names))
+        ch = {"pass": lead, "change": "Pass reopened", "details": (le.get("roadCondition") or "")[:300],
+              "through_highway": True, "route": rt, "route_label": label, "open_directions": dirs,
+              "segments_reopened": reopened, "route_segments": rs, "through_details": td}
+        out.append(ch)
+        notes.append(f"through-highway: route {rt}: through-open, one whole-highway wake ({td})")
+    return out, held, notes
 
 
 USAGE = """usage: passes_quiet.py [--dry-run | --once] [--help]
