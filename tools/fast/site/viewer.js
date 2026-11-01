@@ -153,6 +153,18 @@ function mergeRunsX(man) {
   }
   return man;
 }
+// 10-31 7:30 PM (Benjamin: "a slightly more zoomed-out Washington view made specifically for Studio loop videos"): Studio only, an
+// extra view "Washington (wide, for loops)" = this model's Pacific NW tight / high-res map (src) that Studio frames on Washington so
+// the whole state fits both video frames. Same data, basemap, towns and key as src; the normal Washington view is unchanged.
+function addStudioViews(man) {
+  if (!Q.get("studio")) return man;
+  for (const M of Object.values(man.models || {})) { const V = M.views || {}, src = V.pnwt ? "pnwt" : V.pnwhr ? "pnwhr" : null;
+    if (!src || !V.wa || V.wawide) continue; const out = {};
+    for (const [k, v] of Object.entries(V)) { out[k] = v; if (k === "wa") out.wawide = Object.assign({}, V[src], { label: "Washington (wide, for loops)", src, studioWide: "wa" }); }
+    M.views = out; }
+  return man;
+}
+const VSRC = (vid) => { const V = VIEWS()[vid]; return (V && V.src) || vid; };   // file / tuning id of a view (Studio wide view -> its src)
 const runFile = (r) => XR.has(r) ? "run_x.json" : "run.json";
 async function boot() {
   if (Q.get("bare")) document.body.classList.add("bare");
@@ -166,7 +178,7 @@ async function boot() {
   // 10-29: manifest, fonts and the shown run's run.json in parallel; other runs load when picked
   const [man] = await Promise.all([fetch(DATA + "manifest.json", { cache: "no-cache" }).then(r => r.json()),
                                    document.fonts.load("800 20px Montserrat"), document.fonts.load("500 12px Montserrat")]);
-  S.man = mergeRunsX(man);
+  S.man = addStudioViews(mergeRunsX(man));
   // runs: "model/cycle", newest first per model; models in a fixed order
   const order = ["hrrr", "rrfs", "nbm", "gfs", "ifs", "ifs9", "aifs", "eps", "aens"].filter(m => S.man.models[m] && (S.man.runs[m] || []).length);
   const all = []; for (const m of order) for (const c of [...S.man.runs[m]].reverse()) all.push(`${m}/${c}`);
@@ -328,14 +340,14 @@ function go(d, wrap) { const n = S.runs[S.run].steps.length; S.i = wrap ? (S.i +
 
 // ---------------------------------------------------------------- static per view
 async function viewStatic(vid) {
-  const m = S.run.split("/")[0], sk = m + "/" + vid;
+  vid = VSRC(vid); const m = S.run.split("/")[0], sk = m + "/" + vid;
   if (S.statics[sk]) return S.statics[sk];
   const V = VIEWS()[vid];
   const p = (async () => {
     const [lut, base] = await Promise.all([fetch(DATA + V.lut + SV()).then(r => r.arrayBuffer()).then(b => new Float32Array(b)),
                                            img(DATA + `static/base_${vid}.png` + SV())]);
     // towns layer is not needed for the first paint: draw without it, redraw when it lands (10-29 first-map speedup)
-    const townsP = img(DATA + `static/towns_${vid}.png` + SV()).then(im => { obj.towns = im; if (S.view === vid && window.__drawn) draw(); return im; }, () => null);
+    const townsP = img(DATA + `static/towns_${vid}.png` + SV()).then(im => { obj.towns = im; if (VSRC(S.view) === vid && window.__drawn) draw(); return im; }, () => null);
     // per-pixel source index + weights, made once per view from the coarse LUT (bilinear in panel px)
     const [px, py, pw, ph] = V.panel, x0 = Math.round(px), y0 = Math.round(py), W = Math.round(px + pw) - x0, H = Math.round(py + ph) - y0;
     const { nx, ny, stride } = V, G = S.runs[S.run].grid, gnx = G.nx, gny = G.ny;
@@ -358,7 +370,7 @@ async function viewStatic(vid) {
   })();
   S.statics[sk] = p; return p;
 }
-const keyImg = {}; const keyURL = (pid, vid) => DATA + PRODS()[pid].keys[vid] + SV();
+const keyImg = {}; const keyURL = (pid, vid) => DATA + PRODS()[pid].keys[VSRC(vid)] + SV();
 const getKey = (pid, vid) => { const u = keyURL(pid, vid); return keyImg[u] || (keyImg[u] = img(u)); };
 
 // ---------------------------------------------------------------- data images
@@ -1113,7 +1125,7 @@ function hlGeom(st, D, V) {
   const raw = D.raw && D.raw.mslp ? D.raw.mslp.v : D.iso; if (!raw) return [];
   const m = S.run.split("/")[0], M = S.man.models[m], cr = M.crop || [0, 0, 0, 0], ll = M.grid === "ll";
   const ck = ll ? 27.8 : parseFloat(M.res) || 3, s = ll ? 1 : Math.max(1, Math.round(9 / ck)), w0 = D.w, h0 = D.h;
-  const [rk, prom, smk] = HL_VIEW[S.view] || HL_WA, cell = ck * s;
+  const [rk, prom, smk] = HL_VIEW[VSRC(S.view)] || HL_WA, cell = ck * s;
   // decimated grid (s native cells), smoothed to ~smk km
   const w = Math.floor((w0 - 1) / s) + 1, h = Math.floor((h0 - 1) / s) + 1, a0 = new Float32Array(w * h);
   for (let i = 0; i < h; i++) for (let j = 0; j < w; j++) a0[i * w + j] = raw[i * s * w0 + j * s];
@@ -1215,7 +1227,7 @@ function lowGeom(st, D, P, V) {
     core.push([st.x0 + p[0], st.y0 + p[1], Math.abs(q[0] - p[0]) + 0.6, Math.abs(q[1] - p[1]) + 0.6]); }
   // ensemble-mean lows (old: find_centers on the smoothed mean MSLP, radius / prominence per view, value = raw min nearby)
   const means = [], raw = D.mslpRaw;
-  if (raw) { const vid = S.view, [rk, prom, sm] = LOWV[vid] || [300, 1.2, 0.6], w = D.w, h = D.h, a = blur(raw, w, h, sm);
+  if (raw) { const vid = VSRC(S.view), [rk, prom, sm] = LOWV[vid] || [300, 1.2, 0.6], w = D.w, h = D.h, a = blur(raw, w, h, sm);
     const vlat = lat((h - 1) / 2), ry = Math.max(2, Math.round(rk / (111.2 * 0.25))), rx = Math.max(2, Math.round(rk / (111.2 * 0.25 * Math.max(0.25, Math.cos(vlat * Math.PI / 180)))));
     const cands = [], [r0, r1, c0, c1] = V.cut || [1, h - 1, 1, w - 1];   // only the view's own rows / cols
     for (let i = Math.max(1, r0); i < Math.min(h - 1, r1); i++) for (let j = Math.max(1, c0); j < Math.min(w - 1, c1); j++) { const v = a[i * w + j];

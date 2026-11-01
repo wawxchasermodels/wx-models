@@ -25,12 +25,39 @@ const setFr = (k, fr) => { if (!CLEAN) localStorage.setItem(key(k), JSON.stringi
 let last = null;   // {cv, cur, step}
 const fmtTick = (v, P) => { const a = P.ticks || []; const dec = a.some((t) => Math.abs(t - Math.round(t)) > 1e-6) ? (a.some((t) => Math.abs(t * 10 - Math.round(t * 10)) > 1e-6) ? 2 : 1) : 0; return Number(v).toFixed(dec); };
 
-function crop(k, fr) {   // source rect (map bitmap px) for frame k: "cover" the frame with the map panel, then zoom / pan, kept inside the panel
-  const f = F[k], { cv, cur } = last, rs = cv._rs || 1, [px, py, pw, ph] = cur.V.panel;
-  const kk = Math.max(f.W / pw, f.H / ph) * Math.max(1, fr.zoom || 1), sw = f.W / kk, sh = f.H / kk;
-  let cx = px + pw / 2 - (fr.dx || 0) / kk, cy = py + ph / 2 - (fr.dy || 0) / kk;
-  cx = Math.min(px + pw - sw / 2, Math.max(px + sw / 2, cx)); cy = Math.min(py + ph - sh / 2, Math.max(py + sh / 2, cy));
-  return { sx: (cx - sw / 2) * rs, sy: (cy - sh / 2) * rs, sw: sw * rs, sh: sh * rs, kk, cx, cy, px, py, pw, ph };
+// 10-31 7:30 PM Studio wide Washington view (viewer.js addStudioViews): WT[model] = the normal Washington view's area, in the wide
+// view's figure px (found by matching the two views' grid look-up tables, so it follows any model / projection); "pending" while loading
+const WT = {};
+function wideRect(m) {
+  if (WT[m]) return WT[m] === "pending" ? null : WT[m];
+  const V = S.man.models[m].views, Vw = V.wa, Vs = V.wawide; if (!Vw || !Vs) return null; WT[m] = "pending";
+  const get = (u) => fetch(DATA + u + SV()).then((r) => { if (!r.ok) throw new Error(u); return r.arrayBuffer(); }).then((b) => new Float32Array(b));
+  Promise.all([get(Vw.lut), get(Vs.lut)]).then(([lw, ls]) => {
+    const pts = [], nxw = Vw.nx, nyw = Vw.ny;
+    for (let t = 0; t <= 1.0001; t += 1 / 40) for (const [j, i] of [[0, t * (nxw - 1)], [nyw - 1, t * (nxw - 1)], [t * (nyw - 1), 0], [t * (nyw - 1), nxw - 1]]) {
+      const q = (Math.round(j) * nxw + Math.round(i)) * 3; pts.push([lw[q], lw[q + 1]]); }
+    let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9; const n = Vs.nx * Vs.ny;
+    for (const [a, b] of pts) { let best = 1e18, bk = 0; for (let q = 0; q < n; q++) { const d = (ls[q * 3] - a) ** 2 + (ls[q * 3 + 1] - b) ** 2; if (d < best) { best = d; bk = q; } }
+      const x = (bk % Vs.nx + 0.5) * Vs.stride, y = ((bk / Vs.nx | 0) + 0.5) * Vs.stride; x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+    WT[m] = { x: Vs.panel[0] + x0, y: Vs.panel[1] + y0, w: x1 - x0, h: y1 - y0 }; window.__studioWT = WT; renderAll();
+  }).catch(() => { delete WT[m]; });
+  return null;
+}
+function base(k) {   // camera at dx = dy = 0, zoom 1: centre (figure px) and scale (output px per figure px)
+  const f = F[k], V = last.cur.V, [px, py, pw, ph] = V.panel, t = V.studioWide ? wideRect(last.cur.run.split("/")[0]) : null;
+  if (!t) return { cx: px + pw / 2, cy: py + ph / 2, k0: Math.max(f.W / pw, f.H / ph) };   // normal views: the map panel covers the frame
+  // wide view: the Washington view's area (+4 % each side) fits the frame; the header / color bar may overlap its outer margin
+  // by half their height (that margin is BC / Oregon), so 16:9 is only slightly wider than Washington; 9:16 fits on width
+  const mh = f.H - (f.top + f.bot) / 2, k0 = Math.min(f.W / (t.w * 1.08), mh / (t.h * 1.08));
+  return { cx: t.x + t.w / 2, cy: t.y + t.h / 2 - (f.top - f.bot) / 4 / k0, k0 };
+}
+function crop(k, fr) {   // source rect (map bitmap px) for frame k: base camera, then zoom / pan; the panel stays covering the frame when it
+  // can, and when it is smaller than the frame (wide view) it stays wholly in the frame (the rest is background)
+  const f = F[k], { cv, cur } = last, rs = cv._rs || 1, [px, py, pw, ph] = cur.V.panel, B = base(k);
+  const kk = B.k0 * Math.max(1, fr.zoom || 1), sw = f.W / kk, sh = f.H / kk;
+  const cl = (v, a, b) => Math.min(Math.max(a, b), Math.max(Math.min(a, b), v));
+  const cx = cl(B.cx - (fr.dx || 0) / kk, px + sw / 2, px + pw - sw / 2), cy = cl(B.cy - (fr.dy || 0) / kk, py + sh / 2, py + ph - sh / 2);
+  return { sx: (cx - sw / 2) * rs, sy: (cy - sh / 2) * rs, sw: sw * rs, sh: sh * rs, kk, cx, cy, px, py, pw, ph, bx: B.cx, by: B.cy, rs };
 }
 function band(c, y0, y1, down) {
   const g = c.createLinearGradient(0, y0, 0, y1); const a = "rgba(13,15,19,0.90)", b = "rgba(13,15,19,0)";
@@ -128,12 +155,13 @@ async function render(k, frO) {   // frO: camera override (MP4 storm-track pan)
   c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, f.W, f.H);
   if (BG !== "transparent") { c.fillStyle = BG; c.fillRect(0, 0, f.W, f.H); }
   const r = crop(k, fr); c.imageSmoothingEnabled = true; c.imageSmoothingQuality = last.lite ? "low" : "high";   // lite: slider drag frame (RS 1 map)
-  c.drawImage(cv, r.sx, r.sy, r.sw, r.sh, 0, 0, f.W, f.H);
-  // header
-  band(c, 0, f.top + f.title * 1.6, true);
+  {   // only the map panel part of the source (the wide view can show past the panel's edges: background there)
+    const s = f.W / r.sw, ax = Math.max(r.sx, r.px * r.rs), ay = Math.max(r.sy, r.py * r.rs), bx = Math.min(r.sx + r.sw, (r.px + r.pw) * r.rs), by = Math.min(r.sy + r.sh, (r.py + r.ph) * r.rs);
+    if (bx > ax && by > ay) c.drawImage(cv, ax, ay, bx - ax, by - ay, (ax - r.sx) * s, (ay - r.sy) * s, (bx - ax) * s, (by - ay) * s); }
+  // header (10-31 7:28 PM, Benjamin: "remove the shading on the top and the bottom of the studio views": no dark bands; text keeps its shadow)
   const site = (S.man.models[m] || {}).site || m, R_ = S.runs[cur.run], x = f.pad; let y = k === "v" ? 120 : 34;
   const pw = pill(c, x, y, site.toUpperCase(), Math.round(f.run * 0.95), "#2f8cff", "#fff");
-  c.font = `600 ${f.run}px Montserrat`; c.fillStyle = "#b9c0cc"; c.fillText(`${cur.run.split("/")[1].slice(8)}Z run`, x + pw + 14, y + f.run * 1.08);
+  c.font = `600 ${f.run}px Montserrat`; c.fillStyle = "#c9ced8"; c.shadowColor = "rgba(0,0,0,0.75)"; c.shadowBlur = 6; c.fillText(`${cur.run.split("/")[1].slice(8)}Z run`, x + pw + 14, y + f.run * 1.08); c.shadowBlur = 0;
   y += f.run * 1.55 + f.title * 1.02;
   c.font = `800 ${f.title}px Montserrat`; c.fillStyle = "#fff"; c.shadowColor = "rgba(0,0,0,0.6)"; c.shadowBlur = 8;
   const words = P.title.split(" "), maxW = f.W - 2 * f.pad - (k === "h" ? 260 : BR.corner && BR.cpos === "tr" && LOGOS[BR.logo] ? Math.round(f.W * 0.10) + 24 : 0); let line = "", lines = [];   // 9:16: keep the title clear of a top-right logo
@@ -146,8 +174,8 @@ async function render(k, frO) {   // frO: camera override (MP4 storm-track pan)
   c.fillStyle = "rgba(17,19,22,0.85)"; c.strokeStyle = "rgba(255,255,255,0.35)"; c.lineWidth = 2; c.beginPath(); c.roundRect ? c.roundRect(bx, by, bw, f.valid * 1.9, 14) : c.rect(bx, by, bw, f.valid * 1.9); c.fill(); c.stroke();
   c.fillStyle = "#fff"; c.textAlign = "center"; c.fillText(bt, bx + bw / 2, by + f.valid * 1.32); c.textAlign = "left";
   const cnr = BR.corner && LOGOS[BR.logo] ? cornerBox(k, by + f.valid * 1.9, headBot, f.H - f.bot + (k === "v" ? 110 : 62)) : null;
-  // bottom: color bar + credit
-  band(c, f.H - f.bot - 40, f.H, false);
+  // bottom: color bar + credit (no dark band any more: their text gets a shadow so it stays readable on the map)
+  c.save(); c.shadowColor = "rgba(0,0,0,0.75)"; c.shadowBlur = 6;
   const cbW = k === "v" ? f.W - 2 * f.pad : Math.min(1100, f.W * 0.58), cbY = f.H - f.bot + (k === "v" ? 110 : 62), cbS = k === "v" ? 28 : 24;
   if (!colorbar(c, P, f.pad, cbY, cbW, k === "v" ? 34 : 26, cbS)) {
     try { const im = await getKey(cur.pid, cur.V === VIEWS()[S.view] ? S.view : S.view); const s_ = cbW / im.naturalWidth; c.drawImage(im, f.pad, cbY - 30, cbW, im.naturalHeight * s_); } catch (e) { /* no key */ }
@@ -158,6 +186,7 @@ async function render(k, frO) {   // frO: camera override (MP4 storm-track pan)
   const cB = cnr && (BR.cpos === "br" || BR.cpos === "bl") ? cnr : null;   // the credit steps aside for a logo on its row
   if (k === "v") c.fillText(credit, f.pad + (cB && BR.cpos === "bl" ? cB.s + 18 : 0), f.H - 70); else { c.textAlign = "right"; c.fillText(credit, f.W - f.pad - (cB && BR.cpos === "br" ? cB.s + 20 : 0), f.H - 24); c.textAlign = "left"; }
   if (logo) { c.font = `800 ${k === "v" ? 34 : 28}px Montserrat`; c.fillStyle = "#fff"; c.textAlign = "right"; c.fillText(logo, f.W - f.pad, f.H - (k === "v" ? 70 : 60)); c.textAlign = "left"; }
+  c.restore();
   if (cnr) cornerLogo(c, cnr);
   if (BR.lower) lowerThird(k, c);
   if (PIN.show && !REC.on) drawPins(k, c, r);
@@ -181,7 +210,7 @@ for (const k of ["v", "h"]) {
     if (!d && !PD && PIN.show && !PIN.mode && e.pointerType === "mouse") cv.style.cursor = pinHit(k, cv, e) ? "grab" : "";
     if (!d || pz) return; const s = f.W / cv.clientWidth, fr = getFr(k);
     fr.dx = d.fr.dx + (e.clientX - d.x) * s; fr.dy = d.fr.dy + (e.clientY - d.y) * s; const r = crop(k, fr);   // keep the stored offset inside the panel
-    fr.dx = (r.px + r.pw / 2 - r.cx) * r.kk; fr.dy = (r.py + r.ph / 2 - r.cy) * r.kk; setFr(k, fr); render(k); });
+    fr.dx = (r.bx - r.cx) * r.kk; fr.dy = (r.by - r.cy) * r.kk; setFr(k, fr); render(k); });
   const up = (e) => { if (PD && PD.k === k) { PD = null; cv.classList.remove("pindrag"); mpInfo(); renderAll(); } d = null; cv.classList.remove("drag"); }; cv.addEventListener("pointerup", up); cv.addEventListener("pointercancel", up);
   // 10-31 1:39 PM (Benjamin, iPhone): two-finger pinch zooms the frame (1-2.5x) about the fingers' midpoint; moving both fingers pans
   let pz = null;
@@ -196,9 +225,9 @@ for (const k of ["v", "h"]) {
     if (PD) { e.preventDefault(); return; }
     if (!pz) return; e.preventDefault(); if (e.touches.length < 2) return;
     const [a, b] = [oxy(e.touches[0]), oxy(e.touches[1])], ox = (a[0] + b[0]) / 2, oy = (a[1] + b[1]) / 2;
-    const z = Math.min(2.5, Math.max(1, pz.z * Math.max(10, Math.hypot(a[0] - b[0], a[1] - b[1])) / pz.d)), [px, py, pw, ph] = last.cur.V.panel, kk = Math.max(f.W / pw, f.H / ph) * z;
+    const z = Math.min(2.5, Math.max(1, pz.z * Math.max(10, Math.hypot(a[0] - b[0], a[1] - b[1])) / pz.d)), kk = base(k).k0 * z;
     const fr = frAt(k, pz.mx - (ox - f.W / 2) / kk, pz.my - (oy - f.H / 2) / kk, z), r = crop(k, fr);   // map point under the fingers stays under them
-    fr.dx = (r.px + r.pw / 2 - r.cx) * r.kk; fr.dy = (r.py + r.ph / 2 - r.cy) * r.kk; setFr(k, fr); render(k); window.__spinch = { k, zoom: z };
+    fr.dx = (r.bx - r.cx) * r.kk; fr.dy = (r.by - r.cy) * r.kk; setFr(k, fr); render(k); window.__spinch = { k, zoom: z };
   }, { passive: false });
   const pend = (e) => { if (pz && e.touches.length < 2) pz = null; };
   cv.addEventListener("touchend", pend); cv.addEventListener("touchcancel", pend);
@@ -236,8 +265,8 @@ const pinKey = () => `studio:pins:${S.view}`;
 const getPins = () => { try { return JSON.parse(localStorage.getItem(pinKey()) || "{}"); } catch (e) { return {}; } };
 const setPins = (p) => { try { localStorage.setItem(pinKey(), JSON.stringify(p)); } catch (e) { /* private mode */ } };
 function frAt(k, x, y, zoom) {   // camera centred on map point (x, y) at this zoom, as a {dx, dy, zoom} framing
-  const f = F[k], [px, py, pw, ph] = last.cur.V.panel, kk = Math.max(f.W / pw, f.H / ph) * zoom;
-  return { dx: (px + pw / 2 - x) * kk, dy: (py + ph / 2 - y) * kk, zoom };
+  const B = base(k), kk = B.k0 * zoom;
+  return { dx: (B.cx - x) * kk, dy: (B.cy - y) * kk, zoom };
 }
 function drawPins(k, c, r) {
   const p = getPins(), f = F[k], pos = (q) => [f.W / 2 + (q.x - r.cx) * r.kk, f.H / 2 + (q.y - r.cy) * r.kk], R = k === "v" ? 30 : 26;
@@ -723,4 +752,35 @@ const PLAY = { on: SQ.get("play") === "1", t: 0, next() {
     S.i = i; $("step").value = i; draw();
   }, dwell);
 } };
+// ---- 10-31 7:25 PM (Benjamin: "make sure that the vertical window and horizontal video stay exactly the correct format size and don't
+// compress or get squished ... when I make the window smaller"): desktop frames sized here in px, exact 9:16 and 16:9, scaled down
+// uniformly to fit both the window's width and height (whole frames on screen, no page scroll when there is room). Phones (<= 820 px
+// wide, stacked full-width frames) and clean (OBS) mode keep their CSS sizes. Runs on load, window resize and menu-bar wrap changes.
+function fitFrames() {
+  const st = document.getElementById("studio"), fv = document.getElementById("fv"), fh = document.getElementById("fh"), cvv = F.v.cv, cvh = F.h.cv;
+  const clear = () => { for (const e of [cvv, cvh, fv, fh]) { e.style.width = ""; e.style.height = ""; e.style.flex = ""; } };
+  if (CLEAN || innerWidth <= 820) { clear(); return; }
+  const cs = getComputedStyle(st), padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight), padB = parseFloat(cs.paddingBottom) + 2;
+  const gap = parseFloat(cs.columnGap) || 18, hint = fh.querySelector(".shint"), MINV = 300;   // below ~300 px tall the page scrolls instead
+  let wv = 0, wh = 0;
+  for (let it = 0; it < 5; it++) {
+    const availW = st.clientWidth - padX - gap, sy = scrollY;
+    const availV = innerHeight - (cvv.getBoundingClientRect().top + sy) - padB;
+    const availH = innerHeight - (cvh.getBoundingClientRect().top + sy) - padB - (hint ? hint.offsetHeight + 6 : 0);
+    const nv = Math.max(MINV * 9 / 16, Math.min(availV * 9 / 16, availW * 0.42));
+    const nh = Math.max(240, Math.min(availW - nv, Math.max(MINV, availH) * 16 / 9));
+    const same = Math.abs(nv - wv) < 0.5 && Math.abs(nh - wh) < 0.5; wv = nv; wh = nh;
+    fv.style.flex = fh.style.flex = "0 0 auto"; fv.style.width = wv + "px"; fh.style.width = wh + "px";
+    cvv.style.width = wv + "px"; cvv.style.height = wv * 16 / 9 + "px"; cvh.style.width = wh + "px"; cvh.style.height = wh * 9 / 16 + "px";
+    if (same) break;
+  }
+  window.__studioFit = { v: [wv, wv * 16 / 9], h: [wh, wh * 9 / 16] };
+}
+if (!CLEAN) {
+  let fq = 0; const fitSoon = () => { cancelAnimationFrame(fq); fq = requestAnimationFrame(fitFrames); };
+  addEventListener("resize", fitSoon); addEventListener("orientationchange", fitSoon);
+  if ("ResizeObserver" in window) new ResizeObserver(fitSoon).observe(document.getElementById("bar"));
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitSoon);
+  fitFrames();
+}
 })();

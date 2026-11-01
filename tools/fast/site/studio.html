@@ -99,8 +99,12 @@ html,body{overflow:auto}
 .sfr canvas{display:block;background:repeating-conic-gradient(#202329 0 25%,#191b20 0 50%) 0 0/24px 24px;outline:1px solid #3a3f49;cursor:grab;touch-action:none}
 .sfr canvas:focus{outline:2px solid #2f8cff}
 .sfr canvas.drag{cursor:grabbing}
-#fv canvas{height:calc(100vh - 150px);height:calc(100dvh - 150px);width:auto;aspect-ratio:9/16}
-#fh{flex:1 1 auto}#fh canvas{width:100%;height:auto;aspect-ratio:16/9;max-height:calc(100vh - 150px)}
+/* 10-31 7:25 PM (Benjamin: "make sure that the vertical window and horizontal video stay exactly the correct format size and don't
+   compress or get squished"): on desktop studio.js fitFrames() sizes both frames in px (exact 9:16 / 16:9, scaled down uniformly to fit
+   the window's width AND height); the global canvas{max-width/max-height:100%} rule used to squash them. These are only the pre-JS sizes. */
+#fv canvas{height:calc(100vh - 190px);height:calc(100dvh - 190px);width:auto;aspect-ratio:9/16}
+#fh{flex:1 1 auto}#fh canvas{width:100%;height:auto;aspect-ratio:16/9}
+@media (min-width:821px){.sfr canvas{max-width:none;max-height:none;flex:0 0 auto}}
 .shint{color:#8e939c;font-size:12px}
 @media (max-width:820px){body{display:block;height:auto}#studio{display:block}.sfr{margin-bottom:16px}#fv canvas{height:auto;width:100%}#fh canvas{max-height:none}#bar{position:sticky;bottom:0;z-index:5}}
 /* clean mode (OBS Browser Source): one frame at its real size, no UI */
@@ -197,8 +201,8 @@ body.clean .sfr canvas,body.clean #fv canvas,body.clean #fh canvas{width:auto!im
   if (q.get("from") && !q.get("f")) q.set("f", q.get("from"));
   history.replaceState(null, "", location.pathname + "?" + q.toString()); })();
 </script>
-<script src="viewer.js?v=20261031zb"></script>
+<script src="viewer.js?v=20261031zc"></script>
 <script src="stormfind.js?v=20261031c"></script>
-<script src="studio.js?v=20261031zb"></script>
+<script src="studio.js?v=20261031zc"></script>
 <script src="reqbox.js?v=20261031b"></script>
 </body></html>
