@@ -67,23 +67,32 @@ const BR = Object.assign({ card: false, lower: false, logo: "wa", title: "", sto
 if (SQ.get("brand") === "1") { BR.card = true; BR.lower = true; }
 // corner logo (10-31 4:51 PM, Benjamin: "a smaller logo in one of the top corners ... under the F+ hours", "Just the logo"):
 // only the logo image, no text / panel. Off on every load (never remembered as on); corner + logo choice are remembered.
-// Links: &corner=1, &cornerpos=tl|tr (default tr, under the F+ badge), &brandlogo=.
-BR.corner = SQ.get("corner") === "1"; BR.cpos = SQ.get("cornerpos") === "tl" ? "tl" : SQ.get("cornerpos") === "tr" ? "tr" : (BR.cpos === "tl" ? "tl" : "tr");
+// Links: &corner=1, &cornerpos=br|bl|tr|tl (default br), &brandlogo=.
+// 10-31 5:03 PM (Benjamin: "right where i circled ... about 50% transparent"): default bottom right on the credit-line row, 50 % opacity.
+const CPOS = ["br", "bl", "tr", "tl"];
+BR.corner = SQ.get("corner") === "1"; BR.cpos = CPOS.includes(SQ.get("cornerpos")) ? SQ.get("cornerpos") : CPOS.includes(BR.cpos2) ? BR.cpos2 : "br"; delete BR.cpos2;
 for (const [q, k_] of [["card", "card"], ["lower", "lower"]]) if (SQ.has(q)) BR[k_] = SQ.get(q) === "1";
 if (SQ.has("title")) BR.title = SQ.get("title"); if (SQ.has("storm")) BR.storm = SQ.get("storm"); if (SQ.has("brandlogo")) BR.logo = SQ.get("brandlogo");
-const saveBR = () => { if (!SQ.get("make") && !CLEAN) try { localStorage.setItem("studio:brand3", JSON.stringify({ logo: BR.logo, cpos: BR.cpos, title: BR.autoT ? "" : BR.title, storm: BR.autoS ? "" : BR.storm })); } catch (e) { /* private */ } };
+const saveBR = () => { if (!SQ.get("make") && !CLEAN) try { localStorage.setItem("studio:brand3", JSON.stringify({ logo: BR.logo, cpos2: BR.cpos, title: BR.autoT ? "" : BR.title, storm: BR.autoS ? "" : BR.storm })); } catch (e) { /* private */ } };
 const logoImg = {};
 function getLogo() { const u = LOGOS[BR.logo]; if (!u) return null; if (!logoImg[u]) { const im = new Image(); im.src = u; logoImg[u] = im; im.onload = () => renderAll(); } const im = logoImg[u]; return im.complete && im.naturalWidth ? im : null; }
 const ptTime = (iso, o) => { try { return new Date(iso).toLocaleString("en-US", Object.assign({ timeZone: "America/Los_Angeles" }, o)); } catch (e) { return iso; } };
 function runText() { const [m, c] = last.cur.run.split("/"), site = (S.man.models[m] || {}).site || m; return `${site} ${c.slice(8)}Z ${c.slice(4, 6)}-${c.slice(6, 8)} run`; }
-// just the logo image: ~10 % (9:16) / 8 % (16:9) of frame width, 88 % opacity, soft dark shadow so the white ring reads on light maps.
-// tr: right-aligned under the F+ badge; tl: under the header text (title + valid line).
-function cornerLogo(k, c, badgeBot, headBot) {
-  const lg = getLogo(); if (!lg) return; const f = F[k], s = Math.round(f.W * (k === "v" ? 0.10 : 0.08)), gap = k === "v" ? 18 : 14;
-  const x = BR.cpos === "tl" ? f.pad : f.W - f.pad - s, y = Math.round((BR.cpos === "tl" ? headBot : badgeBot) + gap);
-  // two shadow passes = a soft dark halo hugging the logo's edge (no panel), so the white ring still reads on white land / light precip
-  c.save(); c.globalAlpha = 0.92; c.shadowColor = "rgba(0,0,0,0.7)"; c.shadowBlur = Math.round(s * 0.08); c.shadowOffsetY = Math.round(s * 0.015);
-  c.drawImage(lg, x, y, s, s); c.shadowBlur = Math.round(s * 0.03); c.drawImage(lg, x, y, s, s); c.restore();
+// just the logo image at 50 % opacity with a light dark halo (no panel). Sizes: top 10 % (9:16) / 8 % (16:9) of frame width;
+// bottom a touch smaller (96 / 120 px). br: right-aligned on the credit-line row (16:9: the credit text moves left of it);
+// bl: 9:16 left on the credit row (credit moves right of it), 16:9 just above the colour key's label (the key fills the bottom left);
+// tr: under the F+ badge; tl: under the header text.
+function cornerBox(k, badgeBot, headBot, cbY) {
+  const f = F[k], p = BR.cpos;
+  if (p === "tr" || p === "tl") { const s = Math.round(f.W * (k === "v" ? 0.10 : 0.08)), gap = k === "v" ? 18 : 14; return { s, x: p === "tl" ? f.pad : f.W - f.pad - s, y: Math.round((p === "tl" ? headBot : badgeBot) + gap) }; }
+  const s = k === "v" ? 96 : 120;
+  if (k === "v") return { s, x: p === "bl" ? f.pad : f.W - f.pad - s, y: Math.round(f.H - 70 - 8 - s / 2) };   // centred on the credit text (baseline H-70)
+  if (p === "br") return { s, x: f.W - f.pad - s, y: f.H - 14 - s };
+  return { s, x: f.pad, y: cbY - 30 - 16 - s };
+}
+function cornerLogo(c, b) {
+  const lg = getLogo(); if (!lg || !b) return;
+  c.save(); c.globalAlpha = 0.5; c.shadowColor = "rgba(0,0,0,0.45)"; c.shadowBlur = Math.round(b.s * 0.06); c.drawImage(lg, b.x, b.y, b.s, b.s); c.restore();
 }
 function lowerThird(k, c) {
   const f = F[k], step = last.step, lg = getLogo(), h = k === "v" ? 150 : 118, w = k === "v" ? f.W - 2 * f.pad : 860, x = f.pad, y = f.H - f.bot - h - (k === "v" ? 40 : 26);
@@ -136,7 +145,7 @@ async function render(k, frO) {   // frO: camera override (MP4 storm-track pan)
   c.font = `800 ${Math.round(f.valid * 1.1)}px Montserrat`; const bt = `F+${step.f}`, bw = c.measureText(bt).width + 40, bx = f.W - f.pad - bw, by = k === "v" ? 120 : 34;
   c.fillStyle = "rgba(17,19,22,0.85)"; c.strokeStyle = "rgba(255,255,255,0.35)"; c.lineWidth = 2; c.beginPath(); c.roundRect ? c.roundRect(bx, by, bw, f.valid * 1.9, 14) : c.rect(bx, by, bw, f.valid * 1.9); c.fill(); c.stroke();
   c.fillStyle = "#fff"; c.textAlign = "center"; c.fillText(bt, bx + bw / 2, by + f.valid * 1.32); c.textAlign = "left";
-  if (BR.corner) cornerLogo(k, c, by + f.valid * 1.9, headBot);
+  const cnr = BR.corner && LOGOS[BR.logo] ? cornerBox(k, by + f.valid * 1.9, headBot, f.H - f.bot + (k === "v" ? 110 : 62)) : null;
   // bottom: color bar + credit
   band(c, f.H - f.bot - 40, f.H, false);
   const cbW = k === "v" ? f.W - 2 * f.pad : Math.min(1100, f.W * 0.58), cbY = f.H - f.bot + (k === "v" ? 110 : 62), cbS = k === "v" ? 28 : 24;
@@ -146,8 +155,10 @@ async function render(k, frO) {   // frO: camera override (MP4 storm-track pan)
   c.font = `500 ${k === "v" ? 22 : 18}px Montserrat`; c.fillStyle = "rgba(220,224,230,0.85)";
   const credit = `${(R_.runline || "").split(" run ")[0]}  \u00b7  ${cur.V.label}`, logo = SQ.get("logo") || "";
   // 9:16: credit under the bar, logo right; 16:9: bar fills the left 58 %, so credit (and logo above it) sit bottom-right
-  if (k === "v") c.fillText(credit, f.pad, f.H - 70); else { c.textAlign = "right"; c.fillText(credit, f.W - f.pad, f.H - 24); c.textAlign = "left"; }
+  const cB = cnr && (BR.cpos === "br" || BR.cpos === "bl") ? cnr : null;   // the credit steps aside for a logo on its row
+  if (k === "v") c.fillText(credit, f.pad + (cB && BR.cpos === "bl" ? cB.s + 18 : 0), f.H - 70); else { c.textAlign = "right"; c.fillText(credit, f.W - f.pad - (cB && BR.cpos === "br" ? cB.s + 20 : 0), f.H - 24); c.textAlign = "left"; }
   if (logo) { c.font = `800 ${k === "v" ? 34 : 28}px Montserrat`; c.fillStyle = "#fff"; c.textAlign = "right"; c.fillText(logo, f.W - f.pad, f.H - (k === "v" ? 70 : 60)); c.textAlign = "left"; }
+  if (cnr) cornerLogo(c, cnr);
   if (BR.lower) lowerThird(k, c);
   if (PIN.show && !REC.on) drawPins(k, c, r);
   window.__studio = (window.__studio || 0) + 1;
