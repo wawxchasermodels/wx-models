@@ -1584,7 +1584,10 @@ function lowGeom(st, D, P, V) {
   const top = L.length ? L.reduce((a, b) => (b.mb < a.mb ? b : a)) : null;
   // list box on the side that hides fewer member dots / mean lows (old site: box outside the map, which a fixed basemap can't do)
   const PW = 0.092 * V.fig[0] + 0.03 * V.fig[0], hid = x0_ => dots.filter(d => d[0] >= x0_ && d[0] <= x0_ + PW).length + 10 * means.filter(d => d[0] >= x0_ && d[0] <= x0_ + PW).length;
-  const side = hid(st.x0) <= hid(st.x0 + st.W - PW) ? "left" : "right";
+  // 11-01 (Benjamin t2022u: "Scrolling through the low centers on AIFS ensembles is messed up, menus jump all over when scrubbing. ECMWF EPS
+  // does the same thing"; t2023u: likes the list on the right): the side used to be re-picked every hour (whichever side hid fewer dots),
+  // so the list and the dot legend flipped left/right while scrubbing. Now always the right side (AIFS ENS + ECMWF EPS, every view).
+  const side = "right"; void hid;
   return { side, dots, core, means, top, hasNum: !!E.mnum, strong: tagged.slice(0, 10), weak: tagged.slice().reverse().slice(0, 10), n: E.n || 50,
            meanVals: means.map(x => x[2]).sort((x, y) => x - y) };
 }
@@ -1610,7 +1613,9 @@ function paintLowPanel(ctx, st, V, g) {   // ens_maps.low_panel, drawn inside th
     for (const [p, m] of rows) {
       ctx.beginPath(); ctx.arc(xl + 0.004 * LW, y + 0.42 * lh, 0.0031 * LW, 0, 2 * Math.PI); ctx.fillStyle = dotCol(p); ctx.fill();
       ctx.lineWidth = 0.6; ctx.strokeStyle = "#ffffff"; ctx.stroke();
-      t(xl + 0.011 * LW, y, String(Math.round(p)), 800, 11.7); if (m) t(xl + 0.041 * LW, y, `Mem ${m}`, 700, 10.6, "#2b2e35"); y += lh; }
+      ctx.textBaseline = "middle";   // 11-01 (t2024u): row text centred on its dot like the legend
+      t(xl + 0.011 * LW, y + 0.42 * lh, String(Math.round(p)), 800, 11.7); if (m) t(xl + 0.041 * LW, y + 0.42 * lh, `Mem ${m}`, 700, 10.6, "#2b2e35");
+      ctx.textBaseline = "top"; y += lh; }
     y += lh * 0.5;
   }
   // strongest member low in view: ring around its dot + "Mem N · 952" (side away from the list / map edge / red L)
@@ -1627,7 +1632,9 @@ function paintLowPanel(ctx, st, V, g) {   // ens_maps.low_panel, drawn inside th
   ctx.globalAlpha = 0.92; ctx.fillStyle = "#ffffff"; ctx.fillRect(lx, ly, lw, lhgt); ctx.globalAlpha = 1; ctx.strokeStyle = "#c9c4b8"; ctx.strokeRect(lx, ly, lw, lhgt);
   t(lx + pt(5), ly + pt(4), "Member low (mb)", 700, 7.5);
   DOT_LABELS.forEach((s, k) => { const yy = ly + pt(4) + rh * (k + 1); ctx.beginPath(); ctx.arc(lx + pt(9), yy + rh * 0.42, pt(2.8), 0, 2 * Math.PI);
-    ctx.fillStyle = DOT_COLS[k]; ctx.fill(); ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 0.6; ctx.stroke(); t(lx + pt(16), yy, s, 500, 7.2); });
+    ctx.fillStyle = DOT_COLS[k]; ctx.fill(); ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 0.6; ctx.stroke();
+    // 11-01 (Benjamin t2024u screenshot: range labels sat above their dots): label vertically centred on its dot
+    ctx.textBaseline = "middle"; t(lx + pt(16), yy + rh * 0.42, s, 500, 7.2); ctx.textBaseline = "top"; });
   ctx.restore();
 }
 // ---- Stage 5 (10-30): meteograms + Pass Forecaster. The runner samples every town / pass slot at full precision each step
