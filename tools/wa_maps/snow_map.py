@@ -1078,7 +1078,7 @@ def render_special(region, TF, LAT1, LON1, title, subtitle, out_path, model_line
     INK, WHITE = (14, 16, 22), (255, 255, 255)
     CORNER_S_, CORNER_PAD_ = (180, 24) if Hd > Wd else (180, 36)
     TPX = 96 if Hd > Wd else 92; TY = 8
-    fmt_ = R.font(R.MONT, 32, 700); MT = "[ECMWF 0.25\u00b0]"; mtw = d.textlength(MT, font=fmt_)
+    fmt_ = R.font(R.MONT, 32, 700); MT = MODEL_TAG_OVR or "[ECMWF 0.25\u00b0]"; mtw = d.textlength(MT, font=fmt_)
     maxw = Wd - 2 * max(CORNER_PAD_ + CORNER_S_ + 20, mtw + 70)
     while d.textlength(title, font=R.font(R.IMPACT, TPX)) > maxw: TPX -= 2
     ft_t = R.font(R.IMPACT, TPX); tw = d.textlength(title, font=ft_t); tbot = TY + TPX * 1.15
