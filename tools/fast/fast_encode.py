@@ -958,11 +958,14 @@ def static(m, out, views_only=None, x2_only=False):
     # couple more transitional shades up to the max wave height of 85": max wave products only (wavemax, wavemax24; Significant Wave Height keeps 0-40).
     # 0-40 ft: the original bins and colors, unchanged. 40-85 ft: 5 ft steps, the 60 ft scale's purple -> indigo -> lavender -> lilac with a
     # transitional shade between each of its colors, ending near-white lilac; over 85 = the same near-white lilac #f3ebff as before.
-    WVX_L = WV_L + [45, 50, 55, 60, 65, 70, 75, 80, 85]
+    # 11-01 9:15 AM (Benjamin t1993u "the change from neon cyan at 75-80 is the harshest change. So one in between there like a bright blue violet
+    # would be good, let's try it"): the 75-80 bin is split at 77.5: 75-77.5 bright blue-violet #5b5bff, 77.5-80 neon cyan #00e5ff (rest unchanged).
+    # Ticks stay every 5 ft (no 77.5 label). Keys _85v, manifest models.ifs.products_v.
+    WVX_L = WV_L + [45, 50, 55, 60, 65, 70, 75, 77.5, 80, 85]
     CM["wavemax"] = M.ramp(WVX_L, [(0, "#283c96"), (2, "#2878c8"), (4, "#28afd2"), (6, "#32be8c"), (8, "#6ec846"), (10, "#c8dc3c"), (14, "#f0b432"),
                                    (20, "#e6642d"), (28, "#c82846"), (40, "#8c1e78"),
                                    (42.5, "#841f7f"), (47.5, "#6c2595"), (52.5, "#512da0"), (57.5, "#2b1873"), (62.5, "#9b1cff"), (67.5, "#e01cff"),
-                                   (72.5, "#ff1fa6"), (77.5, "#00e5ff"), (82.5, "#c8ff1a")], over="#ffffff")
+                                   (72.5, "#ff1fa6"), (76.25, "#5b5bff"), (78.75, "#00e5ff"), (82.5, "#c8ff1a")], over="#ffffff")
     # 11-01 8:12 AM NEON EXAMPLE (branch wave_scale_neon; Benjamin "Should we add more neon style colors for the highest waves ... make me an example...
     # highest waves almost jump off the scale colors"): 0-55 ft as the saved 85d scale; 55-60 a deep indigo trough so the neon pops, then
     # electric violet, neon magenta, hot pink, neon cyan, electric lime, over 85 pure white. Keys _85n, manifest models.ifs.products_n.
@@ -1130,11 +1133,11 @@ def static(m, out, views_only=None, x2_only=False):
                       barbs=dict(u="wdu", v="wdv", color="#1b1d22", length=HS.BARB_LENGTH, lw=1.0, arrows=True, min=0.5, ref=1, fixed=True),
                       extra="ECMWF wave model (WAM 0.25\u00b0)  \u00b7  arrows = mean wave direction  \u00b7  up to {hi} ft in view", pct=[0, 99.9],
                       only=("ifs",)),
-        "wavemax": dict(title="Estimated Max Wave Height", fields=["swh"], fill="hmax", key="Max wave (ft)", ticks=WVX_T, tickfmt=True, keyver="_85t",
+        "wavemax": dict(title="Estimated Max Wave Height", fields=["swh"], fill="hmax", key="Max wave (ft)", ticks=WVX_T, tickfmt=True, keyver="_85v",
                         **table(WVX_L, CM["wavemax"], "max"), extra="1.86 x significant height (largest of ~1000 waves, Rayleigh; as the old site)"
                         "  \u00b7  up to {hi} ft in view", pct=[0, 99.9], only=("ifs",)),
         "wavemax24": dict(title="24 h Max Wave Height (est.)", fields=["swh"], window=24, wmax=True, wfield="swh", wscale=1.86, fill="window", cmap_of="wavemax",
-                          key="Max wave (ft)", ticks=WVX_T, tickfmt=True, keyver="_85t", **table(WVX_L, CM["wavemax"], "max"),
+                          key="Max wave (ft)", ticks=WVX_T, tickfmt=True, keyver="_85v", **table(WVX_L, CM["wavemax"], "max"),
                           extra="1.86 x the highest significant height over the model hours in the 24 h ending at the valid time  \u00b7  up to {hi} ft in view",
                           pct=[0, 99.9], only=("ifs",)),
         "fog": dict(title="Fog Risk Index", fields=["t2m", "d2m", "u10", "v10"], fill="fog", key="Fog risk", ticks=[20, 40, 60, 80, 100], tickfmt=True,
