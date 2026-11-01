@@ -219,7 +219,16 @@ async function render(k, frO) {   // frO: camera override (MP4 storm-track pan)
   // 9:16: credit under the bar, logo right; 16:9: bar fills the left 58 %, so credit (and logo above it) sit bottom-right
   const cB = cnr && (BR.cpos === "br" || BR.cpos === "bl") ? cnr : null;   // the credit steps aside for a logo on its row
   if (k === "v") c.fillText(credit, f.pad + (cB && BR.cpos === "bl" ? cB.s + 18 : 0), f.H - 70); else { c.textAlign = "right"; c.fillText(credit, f.W - f.pad - (cB && BR.cpos === "br" ? cB.s + 20 : 0), f.H - 24); c.textAlign = "left"; }
-  if (logo) { c.font = `800 ${k === "v" ? 34 : 28}px Montserrat`; c.fillStyle = "#fff"; c.textAlign = "right"; c.fillText(logo, f.W - f.pad, f.H - (k === "v" ? 70 : 60)); c.textAlign = "left"; }
+  // 11-01-26 legal audit (Benjamin t2020u): data credit on every export (ECMWF: (c) year, www.ecmwf.int, CC BY 4.0, Modified; GeoNames when towns
+  // show; PRISM normals on precip anomaly maps). 9:16: small lines under the credit; 16:9: right-aligned above it (logo text moves up for it)
+  const dl = window.creditLines ? window.creditLines(cur.pid, cur.P, (cur.P.towns || "numbers") !== "none").map(l => l.replace("  Basemap: Natural Earth.", "")) : [];
+  let dfs = k === "v" ? 17 : 15; c.font = `500 ${dfs}px Montserrat`;
+  const dMax = k === "v" ? f.W - 2 * f.pad : f.W - 2 * f.pad - cbW - 40;
+  while (dfs > 11 && Math.max(0, ...dl.map(l => c.measureText(l).width)) > dMax) { dfs -= 1; c.font = `500 ${dfs}px Montserrat`; }
+  if (k === "v") dl.forEach((l, i) => c.fillText(l, f.pad, f.H - 70 + (dfs + 8) * (i + 1)));
+  else { c.textAlign = "right"; dl.forEach((l, i) => c.fillText(l, f.W - f.pad, f.H - 24 - 26 - (dl.length - 1 - i) * (dfs + 6))); c.textAlign = "left"; }
+  const dUp = k === "v" ? 0 : dl.length * (dfs + 6);
+  if (logo) { c.font = `800 ${k === "v" ? 34 : 28}px Montserrat`; c.fillStyle = "#fff"; c.textAlign = "right"; c.fillText(logo, f.W - f.pad, f.H - (k === "v" ? 70 : 60) - dUp); c.textAlign = "left"; }
   c.restore();
   if (cnr) cornerLogo(c, cnr);
   if (BR.lower) lowerThird(k, c);

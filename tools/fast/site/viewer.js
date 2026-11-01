@@ -715,6 +715,7 @@ async function render(lite) {
   if (P.lows && S.lowPanel) paintLowPanel(ctx, st, V, S.lowPanel);
   // 5. key + header text
   if (!V.studioOnly) ctx.drawImage(L2.key, 0, 0, LW, LH);   // Studio-only view: Studio draws its own color bar (the key file is another view's)
+  if (!V.studioOnly) drawCredit(ctx, st, pid, P, LW, LH, st.towns && tmode !== "none");   // 11-01-26 legal audit: credit line redrawn over the key's baked one
   const [r0, r1, c0, c1] = V.cut;                                            // same rows/cols temp_maps.cut() keeps
   if (!D.pct) D.pct = {};
   if (!D.pct[vid]) { const a = new Float32Array(Math.ceil((r1 - r0) / 2) * Math.ceil((c1 - c0) / 2)); let n = 0;   // every 2nd cell
@@ -750,6 +751,34 @@ async function render(lite) {
     u.searchParams.delete("mg"); u.searchParams.delete("obs"); try { history.replaceState(null, "", u); } catch (e) {} }, 400);
   preload(run, pid, S.i);
   if (window.onStudioDraw) window.onStudioDraw(cv_(), S.cur, step);
+}
+// 11-01-26 legal audit (Benjamin t2020u "add all appropriate credits"): the key PNGs carry an older credit (no year, no GeoNames, no PRISM).
+// Paint over that bottom-left credit row and write the full line: ECMWF CC BY 4.0 (c year, source, modified), GeoNames when town names
+// are drawn, PRISM / CPC / GPCP normals on the precip anomaly maps. NOAA keeps "Data: NOAA (public domain)" as before.
+const CREDIT_YEAR = new Date().getFullYear();
+function creditLines(pid, P, towns) {
+  const m = S.run.split("/")[0], name = (MD() && MD().name) || "", ec = /^ECMWF/.test(name) || /^(ifs|ifs9|aifs|eps|aens)$/.test(m);
+  const L = [];
+  if (P.clim === "pr" || /^qpf(a|pct)$/.test(pid)) L.push("Normals: PRISM Group, Oregon State University, https://prism.oregonstate.edu (accessed 30 Oct 2026); NOAA CPC & GPCP via NOAA PSL.");
+  const a = [ec ? `${name ? name + ": " : ""}Data: \u00a9 ${CREDIT_YEAR} ECMWF (www.ecmwf.int), CC BY 4.0. Modified.` : (pid === "t2m" ? "" : "Data: NOAA (public domain).")];
+  if (towns) a.push("Places: GeoNames (geonames.org), CC BY 4.0."); a.push("Basemap: Natural Earth.");
+  L.push(a.filter(Boolean).join("  "));
+  return L;
+}
+window.creditLines = creditLines;
+function drawCredit(ctx, st, pid, P, LW, LH, towns) {
+  const yb = st.y0 + st.H, top = yb + Math.max(3, LH * 0.004), L = creditLines(pid, P, towns);
+  const maxW = (MAXH_PIDS.test(pid) ? st.x0 + st.W - pt(11) * 9.5 : LW) - LW * 0.03;   // stay left of "Max height: NN ft"
+  ctx.save(); ctx.fillStyle = S.man.style.BG; ctx.fillRect(0, top, LW * 0.985, LH - top);
+  let fs = pt(9.5); ctx.font = `500 ${fs}px Montserrat`;
+  const wid = () => Math.max(...L.map(l => ctx.measureText(l).width));
+  while (fs > pt(6.5) && LW * 0.024 + wid() > maxW) { fs -= 0.5; ctx.font = `500 ${fs}px Montserrat`; }
+  const lh = fs * 1.25, avail = LH - top;
+  if (L.length * lh > avail) { fs = Math.max(pt(6), avail / L.length / 1.25); ctx.font = `500 ${fs}px Montserrat`; }
+  ctx.fillStyle = S.man.style.MUTED; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+  const y0 = LH - LH * 0.012 - fs * 0.22;
+  L.forEach((l, i) => ctx.fillText(l, LW * 0.024, y0 - (L.length - 1 - i) * fs * 1.25));
+  ctx.restore();
 }
 const cv_ = () => $("map");
 

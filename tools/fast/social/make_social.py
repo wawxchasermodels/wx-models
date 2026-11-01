@@ -309,7 +309,7 @@ def footer(fig, P, view, k, W, H, F, logo):
         text(fig, W, H, px, y_tick, s.replace("-", "−"), F["Bold"], 56 if v else 52, ha="center", stroke=4, zorder=9)
         fig.add_artist(plt.Line2D([px / W] * 2, [1 - (y_bar + bar_h) / H, 1 - (y_bar + bar_h + 14) / H], color="#ffffffd0", lw=2.5, transform=fig.transFigure, zorder=9))
     text(fig, W, H, x, y_key, P["key"], F["Bold"], 50 if v else 48, color="#e9ecf1", stroke=4, zorder=9)
-    cred = f"Data: ECMWF open data (CC-BY-4.0)  ·  {VIEWS[view]['label']}"
+    cred = f"Data: © {dt.date.today().year} ECMWF (www.ecmwf.int), CC BY 4.0. Modified.  ·  {VIEWS[view]['label']}"   # 11-01-26 legal audit (t2020u)
     if v: text(fig, W, H, x, y_cred, cred, F["Medium"], 40, color="#c3cad6", zorder=9)
     else: text(fig, W, H, W - x, y_cred, cred, F["Medium"], 40, color="#c3cad6", ha="right", zorder=9)
     # logo slot (text, or a dashed placeholder box until the page's logo file is supplied)

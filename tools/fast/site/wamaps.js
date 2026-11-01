@@ -208,6 +208,18 @@ function summaryLine1(K, vals, fmt = String, unit = "") {
   const l = G.map(([n, ks]) => [n, rng(ks)]).filter(([, g]) => g.length).map(([n, g]) => `${n} ${f_(g)}`).join(", ");
   return l.slice(0, 1).toUpperCase() + l.slice(1);
 }
+// 11-01-26 legal audit (Benjamin t2020u): faint credit just above the date line like nbm_map (R.subtle_credit: 22 px 600, white 38 %, 1 px dark halo).
+// ECMWF sources: (c) year ECMWF (www.ecmwf.int), CC BY 4.0, Modified. Every map: GeoNames town points (CC BY 4.0). NOAA: no Data credit (his rule).
+function wamCredit(ctx, K, m) {
+  const L = [];
+  if (m === "ifs9" || m === "ifs") L.push(`Data: \u00a9 ${new Date().getFullYear()} ECMWF (www.ecmwf.int), CC BY 4.0. Modified.`);
+  L.push("Places: GeoNames (geonames.org), CC BY 4.0");
+  const dt = K.date[0], top = dt.y - dt.font[1] - 34;
+  ctx.save(); ctx.font = "600 22px Montserrat"; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic"; ctx.lineJoin = "round";
+  L.forEach((l, i) => { const yb = top - 28 * (L.length - 1 - i) + 0.968 * 22;
+    ctx.lineWidth = 2; ctx.strokeStyle = "rgba(0,0,0,0.30)"; ctx.strokeText(l, dt.x, yb); ctx.fillStyle = "rgba(255,255,255,0.38)"; ctx.fillText(l, dt.x, yb); });
+  ctx.restore();
+}
 async function render(cv, c, kind, view, d) {
   const P = PRODUCTS[kind], [K, VK, F] = await Promise.all([kindKit(kind, view), viewKit(view), fieldFor(c, kind, d)]);
   const [base, over, title] = await Promise.all([loadImg(KIT + view + "/base.png"), loadImg(KIT + view + "/" + kind + "_overlay.png"), loadImg(KIT + view + `/titles/${kind}_${d.day}.png`)]);
@@ -226,6 +238,7 @@ async function render(cv, c, kind, view, d) {
   pilText(ctx, l2, s2.x, s2.y, "rs", ["", fitPx(l2, K.sum_px[1]), 800], 4, "#fff");
   pilText(ctx, l1, s1.x, s1.y, "rs", ["", fitPx(l1, K.sum_px[0]), 800], 4, "#fff");
   const dt = K.date[0]; pilText(ctx, P.sub(d), dt.x, dt.y, "ls", dt.font, 4, "#fff");
+  wamCredit(ctx, K, "nbm");
   return { title: P.title(d), sub: P.sub(d), l1, l2, vals, steps: d.steps };
 }
 async function renderTotals(cv, m, c, kind, view, w) {
@@ -262,6 +275,7 @@ async function renderTotals(cv, m, c, kind, view, w) {
   pilText(ctx, l1, s1.x, s1.y, "rs", ["", fitPx(l1, K.sum_px[0]), 800], 4, "#fff");
   const R_ = WA.runs[rkey(m, c)], sub = `${utcLbl(w.ms0)} to ${utcLbl(w.ms1)} UTC (${w.f1 - w.f0} h) · ${SRC[m].name} ${c.slice(8)}Z run`;
   const dt = K.date[0]; pilText(ctx, sub, dt.x, dt.y, "ls", dt.font, 4, "#fff");
+  wamCredit(ctx, K, m);
   return { title: P.title(), sub, l1, l2, vals, steps: [w.f0, w.f1], n: F.n };
 }
 // ---------------------------------------------------------------- page

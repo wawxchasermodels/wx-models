@@ -72,7 +72,7 @@ const glob = (m) => [
   [`${m}_multirun_snow`, "Multi-run Total Snow", "mr_snow"],
   [`${m}_winter_summary`, "Winter Weather Summary", "winter"],
 ];
-const ECMWF_CREDIT = "Source: ECMWF open data, CC BY 4.0. Modified. \u00a9 ECMWF, www.ecmwf.int";
+const ECMWF_CREDIT = `Source: ECMWF open data, CC BY 4.0. Modified. \u00a9 ${new Date().getFullYear()} ECMWF, www.ecmwf.int`;
 // tag = old chart title tag / caption tag; rl = old run-line model name
 const SECTIONS = [   // the old page's three models first, then the fast site's extra models
   { id: "eps", label: "ECMWF EPS", tag: "EPS", rl: "ECMWF ENS 0.25\u00b0, 50 members", credit: ECMWF_CREDIT, products: ens("eps") },
