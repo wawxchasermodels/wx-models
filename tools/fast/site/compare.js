@@ -25,7 +25,19 @@ function push(from) {   // send the synced parts of `from` to the other frame
   if (Object.keys(m).length > 1) frame(other(from)).postMessage(m, "*");
 }
 let urlT = 0;
+// 11-01 (t2021u): equal maps. Each desktop frame reports the room its map has (w x h); both get the smaller of the two, so the
+// first and second map always draw at exactly the same size (a frame whose menus wrap to more lines no longer gets a bigger/smaller map)
+const BOX = { L: null, R: null }; let boxLast = "";
+function sendBox() {
+  if (!BOX.L || !BOX.R) return; const w = Math.min(BOX.L.w, BOX.R.w), h = Math.min(BOX.L.h, BOX.R.h), k = w + "x" + h;
+  if (k === boxLast) return; boxLast = k; for (const id of ["L", "R"]) frame(id).postMessage({ wx: "box", w, h }, "*");
+}
+// 11-01 (t2021u: "a way to minimize the menus after I've opened them"): hide / show the menus in both frames at once
+let MENUS = true;
+$("menusall").onclick = () => { MENUS = !MENUS; $("menusall").textContent = MENUS ? "Hide menus" : "Show menus"; for (const id of ["L", "R"]) frame(id).postMessage({ wx: "menus", show: MENUS }, "*"); };
+
 addEventListener("message", (e) => {
+  if (e.data && e.data.wx === "box") return;   // 11-01 t2027u: maps are sized by the (equal) frame width now, menus sit under them; no size capping
   const d = e.data; if (d && d.wx === "size" && SLIM && ST.hasOwnProperty(d.id) && e.source === frame(d.id)) { $(d.id).style.height = Math.max(120, Math.min(1400, d.h)) + "px"; return; }
   if (!d || d.wx !== "state" || !ST.hasOwnProperty(d.id)) return;
   if (e.source !== frame(d.id)) return;

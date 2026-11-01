@@ -41,10 +41,24 @@ body.bare #bar{display:none}
 /* side-by-side frames (compare.html): no page-level extras, smaller bar */
 body.embed #share,body.embed #obsbtn,body.embed #stat,body.embed #pfbtn{display:none}
 body.embed #bar{gap:6px;padding:6px 8px}
+/* 11-01 (Benjamin t2027u: "move the compare views directly under the slider ... menus drop down BELOW the views so the views never change
+   size or position"): in compare frames the map comes first, top-aligned, sized only by the frame width (capped to the frame height),
+   and the menus (and the Menus / Hide menus button) sit under it; the frame scrolls if the menus need more room */
+html:has(body.embed),body.embed{height:auto!important;min-height:100%;overflow-y:auto!important}
+body.embed{display:flex;flex-direction:column}
+body.embed #wrap{order:1;flex:0 0 auto!important;align-items:flex-start!important;padding:0!important}
+body.embed #map{max-height:calc(100vh - 2px)!important}body.embed.cslim #map{max-height:none!important}
+body.embed #bar{order:2;border-bottom:0;border-top:1px solid #2c3039}
+body.embed #cgear{order:3;position:static!important;margin:6px 8px;align-self:flex-start}
+body.embed #bar #cgear{margin:0}
+body.embed #dock{order:4}body.embed .lic{display:none}
 body.cslim #bar,body.cslim #dock,body.cslim #stepctl,body.cslim #loadnote{display:none!important}body.cslim.cshow #bar{display:flex!important}
 body.cslim #wrap{padding:0!important}body.cslim{min-height:0!important;height:auto!important}
 #cgear{position:fixed;right:6px;bottom:6px;z-index:20;background:#262931e0;color:#f4f2ee;border:1px solid #7d828c;border-radius:6px;padding:3px 8px;font:12px Montserrat,system-ui,sans-serif;cursor:pointer}
 body.cslim.cshow #cgear{position:static;margin:4px 8px}
+/* 11-01 (t2021u): menus toggle in every compare frame; shown = "Hide menus" first in the bar, hidden = "Menus" button under the map */
+body.cmin #bar{display:none!important}
+#bar #cgear{position:static;margin:0;background:#2f8cff2e;border-color:#2f8cff;font-weight:700;font-size:inherit;padding:4px 9px}
 /* 10-29 9:01 PM (Benjamin): on phones the hour slider + step buttons sit UNDER the map (thumb no longer covers it);
    the map hugs the slider at the bottom of the screen, menus stay on top. Desktop unchanged. viewer.js moves #stepctl. */
 #stepctl{display:contents}
@@ -108,7 +122,7 @@ table.pf td small.el{color:#a7abb3;font-weight:500;font-size:11px}table.pf td.fz
 </div>
 <div id="wrap"><canvas id="map"></canvas><div id="tip" hidden></div></div>
 <div id="dock"></div>
-<script src="viewer.js?v=20261101u"></script>
+<script src="viewer.js?v=20261101z"></script>
 <script src="reqbox.js?v=20261031b"></script>
 <footer class="lic"><details><summary>Data: &copy; <span class="yr">2026</span> ECMWF (www.ecmwf.int), CC BY 4.0 &middot; Places: GeoNames, CC BY 4.0 &middot; NOAA (public domain) &middot; Natural Earth &middot; <u>Credits</u></summary>
 <p>Based on data and products of the European Centre for Medium-Range Weather Forecasts (ECMWF). Copyright &copy; <span class="yr">2026</span> ECMWF, <a href="https://www.ecmwf.int">www.ecmwf.int</a>. Licensed under CC BY 4.0 (<a href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a>). Maps are modified from the original data. ECMWF does not accept any liability whatsoever for any error or omission in the data, their availability, or for any loss or damage arising from their use.</p>
