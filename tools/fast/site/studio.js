@@ -43,13 +43,23 @@ function wideRect(m) {
   }).catch(() => { delete WT[m]; });
   return null;
 }
+// Washington's box inside the normal Washington view's area (temp_maps "wa" frame: state 242,275 1095x694 in panel 218.9,224.75 1162x778)
+const WA_IN_WAVIEW = [0.0199, 0.0646, 0.942, 0.892];
+function stateRect(V, m) {   // Washington's box in the wide view's figure px: the view's own "fit" (studio_views.py), else from WT
+  if (V.fit) { const [x, y, w, h] = V.fit; return { x, y, w, h }; }
+  const t = wideRect(m), q = WA_IN_WAVIEW; if (!t) return null;
+  return { x: t.x + q[0] * t.w, y: t.y + q[1] * t.h, w: q[2] * t.w, h: q[3] * t.h };
+}
 function base(k) {   // camera at dx = dy = 0, zoom 1: centre (figure px) and scale (output px per figure px)
-  const f = F[k], V = last.cur.V, [px, py, pw, ph] = V.panel, t = V.studioWide ? wideRect(last.cur.run.split("/")[0]) : null;
+  const f = F[k], V = last.cur.V, [px, py, pw, ph] = V.panel, t = V.studioWide ? stateRect(V, last.cur.run.split("/")[0]) : null;
   if (!t) return { cx: px + pw / 2, cy: py + ph / 2, k0: Math.max(f.W / pw, f.H / ph) };   // normal views: the map panel covers the frame
-  // wide view: the Washington view's area (+4 % each side) fits the frame; the header / color bar may overlap its outer margin
-  // by half their height (that margin is BC / Oregon), so 16:9 is only slightly wider than Washington; 9:16 fits on width
-  const mh = f.H - (f.top + f.bot) / 2, k0 = Math.min(f.W / (t.w * 1.08), mh / (t.h * 1.08));
-  return { cx: t.x + t.w / 2, cy: t.y + t.h / 2 - (f.top - f.bot) / 4 / k0, k0 };
+  // wide view (10-31 7:55 PM, Benjamin: "a little tighter", whole state with a little margin): Washington fits a band between the
+  // title and the color bar. 16:9: state from y 190 to H-120 and shifted right (its left edge at 27 % of the width) so the title,
+  // top left, sits over the ocean / Vancouver Island instead of on Vancouver; 9:16: 86 % of the width, centred under the title.
+  if (k === "h") { const y0 = 190, y1 = f.H - 120, xl = 0.27 * f.W, k0 = Math.min((0.93 * f.W - xl) / t.w, (y1 - y0) / t.h);
+    return { cx: t.x + t.w / 2 - (xl + t.w * k0 / 2 - f.W / 2) / k0, cy: t.y + t.h / 2 - ((y0 + y1) / 2 - f.H / 2) / k0, k0 }; }
+  const y0 = f.top + 80, y1 = f.H - f.bot + 40, k0 = Math.min(0.86 * f.W / t.w, (y1 - y0) / t.h);
+  return { cx: t.x + t.w / 2, cy: t.y + t.h / 2 - ((y0 + y1) / 2 - f.H / 2) / k0, k0 };
 }
 function crop(k, fr) {   // source rect (map bitmap px) for frame k: base camera, then zoom / pan; the panel stays covering the frame when it
   // can, and when it is smaller than the frame (wide view) it stays wholly in the frame (the rest is background)

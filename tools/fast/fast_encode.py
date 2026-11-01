@@ -1391,6 +1391,8 @@ def static(m, out, views_only=None, x2_only=False):
                                           crop=[i0, i1, j0, j1], views=views, products=prods, clim=clim, **({"products_x": prods_x} if prods_x else {}))
     man.setdefault("runs", {}).setdefault(m, [])
     json.dump(man, open(mp, "w"), indent=1)
+    if MD["grid"] == "ll":   # 10-31: Studio-only "Washington (wide, for loops)" view on this crop (static/studio_views.json, not the manifest)
+        import studio_views; studio_views.build([m], man, out)
     print(f"{m} static done, crop {[i0, i1, j0, j1]}", flush=True)
 
 # ------------------------------------------------------------------------------------------------ steps

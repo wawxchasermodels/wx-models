@@ -1,0 +1,124 @@
+#!/usr/bin/env python3
+"""Studio-only map views for the global models (Benjamin 10-31-26 7:49 PM: "city labels on the new washington wide are way too
+big"; 7:50 PM: build a proper wide Washington basemap and town layer, and make the view a little tighter).
+
+"Washington (wide, for loops)" (wawide) was the model's Pacific NW tight map (pnwt) blown up ~3.8x by the Studio camera, so its
+town names / numbers came out ~50 px tall in a 1080 px frame. This builds a real view for it, drawn at the scale the Studio frames
+show it: Washington ~600 x 380 figure px (like the HRRR wide view), with room above / below for the 9:16 frame. Same encoder code
+as fast_encode.static (LUT, coast / border layer, towns placed by temp_maps.region_towns with "88" numbers, number slots).
+
+Nothing in manifest.json changes (no new view in the site's View menus): the view entries go to static/studio_views.json, which
+only the Studio page reads. New files only: static/studio_views.json, static/lut_<model>_wawide.bin, static/{,x2/}base_wawide.png,
+static/{,x2/}towns_wawide.png. Global (0.25 / 0.1 deg lat-lon) models only; the grid is analytic, so no GRIB download is needed.
+The data rows / cols come from the model's published crop (manifest), so every run already in R2 works with it.
+
+  studio_views.py --manifest data/manifest.json --out D [--models gfs,ifs,ifs9,aifs,eps,aens]
+"""
+import os, sys, json, argparse, time
+import numpy as np
+HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
+import fast_encode as FE
+
+VID = "wawide"
+STATE = (-124.85, -116.9, 45.54, 49.0)   # Washington's lon / lat box: the part the Studio camera fits in the frame ("fit")
+GLOBAL = ("gfs", "ifs", "ifs9", "aifs", "eps", "aens")
+
+def setup():
+    import matplotlib; matplotlib.use("Agg")
+    import cartopy.crs as ccrs
+    import house_style as HS, temp_maps as TM
+    HS.use_for_plots(); FE.extra_views(TM, ccrs)
+    # 13 x 17 in at 100 dpi: panel ~1238 x 1351 px, Washington ~599 x 379 px (HRRR wide view: 568 x 392). Tall, so a 9:16 frame
+    # that fits the state's width still has map above and below it (41-53.6 N); 16:9 shows ~940 px of the 1238 px width.
+    TM.VIEWS[VID] = dict(label="Washington (wide, for loops)", size=(13, 17),
+                         proj=ccrs.LambertConformal(central_longitude=-120.6, central_latitude=47.3, standard_parallels=(45, 49)),
+                         ll=(-128.5, -113.3, 41.0, 53.6), box=(-129.5, -112.0, 40.5, 54.2))
+    # towns: the regional (population-tiered) placement like the HRRR wide view, a lower last tier (WA towns of 12k+) since
+    # this frame is only ~1/3 of the Pacific NW tight one; names 9.5 / 8.5 / 8 pt as on every regional view
+    TM.REGION_TOWNS[VID] = ((250000, 50000, 12000), 70)
+    # + four eastern Washington towns from the site's Washington list (they fill the gaps east of the Cascades; this process
+    # builds only this view, so the shared requested list is extended here only)
+    TM.REGION_REQUESTED = tuple(TM.REGION_REQUESTED) + tuple(n for n in ("Ellensburg", "Moses Lake", "Pullman", "Colville") if n not in TM.REGION_REQUESTED)
+    return TM, HS, ccrs
+
+def build(models, man, out):
+    import matplotlib.pyplot as plt
+    import cartopy.feature as cf
+    TM, HS, ccrs = setup(); pc = ccrs.PlateCarree(); V = TM.VIEWS[VID]
+    os.makedirs(f"{out}/static/x2", exist_ok=True)
+    def layer_fig():
+        fig, ax, ky = TM.frame(VID); fig.patch.set_alpha(0); ax.patch.set_alpha(0); return fig, ax, ky
+    def save(fig, path):
+        fig.savefig(path, dpi=FE.DPI, transparent=True); fig.savefig(path.replace("/static/", "/static/x2/"), dpi=FE.DPI * FE.X2, transparent=True)
+        plt.close(fig); return os.path.getsize(path)
+    # geometry (same as fast_encode.static)
+    fig, ax, ky = TM.frame(VID); fig.set_dpi(FE.DPI); ax.apply_aspect(); fig.canvas.draw()
+    W, H = fig.get_size_inches() * FE.DPI; b = ax.get_position()
+    px, py, pw, ph = b.x0 * W, (1 - b.y1) * H, b.width * W, b.height * H
+    x0, x1, y0, y1 = ax.get_extent(V["proj"])
+    nx, ny = int(np.ceil(pw / FE.STRIDE)) + 1, int(np.ceil(ph / FE.STRIDE)) + 1
+    gxp = np.arange(nx) * FE.STRIDE; gyp = np.arange(ny) * FE.STRIDE
+    PX = x0 + (gxp[None, :] / pw) * (x1 - x0) + 0 * gyp[:, None]; PY = y1 - (gyp[:, None] / ph) * (y1 - y0) + 0 * gxp[None, :]
+    ll = pc.transform_points(V["proj"], PX, PY); LO_, LA_ = ll[..., 0], ll[..., 1]
+    n2 = V["proj"].transform_points(pc, LO_, np.minimum(LA_ + 0.05, 89.9))
+    ang = np.arctan2(-(n2[..., 1] - PY) / (y1 - y0) * ph, (n2[..., 0] - PX) / (x1 - x0) * pw)
+    tr = pc._as_mpl_transform(ax)   # Washington's box in figure px (top-left origin): the Studio camera's "fit" rect
+    sp = [tr.transform((lo, la)) for lo in np.linspace(STATE[0], STATE[1], 40) for la in STATE[2:]] + \
+         [tr.transform((lo, la)) for lo in STATE[:2] for la in np.linspace(STATE[2], STATE[3], 40)]
+    xs = [p[0] for p in sp]; ys = [H - p[1] for p in sp]
+    fit = [float(min(xs)), float(min(ys)), float(max(xs) - min(xs)), float(max(ys) - min(ys))]
+    plt.close(fig)
+    sizes = {}
+    # fixed layers, shared by every model (same frame): coast / borders / frame, then towns (built with the first model's grid)
+    fig, ax, ky = layer_fig(); HS.outlines(ax, cf, res="10m"); HS.frame(ax)
+    nt = len(fig.texts); HS.header(fig, "X", "X", "X", "X", "X")
+    for t in fig.texts[nt:]: t.set_visible(False)
+    sizes["base"] = save(fig, f"{out}/static/base_{VID}.png")
+    entries = {}; towns_png = False
+    for m in models:
+        MD = FE.MODELS[m]; assert MD["grid"] == "ll", m
+        if m not in man.get("models", {}): print(f"{m}: not in manifest, skipped", flush=True); continue
+        i0, i1, j0, j1 = man["models"][m]["crop"]; rs_ = MD.get("res", 0.25)
+        fi, fj = (90.0 - LA_) / rs_, np.mod(LO_, 360.0) / rs_
+        if not (fi.min() >= i0 and fi.max() <= i1 - 1 and fj.min() >= j0 and fj.max() <= j1 - 1):
+            print(f"{m}: view not inside the published crop {[i0, i1, j0, j1]} (rows {fi.min():.1f}-{fi.max():.1f}, cols {fj.min():.1f}-{fj.max():.1f}); skipped", flush=True); continue
+        np.stack([fi - i0, fj - j0, ang], -1).astype("<f4").tofile(f"{out}/static/lut_{m}_{VID}.bin")
+        crop_la = 90.0 - np.arange(i0, i1) * rs_; crop_lo = np.mod(np.arange(j0, j1) * rs_, 360.0)
+        bx = V["box"]; rr = np.where((crop_la >= bx[2]) & (crop_la <= bx[3]))[0]; cc = np.where((crop_lo >= bx[0] % 360) & (crop_lo <= bx[1] % 360))[0]
+        cut = [int(rr.min()), int(rr.max() + 1), int(cc.min()), int(cc.max() + 1)]
+        # towns: the site's own placement with "88" numbers; each number's grid point from sampling lat and lon grids at the pins
+        wcols = np.where(crop_lo >= 180)[0]; tw_lo1 = crop_lo[wcols] - 360; tw_la1 = crop_la
+        tw_la, tw_lo = np.meshgrid(tw_la1, tw_lo1, indexing="ij")
+        f88 = lambda v: None if not np.isfinite(v) else "88"
+        fig, ax, ky = layer_fig(); arts = TM.towns(ax, VID, (tw_la1, tw_lo1, tw_la), f88) or []
+        tv_la = dict(getattr(ax, "town_values", {}) or {})
+        fig2, ax2, _ = layer_fig(); TM.towns(ax2, VID, (tw_la1, tw_lo1, tw_lo), f88); tv_lo = dict(getattr(ax2, "town_values", {}) or {}); plt.close(fig2)
+        fig.canvas.draw(); r = fig.canvas.get_renderer(); Wd, Hd = fig.get_size_inches() * fig.dpi; slots = []; last = None
+        for t in arts:
+            if t.get_text() != "88": last = t.get_text(); continue
+            if not t.get_visible() or last not in tv_la: continue
+            pla, plo = tv_la[last], tv_lo.get(last)
+            if plo is None or not (np.isfinite(pla) and np.isfinite(plo)): continue
+            bb = t.get_window_extent(r)
+            slots.append(dict(name=last, kind="town", x=bb.x0 / Wd, y=1 - (bb.y0 + bb.y1) / 2 / Hd, fi=float((90.0 - pla) / rs_ - i0),
+                              fj=float(np.mod(plo, 360.0) / rs_ - j0), size=t.get_fontsize(), color=t.get_color()))
+            t.set_visible(False)
+        if not towns_png: sizes["towns"] = save(fig, f"{out}/static/towns_{VID}.png"); towns_png = [s["name"] for s in slots]
+        else:
+            plt.close(fig)
+            if [s["name"] for s in slots] != towns_png: raise SystemExit(f"{m}: town placement differs from the shared towns layer")
+        entries[m] = dict(label=V["label"], fig=[int(round(W)), int(round(H))], size_in=[float(x) for x in V["size"]], panel=[px, py, pw, ph],
+                          stride=FE.STRIDE, nx=nx, ny=ny, barbs_across=20, lut=f"static/lut_{m}_{VID}.bin", cut=cut, towns=slots,
+                          fit=fit, studioOnly=True, studioWide="wa", keysFrom="wa")
+        print(f"{m} {VID}: {len(slots)} town numbers, cut {cut}", flush=True)
+    sp = f"{out}/static/studio_views.json"; old = json.load(open(sp)).get("models", {}) if os.path.exists(sp) else {}   # other models kept
+    for m, e in entries.items(): old.setdefault(m, {})[VID] = e
+    doc = dict(built=time.strftime("%Y-%m-%dT%H:%M:%S%z"), v=time.strftime("%Y%m%d%H%M%S"),
+               note="Studio-only views (studio_views.py); not in manifest.json", models=old)
+    json.dump(doc, open(sp, "w"), indent=1)
+    print("sizes", sizes, "towns", towns_png, flush=True); return doc
+
+if __name__ == "__main__":
+    ap = argparse.ArgumentParser(); ap.add_argument("--manifest", required=True); ap.add_argument("--out", required=True)
+    ap.add_argument("--models", default=",".join(GLOBAL)); a = ap.parse_args()
+    build(a.models.split(","), json.load(open(a.manifest)), a.out)

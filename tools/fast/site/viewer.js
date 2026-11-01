@@ -156,11 +156,15 @@ function mergeRunsX(man) {
 // 10-31 7:30 PM (Benjamin: "a slightly more zoomed-out Washington view made specifically for Studio loop videos"): Studio only, an
 // extra view "Washington (wide, for loops)" = this model's Pacific NW tight / high-res map (src) that Studio frames on Washington so
 // the whole state fits both video frames. Same data, basemap, towns and key as src; the normal Washington view is unchanged.
-function addStudioViews(man) {
+function addStudioViews(man, sv) {
   if (!Q.get("studio")) return man;
-  for (const M of Object.values(man.models || {})) { const V = M.views || {}, src = V.pnwt ? "pnwt" : V.pnwhr ? "pnwhr" : null;
-    if (!src || !V.wa || V.wawide) continue; const out = {};
-    for (const [k, v] of Object.entries(V)) { out[k] = v; if (k === "wa") out.wawide = Object.assign({}, V[src], { label: "Washington (wide, for loops)", src, studioWide: "wa" }); }
+  // 10-31 7:55 PM (Benjamin: "city labels on the new washington wide are way too big"): the global models now get a real view
+  // made for Studio (tools/fast/studio_views.py -> static/studio_views.json, not in manifest.json): its own basemap and town layer
+  // drawn at the size the Studio frames show it. Models without one (HRRR / RRFS / NBM) keep the high-res Pacific NW map as before.
+  const SVM = (sv && sv.models) || {};
+  for (const [m, M] of Object.entries(man.models || {})) { const V = M.views || {}, own = (SVM[m] || {}).wawide, src = V.pnwt ? "pnwt" : V.pnwhr ? "pnwhr" : null;
+    if ((!own && !src) || !V.wa || V.wawide) continue; const out = {};
+    for (const [k, v] of Object.entries(V)) { out[k] = v; if (k === "wa") out.wawide = own ? Object.assign({}, own, { studioWide: "wa" }) : Object.assign({}, V[src], { label: "Washington (wide, for loops)", src, studioWide: "wa" }); }
     M.views = out; }
   return man;
 }
@@ -176,9 +180,10 @@ async function boot() {
     document.body.appendChild(b);
     let lh = 0; new ResizeObserver(() => { const h = cslimH(); if (Math.abs(h - lh) > 2 && parent !== window) { lh = h; parent.postMessage({ wx: "size", id: Q.get("id"), h }, "*"); } }).observe(document.body); }
   // 10-29: manifest, fonts and the shown run's run.json in parallel; other runs load when picked
-  const [man] = await Promise.all([fetch(DATA + "manifest.json", { cache: "no-cache" }).then(r => r.json()),
+  const [man, sv] = await Promise.all([fetch(DATA + "manifest.json", { cache: "no-cache" }).then(r => r.json()),
+                                   Q.get("studio") ? fetch(DATA + "static/studio_views.json", { cache: "no-cache" }).then(r => r.ok ? r.json() : null, () => null) : null,
                                    document.fonts.load("800 20px Montserrat"), document.fonts.load("500 12px Montserrat")]);
-  S.man = addStudioViews(mergeRunsX(man));
+  S.man = addStudioViews(mergeRunsX(man), sv);
   // runs: "model/cycle", newest first per model; models in a fixed order
   const order = ["hrrr", "rrfs", "nbm", "gfs", "ifs", "ifs9", "aifs", "eps", "aens"].filter(m => S.man.models[m] && (S.man.runs[m] || []).length);
   const all = []; for (const m of order) for (const c of [...S.man.runs[m]].reverse()) all.push(`${m}/${c}`);
@@ -370,7 +375,7 @@ async function viewStatic(vid) {
   })();
   S.statics[sk] = p; return p;
 }
-const keyImg = {}; const keyURL = (pid, vid) => DATA + PRODS()[pid].keys[VSRC(vid)] + SV();
+const keyImg = {}; const keyURL = (pid, vid) => { const K = PRODS()[pid].keys, V = VIEWS()[vid] || {}; return DATA + (K[VSRC(vid)] || K[V.keysFrom] || K.wa) + SV(); };   // Studio-only view: Washington key
 const getKey = (pid, vid) => { const u = keyURL(pid, vid); return keyImg[u] || (keyImg[u] = img(u)); };
 
 // ---------------------------------------------------------------- data images
@@ -668,7 +673,7 @@ async function render(lite) {
   }
   if (P.lows && S.lowPanel) paintLowPanel(ctx, st, V, S.lowPanel);
   // 5. key + header text
-  ctx.drawImage(L2.key, 0, 0, LW, LH);
+  if (!V.studioOnly) ctx.drawImage(L2.key, 0, 0, LW, LH);   // Studio-only view: Studio draws its own color bar (the key file is another view's)
   const [r0, r1, c0, c1] = V.cut;                                            // same rows/cols temp_maps.cut() keeps
   if (!D.pct) D.pct = {};
   if (!D.pct[vid]) { const a = new Float32Array(Math.ceil((r1 - r0) / 2) * Math.ceil((c1 - c0) / 2)); let n = 0;   // every 2nd cell
