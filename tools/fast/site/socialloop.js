@@ -67,12 +67,15 @@ function drawPins() {
       d.title = `Drag to move pin ${n.toUpperCase()}`; d.style.left = (ox + p[n].x * r.width) + "px"; d.style.top = (oy + p[n].y * r.height) + "px"; box.appendChild(d); pinDrag(d, k, n); }
     const hp = p.a || p.b;
     if (hp && !P.pinMode) { const h = document.createElement("div"); h.className = "lpdh"; h.textContent = PD ? `Moving ${PD.n.toUpperCase()}` : "Drag A or B to move";
-      h.style.left = (ox + hp.x * r.width) + "px"; h.style.top = (oy + hp.y * r.height + (hp.y > 0.85 ? -46 : 26)) + "px"; box.appendChild(h); }
+      hintAt(h, ox, oy, r, hp); box.appendChild(h); }
   }
 }
 // 10-31 5:12 PM (Benjamin: "drag point a and b for the storm across the map either with my finger, or with my cursor"): pins are
 // draggable (mouse + touch, 44 px target, touch-action none so the page doesn't scroll); the stored fraction updates live.
 let PD = null;
+// the hint pill sits under pin A (above it near the bottom), kept inside the picture near the left / right edges
+function hintAt(h, ox, oy, r, hp) { h.style.left = (ox + hp.x * r.width) + "px"; h.style.top = (oy + hp.y * r.height + (hp.y > 0.85 ? -46 : 26)) + "px";
+  h.style.transform = hp.x < 0.22 ? "translateX(-18px)" : hp.x > 0.78 ? "translateX(calc(-100% + 18px))" : "translateX(-50%)"; }
 function pinDrag(el, k, n) {
   el.addEventListener("pointerdown", (e) => { if (P.busy || PV) return; e.preventDefault(); e.stopPropagation();
     // overlapping hit rings: take the pin whose centre is nearest the finger; keep the grab offset so the pin doesn't jump
@@ -86,7 +89,7 @@ function pinDrag(el, k, n) {
     const box = $s("i" + k).parentNode, br = box.getBoundingClientRect(), ox = r.left - br.left, oy = r.top - br.top, q = p[k + n];
     el.style.left = (ox + q.x * r.width) + "px"; el.style.top = (oy + q.y * r.height) + "px";
     const ln = box.querySelector(".lpline line"); if (ln) { ln.setAttribute(n === "a" ? "x1" : "x2", q.x * r.width); ln.setAttribute(n === "a" ? "y1" : "y2", q.y * r.height); }
-    const h = box.querySelector(".lpdh"); if (h) { h.textContent = `Moving ${n.toUpperCase()}`; const hp = p[k + "a"] || q; h.style.left = (ox + hp.x * r.width) + "px"; h.style.top = (oy + hp.y * r.height + (hp.y > 0.85 ? -46 : 26)) + "px"; }
+    const h = box.querySelector(".lpdh"); if (h) { h.textContent = `Moving ${n.toUpperCase()}`; hintAt(h, ox, oy, r, p[k + "a"] || q); }
   });
   const up = (e) => { if (!PD || PD.id !== e.pointerId || PD.el !== el) return; PD = null; el.classList.remove("drag"); info(); };
   el.addEventListener("pointerup", up); el.addEventListener("pointercancel", up);
