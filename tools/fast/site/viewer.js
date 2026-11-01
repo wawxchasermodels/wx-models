@@ -893,6 +893,32 @@ function erasedTowns(im, key, rects, LW) {   // town layer copy with the re-plac
     TE.set(k, c); while (TE.size > 6) TE.delete(TE.keys().next().value); }
   return c;
 }
+// 11-01 9:54 AM (Benjamin t2004u "Make the coastal town name wave heights pull a marker 1/2 mile off shore"): each saltwater town's number
+// is read at a point ~0.5 mi (0.8 km) off its shore on the open-water side, not at the town. OFFSHORE = explicit points (towns whose pin
+// sits back from the water or inside a bay / harbor: the point is 0.5 mi off the open shore); OFF_BRG = bearing (deg, 0 = N, 90 = E)
+// toward the water, point = town + 0.8 km along it; other towns: due west. Sampled like before (bilinear when the 4 grid points around
+// the marker are sea, else the nearest sea point within 1.5 cells of the MARKER), so at 0.25 deg most numbers only change where the
+// nearest sea cell differs; no sea point near the marker -> the town point as before (logged).
+const OFFSHORE = { "Neah Bay": [48.38, -124.615], "La Push": [47.908, -124.648], "Ocean Shores": [46.974, -124.19], "Westport": [46.89, -124.142],
+  "Long Beach": [46.35, -124.077], "Cannon Beach": [45.89, -123.975], "Port Angeles": [48.13, -123.43], "Victoria": [48.40, -123.36],
+  "Bellingham": [48.75, -122.51], "Smith Island": [48.328, -122.831], "Port Townsend": [48.117, -122.745], "Shore Acres": [43.326, -124.395],
+  "Coos Bay": [43.35, -124.36], "Eureka": [40.80, -124.20], "San Francisco": [37.76, -122.52], "San Diego": [32.745, -117.265],
+  "Monterey": [36.61, -121.88], "Santa Barbara": [34.395, -119.69], "Los Angeles": [33.98, -118.50], "Crescent City": [41.74, -124.21] };
+const OFF_BRG = { "Anacortes": 0, "Coupeville": 0, "Friday Harbor": 90, "Bremerton": 180, "Poulsbo": 180, "Mukilteo": 315, "Edmonds": 270, "Kingston": 90,
+  "Gig Harbor": 90, "Port Orchard": 0, "Bainbridge Is.": 90, "Port Ludlow": 90, "Vancouver": 270, "Richmond": 270, "North Vancouver": 180,
+  "Delta (Ladner)": 270, "Tsawwassen": 270, "White Rock": 180, "Point Roberts": 270, "Nanaimo": 90, "Squamish": 180, "Port Alberni": 180,
+  "Courtenay": 90, "Campbell River": 90, "Powell River": 270, "Sechelt": 180, "Parksville": 0, "Sooke": 180, "Bodega Bay": 200, "Santa Cruz": 180,
+  "Malibu": 180 };
+function offshorePt(name, la, lo) {
+  if (OFFSHORE[name]) return OFFSHORE[name];
+  const b = (OFF_BRG[name] ?? 270) * Math.PI / 180, km = 0.8;
+  return [la + km * Math.cos(b) / 111.2, lo + km * Math.sin(b) / (111.2 * Math.cos(la * Math.PI / 180))];
+}
+function offVal(D, name, T, WT) {   // t2004u: the town's number from its 0.5 mi offshore marker (see OFFSHORE)
+  const [a, b] = offshorePt(name, T[0], T[1]); let v = seaVal(D, a, b), how = "offshore";
+  if (!isFinite(v)) { v = seaVal(D, T[0], T[1]); how = "town (no sea near the marker)"; }
+  (WT.vals = WT.vals || {})[name] = [Math.round(seaVal(D, T[0], T[1])), Math.round(v), how]; return v;
+}
 function seaVal(D, la, lo) {   // model value at a coast town: bilinear when the 4 points around it are sea, else the nearest sea point (<= 2 cells)
   const cr = MD().crop || [0, 0, 0, 0], F = D.fill, w = D.w, h = D.h, fi = (90 - la) / 0.25 - cr[0], fj = ((lo + 360) % 360) / 0.25 - cr[2];
   const ok = (r, c) => r >= 0 && c >= 0 && r < h && c < w && F[r * w + c] >= 0, r = Math.floor(fi), c = Math.floor(fj);
@@ -917,7 +943,7 @@ function drawCoast(ctx, st, D, P, V, LW, LH, WT) {
     if (!must && (hit(dot, pt(1)) || dots.some(([a, b]) => (a - x) ** 2 + (b - y) ** 2 < pt(wa ? 9 : 11) ** 2))) { WT.log.push(`${name}: dot blocked`); return; }
     const t0 = must && (V.towns || []).find(t => t.name === name);   // a re-placed city keeps its usual number (read at its pin, as before)
     const fN = big ? `700 ${pt(9.5)}px Montserrat` : fName;
-    const v = t0 && t0.fi >= 0 && t0.fj >= 0 && t0.fi < D.h - 1 && t0.fj < D.w - 1 ? sampleRC(D.fill, D.w, t0.fi, t0.fj) : seaVal(D, T[0], T[1]), s_ = isFinite(v) && !(WT.own && WAVE_KEEP[name] === "p") ? fmtVal(P, v) : "";
+    const v = t0 && t0.fi >= 0 && t0.fj >= 0 && t0.fi < D.h - 1 && t0.fj < D.w - 1 ? sampleRC(D.fill, D.w, t0.fi, t0.fj) : offVal(D, name, T, WT), s_ = isFinite(v) && !(WT.own && WAVE_KEEP[name] === "p") ? fmtVal(P, v) : "";
     ctx.font = fN; const nw = ctx.measureText(name).width; ctx.font = fNum; const vw = s_ ? ctx.measureText(s_).width : 0, W_ = nw + (s_ ? gap + vw : 0);
     const c = { r: [pt(5), 0], l: [-pt(5) - W_, 0], a: [-W_ / 2, -pt(9.5)], b: [-W_ / 2, pt(9.5)] };
     const sd = C.side || T[2], cands = [c[sd], ...["r", "l", "a", "b"].filter(k => k !== sd).map(k => c[k]), [pt(5), -pt(6)], [pt(5), pt(6)], [-pt(5) - W_, -pt(6)], [-pt(5) - W_, pt(6)]];
