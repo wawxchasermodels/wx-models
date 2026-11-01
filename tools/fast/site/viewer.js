@@ -705,8 +705,20 @@ async function render(lite) {
   if (pid === "gust10" && run.startsWith("eps/") && f <= 144 && f % 3 === 0) extra = extra.replace("in the 6 h ending", "in the 3 h ending");   // 10-31 EPS 3-hourly to F+144
   header(ctx, V, P.title, step.valid_line, `${S.runs[run].runline}  \u00b7  ${V.label}  \u00b7  ${extra}`, step.badge);
   S.peak = GUST_PIDS.test(pid) ? drawPeak(ctx, st, vals) : null;
+  // 11-01 7:43 AM (Benjamin: "Add a 'max height:80ft' just underneath the bottom right of the graphic"): max wave maps show the tallest
+  // value in this frame and view (true grid max over the view's rows/cols, nearest whole ft), right-aligned under the map's bottom-right corner
+  let maxv = null;
+  if (MAXH_PIDS.test(pid)) {
+    if (!D.mx) D.mx = {};
+    if (D.mx[vid] === undefined) { let mx = -Infinity; for (let r = r0; r < r1; r++) for (let c = c0; c < c1; c++) { const v = D.fill[r * D.w + c]; if (v > mx) mx = v; } D.mx[vid] = mx; }
+    if (isFinite(D.mx[vid]) && D.mx[vid] >= 0) {
+      maxv = D.mx[vid]; const yb = st.y0 + st.H, yc = yb + (LH - yb) * 0.5;
+      ctx.save(); ctx.font = `800 ${pt(11)}px Montserrat`; ctx.fillStyle = S.man.style.INK; ctx.textAlign = "right"; ctx.textBaseline = "middle";
+      ctx.fillText(`Max height: ${Math.round(maxv)} ft`, st.x0 + st.W, yc); ctx.restore();
+    }
+  }
   const t3 = performance.now();
-  S.cur = { st, D, vals, P, pid, V, run, f };
+  S.cur = { st, D, vals, P, pid, V, run, f, maxv };
   S.last = { data_ms: t1 - t0, fill_ms: t2 - t1, overlay_ms: t3 - t2, total_ms: t3 - t0 };
   $("stat").textContent = `F+${f}  data ${S.last.data_ms.toFixed(0)} ms · fill ${S.last.fill_ms.toFixed(0)} ms · lines/labels ${S.last.overlay_ms.toFixed(0)} ms`;
   window.__drawn = `${pid}/${vid}/${f}` + (lite ? "~" : ""); window.__rs = rs;
@@ -737,6 +749,7 @@ function fmtVal(P, v) {   // temp_maps fmt_int / fmt_vis
   if (P.fmt === "vis") return v >= 7 ? "7+" : v < 3 ? v.toFixed(1) : v.toFixed(0);
   return String(Math.round(v));
 }
+const MAXH_PIDS = /^wavemax(24)?$/;   // 11-01: products with the 'Max height: NN ft' line (viewer + Studio)
 const UNITS = { ivt: " kg/m/s", fog: "", waves: " ft", wavemax: " ft", ehigh: "\u00b0F", elow: "\u00b0F", d2m: "\u00b0F", feels: "\u00b0F", gustmax: " mph", t925w: "\u00b0C", t850w: "\u00b0C", t700w: "\u00b0C", t500w: "\u00b0C", t300w: "\u00b0C", w850: " kt", thick: " dam", slp: " mb", pw: " in", pwa: " in", ptype: "", qpfa: " in", qpfpct: "%", eqpf90: " in", esnow: " in", esnow90: " in", egust90: " mph", epcape: "%", elows: "%", spag: " m", nqpf1: " in", nqpf6: " in", nsnow6: " in", ntstm: "%", nmaxt: "\u00b0F", nmint: "\u00b0F", dsnod: " in", qpf3: " in", qpf12: " in", qpf48: " in", snow1: " in", snow6: " in", gust6: " mph", ltng6: " /km\u00b2/5 min", qpf1: " in", qpf6: " in", qpf24: " in", mslpqpf: " in", t2ma: "\u00b0F", t850a: "\u00b0C", et2sd: "\u00b0F", ep32: "%", ez500: " m", w500: " kt", w300: " kt", w250: " kt", z500anom: " m", mucape: " J/kg", sbcape: " J/kg", ltng: " /km\u00b2/5 min", ltgp: " in", t2m: "\u00b0F", gust10: " mph", aifswind: " mph", t850: "\u00b0C", t700: "\u00b0C", tcc: "%", vis: " mi", ir: "\u00b0C",
                 refc: " dBZ", qpf: " in", snow: " in", frz: " ft", snowlvl: " ft" };
 // value under the cursor / tap (item 1) and swipe to step (item 6)

@@ -192,6 +192,15 @@ async function render(k, frO) {   // frO: camera override (MP4 storm-track pan)
   if (!colorbar(c, P, f.pad, cbY, cbW, k === "v" ? 34 : 26, cbS)) {
     try { const im = await getKey(cur.pid, cur.V === VIEWS()[S.view] ? S.view : S.view); const s_ = cbW / im.naturalWidth; c.drawImage(im, f.pad, cbY - 30, cbW, im.naturalHeight * s_); } catch (e) { /* no key */ }
   }
+  if (cur.maxv != null) {   // 11-01 7:43 AM (Benjamin: "when I show this on studio mode, include that somewhere on the canvas"): tallest wave in this
+    // frame's crop (max of the drawn map values inside it, nearest whole ft), right-aligned above the color bar's right end
+    const st = cur.st, v_ = cur.vals, X0 = Math.max(0, Math.floor(r.sx / r.rs - st.x0)), X1 = Math.min(st.W, Math.ceil((r.sx + r.sw) / r.rs - st.x0)),
+      Y0 = Math.max(0, Math.floor(r.sy / r.rs - st.y0)), Y1 = Math.min(st.H, Math.ceil((r.sy + r.sh) / r.rs - st.y0));
+    let mx = -Infinity; for (let yy = Y0; yy < Y1; yy++) for (let xx = X0, kq = yy * st.W + X0; xx < X1; xx++, kq++) if (v_[kq] > mx) mx = v_[kq];
+    if (!(mx >= 0)) mx = cur.maxv;
+    c.font = `800 ${Math.round(cbS * 1.15)}px Montserrat`; c.fillStyle = "#fff"; c.textAlign = "right";
+    c.fillText(`Max height: ${Math.round(mx)} ft`, f.pad + cbW, cbY - cbS * 0.55); c.textAlign = "left";
+  }
   c.font = `500 ${k === "v" ? 22 : 18}px Montserrat`; c.fillStyle = "rgba(220,224,230,0.85)";
   const credit = `${(R_.runline || "").split(" run ")[0]}  \u00b7  ${cur.V.label}`, logo = SQ.get("logo") || "";
   // 9:16: credit under the bar, logo right; 16:9: bar fills the left 58 %, so credit (and logo above it) sit bottom-right
