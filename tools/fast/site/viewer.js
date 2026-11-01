@@ -688,8 +688,10 @@ async function render(lite) {
   ctx.restore();
   // 4. towns (dots + names static) and live numbers
   const tmode = P.towns || "numbers";
-  if (st.towns && tmode !== "none") ctx.drawImage(L2.towns, 0, 0, LW, LH);
+  const WT = WAVE_PIDS.test(pid) && MD().grid === "ll" ? coastPlan(ctx, st, V, LW, LH) : null;   // wave maps: coast towns (11-01 t1990u)
+  if (st.towns && tmode !== "none") ctx.drawImage(WT && WT.erase.length ? erasedTowns(L2.towns, `${st.townsU}#${WT.vid}`, WT.erase, LW) : L2.towns, 0, 0, LW, LH);
   if (st.towns && tmode === "numbers") for (const t of V.towns) {
+    if (WT && WT.re.has(t.name)) continue;   // re-placed with the coast towns
     if (!(t.fi >= 0 && t.fj >= 0 && t.fi < D.h - 1 && t.fj < D.w - 1)) continue;
     let v = sampleRC(D.fill, D.w, t.fi, t.fj); if (!isFinite(v)) continue;   // HRRR: integer = nearest 3 km point; global: bilinear at the pin
     if (pid === "t2m" && t.t2m_corr !== undefined) v += t.t2m_corr;          // pass summit height correction (temp_maps)
@@ -697,7 +699,7 @@ async function render(lite) {
   }
   // 11-01 8:32 AM (Benjamin t1987u: "Include known buoy locations off the coast, and have them show the wave height numbers, do the same for
   // significant wave height"; t1988u: "Just make them look like the other locations in the map"): NDBC buoys on the ECMWF wave maps only
-  if (WAVE_PIDS.test(pid) && MD().grid === "ll") drawBuoys(ctx, st, D, P, V, LW, LH);
+  if (WT) drawCoast(ctx, st, D, P, V, LW, LH, WT);
   if (P.lows && S.lowPanel) paintLowPanel(ctx, st, V, S.lowPanel);
   // 5. key + header text
   if (!V.studioOnly) ctx.drawImage(L2.key, 0, 0, LW, LH);   // Studio-only view: Studio draws its own color bar (the key file is another view's)
@@ -762,15 +764,13 @@ function fmtVal(P, v) {   // temp_maps fmt_int / fmt_vis
 // map edge is left out. Values: bilinear when the 4 grid points around the buoy are all sea, else the nearest sea point; none -> skipped.
 const WAVE_PIDS = /^(waves|wavemax|wavemax24)$/;
 const BUOYS = [["46041","Cape Elizabeth",47.351,-124.741,"wa"],["46029","Columbia River Bar",46.148,-124.508,"wa"],["46087","Neah Bay",48.493,-124.727,"wa"],["46005","West Washington",46.147,-131.077,"wa wide"],["46089","Tillamook",45.928,-125.815,"wa"],["46050","Stonewall Bank",44.679,-124.535,"wa"],["46002","West Oregon",42.56,-130.523,"wa wide"],["46211","Grays Harbor",46.857,-124.243,"wa"],["46229","Umpqua Offshore",43.772,-124.549,""],["46015","Port Orford",42.754,-124.839,""],["46027","St Georges",41.84,-124.382,""],["46022","Eel River",40.716,-124.54,""],["46014","Point Arena",39.225,-123.98,""],["46013","Bodega Bay",38.235,-123.317,""],["46214","Point Reyes",37.944,-123.466,""],["46026","San Francisco",37.75,-122.838,""],["46042","Monterey",36.787,-122.408,""],["46028","Cape San Martin",35.763,-121.9,""],["46011","Santa Maria",34.937,-120.999,""],["46025","Santa Monica Basin",33.765,-119.077,""],["46047","Tanner Bank",32.418,-119.535,""],["46086","San Clemente Basin",32.504,-118.029,""],["46206","La Perouse Bank",48.84,-126.0,""],["46088","New Dungeness",48.332,-123.179,""],["46059","West California",38.067,-129.895,"wide"],["46006","Southeast Papa",40.73,-137.42,"wide"],["46036","South Nomad",48.36,-133.94,"wide"],["46004","Middle Nomad",50.93,-136.1,""],["46147","South Moresby",51.83,-131.22,""],["46208","West Moresby",52.52,-132.69,""],["46205","West Dixon Entrance",54.18,-134.32,""],["46184","North Nomad",53.92,-138.85,"wide"],["46246","Station Papa",49.903,-145.246,""],["46084","Cape Edgecumbe",56.614,-136.04,""],["46083","Fairweather Ground",58.276,-138.024,""],["46085","Central Gulf of Alaska",55.84,-142.895,"wide"],["46001","Western Gulf of Alaska",56.296,-148.027,"wide"],["46060","West Orca Bay",60.571,-146.795,""],["46078","Albatross Bank",55.561,-152.599,""],["46066","South Kodiak",52.776,-154.992,"wide"],["51001","NW Hawaii",24.475,-162.03,"wide"],["51000","Northern Hawaii",23.534,-153.752,""],["51003","Western Hawaii",19.151,-160.617,""],["51002","SW Hawaii",17.07,-157.755,""],["51004","SE Hawaii",17.504,-152.197,"wide"],["44025","Long Island",40.258,-73.175,""],["44008","Nantucket",40.5,-69.254,""],["44011","Georges Bank",41.088,-66.546,"wide"],["41001","East Hatteras",34.738,-72.503,"wide"],["41002","South Hatteras",31.743,-74.955,""],["41048","West Bermuda",31.878,-69.722,"wide"],["41010","Canaveral East",28.86,-78.478,"wide"],["41047","NE Bahamas",27.557,-71.48,""],["42002","West Gulf",25.95,-93.78,"wide"],["42001","Mid Gulf",25.922,-89.638,"wide"],["42003","East Gulf",25.925,-85.616,""]];
-function drawBuoys(ctx, st, D, P, V, LW, LH) {
+function drawBuoys(ctx, st, D, P, V, LW, LH, taken0) {
   const cr = MD().crop || [0, 0, 0, 0], X0 = st.x0, Y0 = st.y0, X1 = st.x0 + st.W, Y1 = st.y0 + st.H;
   if (!st.buoyPx) st.buoyPx = {};
   const F = D.fill, w = D.w, h = D.h, ok = (r, c) => r >= 0 && c >= 0 && r < h && c < w && F[r * w + c] >= 0;
   const fName = `600 ${pt(8.5)}px Montserrat`, fNum = `800 ${pt(9.5)}px Montserrat`, hh = pt(6.5), gap = pt(3.0), off = pt(5);
-  const taken = [];   // [x0, y0, x1, y1] in figure px
-  ctx.save(); ctx.font = `600 ${pt(9.5)}px Montserrat`;
-  for (const t of V.towns || []) {   // city labels (static layer): number at t.x / t.y, name just to its left (dot not known: left or right)
-    const nx = t.x * LW, ny = t.y * LH, nw = ctx.measureText(t.name || "").width; taken.push([nx - nw - gap - pt(1), ny - hh, nx + pt(14), ny + hh]); }
+  const taken = taken0 || [];   // [x0, y0, x1, y1] in figure px; drawCoast passes the city + coast town boxes (shared, buoys add theirs)
+  ctx.save();
   const hit = (b, g = pt(2.5)) => b[0] < X0 + 2 || b[1] < Y0 + 2 || b[2] > X1 - 2 || b[3] > Y1 - 2 || taken.some(a => b[0] < a[2] + g && b[2] > a[0] - g && b[1] < a[3] + g && b[3] > a[1] - g);
   // 11-01 8:38 AM (Benjamin t1989u: "Make sure it doesn't look excessively crowded, the buoys I care about the most are the ones right off the
   // Washington coast in the PNW views"): Washington offshore buoys first; the North America view shows only the sparse "wide" set; any
@@ -797,6 +797,93 @@ function drawBuoys(ctx, st, D, P, V, LW, LH) {
     haloText(ctx, nm, x + at[0], y + at[1], fName, "#1b1d22", pt(2.4), "left", "middle");
     haloText(ctx, s_, x + at[0] + nw + gap, y + at[1], fNum, "#0d0f13", pt(3.0), "left", "middle");
   }
+  ctx.restore();
+}
+// ---- coast towns on the wave maps (11-01 9:00 AM, Benjamin t1990u: "You can also include west port, Long Beach, ocean shores and La push on
+// the Washington map wave map still, and the other town names we discussed a long time ago for waves"; house rules: Long Beach and Ocean
+// Shores labeled over the ocean right next to the town, WA towns before OR / BC, no crowding, buoys off the WA coast matter most).
+// Wave maps only (waves / wavemax / wavemax24, viewer + Studio). Towns from the WA marine wave map (wa_extras/wave_map.py TOWNS + La Push).
+// "re": static-layer city labels lifted out of the town layer (erased there) and placed again together with the coast towns and the buoys,
+// so the coast has room (Neah Bay's label covered buoy 46087, Aberdeen's covered Ocean Shores / Westport). Nothing is dropped: a re-placed
+// city that finds no free spot goes back to its old spot. Same look as the city labels of that view (WA view: 9.5 pt name + 10.5 pt bold
+// number; Pacific NW views: 8.5 pt + 9.5 pt). Number = MODEL wave value at the nearest sea grid point (the town pin is often land at 0.25°).
+const COAST_TOWNS = { "Neah Bay": [48.37, -124.62, "a"], "La Push": [47.908, -124.636, "l"], "Forks": [47.95, -124.39, "r"], "Ocean Shores": [46.974, -124.156, "l"],
+  "Westport": [46.89, -124.104, "l"], "Aberdeen": [46.98, -123.82, "r"], "Raymond": [46.686, -123.733, "r"], "Long Beach": [46.35, -124.05, "l"],
+  "Port Angeles": [48.12, -123.43, "l"], "Astoria": [46.188, -123.831, "r"], "Cannon Beach": [45.89, -123.96, "r"], "Tacoma": [47.25, -122.44, "r"], "Victoria": [48.43, -123.36, "a"] };
+const COAST_VIEWS = {   // order = priority; buoys: "first" = WA buoys placed before the added towns (Pacific NW views), else after
+  wa: { style: "wa", re: ["Neah Bay", "Forks", "Aberdeen", "Long Beach"], add: ["La Push", "Ocean Shores", "Westport", "Raymond"], buoys: "after",
+        order: ["Neah Bay", "La Push", "Forks", "Aberdeen", "Ocean Shores", "Westport", "Long Beach", "Raymond"] },
+  pnwt: { style: "region", re: ["Tacoma"], add: ["Ocean Shores", "Westport", "La Push", "Long Beach", "Neah Bay"], buoys: "first", big: ["Tacoma"] },   // Tacoma's name covered buoy 46041
+  pnw: { style: "region", re: [], add: ["Ocean Shores", "Long Beach", "La Push", "Westport", "Neah Bay"], buoys: "after", side: "r" } };   // no other city labels here: town names go on the (empty) land side, buoy labels keep the ocean
+function coastPlan(ctx, st, V, LW, LH) {
+  const vid = VSRC(S.view), C = COAST_VIEWS[vid]; if (!C) return { vid, erase: [], re: new Set(), C: null };
+  const wa = C.style === "wa", gap = pt(wa ? 3.5 : 3.0), hh = pt(6.5), erase = [], re = new Set(), boxes = [], cr = MD().crop || [0, 0, 0, 0];
+  const px = (la, lo) => { const k = `${la},${lo}`; if (!st.coastPx) st.coastPx = {}; if (!(k in st.coastPx)) { const q = gridInv(V, st, (90 - la) / 0.25 - cr[0], ((lo + 360) % 360) / 0.25 - cr[2], null);
+    st.coastPx[k] = q && q[0] >= 0 && q[1] >= 0 && q[0] <= st.W && q[1] <= st.H ? [st.x0 + q[0], st.y0 + q[1]] : null; } return st.coastPx[k]; };
+  ctx.save();
+  for (const t of V.towns || []) {   // static city labels: number at t.x / t.y, name just to its left
+    ctx.font = wa ? `600 ${pt(9.5)}px Montserrat` : `700 ${pt(9.5)}px Montserrat`;
+    const nx = t.x * LW, ny = t.y * LH, nw = ctx.measureText(t.name || "").width, b = [nx - nw - gap - pt(1), ny - hh, nx + pt(14), ny + hh];
+    if (C.re.includes(t.name) && COAST_TOWNS[t.name]) { const T = COAST_TOWNS[t.name], d = px(T[0], T[1]); if (!d) { boxes.push(b); continue; }
+      re.add(t.name); erase.push([b[0] - pt(2), ny - pt(8), nx + pt(1), ny + pt(8)], [d[0] - pt(3.5), d[1] - pt(3.5), d[0] + pt(3.5), d[1] + pt(3.5)]);
+      boxes.push(null); C._old = C._old || {}; C._old[t.name] = [nx - nw - gap, ny]; }
+    else boxes.push(b);
+  }
+  ctx.restore();
+  return (window.__coast = { vid, C, erase, re, boxes: boxes.filter(Boolean), px, log: [] });
+}
+const TE = new Map();
+function erasedTowns(im, key, rects, LW) {   // town layer copy with the re-placed cities cut out (cached per layer size)
+  const w = im.naturalWidth || im.width, h = im.naturalHeight || im.height, s = w / LW, k = `${key}@${w}`; let c = TE.get(k);
+  if (!c) { c = document.createElement("canvas"); c.width = w; c.height = h; const x = c.getContext("2d"); x.drawImage(im, 0, 0);
+    for (const r of rects) x.clearRect(r[0] * s, r[1] * s, (r[2] - r[0]) * s, (r[3] - r[1]) * s);
+    TE.set(k, c); while (TE.size > 6) TE.delete(TE.keys().next().value); }
+  return c;
+}
+function seaVal(D, la, lo) {   // model value at a coast town: bilinear when the 4 points around it are sea, else the nearest sea point (<= 2 cells)
+  const cr = MD().crop || [0, 0, 0, 0], F = D.fill, w = D.w, h = D.h, fi = (90 - la) / 0.25 - cr[0], fj = ((lo + 360) % 360) / 0.25 - cr[2];
+  const ok = (r, c) => r >= 0 && c >= 0 && r < h && c < w && F[r * w + c] >= 0, r = Math.floor(fi), c = Math.floor(fj);
+  if (ok(r, c) && ok(r, c + 1) && ok(r + 1, c) && ok(r + 1, c + 1)) return sampleRC(F, w, fi, fj);
+  let bd = 2.26, v; for (let rr = r - 1; rr <= r + 2; rr++) for (let cc = c - 1; cc <= c + 2; cc++) { const d = (rr - fi) ** 2 + (cc - fj) ** 2; if (ok(rr, cc) && d < bd) { bd = d; v = F[rr * w + cc]; } }
+  return v;
+}
+function drawCoast(ctx, st, D, P, V, LW, LH, WT) {
+  const C = WT.C; if (!C) { drawBuoys(ctx, st, D, P, V, LW, LH, WT.boxes || []); return; }
+  const wa = C.style === "wa", fName = `600 ${pt(wa ? 9.5 : 8.5)}px Montserrat`, fNum = `800 ${pt(wa ? 10.5 : 9.5)}px Montserrat`, gap = pt(wa ? 3.5 : 3.0), hh = pt(6.5);
+  const X0 = st.x0, Y0 = st.y0, X1 = st.x0 + st.W, Y1 = st.y0 + st.H, taken = WT.boxes.slice(), dots = [], resv = [];
+  const hit = (b, g = pt(2.5)) => b[0] < X0 + 2 || b[1] < Y0 + 2 || b[2] > X1 - 2 || b[3] > Y1 - 2 || taken.concat(resv).some(a => b[0] < a[2] + g && b[2] > a[0] - g && b[1] < a[3] + g && b[3] > a[1] - g);
+  // the WA buoys' dots are kept free of town labels (Benjamin: those buoys matter most); the buoys themselves don't see this reserve
+  // (only buoys the spacing rule will keep: same 30 pt rule as drawBuoys), and so are the re-placed cities' own dots
+  const kept = []; for (const [id, , la, lo, tag] of BUOYS) if (tag === "wa") { const d = WT.px(la, lo); if (!d || kept.some(([a, b]) => (a - d[0]) ** 2 + (b - d[1]) ** 2 < pt(30) ** 2)) continue;
+    kept.push(d); resv.push([d[0] - pt(3), d[1] - pt(3), d[0] + pt(3), d[1] + pt(3)]); }
+  for (const n of WT.re) { const T = COAST_TOWNS[n], d = T && WT.px(T[0], T[1]); if (d) resv.push([d[0] - pt(2.5), d[1] - pt(2.5), d[0] + pt(2.5), d[1] + pt(2.5)]); }
+  const place = (name, must) => {
+    const T = COAST_TOWNS[name], d = T && WT.px(T[0], T[1]); if (!d) { WT.log.push(`${name}: off map`); return; }
+    const [x, y] = d, dot = [x - pt(2.5), y - pt(2.5), x + pt(2.5), y + pt(2.5)], big = (C.big || []).includes(name);
+    if (must) { const k = resv.findIndex(b => Math.abs(b[0] + pt(2.5) - x) < 0.01 && Math.abs(b[1] + pt(2.5) - y) < 0.01); if (k >= 0) resv.splice(k, 1); }   // its own dot reserve
+    if (!must && (hit(dot, pt(1)) || dots.some(([a, b]) => (a - x) ** 2 + (b - y) ** 2 < pt(wa ? 9 : 11) ** 2))) { WT.log.push(`${name}: dot blocked`); return; }
+    const t0 = must && (V.towns || []).find(t => t.name === name);   // a re-placed city keeps its usual number (read at its pin, as before)
+    const fN = big ? `700 ${pt(9.5)}px Montserrat` : fName;
+    const v = t0 && t0.fi >= 0 && t0.fj >= 0 && t0.fi < D.h - 1 && t0.fj < D.w - 1 ? sampleRC(D.fill, D.w, t0.fi, t0.fj) : seaVal(D, T[0], T[1]), s_ = isFinite(v) ? fmtVal(P, v) : "";
+    ctx.font = fN; const nw = ctx.measureText(name).width; ctx.font = fNum; const vw = s_ ? ctx.measureText(s_).width : 0, W_ = nw + (s_ ? gap + vw : 0);
+    const c = { r: [pt(5), 0], l: [-pt(5) - W_, 0], a: [-W_ / 2, -pt(9.5)], b: [-W_ / 2, pt(9.5)] };
+    const sd = C.side || T[2], cands = [c[sd], ...["r", "l", "a", "b"].filter(k => k !== sd).map(k => c[k]), [pt(5), -pt(6)], [pt(5), pt(6)], [-pt(5) - W_, -pt(6)], [-pt(5) - W_, pt(6)]];
+    let at = null; for (const [gx, gy] of cands) { const b = [x + gx, y + gy - hh, x + gx + W_, y + gy + hh]; if (!hit(b)) { at = [gx, gy, b]; break; } }
+    if (!at && must && C._old && C._old[name]) { const [ox, oy] = C._old[name]; at = [ox - x, oy - y, [ox, oy - hh, ox + W_, oy + hh]]; }   // never drop an existing city
+    if (!at) { WT.log.push(`${name}: no room for the label`); return; }
+    taken.push(dot, at[2]); dots.push(d); WT.log.push(`${name}: placed`);
+    ctx.beginPath(); ctx.arc(x, y, pt(wa ? 1.8 : 1.6) + pt(wa ? 0.5 : 0.45), 0, 2 * Math.PI); ctx.fillStyle = "#ffffff"; ctx.fill();
+    ctx.beginPath(); ctx.arc(x, y, pt(wa ? 1.8 : 1.6), 0, 2 * Math.PI); ctx.fillStyle = "#1b1d22"; ctx.fill();
+    haloText(ctx, name, x + at[0], y + at[1], fN, "#1b1d22", pt(wa ? 2.6 : 2.4), "left", "middle");
+    if (s_) haloText(ctx, s_, x + at[0] + nw + gap, y + at[1], fNum, "#0d0f13", pt(3.0), "left", "middle");
+  };
+  ctx.save();
+  if (C.order) for (const n of C.order) { if (WT.re.has(n)) place(n, true); else if (C.add.includes(n)) place(n, false); }
+  else { for (const n of C.re) if (WT.re.has(n)) place(n, true); if (C.buoys === "after") for (const n of C.add) place(n, false); }
+  ctx.restore();
+  drawBuoys(ctx, st, D, P, V, LW, LH, taken);
+  ctx.save();
+  if (C.buoys === "first") for (const n of C.add) place(n, false);
   ctx.restore();
 }
 const MAXH_PIDS = /^wavemax(24)?$/;   // 11-01: products with the 'Max height: NN ft' line (viewer + Studio)
