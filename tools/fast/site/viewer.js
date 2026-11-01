@@ -1526,7 +1526,10 @@ function lowGeom(st, D, P, V) {
   const top = L.length ? L.reduce((a, b) => (b.mb < a.mb ? b : a)) : null;
   // list box on the side that hides fewer member dots / mean lows (old site: box outside the map, which a fixed basemap can't do)
   const PW = 0.092 * V.fig[0] + 0.03 * V.fig[0], hid = x0_ => dots.filter(d => d[0] >= x0_ && d[0] <= x0_ + PW).length + 10 * means.filter(d => d[0] >= x0_ && d[0] <= x0_ + PW).length;
-  const side = hid(st.x0) <= hid(st.x0 + st.W - PW) ? "left" : "right";
+  // 11-01 (Benjamin t2022u: "Scrolling through the low centers on AIFS ensembles is messed up, menus jump all over when scrubbing. ECMWF EPS
+  // does the same thing"; t2023u: likes the list on the right): the side used to be re-picked every hour (whichever side hid fewer dots),
+  // so the list and the dot legend flipped left/right while scrubbing. Now always the right side (AIFS ENS + ECMWF EPS, every view).
+  const side = "right"; void hid;
   return { side, dots, core, means, top, hasNum: !!E.mnum, strong: tagged.slice(0, 10), weak: tagged.slice().reverse().slice(0, 10), n: E.n || 50,
            meanVals: means.map(x => x[2]).sort((x, y) => x - y) };
 }
