@@ -1237,7 +1237,7 @@ function lowGeom(st, D, P, V) {
   // member lows: pixel position, in view only (same rule as the old list: "in view")
   const L = [];
   for (const [mem, fi, fj, mb] of E.lows) { const p = gridInv(V, st, fi, fj, null); if (!inView(p)) continue;
-    L.push({ mem: mem + 1, fi, fj, mb, la: lat(fi), lo: lon(fj), x: st.x0 + p[0], y: st.y0 + p[1] }); }
+    L.push({ mem: mem + 1, num: E.mnum ? E.mnum[mem] || null : null, fi, fj, mb, la: lat(fi), lo: lon(fj), x: st.x0 + p[0], y: st.y0 + p[1] }); }
   const dots = L.slice().sort((a, b) => b.mb - a.mb).map(o => [o.x, o.y, o.mb]);   // deepest drawn last (on top)
   // core: points where 5+ different members have a low within 25 km (old: contourf of that member count, navy)
   const C = P.core || { km: 25, min: 5 }, core = [], seen = new Set(), step = 0.05;
@@ -1273,11 +1273,15 @@ function lowGeom(st, D, P, V) {
       for (let di = -2; di <= 2; di++) for (let dj = -2; dj <= 2; dj++) { const ii = i + di, jj = j + dj; if (ii >= 0 && jj >= 0 && ii < h && jj < w) mn = Math.min(mn, raw[ii * w + jj]); }
       means.push([st.x0 + p[0], st.y0 + p[1], mn]); }
   }
-  const tagged = L.map(o => [o.mb, o.mem]).sort((x, y) => x[0] - y[0]);
+  // 11-01 (Benjamin: "include which ensemble member # is showing the individual strongest or lowest lows"): the list and the map
+  // label use the real ECMWF member number (ens json "mnum"). Older files have none (their stack order was shuffled per step, so
+  // the old "#k" was not the member) -> no number shown for them.
+  const tagged = L.map(o => [o.mb, o.num]).sort((x, y) => x[0] - y[0]);
+  const top = L.length ? L.reduce((a, b) => (b.mb < a.mb ? b : a)) : null;
   // list box on the side that hides fewer member dots / mean lows (old site: box outside the map, which a fixed basemap can't do)
   const PW = 0.092 * V.fig[0] + 0.03 * V.fig[0], hid = x0_ => dots.filter(d => d[0] >= x0_ && d[0] <= x0_ + PW).length + 10 * means.filter(d => d[0] >= x0_ && d[0] <= x0_ + PW).length;
   const side = hid(st.x0) <= hid(st.x0 + st.W - PW) ? "left" : "right";
-  return { side, dots, core, means, strong: tagged.slice(0, 10), weak: tagged.slice().reverse().slice(0, 10), n: E.n || 50,
+  return { side, dots, core, means, top, hasNum: !!E.mnum, strong: tagged.slice(0, 10), weak: tagged.slice().reverse().slice(0, 10), n: E.n || 50,
            meanVals: means.map(x => x[2]).sort((x, y) => x - y) };
 }
 function paintLowPanel(ctx, st, V, g) {   // ens_maps.low_panel, drawn inside the left edge of the map + the dot legend
@@ -1291,6 +1295,7 @@ function paintLowPanel(ctx, st, V, g) {   // ens_maps.low_panel, drawn inside th
   const xl = x0 + 0.007 * LW, cw = (PW - 0.014 * LW) / 2; let y = y0 + 0.3 * lh;
   t(xl, y, "Lows (mb)", 800, 13.6); y += lh * 1.2;
   t(xl, y, `in view \u00b7 ${g.n} mem.`, 500, 10.0, "#5b5e66"); y += lh * 1.4;
+  if (!g.hasNum) { t(xl, y - lh * 0.45, "member # n/a (older run)", 500, 7.6, "#8a8d94"); }
   t(xl, y, "Mean (red L)", 800, 12.0); y += lh * 1.05;
   if (!ms.length) { t(xl, y, "none", 500, 11, "#5b5e66"); y += lh; }
   ms.forEach((v, k) => { t(xl + (k % 2) * cw, y, String(Math.round(v)), 900, 15.0, "#d7191c"); if (k % 2 === 1 || k === ms.length - 1) y += lh * 1.2; });
@@ -1301,9 +1306,18 @@ function paintLowPanel(ctx, st, V, g) {   // ens_maps.low_panel, drawn inside th
     for (const [p, m] of rows) {
       ctx.beginPath(); ctx.arc(xl + 0.004 * LW, y + 0.42 * lh, 0.0031 * LW, 0, 2 * Math.PI); ctx.fillStyle = dotCol(p); ctx.fill();
       ctx.lineWidth = 0.6; ctx.strokeStyle = "#ffffff"; ctx.stroke();
-      t(xl + 0.011 * LW, y, String(Math.round(p)), 800, 11.7); t(xl + 0.041 * LW, y, `#${m}`, 500, 10.6, "#5b5e66"); y += lh; }
+      t(xl + 0.011 * LW, y, String(Math.round(p)), 800, 11.7); if (m) t(xl + 0.041 * LW, y, `Mem ${m}`, 700, 10.6, "#2b2e35"); y += lh; }
     y += lh * 0.5;
   }
+  // strongest member low in view: ring around its dot + "Mem N · 952" (side away from the list / map edge / red L)
+  const T = g.top; if (T && g.hasNum && T.num) {
+    ctx.beginPath(); ctx.arc(T.x, T.y, pt(6.2), 0, 2 * Math.PI); ctx.lineWidth = pt(1.6); ctx.strokeStyle = "#ffffff"; ctx.stroke();
+    ctx.lineWidth = pt(0.9); ctx.strokeStyle = "#0b0d12"; ctx.stroke();
+    const s = `Mem ${T.num} \u00b7 ${Math.round(T.mb)}`; ctx.font = `800 ${pt(10.5)}px Montserrat`; const w = ctx.measureText(s).width, gap = pt(9);
+    const pL = [x0, x0 + PW], blocked = xa => xa < st.x0 + pt(3) || xa + w > st.x0 + st.W - pt(3) || (xa + w > pL[0] && xa < pL[1]) ||
+      g.means.some(([mx, my]) => Math.abs(my - (T.y - pt(9))) < pt(22) && mx > xa - pt(8) && mx < xa + w + pt(8));
+    let xa = T.x + gap; if (blocked(xa) && !blocked(T.x - gap - w)) xa = T.x - gap - w;
+    haloText(ctx, s, xa, T.y - pt(9), `800 ${pt(10.5)}px Montserrat`, "#0b0d12", pt(2.6), "left", "middle"); }
   // "Member low (mb)" legend, lower left of the map just right of the list (old: matplotlib legend, lower left)
   const lw = pt(78), rh = pt(11), lhgt = rh * (DOT_LABELS.length + 1) + pt(8), lx = g.side === "right" ? x0 - lw - pt(5) : x0 + PW + pt(5), ly = st.y0 + st.H - lhgt - pt(5);
   ctx.globalAlpha = 0.92; ctx.fillStyle = "#ffffff"; ctx.fillRect(lx, ly, lw, lhgt); ctx.globalAlpha = 1; ctx.strokeStyle = "#c9c4b8"; ctx.strokeRect(lx, ly, lw, lhgt);

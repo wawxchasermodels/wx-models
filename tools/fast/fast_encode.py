@@ -179,7 +179,11 @@ class EpsReader:
                 self.X[name] = st.mean(0)
                 if kind_ == "p90": self.X[name + "90"] = np.percentile(st, 90, axis=0)
                 if kind_ == "pc": self.X[name + "p"] = (st >= 500).mean(0) * 100
-                if name == "msl": self.lows, self.X["lowp"] = self._lows(st)
+                if name == "msl":
+                    self.lows, self.X["lowp"] = self._lows(st)
+                    # 11-01: the open-data index lists members in a shuffled order (differs per step), so a low's stack index k is
+                    # not its member. Real ECMWF member number of each stack slice (ens json "mnum"; the site shows "Mem N").
+                    self.lows_num = [int(x.get("number") or 0) for x in xs]
                 del st
         if gh_members: self.spag = self._spag(np.stack(gh_members)); del gh_members
     def _crop(self, v):
@@ -579,7 +583,7 @@ def step_job(args):
         p = f"{out}/single/{name}_f{s:03d}.png"; Image.fromarray(a8, "L").save(p, optimize=True); sizes[name] = os.path.getsize(p)
     ranges["_packs"] = packs
     if getattr(R, "lows", None) is not None or getattr(R, "spag", None):   # ensemble member low centres + 500 mb member lines
-        p = f"{out}/single/ens_f{s:03d}.json"; json.dump(dict(n=R.n, lows=getattr(R, "lows", []), spag=getattr(R, "spag", {})), open(p, "w"), separators=(",", ":"))
+        p = f"{out}/single/ens_f{s:03d}.json"; json.dump(dict(n=R.n, lows=getattr(R, "lows", []), spag=getattr(R, "spag", {}), **({"mnum": R.lows_num} if getattr(R, "lows_num", None) else {})), open(p, "w"), separators=(",", ":"))
         sizes["ens"] = os.path.getsize(p)
     if getattr(R, "M", None):   # ensemble members at MEM_POINTS: {"n": [places], "s": {field: scale}, "v": {field: [[place values] per member]}}
         p = f"{out}/single/mem_f{s:03d}.json"; json.dump(dict(n=R.mem_names, s={k: MEM_SCALE[k] for k in R.M}, v=R.M), open(p, "w"), separators=(",", ":"))
