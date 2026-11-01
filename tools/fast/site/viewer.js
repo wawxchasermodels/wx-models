@@ -868,6 +868,10 @@ const WAVE_KEEP = Object.fromEntries([..."Birch Bay|Port Angeles|Admiralty Inlet
 // Port Townsend -> Admiralty Inlet, Seattle -> Elliott Bay, Tacoma -> Commencement Bay (same spots as t2005u)
 const WAVE_RENAME = { "Oak Harbor": "Smith Island", "Neah Bay": "Tatoosh Island", "Bellingham": "Birch Bay", "Everett": "Possession Sound",
   "Port Townsend": "Admiralty Inlet", "Seattle": "Elliott Bay", "Tacoma": "Commencement Bay" };
+// 11-01 10:34 AM (Benjamin t2011u "Remove irrelevant town names from the western Washington and puget sound views in waves too"): sheltered
+// bay-head / inlet towns that don't help read waves are dropped on those two views (all wave products, viewer + Studio)
+const WAVE_DROP = { wwa: new Set(["Bremerton", "Poulsbo", "Coupeville", "Friday Harbor"]),
+  puget: new Set(["Bremerton", "Poulsbo", "Port Orchard", "Port Ludlow"]) };
 const OWN_DEFAULT = { style: "wa", own: true, re: [], add: [], buoys: "after" };   // other views with a town layer (puget, wwa, ewa, passes, newa, lm, bc)
 function coastPlan(ctx, st, V, LW, LH) {
   const vid = VSRC(S.view), C = COAST_VIEWS[vid] || ((V.towns || []).length ? OWN_DEFAULT : null), cr = MD().crop || [0, 0, 0, 0];
@@ -875,7 +879,7 @@ function coastPlan(ctx, st, V, LW, LH) {
   if (C.own) {   // 11-01 t1998u / t2001u: own labels only (static town layer not drawn): saltwater towns + the four Puget Sound cities as plain names
     const xt = {}, keep = [];
     for (const t of V.towns || []) { const la = 90 - (t.fi + cr[0]) * 0.25, lo = (t.fj + cr[2]) * 0.25 - 360;
-      const nm = WAVE_RENAME[t.name] || t.name, k = WAVE_KEEP[nm]; if (!k || (nm === "Vancouver" && !["lm", "bc", "pnwt"].includes(vid))) continue;
+      const nm = WAVE_RENAME[t.name] || t.name, k = WAVE_KEEP[nm]; if (!k || (WAVE_DROP[vid] && WAVE_DROP[vid].has(nm)) || (nm === "Vancouver" && !["lm", "bc", "pnwt"].includes(vid))) continue;
       if (!COAST_TOWNS[nm]) xt[nm] = [la, lo, "r"]; keep.push(nm); }
     const nn = keep.filter(n => WAVE_KEEP[n] === "n"), pp = keep.filter(n => WAVE_KEEP[n] === "p");
     const pre = C.order || (C.plainLast ? nn : nn.concat(pp)), post = C.order ? [] : (C.add || []).filter(n => !pre.includes(n)).concat(C.plainLast ? pp : []);
