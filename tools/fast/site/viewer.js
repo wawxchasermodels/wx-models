@@ -830,9 +830,9 @@ function drawBuoys(ctx, st, D, P, V, LW, LH, taken0) {
 // number; Pacific NW views: 8.5 pt + 9.5 pt). Number = MODEL wave value at the nearest sea grid point (the town pin is often land at 0.25°).
 const COAST_TOWNS = { "Neah Bay": [48.37, -124.62, "a"], "La Push": [47.908, -124.636, "l"], "Forks": [47.95, -124.39, "r"], "Ocean Shores": [46.974, -124.156, "l"],
   "Westport": [46.89, -124.104, "l"], "Aberdeen": [46.98, -123.82, "r"], "Raymond": [46.686, -123.733, "r"], "Long Beach": [46.35, -124.05, "l"],
-  "Port Angeles": [48.12, -123.43, "b"], "Astoria": [46.188, -123.831, "r"], "Cannon Beach": [45.89, -123.96, "r"], "Tacoma": [47.295, -122.475, "r"], "Victoria": [48.43, -123.36, "a"],
-  "Port Townsend": [48.135, -122.72, "r"], "Smith Island": [48.321, -122.831, "r"], "Birch Bay": [48.918, -122.765, "r"], "Seattle": [47.605, -122.36, "r"],
-  "Everett": [47.985, -122.255, "r"], "Tatoosh Island": [48.392, -124.736, "a"],
+  "Port Angeles": [48.12, -123.43, "b"], "Astoria": [46.188, -123.831, "r"], "Cannon Beach": [45.89, -123.96, "r"], "Commencement Bay": [47.295, -122.475, "r"], "Victoria": [48.43, -123.36, "a"],
+  "Admiralty Inlet": [48.135, -122.72, "r"], "Smith Island": [48.321, -122.831, "r"], "Birch Bay": [48.918, -122.765, "r"], "Elliott Bay": [47.605, -122.36, "r"],
+  "Possession Sound": [47.985, -122.255, "r"], "Tatoosh Island": [48.392, -124.736, "a"],
   "Vancouver": [49.283, -123.12, "r"],
   // West Coast view (t1999u): Shore Acres (Cape Arago, OR) + major Oregon / California coast places (labels on the land side)
   "Shore Acres": [43.326, -124.383, "r"], "Coos Bay": [43.366, -124.217, "r"], "Newport": [44.637, -124.053, "r"], "Crescent City": [41.756, -124.201, "r"],
@@ -845,9 +845,9 @@ const COAST_VIEWS = {   // order = priority; buoys: "first" = WA buoys placed be
   // really want wave heights for seattle, everett, Tacoma, Olympia"): the Washington wave view drops the static town layer ("own") and draws only
   // saltwater towns (number = model wave value at the nearest sea point) plus Seattle / Everett / Tacoma / Olympia as plain names ("plain")
   wa: { style: "wa", own: true, re: [], add: [], buoys: "after",
-        order: ["Tatoosh Island", "La Push", "Ocean Shores", "Westport", "Long Beach", "Port Townsend", "Port Angeles", "Smith Island", "Birch Bay",
-                "Seattle", "Everett", "Tacoma", "Cannon Beach"] },
-  pnwt: { style: "region", own: true, re: [], add: ["Ocean Shores", "Westport", "La Push", "Long Beach", "Tatoosh Island"], buoys: "first", big: ["Tacoma", "Seattle", "Vancouver"] },   // Tacoma's name covered buoy 46041
+        order: ["Tatoosh Island", "La Push", "Ocean Shores", "Westport", "Long Beach", "Admiralty Inlet", "Port Angeles", "Smith Island", "Birch Bay",
+                "Elliott Bay", "Possession Sound", "Commencement Bay", "Cannon Beach"] },
+  pnwt: { style: "region", own: true, re: [], add: ["Ocean Shores", "Westport", "La Push", "Long Beach", "Tatoosh Island"], buoys: "first", big: ["Vancouver"], plainLast: true },   // t2008u: water names (name only) placed last, regular size   // Tacoma's name covered buoy 46041
   wc: { style: "region", re: [], add: ["Shore Acres", "San Francisco", "Los Angeles", "San Diego", "Monterey", "Eureka", "Crescent City", "Newport",
         "Santa Barbara", "Half Moon Bay", "Santa Cruz", "Morro Bay", "Fort Bragg", "Bodega Bay", "Cape Mendocino", "Malibu", "Westport", "Tatoosh Island",
         "Coos Bay", "Cannon Beach", "Long Beach", "Ocean Shores", "La Push"], buoys: "after", side: "r" },
@@ -858,13 +858,16 @@ const coastPx = (st, V) => (la, lo) => { const cr = MD().crop || [0, 0, 0, 0], k
 // 11-01 9:36 AM (Benjamin t2001u "Remove all inland locations from the waves maps, except for the [ones] I mentioned in Washington"): on every wave
 // view only towns on saltwater keep a label ("n": name + model wave value); Seattle / Everett / Tacoma / Olympia stay as plain names ("p", t1998u
 // "Don't really want wave heights for seattle, everett, Tacoma, Olympia"); Oak Harbor -> Smith Island (t1998u). Everything else is left off.
-const WAVE_KEEP = Object.fromEntries([..."Birch Bay|Port Angeles|Port Townsend|Smith Island|Tatoosh Island|La Push|Long Beach|Cannon Beach|Ocean Shores|Westport|Anacortes|Coupeville|Friday Harbor|Bremerton|Poulsbo|Mukilteo|Edmonds|Kingston|Gig Harbor|Port Orchard|Bainbridge Is.|Port Ludlow|Vancouver|Richmond|North Vancouver|Delta (Ladner)|Tsawwassen|White Rock|Point Roberts|Nanaimo|Squamish|Port Alberni|Courtenay|Campbell River|Powell River|Sechelt|Tofino|Ucluelet|Parksville|Port Renfrew|Sooke".split("|").map(n => [n, "n"]),
-  ..."Seattle|Everett|Tacoma".split("|").map(n => [n, "p"])]);
+const WAVE_KEEP = Object.fromEntries([..."Birch Bay|Port Angeles|Admiralty Inlet|Smith Island|Tatoosh Island|La Push|Long Beach|Cannon Beach|Ocean Shores|Westport|Anacortes|Coupeville|Friday Harbor|Bremerton|Poulsbo|Mukilteo|Edmonds|Kingston|Gig Harbor|Port Orchard|Bainbridge Is.|Port Ludlow|Vancouver|Richmond|North Vancouver|Delta (Ladner)|Tsawwassen|White Rock|Point Roberts|Nanaimo|Squamish|Port Alberni|Courtenay|Campbell River|Powell River|Sechelt|Tofino|Ucluelet|Parksville|Port Renfrew|Sooke".split("|").map(n => [n, "n"]),
+  ..."Elliott Bay|Possession Sound|Commencement Bay".split("|").map(n => [n, "p"])]);
 // 11-01 10:02 AM (Benjamin t2005u "Move the everett location to say possession sound, move the port Townsend location to admiralty inlet, change
 // neah bay to the tattoosh island location, take Bellingham off, put birch bay on. Take Victoria off. Change seattle to the Elliot bay location.
 // Change Tacoma to the western part of Commencement bay. Take Olympia off."): Neah Bay -> Tatoosh Island, Bellingham -> Birch Bay; Victoria and
 // Olympia removed from WAVE_KEEP; Everett / Port Townsend / Seattle / Tacoma moved onto the water (COAST_TOWNS)
-const WAVE_RENAME = { "Oak Harbor": "Smith Island", "Neah Bay": "Tatoosh Island", "Bellingham": "Birch Bay" };
+// 11-01 10:21 AM (Benjamin t2008u "I want those marine locations to be the names on the map too instead of the cities"): Everett -> Possession Sound,
+// Port Townsend -> Admiralty Inlet, Seattle -> Elliott Bay, Tacoma -> Commencement Bay (same spots as t2005u)
+const WAVE_RENAME = { "Oak Harbor": "Smith Island", "Neah Bay": "Tatoosh Island", "Bellingham": "Birch Bay", "Everett": "Possession Sound",
+  "Port Townsend": "Admiralty Inlet", "Seattle": "Elliott Bay", "Tacoma": "Commencement Bay" };
 const OWN_DEFAULT = { style: "wa", own: true, re: [], add: [], buoys: "after" };   // other views with a town layer (puget, wwa, ewa, passes, newa, lm, bc)
 function coastPlan(ctx, st, V, LW, LH) {
   const vid = VSRC(S.view), C = COAST_VIEWS[vid] || ((V.towns || []).length ? OWN_DEFAULT : null), cr = MD().crop || [0, 0, 0, 0];
@@ -874,7 +877,8 @@ function coastPlan(ctx, st, V, LW, LH) {
     for (const t of V.towns || []) { const la = 90 - (t.fi + cr[0]) * 0.25, lo = (t.fj + cr[2]) * 0.25 - 360;
       const nm = WAVE_RENAME[t.name] || t.name, k = WAVE_KEEP[nm]; if (!k || (nm === "Vancouver" && !["lm", "bc", "pnwt"].includes(vid))) continue;
       if (!COAST_TOWNS[nm]) xt[nm] = [la, lo, "r"]; keep.push(nm); }
-    const pre = C.order || keep.filter(n => WAVE_KEEP[n] === "n").concat(keep.filter(n => WAVE_KEEP[n] === "p")), post = C.order ? [] : (C.add || []).filter(n => !pre.includes(n));
+    const nn = keep.filter(n => WAVE_KEEP[n] === "n"), pp = keep.filter(n => WAVE_KEEP[n] === "p");
+    const pre = C.order || (C.plainLast ? nn : nn.concat(pp)), post = C.order ? [] : (C.add || []).filter(n => !pre.includes(n)).concat(C.plainLast ? pp : []);
     return (window.__coast = { vid, C, own: true, xt, pre, post, erase: [], re: new Set((V.towns || []).map(t => t.name)), boxes: [], px: coastPx(st, V), log: [] }); }
   const wa = C.style === "wa", gap = pt(wa ? 3.5 : 3.0), hh = pt(6.5), erase = [], re = new Set(), boxes = [];
   const px = coastPx(st, V);
@@ -906,7 +910,7 @@ function erasedTowns(im, key, rects, LW) {   // town layer copy with the re-plac
 // nearest sea cell differs; no sea point near the marker -> the town point as before (logged).
 const OFFSHORE = { "Tatoosh Island": [48.392, -124.75], "La Push": [47.908, -124.648], "Ocean Shores": [46.974, -124.19], "Westport": [46.89, -124.142],
   "Long Beach": [46.35, -124.077], "Cannon Beach": [45.89, -123.975], "Port Angeles": [48.13, -123.43],
-  "Birch Bay": [48.91, -122.79], "Smith Island": [48.328, -122.831], "Port Townsend": [48.135, -122.72], "Shore Acres": [43.326, -124.395],
+  "Birch Bay": [48.91, -122.79], "Smith Island": [48.328, -122.831], "Admiralty Inlet": [48.135, -122.72], "Shore Acres": [43.326, -124.395],
   "Coos Bay": [43.35, -124.36], "Eureka": [40.80, -124.20], "San Francisco": [37.76, -122.52], "San Diego": [32.745, -117.265],
   "Monterey": [36.61, -121.88], "Santa Barbara": [34.395, -119.69], "Los Angeles": [33.98, -118.50], "Crescent City": [41.74, -124.21] };
 const OFF_BRG = { "Anacortes": 0, "Coupeville": 0, "Friday Harbor": 90, "Bremerton": 180, "Poulsbo": 180, "Mukilteo": 315, "Edmonds": 270, "Kingston": 90,
