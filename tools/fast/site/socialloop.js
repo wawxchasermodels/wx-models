@@ -53,15 +53,40 @@ function pinsFor(k) { const p = getPins(); return { a: p[k + "a"], b: p[k + "b"]
 function drawPins() {
   for (const k of ["v", "h"]) {
     const img = $s("i" + k), box = img.parentNode; box.style.position = "relative";
-    box.querySelectorAll(".lpin,.lptrk").forEach((e) => e.remove());
+    box.querySelectorAll(".lpin,.lptrk,.lpline,.lpdh").forEach((e) => e.remove());
     if (!P.on || $s("lpmode").value !== "pan") continue;
     const p = pinsFor(k), r = img.getBoundingClientRect(), br = box.getBoundingClientRect();
     const T = TRK.sel >= 0 && TRK.key === `${S.run}/${S.view}` ? TRK.list[TRK.sel] : null;
     if (T) for (const q of T.pts) { const f_ = frac(S.view, k, q.lat, q.lon), d = document.createElement("div"); d.className = "lptrk" + (T.landfall && q.f === T.landfall.f ? " lf" : "");
       d.style.left = (r.left - br.left + f_.x * r.width) + "px"; d.style.top = (r.top - br.top + f_.y * r.height) + "px"; box.appendChild(d); }
-    for (const n of ["a", "b"]) { if (!p[n]) continue; const d = document.createElement("div"); d.className = "lpin " + n; d.textContent = n.toUpperCase();
-      d.style.left = (r.left - br.left + p[n].x * r.width) + "px"; d.style.top = (r.top - br.top + p[n].y * r.height) + "px"; box.appendChild(d); }
+    const ox = r.left - br.left, oy = r.top - br.top;
+    if (p.a && p.b) {   // the pan path A -> B (dashed), redrawn live while a pin is dragged
+      const sv = document.createElementNS("http://www.w3.org/2000/svg", "svg"); sv.setAttribute("class", "lpline"); sv.style.left = ox + "px"; sv.style.top = oy + "px"; sv.setAttribute("width", r.width); sv.setAttribute("height", r.height);
+      sv.innerHTML = `<line x1="${p.a.x * r.width}" y1="${p.a.y * r.height}" x2="${p.b.x * r.width}" y2="${p.b.y * r.height}"/>`; box.appendChild(sv); }
+    for (const n of ["a", "b"]) { if (!p[n]) continue; const d = document.createElement("div"); d.className = "lpin " + n; d.textContent = n.toUpperCase(); d.dataset.k = k; d.dataset.n = n;
+      d.title = `Drag to move pin ${n.toUpperCase()}`; d.style.left = (ox + p[n].x * r.width) + "px"; d.style.top = (oy + p[n].y * r.height) + "px"; box.appendChild(d); pinDrag(d, k, n); }
+    const hp = p.a || p.b;
+    if (hp && !P.pinMode) { const h = document.createElement("div"); h.className = "lpdh"; h.textContent = PD ? `Moving ${PD.n.toUpperCase()}` : "Drag A or B to move";
+      h.style.left = (ox + hp.x * r.width) + "px"; h.style.top = (oy + hp.y * r.height + (hp.y > 0.85 ? -46 : 26)) + "px"; box.appendChild(h); }
   }
+}
+// 10-31 5:12 PM (Benjamin: "drag point a and b for the storm across the map either with my finger, or with my cursor"): pins are
+// draggable (mouse + touch, 44 px target, touch-action none so the page doesn't scroll); the stored fraction updates live.
+let PD = null;
+function pinDrag(el, k, n) {
+  el.addEventListener("pointerdown", (e) => { if (P.busy || PV) return; e.preventDefault(); e.stopPropagation(); el.setPointerCapture(e.pointerId); PD = { k, n, id: e.pointerId }; el.classList.add("drag"); });
+  el.addEventListener("pointermove", (e) => {
+    if (!PD || PD.id !== e.pointerId) return; e.preventDefault(); const r = $s("i" + k).getBoundingClientRect(), p = getPins();
+    p[k + n] = { x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)) }; setPins(p);
+    window.__pinDrag = { k, n, x: p[k + n].x, y: p[k + n].y }; $s("lppins").textContent = `Moving pin ${n.toUpperCase()}…`;
+    // move this element in place (re-creating it would drop the pointer capture); path line + hint follow
+    const box = $s("i" + k).parentNode, br = box.getBoundingClientRect(), ox = r.left - br.left, oy = r.top - br.top, q = p[k + n];
+    el.style.left = (ox + q.x * r.width) + "px"; el.style.top = (oy + q.y * r.height) + "px";
+    const ln = box.querySelector(".lpline line"); if (ln) { ln.setAttribute(n === "a" ? "x1" : "x2", q.x * r.width); ln.setAttribute(n === "a" ? "y1" : "y2", q.y * r.height); }
+    const h = box.querySelector(".lpdh"); if (h) { h.textContent = `Moving ${n.toUpperCase()}`; const hp = p[k + "a"] || q; h.style.left = (ox + hp.x * r.width) + "px"; h.style.top = (oy + hp.y * r.height + (hp.y > 0.85 ? -46 : 26)) + "px"; }
+  });
+  const up = (e) => { if (!PD || PD.id !== e.pointerId) return; PD = null; el.classList.remove("drag"); info(); };
+  el.addEventListener("pointerup", up); el.addEventListener("pointercancel", up);
 }
 function onImgClick(k, e) {
   if (!P.pinMode) return; e.preventDefault(); const r = $s("i" + k).getBoundingClientRect(), p = getPins();

@@ -169,20 +169,28 @@ window.onStudioDraw = (cv, cur, step) => { last = { cv, cur, step }; renderAll()
 // drag / keys / zoom / buttons
 for (const k of ["v", "h"]) {
   const f = F[k], cv = f.cv; let d = null;
-  cv.addEventListener("pointerdown", (e) => { if (CLEAN || !last || REC.on) return; if (PIN.mode) { placePin(k, cv, e); return; } cv.setPointerCapture(e.pointerId); cv.focus(); cv.classList.add("drag"); d = { x: e.clientX, y: e.clientY, fr: getFr(k) }; });
-  cv.addEventListener("pointermove", (e) => { if (!d || pz) return; const s = f.W / cv.clientWidth, fr = getFr(k);
+  // 10-31 5:12 PM (Benjamin: "drag point a and b for the storm across the map either with my finger, or with my cursor"):
+  // grabbing a shown pin drags it (live), anywhere else drags the frame as before
+  cv.addEventListener("pointerdown", (e) => { if (CLEAN || !last || REC.on) return; if (PIN.mode) { placePin(k, cv, e); return; }
+    const hit = pinHit(k, cv, e); if (hit) { e.preventDefault(); cv.setPointerCapture(e.pointerId); PD = { k, n: hit, id: e.pointerId }; cv.classList.add("pindrag"); return; }
+    cv.setPointerCapture(e.pointerId); cv.focus(); cv.classList.add("drag"); d = { x: e.clientX, y: e.clientY, fr: getFr(k) }; });
+  cv.addEventListener("pointermove", (e) => { if (PD && PD.k === k && PD.id === e.pointerId) { pinMove(k, cv, e); return; }
+    if (!d && !PD && PIN.show && !PIN.mode && e.pointerType === "mouse") cv.style.cursor = pinHit(k, cv, e) ? "grab" : "";
+    if (!d || pz) return; const s = f.W / cv.clientWidth, fr = getFr(k);
     fr.dx = d.fr.dx + (e.clientX - d.x) * s; fr.dy = d.fr.dy + (e.clientY - d.y) * s; const r = crop(k, fr);   // keep the stored offset inside the panel
     fr.dx = (r.px + r.pw / 2 - r.cx) * r.kk; fr.dy = (r.py + r.ph / 2 - r.cy) * r.kk; setFr(k, fr); render(k); });
-  const up = () => { d = null; cv.classList.remove("drag"); }; cv.addEventListener("pointerup", up); cv.addEventListener("pointercancel", up);
+  const up = (e) => { if (PD && PD.k === k) { PD = null; cv.classList.remove("pindrag"); mpInfo(); renderAll(); } d = null; cv.classList.remove("drag"); }; cv.addEventListener("pointerup", up); cv.addEventListener("pointercancel", up);
   // 10-31 1:39 PM (Benjamin, iPhone): two-finger pinch zooms the frame (1-2.5x) about the fingers' midpoint; moving both fingers pans
   let pz = null;
   const oxy = (t) => { const b = cv.getBoundingClientRect(); return [(t.clientX - b.left) * f.W / b.width, (t.clientY - b.top) * f.H / b.height]; };
   cv.addEventListener("touchstart", (e) => {
+    if (PD) { e.preventDefault(); return; }   // dragging a pin: no pinch / page scroll
     if (CLEAN || !last || REC.on || PIN.mode || e.touches.length !== 2) return; e.preventDefault(); d = null;
     const [a, b] = [oxy(e.touches[0]), oxy(e.touches[1])], fr0 = getFr(k), r0 = crop(k, fr0), ox = (a[0] + b[0]) / 2, oy = (a[1] + b[1]) / 2;
     pz = { d: Math.max(10, Math.hypot(a[0] - b[0], a[1] - b[1])), z: Math.max(1, fr0.zoom || 1), mx: r0.cx + (ox - f.W / 2) / r0.kk, my: r0.cy + (oy - f.H / 2) / r0.kk };
   }, { passive: false });
   cv.addEventListener("touchmove", (e) => {
+    if (PD) { e.preventDefault(); return; }
     if (!pz) return; e.preventDefault(); if (e.touches.length < 2) return;
     const [a, b] = [oxy(e.touches[0]), oxy(e.touches[1])], ox = (a[0] + b[0]) / 2, oy = (a[1] + b[1]) / 2;
     const z = Math.min(2.5, Math.max(1, pz.z * Math.max(10, Math.hypot(a[0] - b[0], a[1] - b[1])) / pz.d)), [px, py, pw, ph] = last.cur.V.panel, kk = Math.max(f.W / pw, f.H / ph) * z;
@@ -241,10 +249,17 @@ function drawPins(k, c, r) {
     c.beginPath(); c.moveTo(x0, y0); c.lineTo(x1, y1); c.stroke(); c.setLineDash([]); }
   for (const [n, col] of [["a", "#16a34a"], ["b", "#dc2626"]]) {
     if (!p[n]) continue; const [x, y] = pos(p[n]);
-    c.fillStyle = col; c.strokeStyle = "#fff"; c.lineWidth = 5; c.beginPath(); c.arc(x, y, R, 0, 7); c.fill(); c.stroke();
+    const big = PD && PD.k === k && PD.n === n ? 1.15 : 1;   // the pin being dragged grows a little
+    c.strokeStyle = "rgba(0,0,0,0.55)"; c.lineWidth = 11; c.beginPath(); c.arc(x, y, R * big, 0, 7); c.stroke();   // dark outer ring: readable on any map
+    c.fillStyle = col; c.strokeStyle = "#fff"; c.lineWidth = 5; c.beginPath(); c.arc(x, y, R * big, 0, 7); c.fill(); c.stroke();
     c.fillStyle = "#fff"; c.font = `800 ${R}px Montserrat`; c.textAlign = "center"; c.textBaseline = "middle"; c.fillText(n.toUpperCase(), x, y + 2);
     c.textAlign = "left"; c.textBaseline = "alphabetic";
   }
+  const hp = p.a || p.b;   // "Drag A or B to move" pill under pin A (above it near the bottom edge); not in videos (pins aren't drawn while recording)
+  if (hp && !PIN.mode) { const [x, y] = pos(hp), fs = k === "v" ? 26 : 22, t = PD ? `Moving ${PD.n.toUpperCase()}` : "Drag A or B to move"; c.font = `700 ${fs}px Montserrat`;
+    const w = c.measureText(t).width + 24, h = fs + 16, bx = Math.min(f.W - w - 8, Math.max(8, x - w / 2)), by = y + R + 18 + h > f.H - 8 ? y - R - 18 - h : y + R + 18;
+    c.fillStyle = "rgba(17,19,22,0.82)"; c.beginPath(); c.roundRect ? c.roundRect(bx, by, w, h, h / 2) : c.rect(bx, by, w, h); c.fill();
+    c.fillStyle = "#fff"; c.textBaseline = "middle"; c.fillText(t, bx + 12, by + h / 2 + 1); c.textBaseline = "alphabetic"; }
 }
 function placePin(k, cv, e) {
   const f = F[k], b = cv.getBoundingClientRect(), ox = (e.clientX - b.left) * f.W / b.width, oy = (e.clientY - b.top) * f.H / b.height, r = crop(k, getFr(k));
@@ -252,6 +267,22 @@ function placePin(k, cv, e) {
   // pin A placed and no pin B yet: go straight on to pin B (one less tap); Esc stops
   if (PIN.mode === "a" && !p.b) { PIN.mode = "b"; $s("pinhint").textContent = "Pin A set. Now tap where the loop should END (pin B). Esc cancels."; render("v"); render("h"); return; }
   PIN.mode = null; $s("pinhint").hidden = true; $s("mp4p").hidden = false; mpInfo(); render("v"); render("h");
+}
+// pin drag: hit area = the pin + a margin, at least a 44 px (CSS) touch target; the pin follows the pointer in map coordinates
+// (stored per view exactly like a tapped pin), so presets / storm finder / links / batch keep working with the dragged spot.
+let PD = null;
+const evXY = (k, cv, e) => { const f = F[k], b = cv.getBoundingClientRect(); return [(e.clientX - b.left) * f.W / b.width, (e.clientY - b.top) * f.H / b.height, f.W / b.width]; };
+function pinHit(k, cv, e) {
+  if (!PIN.show || !last) return null; const p = getPins(); if (!p.a && !p.b) return null;
+  const f = F[k], r = crop(k, getFr(k)), [ox, oy, sc] = evXY(k, cv, e), R = (k === "v" ? 30 : 26) + 12, hitR = Math.max(R, 22 * sc + (e.pointerType === "touch" ? 6 * sc : 0));
+  let best = null, bd = Infinity;
+  for (const n of ["b", "a"]) { if (!p[n]) continue; const dd = Math.hypot(f.W / 2 + (p[n].x - r.cx) * r.kk - ox, f.H / 2 + (p[n].y - r.cy) * r.kk - oy); if (dd <= hitR && dd < bd) { bd = dd; best = n; } }
+  return best;
+}
+function pinMove(k, cv, e) {
+  const f = F[k], r = crop(k, getFr(k)), [ox, oy] = evXY(k, cv, e), x = Math.min(f.W, Math.max(0, ox)), y = Math.min(f.H, Math.max(0, oy));
+  const p = getPins(); p[PD.n] = { x: r.cx + (x - f.W / 2) / r.kk, y: r.cy + (y - f.H / 2) / r.kk }; setPins(p);
+  render(k); const t = $s("mppins"); if (t) t.textContent = `Moving pin ${PD.n.toUpperCase()}…`; window.__pinDrag = { k, n: PD.n, x: p[PD.n].x, y: p[PD.n].y };
 }
 // ---- usability (10-31 2:24 PM, Benjamin: "I want the studio to be as intuitive and functional as possible")
 // remembered loop settings (not the frame: the Save MP4 button you press picks that), presets, a camera-move preview, progress bar,
@@ -416,7 +447,7 @@ async function makeMp4() {
     const nm = `${run.replace("/", "_")}_${last.cur.pid}_${S.view}_F${steps[idx[0]].f}-F${steps[idx[idx.length - 1]].f}_${k === "v" ? "1080x1920" : "1920x1080"}${pan ? "_track" : ""}.${blob.type.includes("mp4") ? "mp4" : "webm"}`;
     const u = URL.createObjectURL(blob), v = $s("mpv"), dl = $s("mpdl"); if (v.dataset.u) URL.revokeObjectURL(v.dataset.u); v.dataset.u = u; v.src = u; dl.href = u; dl.download = nm;
     const file = new File([blob], nm, { type: blob.type }); $s("mpshare").hidden = !(navigator.canShare && navigator.canShare({ files: [file] })); $s("mpshare").onclick = () => navigator.share({ files: [file] }).catch(() => {});
-    n += cardN; $s("mpout").hidden = false; window.__mp4 = { name: nm, bytes: blob.size, frames: n, seconds: n / FPS, branded: !!(BR.card || BR.lower), corner: !!(BR.corner && LOGOS[BR.logo]) ? BR.cpos : null, how, ms: Math.round(performance.now() - t0), blob };
+    n += cardN; $s("mpout").hidden = false; window.__mp4 = { name: nm, pan: pan ? { follow: trk ? "track" : "pins", a: pins.a, b: pins.b } : null, bytes: blob.size, frames: n, seconds: n / FPS, branded: !!(BR.card || BR.lower), corner: !!(BR.corner && LOGOS[BR.logo]) ? BR.cpos : null, how, ms: Math.round(performance.now() - t0), blob };
     mpSt(`Done: ${(blob.size / 1e6).toFixed(1)} MB, ${(n / FPS).toFixed(1)} s, made in ${((performance.now() - t0) / 1000).toFixed(0)} s`);
   } catch (e) { if (enc) enc.abort(); mpSt(e.message === "stopped" ? "Stopped." : "Could not make the video: " + (e.message || e)); window.__mp4 = { error: String(e.message || e) }; }
   finally { REC.on = false; window.__vjNoJump = false; $s("mpgo").disabled = false; $s("mpstop").hidden = true; $s("mpprog").hidden = true; document.body.classList.remove("rec"); if (S.run === run) { S.i = keep; $("step").value = keep; } draw(); }
@@ -664,7 +695,10 @@ if (!CLEAN && $s("mp4p")) {
     if (PIN.mode) { PIN.mode = null; $s("pinhint").hidden = true; $s("mp4p").hidden = false; mpInfo(); render("v"); render("h"); }
     else if (REC.on) REC.cancel = true;
     else if (!$s("mp4p").hidden) { $s("mp4p").hidden = true; PIN.show = false; document.body.classList.remove("mprange"); render("v"); render("h"); } });
-  window.__studioMp4 = { getPins, setPins, makeMp4, openMp4, findStorms, applyStorm, llToFig, TRK, BR, batchExport, bxFill };
+  // test hook: a pin's on-screen (client) position in frame k
+  const pinXY = (k, n) => { const p = getPins()[n]; if (!p || !last) return null; const f = F[k], r = crop(k, getFr(k)), b = f.cv.getBoundingClientRect();
+    return { x: b.left + (f.W / 2 + (p.x - r.cx) * r.kk) * b.width / f.W, y: b.top + (f.H / 2 + (p.y - r.cy) * r.kk) * b.height / f.H }; };
+  window.__studioMp4 = { pinXY, getFr, getPins, setPins, makeMp4, openMp4, findStorms, applyStorm, llToFig, TRK, BR, batchExport, bxFill };
   if (SQ.get("make") === "loop") autoLoop();
 }
 // auto-advance (clean mode or ?play=1): next hour after each finished frame + dwell; loops (or holds); newest run on loop when model= is used

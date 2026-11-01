@@ -30,7 +30,11 @@ html,body{margin:0;background:#15171c;color:#f4f2ee;font:14px Montserrat,system-
 #lp .mp-note,#lpst{color:#cfd3da}#lpst{font-weight:600}#lps{width:170px;accent-color:#2f8cff}#lpprog{width:120px;accent-color:#2f8cff}#lpkeys{color:#8e939c!important;font-size:11.5px}
 #lpv,#lpprev{display:block;max-width:100%;max-height:50vh;margin-top:6px;background:#000}
 #lphint{position:fixed;left:50%;top:10px;transform:translateX(-50%);z-index:13;background:#2f8cff;color:#fff;font-weight:700;padding:8px 14px;border-radius:8px;box-shadow:0 4px 16px #0008;max-width:90vw;text-align:center}
-.lpin{position:absolute;width:30px;height:30px;margin:-15px 0 0 -15px;border-radius:50%;border:3px solid #fff;color:#fff;font:800 15px/24px Montserrat;text-align:center;pointer-events:none;box-shadow:0 2px 6px #0009}
+.lpin{position:absolute;z-index:3;width:30px;height:30px;margin:-15px 0 0 -15px;border-radius:50%;border:3px solid #fff;color:#fff;font:800 15px/24px Montserrat;text-align:center;box-shadow:0 0 0 3px #0008,0 2px 6px #0009;cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none}
+.lpin::before{content:"";position:absolute;left:50%;top:50%;width:48px;height:48px;margin:-24px 0 0 -24px;border-radius:50%}
+.lpin.drag{cursor:grabbing;transform:scale(1.15)}
+.lpline{position:absolute;pointer-events:none;overflow:visible;z-index:2}.lpline line{stroke:#fff;stroke-width:3;stroke-dasharray:10 7;filter:drop-shadow(0 0 2px #000)}
+.lpdh{position:absolute;z-index:3;transform:translateX(-50%);background:rgba(17,19,22,.85);color:#fff;font:700 12px Montserrat;padding:4px 9px;border-radius:12px;white-space:nowrap;pointer-events:none}
 .lpin.a{background:#16a34a}.lpin.b{background:#dc2626}
 .lptrk{position:absolute;width:9px;height:9px;margin:-4.5px 0 0 -4.5px;border-radius:50%;background:#ffd65a;pointer-events:none;box-shadow:0 0 0 2px #0008}.lptrk.lf{width:22px;height:22px;margin:-11px 0 0 -11px;background:none;border:3px solid #ffd65a}
 #lpsf{border-color:#ffd65a!important}#lpsfl{max-width:100%}#lpsfi{flex-basis:100%}
@@ -80,6 +84,6 @@ html,body{margin:0;background:#15171c;color:#f4f2ee;font:14px Montserrat,system-
 <div id="strip" aria-label="All hours"></div>
 <script src="social.js"></script>
 <script src="stormfind.js?v=20261031c"></script>
-<script src="socialloop.js?v=20261031g"></script>
+<script src="socialloop.js?v=20261031u"></script>
 <script src="reqbox.js?v=20261031b"></script>
 </body></html>
