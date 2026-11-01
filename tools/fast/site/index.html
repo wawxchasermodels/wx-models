@@ -45,6 +45,9 @@ body.cslim #bar,body.cslim #dock,body.cslim #stepctl,body.cslim #loadnote{displa
 body.cslim #wrap{padding:0!important}body.cslim{min-height:0!important;height:auto!important}
 #cgear{position:fixed;right:6px;bottom:6px;z-index:20;background:#262931e0;color:#f4f2ee;border:1px solid #7d828c;border-radius:6px;padding:3px 8px;font:12px Montserrat,system-ui,sans-serif;cursor:pointer}
 body.cslim.cshow #cgear{position:static;margin:4px 8px}
+/* 11-01 (t2021u): menus toggle in every compare frame; shown = "Hide menus" first in the bar, hidden = small "Menus" pill (bottom right) */
+body.cmin #bar{display:none!important}
+#bar #cgear{position:static;margin:0;background:#2f8cff2e;border-color:#2f8cff;font-weight:700;font-size:inherit;padding:4px 9px}
 /* 10-29 9:01 PM (Benjamin): on phones the hour slider + step buttons sit UNDER the map (thumb no longer covers it);
    the map hugs the slider at the bottom of the screen, menus stay on top. Desktop unchanged. viewer.js moves #stepctl. */
 #stepctl{display:contents}
@@ -108,6 +111,6 @@ table.pf td small.el{color:#a7abb3;font-weight:500;font-size:11px}table.pf td.fz
 </div>
 <div id="wrap"><canvas id="map"></canvas><div id="tip" hidden></div></div>
 <div id="dock"></div>
-<script src="viewer.js?v=20261101t"></script>
+<script src="viewer.js?v=20261101v"></script>
 <script src="reqbox.js?v=20261031b"></script>
 </body></html>

@@ -43,7 +43,9 @@ const img = src => new Promise((ok, no) => { const im = new Image(); im.onload =
 function fitPhone() {   // phones: map as large as fits between the menus and the slider bar, placed right under the menus
   const cv = $("map"); if (!cv) return;
   const LW = cv._lw || cv.width, LH = cv._lh || cv.height;   // logical (figure px) size; the bitmap can be LW x RS (sharpMap)
-  cv.style.maxWidth = `min(100%, ${LW}px)`; cv.style.maxHeight = document.body.classList.contains("phone") ? "none" : `min(100%, ${LH}px)`;
+  const cb = CMPBOX && !document.body.classList.contains("phone") && !document.body.classList.contains("cslim") ? CMPBOX : null;   // compare: same size as the other map
+  if (cb) { const k = Math.min(cb.w / LW, cb.h / LH, 1); cv.style.maxWidth = Math.floor(LW * k) + "px"; cv.style.maxHeight = Math.floor(LH * k) + "px"; }
+  else { cv.style.maxWidth = `min(100%, ${LW}px)`; cv.style.maxHeight = document.body.classList.contains("phone") ? "none" : `min(100%, ${LH}px)`; }
   if (!document.body.classList.contains("phone") || !cv.width) { cv.style.width = cv.style.height = ""; schedSharp(); return; }
   const wr = $("wrap"), cs = getComputedStyle(wr), padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight), padY = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
   const vh = window.visualViewport ? visualViewport.height : innerHeight;
@@ -192,9 +194,16 @@ async function boot() {
   if (Q.get("embed")) { document.body.classList.add("embed"); addEventListener("message", onCompareMsg); }
   // 10-31 3:17 PM slim compare (Benjamin: "a slimmer phone compare"): menus folded behind a small button, the compare page's shared
   // hour slider replaces this frame's own, the map is sized to the frame width (the page sizes the frame to the map)
-  if (Q.get("slim")) { document.body.classList.add("cslim"); const b = document.createElement("button"); b.id = "cgear"; b.type = "button"; b.textContent = "Menus";
-    b.title = "Show / hide this map's model, product and view menus"; b.onclick = () => { document.body.classList.toggle("cshow"); fitPhone(); setTimeout(() => S.cur && postCompare(S.cur.run, S.cur.pid, S.view, S.runs[S.run].steps[S.i]), 50); };
-    document.body.appendChild(b);
+  if (Q.get("slim")) document.body.classList.add("cslim");
+  // 11-01 (Benjamin t2021u: "Need a way to minimize the menus after I've opened them in the compare view"): every compare frame (desktop
+  // and phone) gets a Menus / Hide menus toggle; shown menus put "Hide menus" first in the bar, hidden menus leave a small "Menus" pill.
+  // Remembered per frame (localStorage cmpMenus_L / _R). The compare page's "Hide menus" button sets both frames at once.
+  if (Q.get("embed")) { const b = document.createElement("button"); b.id = "cgear"; b.type = "button";
+    b.title = "Show / hide this map's model, product and view menus"; b.onclick = () => cmpMenus(!cmpMenusShown(), true);
+    let sv = null; try { sv = localStorage.getItem("cmpMenus_" + Q.get("id")); } catch (e) { /* private mode */ }
+    cmpMenus(sv === null ? !Q.get("slim") : sv === "1", false, b); }
+  if (Q.get("embed") && "ResizeObserver" in window) new ResizeObserver(() => cmpBox()).observe($("wrap"));
+  if (Q.get("slim")) {
     let lh = 0; new ResizeObserver(() => { const h = cslimH(); if (Math.abs(h - lh) > 2 && parent !== window) { lh = h; parent.postMessage({ wx: "size", id: Q.get("id"), h }, "*"); } }).observe(document.body); }
   // 10-29: manifest, fonts and the shown run's run.json in parallel; other runs load when picked
   const [man, sv, vf, wv] = await Promise.all([fetch(DATA + "manifest.json", { cache: "no-cache" }).then(r => r.json()),
@@ -298,7 +307,27 @@ function postCompare(run, pid, vid, step) {
     i: S.i, n: S.runs[run].steps.length, vline: step.valid_line || "", h: cslimH() }, "*");   // i / n / vline: shared hour slider; h: frame height (slim phone layout)
   cmpEcho = false;
 }
+const cmpMenusShown = () => document.body.classList.contains("cslim") ? document.body.classList.contains("cshow") : !document.body.classList.contains("cmin");
+function cmpMenus(show, save, btn) {   // compare frames: show / hide this frame's menus (11-01 t2021u)
+  const b = btn || $("cgear"); if (!b) return; const B = document.body;
+  if (B.classList.contains("cslim")) B.classList.toggle("cshow", show); else B.classList.toggle("cmin", !show);
+  b.textContent = show ? "Hide menus" : "Menus"; b.classList.toggle("on", show); b.setAttribute("aria-expanded", String(show));
+  if (show) $("bar").prepend(b); else B.appendChild(b);
+  if (save) try { localStorage.setItem("cmpMenus_" + Q.get("id"), show ? "1" : "0"); } catch (e) { /* private mode */ }
+  fitPhone(); setTimeout(() => { cmpBox(); S.cur && postCompare(S.cur.run, S.cur.pid, S.view, S.runs[S.run].steps[S.i]); }, 50);
+}
+// 11-01 (t2021u: "Make sure the compare window is the same size as the first window"): each desktop frame reports the room its map has;
+// the compare page sends back the smaller of the two, and both maps are capped to it, so the two maps always show at the same size
+let CMPBOX = null, cmpBoxLast = "";
+function cmpBox() {
+  if (!Q.get("embed") || parent === window || document.body.classList.contains("cslim")) return;
+  const wr = $("wrap"), cs = getComputedStyle(wr), w = Math.floor(wr.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)),
+    h = Math.floor(wr.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom)), k = w + "x" + h;
+  if (k === cmpBoxLast) return; cmpBoxLast = k; parent.postMessage({ wx: "box", id: Q.get("id"), w, h }, "*");
+}
 async function onCompareMsg(e) {
+  const d0 = e.data; if (d0 && e.source === parent && d0.wx === "menus") { cmpMenus(!!d0.show, true); return; }
+  if (d0 && e.source === parent && d0.wx === "box") { CMPBOX = d0.w > 0 && d0.h > 0 ? { w: d0.w, h: d0.h } : null; fitPhone(); return; }
   const d = e.data; if (!d || d.wx !== "set" || e.source !== parent) return;
   if (d.run && d.run !== S.run) { try { await loadRun(d.run); S.run = d.run; $("run").value = d.run; } catch (err) { return; } }
   const P = PRODS(), has = new Set(S.runs[S.run].fields);
