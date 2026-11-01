@@ -693,6 +693,9 @@ async function render(lite) {
     if (pid === "t2m" && t.t2m_corr !== undefined) v += t.t2m_corr;          // pass summit height correction (temp_maps)
     haloText(ctx, fmtVal(P, v), t.x * LW, t.y * LH, `800 ${pt(t.size)}px Montserrat`, t.color, pt(3.0), "left", "middle");
   }
+  // 11-01 8:32 AM (Benjamin t1987u: "Include known buoy locations off the coast, and have them show the wave height numbers, do the same for
+  // significant wave height"; t1988u: "Just make them look like the other locations in the map"): NDBC buoys on the ECMWF wave maps only
+  if (WAVE_PIDS.test(pid) && MD().grid === "ll") drawBuoys(ctx, st, D, P, V, LW, LH);
   if (P.lows && S.lowPanel) paintLowPanel(ctx, st, V, S.lowPanel);
   // 5. key + header text
   if (!V.studioOnly) ctx.drawImage(L2.key, 0, 0, LW, LH);   // Studio-only view: Studio draws its own color bar (the key file is another view's)
@@ -749,6 +752,50 @@ function fmtVal(P, v) {   // temp_maps fmt_int / fmt_vis
   if (P.fmt === "ft100") return String(Math.round(v / 100) * 100);
   if (P.fmt === "vis") return v >= 7 ? "7+" : v < 3 ? v.toFixed(1) : v.toFixed(0);
   return String(Math.round(v));
+}
+// ---- buoys (11-01): fixed NDBC offshore buoy list (tools/fast/site/buoys_ndbc.json, coordinates from NDBC activestations.xml).
+// Drawn like the city labels (temp_maps.region_towns): small dark dot with a white edge, "Buoy 46041" in 600 8.5 pt on a white halo, then
+// the MODEL value at the buoy point in bold 9.5 pt (same field as the fill, so it matches the colors; not a live observation).
+// Placement: right of the dot, then left / above / below / diagonals; a buoy whose label would touch a city label, another buoy or the
+// map edge is left out. Values: bilinear when the 4 grid points around the buoy are all sea, else the nearest sea point; none -> skipped.
+const WAVE_PIDS = /^(waves|wavemax|wavemax24)$/;
+const BUOYS = [["46041","Cape Elizabeth",47.351,-124.741,"wa"],["46029","Columbia River Bar",46.148,-124.508,"wa"],["46087","Neah Bay",48.493,-124.727,"wa"],["46005","West Washington",46.147,-131.077,"wa wide"],["46089","Tillamook",45.928,-125.815,"wa"],["46050","Stonewall Bank",44.679,-124.535,"wa"],["46002","West Oregon",42.56,-130.523,"wa wide"],["46211","Grays Harbor",46.857,-124.243,"wa"],["46229","Umpqua Offshore",43.772,-124.549,""],["46015","Port Orford",42.754,-124.839,""],["46027","St Georges",41.84,-124.382,""],["46022","Eel River",40.716,-124.54,""],["46014","Point Arena",39.225,-123.98,""],["46013","Bodega Bay",38.235,-123.317,""],["46214","Point Reyes",37.944,-123.466,""],["46026","San Francisco",37.75,-122.838,""],["46042","Monterey",36.787,-122.408,""],["46028","Cape San Martin",35.763,-121.9,""],["46011","Santa Maria",34.937,-120.999,""],["46025","Santa Monica Basin",33.765,-119.077,""],["46047","Tanner Bank",32.418,-119.535,""],["46086","San Clemente Basin",32.504,-118.029,""],["46206","La Perouse Bank",48.84,-126.0,""],["46088","New Dungeness",48.332,-123.179,""],["46059","West California",38.067,-129.895,"wide"],["46006","Southeast Papa",40.73,-137.42,"wide"],["46036","South Nomad",48.36,-133.94,"wide"],["46004","Middle Nomad",50.93,-136.1,""],["46147","South Moresby",51.83,-131.22,""],["46208","West Moresby",52.52,-132.69,""],["46205","West Dixon Entrance",54.18,-134.32,""],["46184","North Nomad",53.92,-138.85,"wide"],["46246","Station Papa",49.903,-145.246,""],["46084","Cape Edgecumbe",56.614,-136.04,""],["46083","Fairweather Ground",58.276,-138.024,""],["46085","Central Gulf of Alaska",55.84,-142.895,"wide"],["46001","Western Gulf of Alaska",56.296,-148.027,"wide"],["46060","West Orca Bay",60.571,-146.795,""],["46078","Albatross Bank",55.561,-152.599,""],["46066","South Kodiak",52.776,-154.992,"wide"],["51001","NW Hawaii",24.475,-162.03,"wide"],["51000","Northern Hawaii",23.534,-153.752,""],["51003","Western Hawaii",19.151,-160.617,""],["51002","SW Hawaii",17.07,-157.755,""],["51004","SE Hawaii",17.504,-152.197,"wide"],["44025","Long Island",40.258,-73.175,""],["44008","Nantucket",40.5,-69.254,""],["44011","Georges Bank",41.088,-66.546,"wide"],["41001","East Hatteras",34.738,-72.503,"wide"],["41002","South Hatteras",31.743,-74.955,""],["41048","West Bermuda",31.878,-69.722,"wide"],["41010","Canaveral East",28.86,-78.478,"wide"],["41047","NE Bahamas",27.557,-71.48,""],["42002","West Gulf",25.95,-93.78,"wide"],["42001","Mid Gulf",25.922,-89.638,"wide"],["42003","East Gulf",25.925,-85.616,""]];
+function drawBuoys(ctx, st, D, P, V, LW, LH) {
+  const cr = MD().crop || [0, 0, 0, 0], X0 = st.x0, Y0 = st.y0, X1 = st.x0 + st.W, Y1 = st.y0 + st.H;
+  if (!st.buoyPx) st.buoyPx = {};
+  const F = D.fill, w = D.w, h = D.h, ok = (r, c) => r >= 0 && c >= 0 && r < h && c < w && F[r * w + c] >= 0;
+  const fName = `600 ${pt(8.5)}px Montserrat`, fNum = `800 ${pt(9.5)}px Montserrat`, hh = pt(6.5), gap = pt(3.0), off = pt(5);
+  const taken = [];   // [x0, y0, x1, y1] in figure px
+  ctx.save(); ctx.font = `600 ${pt(9.5)}px Montserrat`;
+  for (const t of V.towns || []) {   // city labels (static layer): number at t.x / t.y, name just to its left (dot not known: left or right)
+    const nx = t.x * LW, ny = t.y * LH, nw = ctx.measureText(t.name || "").width; taken.push([nx - nw - gap - pt(1), ny - hh, nx + pt(14), ny + hh]); }
+  const hit = (b, g = pt(2.5)) => b[0] < X0 + 2 || b[1] < Y0 + 2 || b[2] > X1 - 2 || b[3] > Y1 - 2 || taken.some(a => b[0] < a[2] + g && b[2] > a[0] - g && b[1] < a[3] + g && b[3] > a[1] - g);
+  // 11-01 8:38 AM (Benjamin t1989u: "Make sure it doesn't look excessively crowded, the buoys I care about the most are the ones right off the
+  // Washington coast in the PNW views"): Washington offshore buoys first; the North America view shows only the sparse "wide" set; any
+  // buoy closer than 30 pt (Washington buoys) / 48 pt (others; na: 60 pt) to one already drawn is left out, so the ocean stays uncrowded. City labels keep priority.
+  const wide = S.view === "na" || VSRC(S.view) === "na", drawn = [];
+  for (const [id, , la, lo, tag] of BUOYS) {
+    if (wide && !/wide/.test(tag || "")) continue;
+    const fi = (90 - la) / 0.25 - cr[0], fj = ((lo + 360) % 360) / 0.25 - cr[2];
+    if (!(fi >= 0 && fj >= 0 && fi < h - 1 && fj < w - 1)) continue;
+    if (!(id in st.buoyPx)) { const q = gridInv(V, st, fi, fj, null); st.buoyPx[id] = q && q[0] >= 0 && q[1] >= 0 && q[0] <= st.W && q[1] <= st.H ? [X0 + q[0], Y0 + q[1]] : null; }
+    const minD = pt(wide ? 60 : tag === "wa" ? 30 : 48), p = st.buoyPx[id]; if (!p || drawn.some(([a, b]) => (a - p[0]) ** 2 + (b - p[1]) ** 2 < minD * minD)) continue;
+    const r = Math.floor(fi), c = Math.floor(fj); let v;
+    if (ok(r, c) && ok(r, c + 1) && ok(r + 1, c) && ok(r + 1, c + 1)) v = sampleRC(F, w, fi, fj);
+    else { let bd = Infinity; for (const [rr, cc] of [[r, c], [r, c + 1], [r + 1, c], [r + 1, c + 1]]) { const d = (rr - fi) ** 2 + (cc - fj) ** 2; if (ok(rr, cc) && d < bd) { bd = d; v = F[rr * w + cc]; } } }
+    if (!isFinite(v)) continue;
+    const nm = `Buoy ${id}`, s_ = fmtVal(P, v); ctx.font = fName; const nw = ctx.measureText(nm).width; ctx.font = fNum; const vw = ctx.measureText(s_).width, W_ = nw + gap + vw;
+    const [x, y] = p, dot = [x - pt(3), y - pt(3), x + pt(3), y + pt(3)]; if (hit(dot, pt(0.5))) continue;   // the dot only has to clear the labels themselves
+    const cands = [[off, 0], [-off - W_, 0], [-W_ / 2, -pt(9.5)], [-W_ / 2, pt(9.5)], [off, -pt(6)], [off, pt(6)], [-off - W_, -pt(6)], [-off - W_, pt(6)]].concat(tag === "wa" ? [[-off - W_, -pt(12)], [-off - W_, pt(12)], [off, -pt(12)], [off, pt(12)]] : []);
+    let at = null; for (const [gx, gy] of cands) { const b = [x + gx, y + gy - hh, x + gx + W_, y + gy + hh]; if (!hit(b)) { at = [gx, gy, b]; break; } }
+    if (!at) continue;
+    taken.push(dot, at[2]); drawn.push(p);
+    ctx.beginPath(); ctx.arc(x, y, pt(1.6) + pt(0.45), 0, 2 * Math.PI); ctx.fillStyle = "#ffffff"; ctx.fill();
+    ctx.beginPath(); ctx.arc(x, y, pt(1.6), 0, 2 * Math.PI); ctx.fillStyle = "#1b1d22"; ctx.fill();
+    haloText(ctx, nm, x + at[0], y + at[1], fName, "#1b1d22", pt(2.4), "left", "middle");
+    haloText(ctx, s_, x + at[0] + nw + gap, y + at[1], fNum, "#0d0f13", pt(3.0), "left", "middle");
+  }
+  ctx.restore();
 }
 const MAXH_PIDS = /^wavemax(24)?$/;   // 11-01: products with the 'Max height: NN ft' line (viewer + Studio)
 const UNITS = { ivt: " kg/m/s", fog: "", waves: " ft", wavemax: " ft", ehigh: "\u00b0F", elow: "\u00b0F", d2m: "\u00b0F", feels: "\u00b0F", gustmax: " mph", t925w: "\u00b0C", t850w: "\u00b0C", t700w: "\u00b0C", t500w: "\u00b0C", t300w: "\u00b0C", w850: " kt", thick: " dam", slp: " mb", pw: " in", pwa: " in", ptype: "", qpfa: " in", qpfpct: "%", eqpf90: " in", esnow: " in", esnow90: " in", egust90: " mph", epcape: "%", elows: "%", spag: " m", nqpf1: " in", nqpf6: " in", nsnow6: " in", ntstm: "%", nmaxt: "\u00b0F", nmint: "\u00b0F", dsnod: " in", qpf3: " in", qpf12: " in", qpf48: " in", snow1: " in", snow6: " in", gust6: " mph", ltng6: " /km\u00b2/5 min", qpf1: " in", qpf6: " in", qpf24: " in", mslpqpf: " in", t2ma: "\u00b0F", t850a: "\u00b0C", et2sd: "\u00b0F", ep32: "%", ez500: " m", w500: " kt", w300: " kt", w250: " kt", z500anom: " m", mucape: " J/kg", sbcape: " J/kg", ltng: " /km\u00b2/5 min", ltgp: " in", t2m: "\u00b0F", gust10: " mph", aifswind: " mph", t850: "\u00b0C", t700: "\u00b0C", tcc: "%", vis: " mi", ir: "\u00b0C",
