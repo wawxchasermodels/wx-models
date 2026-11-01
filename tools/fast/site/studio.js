@@ -240,7 +240,7 @@ const VIS = { v: true, h: true };
 if ("IntersectionObserver" in window) for (const k of ["v", "h"]) new IntersectionObserver((es) => { for (const e of es) VIS[k] = e.isIntersecting; }).observe(F[k].cv);
 const renderAll = () => { if (REC.on) return; if (CLEAN) render(OUTQ); else for (const k of ["v", "h"]) if (!(last && last.lite) || VIS[k]) render(k); };
 window.onStudioSkip = () => { if (PLAY.on) PLAY.next(); };
-window.onStudioDraw = (cv, cur, step, lite) => { last = { cv, cur, step, lite: !!lite }; renderAll(); if (lite) return; if (PLAY.on) PLAY.next(); if (!REC.on && typeof mpSync === "function") try { mpSync(); } catch (e) { /* panel not ready */ } };
+window.onStudioDraw = (cv, cur, step, lite) => { last = { cv, cur, step, lite: !!lite }; renderAll(); try { scrubSync(); } catch (e) { /* scrubber not built */ } if (lite) return; if (PLAY.on) PLAY.next(); if (!REC.on && typeof mpSync === "function") try { mpSync(); } catch (e) { /* panel not ready */ } };
 // drag / keys / zoom / buttons
 for (const k of ["v", "h"]) {
   const f = F[k], cv = f.cv; let d = null;
@@ -809,7 +809,8 @@ function fitFrames() {
   for (let it = 0; it < 5; it++) {
     const availW = st.clientWidth - padX - gap, sy = scrollY;
     const availV = innerHeight - (cvv.getBoundingClientRect().top + sy) - padB;
-    const availH = innerHeight - (cvh.getBoundingClientRect().top + sy) - padB - (hint ? hint.offsetHeight + 6 : 0);
+    let under = 0; for (let e = cvh.nextElementSibling; e; e = e.nextElementSibling) under += e.offsetHeight + 6;   // hint, hour scrubber, request button
+    const availH = innerHeight - (cvh.getBoundingClientRect().top + sy) - padB - under;
     const nv = Math.max(MINV * 9 / 16, Math.min(availV * 9 / 16, availW * 0.42));
     const nh = Math.max(240, Math.min(availW - nv, Math.max(MINV, availH) * 16 / 9));
     const same = Math.abs(nv - wv) < 0.5 && Math.abs(nh - wh) < 0.5; wv = nv; wh = nh;
@@ -818,6 +819,51 @@ function fitFrames() {
     if (same) break;
   }
   window.__studioFit = { v: [wv, wv * 16 / 9], h: [wh, wh * 9 / 16] };
+}
+// ---- 11-01 2 PM (Benjamin t2041u/t2042u): hour scrubber under the 16:9 frame (every forecast hour the model data has: the viewer's
+// own steps, same as the top slider, which it drives), a hover value readout on both frames (the viewer's readout(): same numbers
+// and units as the map page), and the "Request a change" button moved off the 9:16 frame into the space under the 16:9 frame.
+let scrubSync = () => {};
+if (!CLEAN) {
+  const fh = document.getElementById("fh"), hint = fh.querySelector(".shint"), stp = document.getElementById("step");
+  const box = document.createElement("div"); box.id = "scrub";
+  box.innerHTML = `<div class="sr"><button type="button" id="sprev" aria-label="Previous hour">&lsaquo;</button><div class="sw"><input type="range" id="hscrub" min="0" max="0" value="0" aria-label="Forecast hour"><div id="sticks"></div></div><button type="button" id="snext" aria-label="Next hour">&rsaquo;</button><b id="shour"></b></div>`;
+  fh.insertBefore(box, hint);
+  const sl = document.getElementById("hscrub"), tk = document.getElementById("sticks"), lab = document.getElementById("shour");
+  const fwd = (type) => stp.dispatchEvent(new Event(type));
+  sl.addEventListener("pointerdown", () => fwd("pointerdown"));
+  for (const ev of ["pointerup", "pointercancel", "change"]) sl.addEventListener(ev, () => fwd("change"));
+  sl.addEventListener("input", () => { stp.value = sl.value; fwd("input"); });
+  document.getElementById("sprev").onclick = () => document.getElementById("prev").click();
+  document.getElementById("snext").onclick = () => document.getElementById("next").click();
+  let tkKey = "";
+  scrubSync = () => {
+    const R_ = S.runs[S.run]; if (!R_ || !R_.steps) return; const st = R_.steps, n = st.length, s = st[S.i] || {};
+    sl.max = Math.max(0, n - 1); sl.value = S.i;
+    lab.textContent = `F+${s.f}` + (s.valid_line ? `  \u00b7  ${s.valid_line.replace(/^Valid /, "")}` : "");
+    const key = S.run + ":" + n; if (key === tkKey) return; tkKey = key;   // tick labels every 24 h (by forecast hour), rebuilt per run / new hours
+    tk.innerHTML = st.map((x, i) => x.f % 24 === 0 && (x.f % 48 === 0 || st[n - 1].f <= 168) ? `<span style="left:calc(9px + (100% - 18px) * ${n > 1 ? i / (n - 1) : 0})">${x.f}</span>` : "").join("");
+  };
+  // hover readout: frame px -> map figure px (same camera as crop()) -> a pointer position on the hidden map -> viewer readout()
+  const tip = document.createElement("div"); tip.id = "stip"; tip.hidden = true; document.body.appendChild(tip);
+  for (const k of ["v", "h"]) {
+    const f = F[k], cv = f.cv;
+    cv.addEventListener("pointermove", (e) => {
+      if (e.pointerType !== "mouse" || e.buttons || !last || REC.on || PIN.mode || typeof readout !== "function") { tip.hidden = true; return; }
+      const r = crop(k, getFr(k)), b = cv.getBoundingClientRect(), X = r.cx + ((e.clientX - b.left) * f.W / b.width - f.W / 2) / r.kk, Y = r.cy + ((e.clientY - b.top) * f.H / b.height - f.H / 2) / r.kk;
+      if (X < r.px || Y < r.py || X > r.px + r.pw || Y > r.py + r.ph) { tip.hidden = true; return; }   // outside the map panel (wide view background)
+      const m = document.getElementById("map"), mr = m.getBoundingClientRect(), LW = m._lw || m.width, LH = m._lh || m.height, vt = document.getElementById("tip");
+      readout({ clientX: mr.left + X * mr.width / LW, clientY: mr.top + Y * mr.height / LH });
+      if (!vt || vt.hidden || !vt.textContent) { tip.hidden = true; return; }
+      tip.textContent = vt.textContent; vt.hidden = true; tip.hidden = false;
+      tip.style.left = (e.clientX + 14) + "px"; tip.style.top = (e.clientY - 32) + "px";
+    });
+    cv.addEventListener("pointerleave", () => { tip.hidden = true; });
+    cv.addEventListener("pointerdown", () => { tip.hidden = true; });
+  }
+  // Request a change: reqbox.js (loaded after this file) makes #rqb; put it in a slot under the 16:9 frame
+  const slot = document.createElement("div"); slot.id = "rqslot"; fh.appendChild(slot);
+  addEventListener("DOMContentLoaded", () => { const b = document.getElementById("rqb"); if (b) { slot.appendChild(b); fitFrames(); } });
 }
 if (!CLEAN) {
   let fq = 0; const fitSoon = () => { cancelAnimationFrame(fq); fq = requestAnimationFrame(fitFrames); };
