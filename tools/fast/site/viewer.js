@@ -1287,7 +1287,7 @@ function lowGeom(st, D, P, V) {
 function paintLowPanel(ctx, st, V, g) {   // ens_maps.low_panel, drawn inside the left edge of the map + the dot legend
   const [LW, LH] = V.fig, PW = Math.round(0.092 * LW), x0 = g.side === "right" ? st.x0 + st.W - PW - pt(3) : st.x0 + pt(3), y0 = st.y0 + pt(3), H = st.H - pt(6);
   const ms = g.meanVals.slice(0, 4), mrows = Math.max(1, Math.ceil(ms.length / 2));
-  const need = 1.2 + 1.4 + 1.05 + 1.2 * mrows + 0.4 + 2 * (1.05 + 10) + 0.5, lh = Math.min(pt(20.2), H / (need + 0.5));
+  const need = 1.2 + 1.4 + (g.hasNum ? 0 : 0.6) + 1.05 + 1.2 * mrows + 0.4 + 2 * (1.05 + 10) + 0.5, lh = Math.min(pt(20.2), H / (need + 0.5));
   ctx.save(); ctx.globalAlpha = 0.95; ctx.fillStyle = "#f6f3ec"; ctx.strokeStyle = "#c9c4b8"; ctx.lineWidth = 1;
   ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x0, y0, PW, H, pt(3)) : ctx.rect(x0, y0, PW, H); ctx.fill(); ctx.stroke(); ctx.globalAlpha = 1;
   ctx.textAlign = "left"; ctx.textBaseline = "top";
@@ -1295,7 +1295,7 @@ function paintLowPanel(ctx, st, V, g) {   // ens_maps.low_panel, drawn inside th
   const xl = x0 + 0.007 * LW, cw = (PW - 0.014 * LW) / 2; let y = y0 + 0.3 * lh;
   t(xl, y, "Lows (mb)", 800, 13.6); y += lh * 1.2;
   t(xl, y, `in view \u00b7 ${g.n} mem.`, 500, 10.0, "#5b5e66"); y += lh * 1.4;
-  if (!g.hasNum) { t(xl, y - lh * 0.45, "member # n/a (older run)", 500, 7.6, "#8a8d94"); }
+  if (!g.hasNum) { t(xl, y - lh * 0.35, "member # n/a (older run)", 500, 7.6, "#8a8d94"); y += lh * 0.6; }
   t(xl, y, "Mean (red L)", 800, 12.0); y += lh * 1.05;
   if (!ms.length) { t(xl, y, "none", 500, 11, "#5b5e66"); y += lh; }
   ms.forEach((v, k) => { t(xl + (k % 2) * cw, y, String(Math.round(v)), 900, 15.0, "#d7191c"); if (k % 2 === 1 || k === ms.length - 1) y += lh * 1.2; });
