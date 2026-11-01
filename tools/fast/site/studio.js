@@ -56,7 +56,8 @@ function base(k) {   // camera at dx = dy = 0, zoom 1: centre (figure px) and sc
   // wide view (10-31 7:55 PM, Benjamin: "a little tighter", whole state with a little margin): Washington fits a band between the
   // title and the color bar. 16:9: state from y 190 to H-120 and shifted right (its left edge at 27 % of the width) so the title,
   // top left, sits over the ocean / Vancouver Island instead of on Vancouver; 9:16: 84 % of the width, centred under the title.
-  if (k === "h") { const y0 = 190, y1 = f.H - 120, xl = 0.27 * f.W, k0 = Math.min((0.93 * f.W - xl) / t.w, (y1 - y0) / t.h);
+  // (HRRR / RRFS / NBM, no own view: centred, since their grid's northwest corner would show top left)
+  if (k === "h") { const y0 = 190, y1 = f.H - 120, k0 = Math.min((V.fit ? 0.66 : 0.86) * f.W / t.w, (y1 - y0) / t.h), xl = V.fit ? 0.27 * f.W : (f.W - t.w * k0) / 2;
     return { cx: t.x + t.w / 2 - (xl + t.w * k0 / 2 - f.W / 2) / k0, cy: t.y + t.h / 2 - ((y0 + y1) / 2 - f.H / 2) / k0, k0 }; }
   // 9:16: 84 % of the width, nudged 4 % right so the coast towns' names (Neah Bay, left of its dot) stay inside the frame
   const y0 = f.top + 80, y1 = f.H - f.bot + 40, k0 = Math.min(0.84 * f.W / t.w, (y1 - y0) / t.h);
