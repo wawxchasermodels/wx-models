@@ -89,7 +89,13 @@ function colorbar(c, P, x, y, w, h, size) {
   c.font = `600 ${size}px Montserrat`; c.fillStyle = "#e9ecf1"; c.textAlign = "center";
   // ticks: skip any whose label would touch the previous drawn one (precip keys bunch 0.01-0.5 into a few bins)
   let lastR = -1e9; (P.ticks || []).filter((t) => t >= lo && t <= hi).forEach((t) => { const tx = X(t), s_ = fmtTick(t, P), tw = c.measureText(s_).width;
-    if (tx - tw / 2 < lastR + size * 0.6) return; lastR = tx + tw / 2; c.fillRect(tx - 1, y + h, 2, size * 0.35); c.fillText(s_, tx, y + h + size * 1.35); });
+    if (tx - tw / 2 < lastR + size * 0.6) {
+      // 11-01 8:30 AM (Benjamin: "Yes fix the tick label"): the top tick (e.g. 85 on max wave height) sits on the bar's right end and got
+      // skipped next to 80; draw it left-aligned from the end (hanging just past the bar) when that clears the previous label
+      const lx = tx + size * 0.2; if (Math.abs(t - hi) > 1e-9 || lx < lastR + size * 0.3) return;
+      c.fillRect(tx - 2, y + h, 2, size * 0.35); c.textAlign = "left"; c.fillText(s_, lx, y + h + size * 1.35); c.textAlign = "center"; lastR = lx + tw; return;
+    }
+    lastR = tx + tw / 2; c.fillRect(tx - 1, y + h, 2, size * 0.35); c.fillText(s_, tx, y + h + size * 1.35); });
   c.textAlign = "left"; c.font = `700 ${size}px Montserrat`; c.fillText(P.key || "", x, y - size * 0.55);
   return true;
 }
