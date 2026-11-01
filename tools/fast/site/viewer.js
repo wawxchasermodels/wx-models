@@ -168,6 +168,14 @@ function addStudioViews(man, sv) {
     M.views = out; }
   return man;
 }
+// 10-31 8:17 PM (Benjamin: "Fix the pacific nw tight view"): per-view overrides from static/view_fixes.json (studio_views.py
+// pnwt_fix) laid over the manifest: Pacific NW tight's town layer (towns_pnwt_v2.png) + the number slots built with it, since the
+// old towns_pnwt.png no longer matched the manifest's slots (numbers sat on other towns' names). Missing file -> manifest as is.
+function viewFixes(man, vf) {
+  for (const [m, vs] of Object.entries((vf && vf.models) || {})) { const M = (man.models || {})[m]; if (!M) continue;
+    for (const [vid, o] of Object.entries(vs)) if (M.views[vid] && o.towns && o.towns_png) M.views[vid] = Object.assign({}, M.views[vid], { towns: o.towns, towns_png: o.towns_png }); }
+  return man;
+}
 const VSRC = (vid) => { const V = VIEWS()[vid]; return (V && V.src) || vid; };   // file / tuning id of a view (Studio wide view -> its src)
 const runFile = (r) => XR.has(r) ? "run_x.json" : "run.json";
 async function boot() {
@@ -180,10 +188,11 @@ async function boot() {
     document.body.appendChild(b);
     let lh = 0; new ResizeObserver(() => { const h = cslimH(); if (Math.abs(h - lh) > 2 && parent !== window) { lh = h; parent.postMessage({ wx: "size", id: Q.get("id"), h }, "*"); } }).observe(document.body); }
   // 10-29: manifest, fonts and the shown run's run.json in parallel; other runs load when picked
-  const [man, sv] = await Promise.all([fetch(DATA + "manifest.json", { cache: "no-cache" }).then(r => r.json()),
+  const [man, sv, vf] = await Promise.all([fetch(DATA + "manifest.json", { cache: "no-cache" }).then(r => r.json()),
                                    Q.get("studio") ? fetch(DATA + "static/studio_views.json", { cache: "no-cache" }).then(r => r.ok ? r.json() : null, () => null) : null,
+                                   fetch(DATA + "static/view_fixes.json", { cache: "no-cache" }).then(r => r.ok ? r.json() : null, () => null),
                                    document.fonts.load("800 20px Montserrat"), document.fonts.load("500 12px Montserrat")]);
-  S.man = addStudioViews(mergeRunsX(man), sv);
+  S.man = addStudioViews(viewFixes(mergeRunsX(man), vf), sv);
   // runs: "model/cycle", newest first per model; models in a fixed order
   const order = ["hrrr", "rrfs", "nbm", "gfs", "ifs", "ifs9", "aifs", "eps", "aens"].filter(m => S.man.models[m] && (S.man.runs[m] || []).length);
   const all = []; for (const m of order) for (const c of [...S.man.runs[m]].reverse()) all.push(`${m}/${c}`);
@@ -352,7 +361,8 @@ async function viewStatic(vid) {
     const [lut, base] = await Promise.all([fetch(DATA + V.lut + SV()).then(r => r.arrayBuffer()).then(b => new Float32Array(b)),
                                            img(DATA + `static/base_${vid}.png` + SV())]);
     // towns layer is not needed for the first paint: draw without it, redraw when it lands (10-29 first-map speedup)
-    const townsP = img(DATA + `static/towns_${vid}.png` + SV()).then(im => { obj.towns = im; if (VSRC(S.view) === vid && window.__drawn) draw(); return im; }, () => null);
+    const tU = DATA + (V.towns_png || `static/towns_${vid}.png`) + SV();
+    const townsP = img(tU).then(im => { obj.towns = im; if (VSRC(S.view) === vid && window.__drawn) draw(); return im; }, () => null);
     // per-pixel source index + weights, made once per view from the coarse LUT (bilinear in panel px)
     const [px, py, pw, ph] = V.panel, x0 = Math.round(px), y0 = Math.round(py), W = Math.round(px + pw) - x0, H = Math.round(py + ph) - y0;
     const { nx, ny, stride } = V, G = S.runs[S.run].grid, gnx = G.nx, gny = G.ny;
@@ -371,7 +381,7 @@ async function viewStatic(vid) {
         idx[k] = r0 * gnx + c0; wy[k] = fi - r0; wx[k] = fj - c0;
       }
     }
-    const obj = { lut, base, towns: null, townsP, x0, y0, W, H, idx, wx, wy, gnx, baseU: DATA + `static/base_${vid}.png` + SV(), townsU: DATA + `static/towns_${vid}.png` + SV() }; return obj;
+    const obj = { lut, base, towns: null, townsP, x0, y0, W, H, idx, wx, wy, gnx, baseU: DATA + `static/base_${vid}.png` + SV(), townsU: tU }; return obj;
   })();
   S.statics[sk] = p; return p;
 }
