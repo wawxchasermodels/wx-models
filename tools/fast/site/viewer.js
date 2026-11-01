@@ -49,7 +49,7 @@ function fitPhone() {   // phones: map as large as fits between the menus and th
   if (!document.body.classList.contains("phone") || !cv.width) { cv.style.width = cv.style.height = ""; schedSharp(); return; }
   const wr = $("wrap"), cs = getComputedStyle(wr), padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight), padY = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
   const vh = window.visualViewport ? visualViewport.height : innerHeight;
-  const availW = document.documentElement.clientWidth - padX, availH = document.body.classList.contains("cslim") ? 1e5 : vh - $("bar").offsetHeight - $("dock").offsetHeight - padY;
+  const availW = document.documentElement.clientWidth - padX, availH = document.body.classList.contains("cslim") ? 1e5 : document.body.classList.contains("embed") ? vh - 2 : vh - $("bar").offsetHeight - $("dock").offsetHeight - padY;   // compare frames (11-01 t2027u): menus sit under the map, so they never change its size
   const k = Math.max(0.05, Math.min(availW / LW, availH / LH));
   cv.style.width = Math.floor(LW * k) + "px"; cv.style.height = Math.floor(LH * k) + "px"; schedSharp();
 }

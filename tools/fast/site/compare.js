@@ -37,7 +37,7 @@ let MENUS = true;
 $("menusall").onclick = () => { MENUS = !MENUS; $("menusall").textContent = MENUS ? "Hide menus" : "Show menus"; for (const id of ["L", "R"]) frame(id).postMessage({ wx: "menus", show: MENUS }, "*"); };
 
 addEventListener("message", (e) => {
-  if (e.data && e.data.wx === "box" && ST.hasOwnProperty(e.data.id) && e.source === frame(e.data.id)) { BOX[e.data.id] = e.data; sendBox(); return; }
+  if (e.data && e.data.wx === "box") return;   // 11-01 t2027u: maps are sized by the (equal) frame width now, menus sit under them; no size capping
   const d = e.data; if (d && d.wx === "size" && SLIM && ST.hasOwnProperty(d.id) && e.source === frame(d.id)) { $(d.id).style.height = Math.max(120, Math.min(1400, d.h)) + "px"; return; }
   if (!d || d.wx !== "state" || !ST.hasOwnProperty(d.id)) return;
   if (e.source !== frame(d.id)) return;
