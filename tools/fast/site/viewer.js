@@ -760,7 +760,7 @@ function creditLines(pid, P, towns) {
   const m = S.run.split("/")[0], name = (MD() && MD().name) || "", ec = /^ECMWF/.test(name) || /^(ifs|ifs9|aifs|eps|aens)$/.test(m);
   const L = [];
   if (P.clim === "pr" || /^qpf(a|pct)$/.test(pid)) L.push("Normals: PRISM Group, Oregon State University, https://prism.oregonstate.edu (accessed 30 Oct 2026); NOAA CPC & GPCP via NOAA PSL.");
-  const a = [ec ? `${name ? name + ": " : ""}Data: \u00a9 ${CREDIT_YEAR} ECMWF (www.ecmwf.int), CC BY 4.0. Modified.` : (pid === "t2m" ? "" : "Data: NOAA (public domain).")];
+  const a = [ec ? `Data: \u00a9 ${CREDIT_YEAR} ECMWF (www.ecmwf.int), CC BY 4.0. Modified.` : (pid === "t2m" ? "" : "Data: NOAA (public domain).")];
   if (towns) a.push("Places: GeoNames (geonames.org), CC BY 4.0."); a.push("Basemap: Natural Earth.");
   L.push(a.filter(Boolean).join("  "));
   return L;
