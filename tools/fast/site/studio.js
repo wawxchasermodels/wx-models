@@ -83,7 +83,11 @@ function pill(c, x, y, txt, size, bg, fg) {
 function colorbar(c, P, x, y, w, h, size) {
   const L = P.levels, C = P.colors; if (!L || !C || L.length < 2) return false;
   const lo = L[0], hi = L[L.length - 1], n = L.length - 1;   // equal-width bins (like the site's keys), ticks placed inside their bin
-  const X = (v) => { let i = 0; while (i < n - 1 && v > L[i + 1]) i++; return x + (i + Math.min(1, Math.max(0, (v - L[i]) / ((L[i + 1] - L[i]) || 1)))) / n * w; };
+  // 11-01 9:16 AM (Benjamin t1996u "the numbers need to be fixed"): optional per-bin cell widths P.kw (max wave: 75-77.5 and 77.5-80 half a cell
+  // each, so 75-80 is one cell like the other 5 ft steps and 75 / 80 / 85 stay evenly spaced on their color edges)
+  const KW = Array.isArray(P.kw) && P.kw.length === n ? P.kw : null, CW = [0]; for (let i = 0; i < n; i++) CW.push(CW[i] + (KW ? KW[i] : 1));
+  const X = (v) => { let i = 0; while (i < n - 1 && v > L[i + 1]) i++; const fr = Math.min(1, Math.max(0, (v - L[i]) / ((L[i + 1] - L[i]) || 1)));
+    return x + (CW[i] + fr * (CW[i + 1] - CW[i])) / CW[n] * w; };
   for (let i = 0; i < C.length && i < L.length - 1; i++) { c.fillStyle = C[i]; c.fillRect(Math.floor(X(L[i])), y, Math.ceil(X(L[i + 1]) - X(L[i])) + 1, h); }
   c.strokeStyle = "rgba(255,255,255,0.55)"; c.lineWidth = 1.5; c.strokeRect(x, y, w, h);
   c.font = `600 ${size}px Montserrat`; c.fillStyle = "#e9ecf1"; c.textAlign = "center";

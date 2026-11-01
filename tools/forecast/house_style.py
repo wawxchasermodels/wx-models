@@ -126,11 +126,11 @@ def layout(fig, key=True):
     return key_y, key_y - 0.50 / H
 
 
-def hbar(fig, mappable, ticks, title, y, x0=0.150, x1=0.976, signed=False):
+def hbar(fig, mappable, ticks, title, y, x0=0.150, x1=0.976, signed=False, spacing="uniform"):
     """Wide horizontal color key directly under the header: units title on its left, a label on every bin edge below."""
     H = fig.get_size_inches()[1]; h = 0.27 / H
     cax = fig.add_axes([x0, y, x1 - x0, h])
-    cb = fig.colorbar(mappable, cax=cax, orientation="horizontal", ticks=ticks, extendfrac=0.022)
+    cb = fig.colorbar(mappable, cax=cax, orientation="horizontal", ticks=ticks, extendfrac=0.022, spacing=spacing)
     cb.outline.set_edgecolor(PANEL_EDGE); cb.outline.set_linewidth(1.0)
     cax.tick_params(colors=INK, length=5, width=1, pad=3)
     cax.set_xticklabels([(f"{t:+d}" if t else "0") if signed else f"{t:d}" for t in ticks], fontproperties=font(700, BAR_LABEL_SIZE))

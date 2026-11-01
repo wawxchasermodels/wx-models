@@ -962,6 +962,10 @@ def static(m, out, views_only=None, x2_only=False):
     # would be good, let's try it"): the 75-80 bin is split at 77.5: 75-77.5 bright blue-violet #5b5bff, 77.5-80 neon cyan #00e5ff (rest unchanged).
     # Ticks stay every 5 ft (no 77.5 label). Keys _85v, manifest models.ifs.products_v.
     WVX_L = WV_L + [45, 50, 55, 60, 65, 70, 75, 77.5, 80, 85]
+    # 11-01 9:16 AM (Benjamin t1996u "I think the numbers need to be fixed here to make it make more sense"): key cell widths ("kw", also read by
+    # Studio's bar): every bin one cell except 75-77.5 and 77.5-80 at half a cell each, so 75-80 is one cell like every other 5 ft step and the
+    # 75 / 80 / 85 numbers keep the same even rhythm, each on its color edge. Keys _85w.
+    WVX_KW = [0.5 if a in (75, 77.5) else 1 for a in WVX_L[:-1]]
     CM["wavemax"] = M.ramp(WVX_L, [(0, "#283c96"), (2, "#2878c8"), (4, "#28afd2"), (6, "#32be8c"), (8, "#6ec846"), (10, "#c8dc3c"), (14, "#f0b432"),
                                    (20, "#e6642d"), (28, "#c82846"), (40, "#8c1e78"),
                                    (42.5, "#841f7f"), (47.5, "#6c2595"), (52.5, "#512da0"), (57.5, "#2b1873"), (62.5, "#9b1cff"), (67.5, "#e01cff"),
@@ -1133,11 +1137,11 @@ def static(m, out, views_only=None, x2_only=False):
                       barbs=dict(u="wdu", v="wdv", color="#1b1d22", length=HS.BARB_LENGTH, lw=1.0, arrows=True, min=0.5, ref=1, fixed=True),
                       extra="ECMWF wave model (WAM 0.25\u00b0)  \u00b7  arrows = mean wave direction  \u00b7  up to {hi} ft in view", pct=[0, 99.9],
                       only=("ifs",)),
-        "wavemax": dict(title="Estimated Max Wave Height", fields=["swh"], fill="hmax", key="Max wave (ft)", ticks=WVX_T, tickfmt=True, keyver="_85v",
+        "wavemax": dict(title="Estimated Max Wave Height", fields=["swh"], fill="hmax", key="Max wave (ft)", ticks=WVX_T, tickfmt=True, keyver="_85w", kw=WVX_KW,
                         **table(WVX_L, CM["wavemax"], "max"), extra="1.86 x significant height (largest of ~1000 waves, Rayleigh; as the old site)"
                         "  \u00b7  up to {hi} ft in view", pct=[0, 99.9], only=("ifs",)),
         "wavemax24": dict(title="24 h Max Wave Height (est.)", fields=["swh"], window=24, wmax=True, wfield="swh", wscale=1.86, fill="window", cmap_of="wavemax",
-                          key="Max wave (ft)", ticks=WVX_T, tickfmt=True, keyver="_85v", **table(WVX_L, CM["wavemax"], "max"),
+                          key="Max wave (ft)", ticks=WVX_T, tickfmt=True, keyver="_85w", kw=WVX_KW, **table(WVX_L, CM["wavemax"], "max"),
                           extra="1.86 x the highest significant height over the model hours in the 24 h ending at the valid time  \u00b7  up to {hi} ft in view",
                           pct=[0, 99.9], only=("ifs",)),
         "fog": dict(title="Fog Risk Index", fields=["t2m", "d2m", "u10", "v10"], fill="fog", key="Fog risk", ticks=[20, 40, 60, 80, 100], tickfmt=True,
@@ -1381,13 +1385,16 @@ def static(m, out, views_only=None, x2_only=False):
             fn = f"static/key_{m}_{pid}{kv}_{vid}.png"; P["keys"][vid] = fn
             fig, ax, ky = layer_fig(vid); x0, x1, y0, y1 = ax.get_extent(TM.VIEWS[vid]["proj"])
             X, Y = np.meshgrid([x0, x1], [y0, y1]); L = np.asarray(P["levels"]); cm = CM[pid] if pid in CM else CM[P["cmap_of"]]
+            kw = P.get("kw"); tkd = P["ticks"]
+            if kw:   # 11-01: per-bin cell widths: draw on display positions (cumulative widths, proportional spacing), ticks mapped onto them
+                Ld = np.concatenate([[0.0], np.cumsum(kw)]); tkd = [float(np.interp(t, L, Ld)) for t in P["ticks"]]; L = Ld
             ext = "both" if P["under"] and P["over"] else "max" if P["over"] else "min" if P["under"] else "neither"
             if pid == "vis": ext = "max"
             cs = ax.contourf(X, Y, np.full((2, 2), np.nan), levels=L, cmap=cm, norm=BoundaryNorm(L, cm.N), extend=ext, transform=ax.projection)
             cs.set_visible(False)
             kx1 = {"x1": 0.872} if P.get("core") else {}   # elows: room for the old site's "within 25 km" swatch
             if P.get("tickfmt"):
-                cb = HS.hbar(fig, cs, [], P["key"], ky, **kx1); cb.set_ticks(P["ticks"])
+                cb = HS.hbar(fig, cs, [], P["key"], ky, **kx1, **({"spacing": "proportional"} if kw else {})); cb.set_ticks(tkd)
                 cb.ax.set_xticklabels(P.get("ticklabels") or [f"{t:g}" for t in P["ticks"]], fontproperties=HS.font(700, 13))
             else: HS.hbar(fig, cs, tk0, P["key"], ky)
             if P.get("core"):
