@@ -356,6 +356,8 @@ async function makeMp4() {
   if (!last || REC.on) return;
   const k = $s("mpk").value, f = F[k], pan = $s("mpmode").value === "pan", pins = getPins(), idx = pickIdx(), steps = S.runs[S.run].steps;
   if (idx.length < 2) { mpSt("Pick an end hour after the start hour."); return; }
+  // start on a real map: drop leading hours this product doesn't have (e.g. 6 h precip at F+3), so frame 1 is never a stale hour
+  while (idx.length > 2) { const f_ = steps[idx[0]].f; try { await productFields(S.run, S.prod, f_); break; } catch (e) { S.derived.delete(`${S.run}/${S.prod}/${f_}`); if (!String(e && e.message).startsWith("nodata:")) break; idx.shift(); } }
   if ((BR.corner || BR.card || BR.lower) && LOGOS[BR.logo]) { const t_ = performance.now(); while (!getLogo() && performance.now() - t_ < 4000) await sleep(50); }   // logo on frame 1
   if (pan && !(pins.a && pins.b)) { mpSt("Track storm needs pins: tap the frame where the loop starts (A), then where it ends (B)."); startPin(pins.a ? "b" : "a"); return; }
   const T = loopTimes(idx.length), holdN = Math.round(+$s("mph").value * FPS), panN = Math.max(1, Math.round(T[idx.length] * FPS) - 1);
