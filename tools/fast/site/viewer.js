@@ -102,8 +102,14 @@ function schedSharp() {
   clearTimeout(sharpTimer); sharpTimer = setTimeout(() => { const cv = $("map");
     if (cv && cv._lw && window.__drawn && !S.dragging && wantRS(cv._lw, cv._lh) !== (cv._rs || 1)) draw(); }, 200);
 }
+// 10-31 6:44 PM (Benjamin: "Scrubbing through the model hours on the studio view is not smooth on the phone version"): Studio keeps
+// its map bitmap at RS 3 (4800 x 3150) for sharp 1920 px frames, and the light drag frame was drawn at that size too (~0.5-1 s
+// per hour on a 4x-slowed phone CPU, and the Studio frames did not change at all until the finger lifted). While the slider is
+// dragged in Studio the map is now drawn at RS 1 (9x fewer pixels) and the Studio frames follow every drawn hour; the sharp RS 3
+// frame is drawn once when the finger lifts.
+const STUDIO_DRAG_RS = 1;
 function sizeMap(cv, V, keepRS) {   // bitmap = figure px x RS; context transform = RS, so all drawing stays in figure px
-  const [LW, LH] = V.fig, rs = keepRS && cv._lw === LW && cv._lh === LH ? (cv._rs || 1) : wantRS(LW, LH);
+  const [LW, LH] = V.fig, rs = keepRS && Q.get("studio") && S.dragging ? STUDIO_DRAG_RS : keepRS && cv._lw === LW && cv._lh === LH ? (cv._rs || 1) : wantRS(LW, LH);
   const bw = Math.round(LW * rs), bh = Math.round(LH * rs), relayout = cv._lw !== LW || cv._lh !== LH;
   if (cv.width !== bw || cv.height !== bh) { cv.width = bw; cv.height = bh; }
   cv._lw = LW; cv._lh = LH; cv._rs = rs; if (relayout) fitPhone();
@@ -170,7 +176,9 @@ async function boot() {
   // "Runs" menu (Benjamin 10-29 7:10 PM): every available run, grouped by model, newest first; picking one keeps the valid time
   const runLabel = r => { const [m, c] = r.split("/"), p = ((S.man.progress || {})[m] || {})[c];
     return `${S.man.models[m].site} ${c.slice(8)}Z ${c.slice(4, 6)}-${c.slice(6, 8)}${p ? ` (loading, to F+${p[0]})` : ""}`; };
-  const runMenu = (ord, al) => { $("run").innerHTML = ord.map(m => `<optgroup label="${S.man.models[m].site}">` +
+  // 10-31 6:08 PM (Benjamin "Go for it on the eps 3 hourly"): the group label says how often a model's maps come (manifest note, else here)
+  const RUN_NOTE = { eps: "3-hourly to F+144, then 6-hourly" }, runNote = m => S.man.models[m].note || RUN_NOTE[m] || "";
+  const runMenu = (ord, al) => { $("run").innerHTML = ord.map(m => `<optgroup label="${S.man.models[m].site}${runNote(m) ? ` \u00b7 ${runNote(m)}` : ""}">` +
     al.filter(r => r.startsWith(m + "/")).map(r => `<option value="${r}"${r === S.run ? " selected" : ""}>${runLabel(r)}</option>`).join("") + "</optgroup>").join(""); };
   runMenu(order, all);
   // 10-31 frame at a time: every 2 min re-read the manifest so a run that just started shows up in the Runs menu without a reload
@@ -655,7 +663,8 @@ async function render(lite) {
     for (let r = r0; r < r1; r += 2) for (let c = c0; c < c1; c += 2) a[n++] = D.fill[r * D.w + c]; D.pct[vid] = a.subarray(0, n).sort(); }
   const fin = D.pct[vid];
   const pc = p => fin[Math.min(fin.length - 1, Math.max(0, Math.round(p / 100 * (fin.length - 1))))];
-  const extra = (P.isobars && !D.iso && P.extra_noh ? P.extra_noh : P.extra).replace("{lo}", pc(P.pct[0]).toFixed(P.dec || 0)).replace("{hi}", pc(P.pct[1]).toFixed(P.dec || 0));
+  let extra = (P.isobars && !D.iso && P.extra_noh ? P.extra_noh : P.extra).replace("{lo}", pc(P.pct[0]).toFixed(P.dec || 0)).replace("{hi}", pc(P.pct[1]).toFixed(P.dec || 0));
+  if (pid === "gust10" && run.startsWith("eps/") && f <= 144 && f % 3 === 0) extra = extra.replace("in the 6 h ending", "in the 3 h ending");   // 10-31 EPS 3-hourly to F+144
   header(ctx, V, P.title, step.valid_line, `${S.runs[run].runline}  \u00b7  ${V.label}  \u00b7  ${extra}`, step.badge);
   S.peak = GUST_PIDS.test(pid) ? drawPeak(ctx, st, vals) : null;
   const t3 = performance.now();
@@ -664,7 +673,7 @@ async function render(lite) {
   $("stat").textContent = `F+${f}  data ${S.last.data_ms.toFixed(0)} ms · fill ${S.last.fill_ms.toFixed(0)} ms · lines/labels ${S.last.overlay_ms.toFixed(0)} ms`;
   window.__drawn = `${pid}/${vid}/${f}` + (lite ? "~" : ""); window.__rs = rs;
   postCompare(run, pid, vid, step);
-  if (lite) return;
+  if (lite) { if (window.onStudioDraw && Q.get("studio")) window.onStudioDraw(cv_(), S.cur, step, true); return; }
   // iOS Safari throws after 100 history.replaceState calls in 10 s: update the URL once things settle
   if (!Q.get("clean")) clearTimeout(urlTimer), urlTimer = setTimeout(() => { const u = new URL(location); u.searchParams.set("prod", pid); u.searchParams.set("view", vid);
     u.searchParams.set("f", f); u.searchParams.set("run", run); u.searchParams.delete("model");

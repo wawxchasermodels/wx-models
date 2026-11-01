@@ -52,8 +52,8 @@ const ens = (m) => [
   [`${m}_mucape_members`, "Member View & Mean: MUCAPE", "lines_cape"],
   [`${m}_pwat_members`, "Member View & Mean: PWAT", "lines_pwat"],
   [`${m}_mr_t2m`, "Multi-run: 2m Temperature", "mr_t2m"],
-  [`${m}_mr_tmax6`, "Multi-run: 6-h Max Temperature", "mr_tmax"],
-  [`${m}_mr_tmin6`, "Multi-run: 6-h Min Temperature", "mr_tmin"],
+  [`${m}_mr_tmax6`, `Multi-run: ${m === "eps" ? "3/6-h" : "6-h"} Max Temperature`, "mr_tmax"],
+  [`${m}_mr_tmin6`, `Multi-run: ${m === "eps" ? "3/6-h" : "6-h"} Min Temperature`, "mr_tmin"],
   [`${m}_mr_qpf6`, "Multi-run: 6-Hour QPF", "mr_qpf6"],
   [`${m}_mr_snow6`, "Multi-run: 6-Hour Snow", "mr_snow6"],
   [`${m}_mr_qpf24`, "Multi-run: 24-Hour QPF", "mr_qpf24"],
@@ -581,7 +581,7 @@ async function build(sec, prod, town) {
     if (k === "spread_mx") return fr(k, "Spread: Daily High and Low", "\u00b0F", [...bandsItems(HI.noon, HI.v, K.WARM, "High"), ...bandsItems(LO.noon, LO.v, K.COLD, "Low"), { t: "hline", y: 32, label: "Freezing (32\u00b0F)", color: K.COLD, lw: 1.2, dash: "--" }], "upper left");
     const D_ = k === "grid_mx" ? HI : LO, hi = k === "grid_mx";
     return Object.assign(base, { fig: "grid", g: gridSpec(sec, name, run, `${hi ? "Daily High" : "Daily Low"} Temperature: Each Member + Mean`, "\u00b0F",
-      `${hi ? "Highest of the 6 h max" : "Lowest of the 6 h min"} temps in each PT day`, D_.noon.map((t) => [dayLab(t), ""]), D_.v, (v) => v.toFixed(0), TL, TC, null, R) });
+      `${hi ? "Highest of the 3 h / 6 h max" : "Lowest of the 3 h / 6 h min"} temps in each PT day`, D_.noon.map((t) => [dayLab(t), ""]), D_.v, (v) => v.toFixed(0), TL, TC, null, R) });
   }
   if (k === "grid_tp" || k === "grid_tp24") { const S0 = get("tp"); if (!S0) return memEmpty(sec, "Member grids"); let A = withZero(S0, c);
     if (k === "grid_tp24") A = roll(A, 24);
@@ -592,8 +592,10 @@ async function build(sec, prod, town) {
       R && ii.map((i) => refVal(R, "apcpTot", A.x[i], k === "grid_tp" ? t0 : A.x[i] - 24 * 36e5)), R) }); }
   if (k === "grid_gust") { const S0 = get("10fg"); if (!S0) return noField("10 m wind gust");
     const ii = S0.f.map((f, i) => i).filter((i) => S0.f[i] % 6 === 0);
+    // 10-31 EPS 3-hourly to F+144: each step's gust is the max of the 3 h before it there, so a 6 h column = the larger of the two 3 h maxes
+    const g6 = (a, i) => { const j = S0.f.indexOf(S0.f[i] - 3); return j >= 0 && fin(a[j]) && fin(a[i]) ? Math.max(a[i], a[j]) : a[i]; };
     return Object.assign(base, { fig: "grid", g: gridSpec(sec, name, run, "Max Wind Gust: Each Member + Mean", "mph", `Max 10 m gust in the 6 h ending at each time; ${sec.id === "eps" ? "ECMWF ENS" : sec.label} has no hourly output`,
-      ii.map((i) => [dayLab(S0.x[i]), hourLab(S0.x[i])]), S0.m.map((a) => ii.map((i) => a[i])), (v) => v.toFixed(0), GL, GC, R && ii.map((i) => refGust6(R, S0.x[i])), R) }); }
+      ii.map((i) => [dayLab(S0.x[i]), hourLab(S0.x[i])]), S0.m.map((a) => ii.map((i) => g6(a, i))), (v) => v.toFixed(0), GL, GC, R && ii.map((i) => refGust6(R, S0.x[i])), R) }); }
   if (k === "snowens") { const S0 = get("sf", id, SNOW_HOURS); if (!S0) return memEmpty(sec, "Snow totals by member"); const A = withZero(S0, c);
     return Object.assign(base, { fig: "snowens", g: { title: `${name}  \u00b7  Snow Totals by Member`, sub: `${run}  \u00b7  0-${A.f[A.f.length - 1]} h`, credit, x: A.x, f: A.f, A: A.m,
       ref: R ? A.x.map((x) => refVal(R, "snowTot", x, t0)) : null, refRun: R && R.c,
@@ -637,7 +639,7 @@ async function multiRun(sec, prod, town, runs, base) {
   if (!items.length) return { empty: ["Not in this model", "This model run has no data for this product."] };
   const n = items.length;
   if (ensM) {
-    const what = { mr_t2m: "2 m Temperature", mr_tmax: "Max Temperature (6 h window ending each step)", mr_tmin: "Min Temperature (6 h window ending each step)", mr_qpf6: "6-Hour Precipitation", mr_snow6: "6-Hour Snow (10:1)", mr_qpf24: "24-Hour Precipitation", mr_snow24: "24-Hour Snow (10:1)", mr_qpf: "Total Precipitation", mr_snow: "Total Snow (10:1)" }[k];
+    const wn = m === "eps" ? "3 h window to F+144, then 6 h" : "6 h window", what = { mr_t2m: "2 m Temperature", mr_tmax: `Max Temperature (${wn} ending each step)`, mr_tmin: `Min Temperature (${wn} ending each step)`, mr_qpf6: "6-Hour Precipitation", mr_snow6: "6-Hour Snow (10:1)", mr_qpf24: "24-Hour Precipitation", mr_snow24: "24-Hour Snow (10:1)", mr_qpf: "Total Precipitation", mr_snow: "Total Snow (10:1)" }[k];
     return Object.assign(base, { fig: "frame", title: `${town.label} Multi-run: ${what}`, sub: `Ensemble mean of the last ${n} ${sec.id === "eps" ? "ENS" : sec.label} runs, newest bold`,
       panels: [{ ylab: temp ? "\u00b0F" : "inches", legend: "upper left", ylim: temp ? null : floor0(0.25), items: [...items, ...(temp ? [{ t: "hline", y: 32, label: "Freezing (32\u00b0F)", color: K.COLD, lw: 1.2, dash: "--" }] : [])] }] });
   }

@@ -41,8 +41,10 @@ MODELS = {   # grid "lcc" = HRRR 3 km, "ll" = 0.25 deg global (lat 90 -> -90, lo
     # computed here from the members (the open em/es file only appears once the whole run is out). 10-30-26 (Benjamin's saved order).
     # 10-31 (Benjamin "06Z/18Z ensembles"): + 06/18Z, which ECMWF runs to 144 h only (3-hourly; we keep the 6-hourly steps);
     # keep_long keeps the newest 00/12Z run on the site too, so 360 h never drops off (same as "ifs")
-    "eps":  dict(grid="ll", views=GLOBAL_VIEWS, cycles=(0, 6, 12, 18), steps=list(range(6, 361, 6)), keep=4, grid_from="ifs",
-                 steps_short=list(range(6, 145, 6)), short_cycles=(6, 18), keep_long=True),
+    # 10-31 6:08 PM (Benjamin "Go for it on the eps 3 hourly"): 3-hourly to 144 h (as ECMWF publishes it), then 6-hourly to 360 h;
+    # 06/18Z 3-hourly to 144 h. ~84 steps per 00/12Z run instead of 60 (publish ~40 % longer, ~+35 MB per run in R2)
+    "eps":  dict(grid="ll", views=GLOBAL_VIEWS, cycles=(0, 6, 12, 18), steps=list(range(3, 145, 3)) + list(range(150, 361, 6)), keep=4, grid_from="ifs",
+                 steps_short=list(range(3, 145, 3)), short_cycles=(6, 18), keep_long=True, note="3-hourly to F+144, then 6-hourly"),
     # AIFS ensemble (stage 4): 50 members, 00/06/12/18Z, 6-hourly to 360 h; 2 m temp + 500 mb height (z / g), same products as "eps"
     # 10-31: + 06/18Z (AIFS ENS 06/18Z run the full 360 h)
     "aens": dict(grid="ll", views=GLOBAL_VIEWS, cycles=(0, 6, 12, 18), steps=list(range(6, 361, 6)), keep=4, grid_from="ifs"),
@@ -104,7 +106,7 @@ class _NoSt:
     def field(self, *a, **k): raise StopIteration
 # Stage 4 extras (10-30): per-step member params beyond 2 m temp + 500 mb height. name: (param, level, kind, scale, offset)
 #   kind "ms": mean (+ sd); "p90": mean + 90th percentile; "pc": mean + chance >= threshold. Memory: one param's member stack at a time.
-ENS_EXTRA = {"tp": ("tp", None, "p90", 39.3701, 0), "sf": ("sf", None, "p90", 393.701, 0), "10fg": ("10fg", None, "p90", 2.23694, 0),
+ENS_EXTRA = {"tp": ("tp", None, "p90", 39.3701, 0), "sf": ("sf", None, "p90", 393.701, 0), "10fg": (("10fg", "10fg3", "10fg6"), None, "p90", 2.23694, 0),   # ENS: 10fg / 10fg3 to 144 h (3 h max), 10fg (6 h) after
              "msl": ("msl", None, "ms", 0.01, 0), "t850": ("t", "850", "ms", 1.0, -273.15), "mucape": ("mucape", None, "pc", 1.0, 0),
              # old site "EPS lows / highs" = ENS mean of member extremes: 2 m max/min over the last 3 h (to 144 h) or 6 h (after), deg F
              "mx2t": (("mx2t3", "mx2t6"), None, "m", 1.8, -459.67), "mn2t": (("mn2t3", "mn2t6"), None, "m", 1.8, -459.67),
@@ -1253,7 +1255,7 @@ def static(m, out, views_only=None, x2_only=False):
                  if k not in ("mucape", "gust10") or m == "eps"}   # AIFS ENS open data has no gust or CAPE
         for k in ("t850a", "qpf", "qpf6", "qpf24", "qpf48", "mslpqpf", "gust10", "mucape", "qpfa", "qpfpct"):
             if k in prods: prods[k]["title"] += " (ens. mean)"; prods[k]["extra"] = "mean of 50 members  \u00b7  " + prods[k]["extra"]
-        if m == "eps": prods["gust10"]["extra"] = "mean of 50 members' max gust in the 6 h ending at the valid time  \u00b7  up to {hi} mph in view"
+        if m == "eps": prods["gust10"]["extra"] = "mean of 50 members' max gust in the 3 h (to F+144) or 6 h (after) ending at the valid time  \u00b7  up to {hi} mph in view"
         if m == "eps": prods["mucape"]["extra"] = "mean of 50 members  \u00b7  blank under 100 J/kg  \u00b7  up to {hi} J/kg in view"
         CM.update(eqpf90=CM["qpf"], esnow=CM["snow"], esnow90=CM["snow"], egust90=CM["gust10"], epcape=None, elows=None, spag=None)
         prods["eqpf90"] = dict(title="Precipitation Total, 90th Percentile", fields=["apcp90"], key="Precip (in)", ticks=[0.1, 0.5, 1, 2, 3, 4, 6, 8, 10, 12], tickfmt=True,

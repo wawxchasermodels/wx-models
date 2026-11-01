@@ -127,7 +127,7 @@ async function render(k, frO) {   // frO: camera override (MP4 storm-track pan)
   if (!frO) f.zoom.value = Math.round((fr.zoom || 1) * 100);
   c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, f.W, f.H);
   if (BG !== "transparent") { c.fillStyle = BG; c.fillRect(0, 0, f.W, f.H); }
-  const r = crop(k, fr); c.imageSmoothingEnabled = true; c.imageSmoothingQuality = "high";
+  const r = crop(k, fr); c.imageSmoothingEnabled = true; c.imageSmoothingQuality = last.lite ? "low" : "high";   // lite: slider drag frame (RS 1 map)
   c.drawImage(cv, r.sx, r.sy, r.sw, r.sh, 0, 0, f.W, f.H);
   // header
   band(c, 0, f.top + f.title * 1.6, true);
@@ -163,9 +163,12 @@ async function render(k, frO) {   // frO: camera override (MP4 storm-track pan)
   if (PIN.show && !REC.on) drawPins(k, c, r);
   window.__studio = (window.__studio || 0) + 1;
 }
-const renderAll = () => { if (REC.on) return; if (CLEAN) render(OUTQ); else { render("v"); render("h"); } };
+// slider drag (last.lite): only the frames on screen are redrawn per hour (the phone shows one at a time); all of them on release
+const VIS = { v: true, h: true };
+if ("IntersectionObserver" in window) for (const k of ["v", "h"]) new IntersectionObserver((es) => { for (const e of es) VIS[k] = e.isIntersecting; }).observe(F[k].cv);
+const renderAll = () => { if (REC.on) return; if (CLEAN) render(OUTQ); else for (const k of ["v", "h"]) if (!(last && last.lite) || VIS[k]) render(k); };
 window.onStudioSkip = () => { if (PLAY.on) PLAY.next(); };
-window.onStudioDraw = (cv, cur, step) => { last = { cv, cur, step }; renderAll(); if (PLAY.on) PLAY.next(); if (!REC.on && typeof mpSync === "function") try { mpSync(); } catch (e) { /* panel not ready */ } };
+window.onStudioDraw = (cv, cur, step, lite) => { last = { cv, cur, step, lite: !!lite }; renderAll(); if (lite) return; if (PLAY.on) PLAY.next(); if (!REC.on && typeof mpSync === "function") try { mpSync(); } catch (e) { /* panel not ready */ } };
 // drag / keys / zoom / buttons
 for (const k of ["v", "h"]) {
   const f = F[k], cv = f.cv; let d = null;
