@@ -525,6 +525,13 @@ async function build(sec, prod, town) {
         panels.push({ ylab: `in per ${every} h`, legend: "upper left", items: [{ t: "bars", x, y: sw, w: bw, color: K.SNOW, label: "Snow" }, { t: "bars", x, y: fr, base: b1, w: bw, color: K.ICE, label: "Freezing rain" },
           { t: "bars", x, y: x.map(() => 0), w: bw, color: K.PLUM, label: "Sleet" }, { t: "bars", x, y: rn, base: b2, w: bw, color: K.RAIN, label: "Rain" }, { t: "bars", x, y: x.map(() => 0), w: bw, color: K.MUTED, label: "Type not set" }] });
         const SN = T.snowTot ? cut(T.snowTot).map((v) => v || 0) : null;
+        // Benjamin 10-31 ("snowfall bar graph (snow per 6 h) on the pass meteograms", same as the map page's Pass Forecaster): passes get
+        // a Snow per 6 h bar panel (each bar = the 6 h window ending at a 00/06/12/18-hour step, inches) above the running total
+        if (town.pt.k === "pass" && sn) {
+          const s6x = [], s6 = []; f.forEach((F_, i) => { if (F_ % 6 !== 0 || F_ === 0) return; let v = 0; f.forEach((g, j) => { if (g > F_ - 6 && g <= F_) v += sn[j] || 0; }); s6x.push(x[i] - 3 * 36e5); s6.push(v); });
+          const mx = Math.max(0, ...s6), tot = s6.reduce((a_, v) => a_ + v, 0);
+          if (s6.length) panels.push({ ylab: "in per 6 h", legend: "upper left", ylim: () => [0, Math.max(1, mx * 1.2)], items: [{ t: "bars", x: s6x, y: s6, w: 6 * 36e5 * 0.85, color: K.SNOW, label: `Snow per 6 h${T.snowEst ? " (est. 10:1 where \u2264 33\u00b0F)" : ""}  \u00b7  max ${mx.toFixed(1)} in, ${tot.toFixed(1)} in in all` }] });
+        }
         panels.push({ ylab: "snow (in)", legend: "upper left", ylim: bottom0, items: [...(SN ? [{ t: "line", x, y: SN, color: K.SNOW, lw: 2.5, label: `Model snowfall ${SN[SN.length - 1].toFixed(1)} in` }] : []), { t: "line", x, y: A.map((v) => v * 10), color: K.MUTED, lw: 1.4, dash: "--", label: "10:1 of all precip" }] });
       }
       return Object.assign(base, { fig: "panels", hIn: 11 * panels.length / 3, hourly, title: `${name} ${sec.tag} Winter Weather Summary`, sub: runL + "  \u00b7  precip bars colored by the model's precip type at each hour", panels });
