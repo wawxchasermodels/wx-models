@@ -954,14 +954,18 @@ def static(m, out, views_only=None, x2_only=False):
     CM["waves"] = M.ramp(WV_L, [(0, "#283c96"), (2, "#2878c8"), (4, "#28afd2"), (6, "#32be8c"), (8, "#6ec846"), (10, "#c8dc3c"), (14, "#f0b432"),
                                 (20, "#e6642d"), (28, "#c82846"), (40, "#8c1e78")])
     # Benjamin 11-01 7:30 AM "adjust the max wave height scale to go up to at least 60'", 7:38 AM "make the scale go to 85ft, going to have to get
-    # creative with the color scale", 7:41 AM "Make there be more increments in the scale, I don't care as much about the first 10 feet":
-    # max wave products only (wavemax, wavemax24; Significant Wave Height keeps 0-40). 0-10 ft = two coarse steps, then 2.5 ft steps 10-85 (30 steps):
-    # cyan, sea green, lime, yellow, orange, red-orange, crimson, purple-magenta, violet, indigo, electric violet, lavender, light pink, hot pink,
-    # deep rose, dark wine; over 85 = white core. Ticks every 10 ft.
+    # creative with the color scale", 7:41 AM "Make there be more increments in the scale, I don't care as much about the first 10 feet",
+    # 7:57 AM "I liked the way it was where the nearly white color was the highest wave, the red colors look too close to the red colors before the
+    # blue/purple, so maybe just have some pink after blue then. Maybe have the calmest, shortest colors be grey shades":
+    # max wave products only (wavemax, wavemax24; Significant Wave Height keeps 0-40). Bins 0-5, 5-10, then 2.5 ft steps 10-85 (32 bins), one color
+    # per bin (no red/orange/yellow/green): grey 0-15, blue 15-30, indigo/violet 30-45, purple/magenta 45-57.5, pink 57.5-70,
+    # lilac -> near-white 70-85, over 85 white.
     WVX_L = [0, 5] + [10 + 2.5 * i for i in range(31)]
-    CM["wavemax"] = M.ramp(WVX_L, [(2.5, "#22408f"), (7.5, "#2a7cc4"), (10, "#26aecb"), (15, "#36c08c"), (20, "#96cf3a"), (25, "#f0d23a"), (30, "#f5982e"),
-                                   (35, "#e4502c"), (40, "#c21e3c"), (45, "#8e1e78"), (50, "#5c1fa0"), (55, "#3e2ca8"), (60, "#7a4cff"), (65, "#b48aff"),
-                                   (70, "#ffa6d8"), (75, "#ff3d9a"), (80, "#c4005a"), (85, "#5c0a2e")], over="#ffffff")
+    WVX_C = ["#b9bec5", "#979ea7", "#7a828d", "#5f6773", "#173a7a", "#1f4f9e", "#2a66c0", "#3a80db",
+             "#559ced", "#7ab8f7", "#2c288c", "#4433b6", "#5f40d6", "#7d56e8", "#9b70f2", "#b98df8",
+             "#6c2290", "#8c29ad", "#ab34c4", "#c843d2", "#e05ad6", "#e852b0", "#f06cb4", "#f589c6",
+             "#f9a6d6", "#fcc2e4", "#e2aef4", "#d6bcfb", "#dccaff", "#e6d8ff", "#efe5ff", "#f6f0ff"]
+    CM["wavemax"] = M.ramp(WVX_L, [((a + b) / 2, c) for a, b, c in zip(WVX_L[:-1], WVX_L[1:], WVX_C)], over="#ffffff")
     WVX_T = [0, 10, 20, 30, 40, 50, 60, 70, 80, 85]
     FOG_L = list(range(20, 101, 10))
     CM["fog"] = M.ramp(FOG_L, [(20, "#e6e8eb"), (40, "#b9c4cf"), (60, "#7f95ab"), (80, "#4f6a8a"), (100, "#2c3f5f")])
@@ -1124,11 +1128,11 @@ def static(m, out, views_only=None, x2_only=False):
                       barbs=dict(u="wdu", v="wdv", color="#1b1d22", length=HS.BARB_LENGTH, lw=1.0, arrows=True, min=0.5, ref=1, fixed=True),
                       extra="ECMWF wave model (WAM 0.25\u00b0)  \u00b7  arrows = mean wave direction  \u00b7  up to {hi} ft in view", pct=[0, 99.9],
                       only=("ifs",)),
-        "wavemax": dict(title="Estimated Max Wave Height", fields=["swh"], fill="hmax", key="Max wave (ft)", ticks=WVX_T, tickfmt=True, keyver="_85b",
+        "wavemax": dict(title="Estimated Max Wave Height", fields=["swh"], fill="hmax", key="Max wave (ft)", ticks=WVX_T, tickfmt=True, keyver="_85c",
                         **table(WVX_L, CM["wavemax"], "max"), extra="1.86 x significant height (largest of ~1000 waves, Rayleigh; as the old site)"
                         "  \u00b7  up to {hi} ft in view", pct=[0, 99.9], only=("ifs",)),
         "wavemax24": dict(title="24 h Max Wave Height (est.)", fields=["swh"], window=24, wmax=True, wfield="swh", wscale=1.86, fill="window", cmap_of="wavemax",
-                          key="Max wave (ft)", ticks=WVX_T, tickfmt=True, keyver="_85b", **table(WVX_L, CM["wavemax"], "max"),
+                          key="Max wave (ft)", ticks=WVX_T, tickfmt=True, keyver="_85c", **table(WVX_L, CM["wavemax"], "max"),
                           extra="1.86 x the highest significant height over the model hours in the 24 h ending at the valid time  \u00b7  up to {hi} ft in view",
                           pct=[0, 99.9], only=("ifs",)),
         "fog": dict(title="Fog Risk Index", fields=["t2m", "d2m", "u10", "v10"], fill="fog", key="Fog risk", ticks=[20, 40, 60, 80, 100], tickfmt=True,
