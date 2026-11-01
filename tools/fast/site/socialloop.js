@@ -74,10 +74,13 @@ function drawPins() {
 // draggable (mouse + touch, 44 px target, touch-action none so the page doesn't scroll); the stored fraction updates live.
 let PD = null;
 function pinDrag(el, k, n) {
-  el.addEventListener("pointerdown", (e) => { if (P.busy || PV) return; e.preventDefault(); e.stopPropagation(); el.setPointerCapture(e.pointerId); PD = { k, n, id: e.pointerId }; el.classList.add("drag"); });
+  el.addEventListener("pointerdown", (e) => { if (P.busy || PV) return; e.preventDefault(); e.stopPropagation();
+    // overlapping hit rings: take the pin whose centre is nearest the finger; keep the grab offset so the pin doesn't jump
+    let t = el, bd = Infinity; for (const o of el.parentNode.querySelectorAll(".lpin")) { const b = o.getBoundingClientRect(), dd = Math.hypot(b.left + b.width / 2 - e.clientX, b.top + b.height / 2 - e.clientY); if (dd < bd) { bd = dd; t = o; } }
+    const b = t.getBoundingClientRect(); t.setPointerCapture(e.pointerId); PD = { k, n: t.dataset.n, el: t, id: e.pointerId, off: [b.left + b.width / 2 - e.clientX, b.top + b.height / 2 - e.clientY] }; t.classList.add("drag"); });
   el.addEventListener("pointermove", (e) => {
-    if (!PD || PD.id !== e.pointerId) return; e.preventDefault(); const r = $s("i" + k).getBoundingClientRect(), p = getPins();
-    p[k + n] = { x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)) }; setPins(p);
+    if (!PD || PD.id !== e.pointerId || PD.el !== el) return; e.preventDefault(); const r = $s("i" + k).getBoundingClientRect(), p = getPins();
+    p[k + n] = { x: Math.min(1, Math.max(0, (e.clientX + PD.off[0] - r.left) / r.width)), y: Math.min(1, Math.max(0, (e.clientY + PD.off[1] - r.top) / r.height)) }; setPins(p);
     window.__pinDrag = { k, n, x: p[k + n].x, y: p[k + n].y }; $s("lppins").textContent = `Moving pin ${n.toUpperCase()}…`;
     // move this element in place (re-creating it would drop the pointer capture); path line + hint follow
     const box = $s("i" + k).parentNode, br = box.getBoundingClientRect(), ox = r.left - br.left, oy = r.top - br.top, q = p[k + n];
@@ -85,7 +88,7 @@ function pinDrag(el, k, n) {
     const ln = box.querySelector(".lpline line"); if (ln) { ln.setAttribute(n === "a" ? "x1" : "x2", q.x * r.width); ln.setAttribute(n === "a" ? "y1" : "y2", q.y * r.height); }
     const h = box.querySelector(".lpdh"); if (h) { h.textContent = `Moving ${n.toUpperCase()}`; const hp = p[k + "a"] || q; h.style.left = (ox + hp.x * r.width) + "px"; h.style.top = (oy + hp.y * r.height + (hp.y > 0.85 ? -46 : 26)) + "px"; }
   });
-  const up = (e) => { if (!PD || PD.id !== e.pointerId) return; PD = null; el.classList.remove("drag"); info(); };
+  const up = (e) => { if (!PD || PD.id !== e.pointerId || PD.el !== el) return; PD = null; el.classList.remove("drag"); info(); };
   el.addEventListener("pointerup", up); el.addEventListener("pointercancel", up);
 }
 function onImgClick(k, e) {
