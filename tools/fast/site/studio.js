@@ -88,8 +88,11 @@ function colorbar(c, P, x, y, w, h, size) {
   c.strokeStyle = "rgba(255,255,255,0.55)"; c.lineWidth = 1.5; c.strokeRect(x, y, w, h);
   c.font = `600 ${size}px Montserrat`; c.fillStyle = "#e9ecf1"; c.textAlign = "center";
   // ticks: skip any whose label would touch the previous drawn one (precip keys bunch 0.01-0.5 into a few bins)
+  // 11-01 8:55 AM (Benjamin t1992u "add a couple more numbers to the scale, maybe every 5 feet"): the max wave bars (5 ft numbers 40-85, one per bin)
+  // allow a 0.3 em gap between numbers instead of 0.6 em, so 45 / 55 / 65 / 75 show; every other bar unchanged
+  const tgap = /^Max wave/.test(P.key || "") ? 0.3 : 0.6;
   let lastR = -1e9; (P.ticks || []).filter((t) => t >= lo && t <= hi).forEach((t) => { const tx = X(t), s_ = fmtTick(t, P), tw = c.measureText(s_).width;
-    if (tx - tw / 2 < lastR + size * 0.6) {
+    if (tx - tw / 2 < lastR + size * tgap) {
       // 11-01 8:30 AM (Benjamin: "Yes fix the tick label"): the top tick (e.g. 85 on max wave height) sits on the bar's right end and got
       // skipped next to 80; draw it left-aligned from the end (hanging just past the bar) when that clears the previous label
       const lx = tx + size * 0.2; if (Math.abs(t - hi) > 1e-9 || lx < lastR + size * 0.3) return;
