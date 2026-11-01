@@ -953,7 +953,12 @@ def static(m, out, views_only=None, x2_only=False):
     WV_L = [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 40]
     CM["waves"] = M.ramp(WV_L, [(0, "#283c96"), (2, "#2878c8"), (4, "#28afd2"), (6, "#32be8c"), (8, "#6ec846"), (10, "#c8dc3c"), (14, "#f0b432"),
                                 (20, "#e6642d"), (28, "#c82846"), (40, "#8c1e78")])
-    CM["wavemax"] = CM["waves"]
+    # Benjamin 11-01 7:30 AM "adjust the max wave height scale to go up to at least 60'": max wave products only (wavemax, wavemax24;
+    # Significant Wave Height keeps 0-40). Same 0-40 ft bins and colors, then 40-45-50-55-60 ft purple -> indigo -> lavender, over 60 near-white lilac.
+    WVX_L = WV_L + [45, 50, 55, 60]
+    CM["wavemax"] = M.ramp(WVX_L, [(0, "#283c96"), (2, "#2878c8"), (4, "#28afd2"), (6, "#32be8c"), (8, "#6ec846"), (10, "#c8dc3c"), (14, "#f0b432"),
+                                   (20, "#e6642d"), (28, "#c82846"), (40, "#8c1e78"), (47.5, "#5a2a9e"), (55, "#9b7fe0"), (60, "#d2bff5")], over="#f3ebff")
+    WVX_T = [0, 4, 8, 14, 20, 28, 40, 50, 60]
     FOG_L = list(range(20, 101, 10))
     CM["fog"] = M.ramp(FOG_L, [(20, "#e6e8eb"), (40, "#b9c4cf"), (60, "#7f95ab"), (80, "#4f6a8a"), (100, "#2c3f5f")])
     CM.update(d2m=CM["t2m"], feels=CM["t2m"], gustmax=CM["gust10"], t925w=CM["t850"], t850w=CM["t850"], t700w=CM["t700"])
@@ -1115,11 +1120,11 @@ def static(m, out, views_only=None, x2_only=False):
                       barbs=dict(u="wdu", v="wdv", color="#1b1d22", length=HS.BARB_LENGTH, lw=1.0, arrows=True, min=0.5, ref=1, fixed=True),
                       extra="ECMWF wave model (WAM 0.25\u00b0)  \u00b7  arrows = mean wave direction  \u00b7  up to {hi} ft in view", pct=[0, 99.9],
                       only=("ifs",)),
-        "wavemax": dict(title="Estimated Max Wave Height", fields=["swh"], fill="hmax", key="Max wave (ft)", ticks=[0, 4, 8, 14, 20, 28, 40], tickfmt=True,
-                        **table(WV_L, CM["wavemax"], "max"), extra="1.86 x significant height (largest of ~1000 waves, Rayleigh; as the old site)"
+        "wavemax": dict(title="Estimated Max Wave Height", fields=["swh"], fill="hmax", key="Max wave (ft)", ticks=WVX_T, tickfmt=True, keyver="_60",
+                        **table(WVX_L, CM["wavemax"], "max"), extra="1.86 x significant height (largest of ~1000 waves, Rayleigh; as the old site)"
                         "  \u00b7  up to {hi} ft in view", pct=[0, 99.9], only=("ifs",)),
         "wavemax24": dict(title="24 h Max Wave Height (est.)", fields=["swh"], window=24, wmax=True, wfield="swh", wscale=1.86, fill="window", cmap_of="wavemax",
-                          key="Max wave (ft)", ticks=[0, 4, 8, 14, 20, 28, 40], tickfmt=True, **table(WV_L, CM["wavemax"], "max"),
+                          key="Max wave (ft)", ticks=WVX_T, tickfmt=True, keyver="_60", **table(WVX_L, CM["wavemax"], "max"),
                           extra="1.86 x the highest significant height over the model hours in the 24 h ending at the valid time  \u00b7  up to {hi} ft in view",
                           pct=[0, 99.9], only=("ifs",)),
         "fog": dict(title="Fog Risk Index", fields=["t2m", "d2m", "u10", "v10"], fill="fog", key="Fog risk", ticks=[20, 40, 60, 80, 100], tickfmt=True,
@@ -1353,12 +1358,14 @@ def static(m, out, views_only=None, x2_only=False):
         if k in prods: prods[k]["min_show"] = prods[k]["levels"][0]   # blank below the first level (like the site)
     for k in prods:   # overnight 10-30 period variants: blank below the first level like their base products
         if k[:4] in ("snow", "kuch", "fzra", "nqpf", "nsno", "esno") and k[-1].isdigit() or k in ("nqpftot", "nsnowtot"): prods[k]["min_show"] = prods[k]["levels"][0]
+    KEY_PIDS = set(filter(None, os.environ.get("WX_KEY_PIDS", "").split(",")))   # 11-01: optional, render keys only for these products (targeted republish)
     for pid, P in prods.items():
         P.setdefault("fill", P["fields"][0]); tk0 = list(P["ticks"])
         P.update(freeze_color=HS.FREEZE_COLOR, freeze_lw=HS.FREEZE_LW) if "freeze" in P else None
-        P["keys"] = {}
+        P["keys"] = {}; kv = P.pop("keyver", "")   # 11-01: a changed scale gets new key file names (production keeps reading the old keys until it switches)
+        if KEY_PIDS and pid not in KEY_PIDS: continue
         for vid in vids:
-            fn = f"static/key_{m}_{pid}_{vid}.png"; P["keys"][vid] = fn
+            fn = f"static/key_{m}_{pid}{kv}_{vid}.png"; P["keys"][vid] = fn
             fig, ax, ky = layer_fig(vid); x0, x1, y0, y1 = ax.get_extent(TM.VIEWS[vid]["proj"])
             X, Y = np.meshgrid([x0, x1], [y0, y1]); L = np.asarray(P["levels"]); cm = CM[pid] if pid in CM else CM[P["cmap_of"]]
             ext = "both" if P["under"] and P["over"] else "max" if P["over"] else "min" if P["under"] else "neither"
