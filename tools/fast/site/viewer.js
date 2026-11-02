@@ -630,7 +630,10 @@ async function pump() {
   rafOn = false;
   if (S.busy) { S.again = true; return; }
   S.busy = true; const ws = S.waiters; S.waiters = [];
-  const lite = !!S.dragging && !S.settle; S.settle = false;
+  // 11-02 (Benjamin t2098u, Mac: drag "still doesn't look as good" as the arrow keys): Studio with a mouse / trackpad draws
+  // every drag frame on the full sharp path (light frames only on touch screens). Redraws stay coalesced: while one frame is
+  // drawing, slider moves only update S.i and the next animation frame draws the newest hour (stale hours are skipped).
+  const lite = !!S.dragging && !S.settle && !(FINE_PTR && Q.get("studio")); S.settle = false;
   try { await render(lite); } catch (e) { showErr(e); }
   finally { S.busy = false; ws.forEach(r => r()); if (S.again || S.waiters.length) { S.again = false; if (!rafOn) { rafOn = true; requestAnimationFrame(pump); } } }
 }
