@@ -109,7 +109,7 @@ function schedSharp() {
 // per hour on a 4x-slowed phone CPU, and the Studio frames did not change at all until the finger lifted). While the slider is
 // dragged in Studio the map is now drawn at RS 1 (9x fewer pixels) and the Studio frames follow every drawn hour; the sharp RS 3
 // frame is drawn once when the finger lifts.
-const STUDIO_DRAG_RS = 1;
+const STUDIO_DRAG_RS = 1, SETTLE_MS = 140;
 function sizeMap(cv, V, keepRS) {   // bitmap = figure px x RS; context transform = RS, so all drawing stays in figure px
   const [LW, LH] = V.fig, rs = keepRS && Q.get("studio") && S.dragging ? STUDIO_DRAG_RS : keepRS && cv._lw === LW && cv._lh === LH ? (cv._rs || 1) : wantRS(LW, LH);
   const bw = Math.round(LW * rs), bh = Math.round(LH * rs), relayout = cv._lw !== LW || cv._lh !== LH;
@@ -261,7 +261,11 @@ async function boot() {
   sl.addEventListener("pointerdown", () => { S.dragging = true; });
   sl.addEventListener("touchstart", () => { S.dragging = true; }, { passive: true });
   for (const ev of ["pointerup", "pointercancel", "touchend", "touchcancel", "change"]) sl.addEventListener(ev, endDrag);
-  sl.oninput = e => { const v = +e.target.value; if (v === S.i) return; S.i = v; draw(); };
+  // 11-02 (Benjamin t2093u: drag scrubbing in Studio looked lower res than arrow keys): while the slider is held, a light
+  // (RS 1, half-res fill) frame is drawn per hour, then the full-res frame (same as the keys) as soon as the hour has not
+  // changed for SETTLE_MS (pause with the mouse / finger still down); release draws it too.
+  sl.oninput = e => { const v = +e.target.value; if (v === S.i) return; S.i = v; draw();
+    if (Q.get("studio")) { clearTimeout(S.settleT); S.settleT = setTimeout(() => { if (S.dragging) { S.settle = true; draw(); } }, SETTLE_MS); } };
   $("prev").onclick = () => go(-1); $("next").onclick = () => go(1);
   $("play").onclick = () => { if (S.timer) { clearInterval(S.timer); S.timer = null; $("play").textContent = "Play"; }
                               else { S.timer = setInterval(() => go(1, true), 250); $("play").textContent = "Stop"; } };
@@ -625,7 +629,8 @@ async function pump() {
   rafOn = false;
   if (S.busy) { S.again = true; return; }
   S.busy = true; const ws = S.waiters; S.waiters = [];
-  try { await render(!!S.dragging); } catch (e) { showErr(e); }
+  const lite = !!S.dragging && !S.settle; S.settle = false;
+  try { await render(lite); } catch (e) { showErr(e); }
   finally { S.busy = false; ws.forEach(r => r()); if (S.again || S.waiters.length) { S.again = false; if (!rafOn) { rafOn = true; requestAnimationFrame(pump); } } }
 }
 let drawSeq = 0, urlTimer = null;
