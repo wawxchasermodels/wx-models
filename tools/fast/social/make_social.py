@@ -258,6 +258,7 @@ def hl(ax, g, P, view, k, F):
             if any((i - p) ** 2 + (j - q) ** 2 < size * size for p, q in keep): continue
             keep.append((i, j))
         allc += [(kind, i, j) for i, j in keep]
+    col_of = {"H": "#4d9bff", "L": "#ff3b3b"}   # t2053u: original Social H blue / L red (letter + number), on the dark halo
     allc.sort(key=lambda c: -abs(float(a[c[1], c[2]]) - 1013.0))
     r = ax.figure.canvas.get_renderer(); boxes = []
     for kind, i, j in allc:
@@ -268,9 +269,9 @@ def hl(ax, g, P, view, k, F):
         if not (0.04 < fx < 0.96 and top < fy < bot): continue
         # 11-01 t2051u (Benjamin): H / L and the centre pressure in the isobar labels' style (clabel: Bold, 34/32 px, white, 4 px dark halo)
         fs = (34 if k == "h" else 32) * 72 / 200; fx_ = [pe.withStroke(linewidth=4, foreground="#000000b0")]
-        t1 = ax.text(x, y, kind, transform=g["proj"], fontproperties=F["Bold"], fontsize=fs, color="white", ha="center", va="center", zorder=10, path_effects=fx_)
+        t1 = ax.text(x, y, kind, transform=g["proj"], fontproperties=F["Bold"], fontsize=fs, color=col_of[kind], ha="center", va="center", zorder=10, path_effects=fx_)
         t2 = ax.annotate(f"{a[i, j]:.0f}", xy=(x, y), xycoords=g["proj"]._as_mpl_transform(ax), xytext=(0, -fs * 0.65), textcoords="offset points",
-                         fontproperties=F["Bold"], fontsize=fs, color="white", ha="center", va="top", zorder=10, path_effects=fx_)
+                         fontproperties=F["Bold"], fontsize=fs, color=col_of[kind], ha="center", va="top", zorder=10, path_effects=fx_)
         b1, b2 = t1.get_window_extent(r), t2.get_window_extent(r); B = (min(b1.x0, b2.x0) - 6, min(b1.y0, b2.y0) - 6, max(b1.x1, b2.x1) + 6, max(b1.y1, b2.y1) + 6)
         if any(B[0] < C[2] and B[2] > C[0] and B[1] < C[3] and B[3] > C[1] for C in boxes): t1.remove(); t2.remove(); continue
         boxes.append(B)

@@ -1527,11 +1527,12 @@ function hlAvoid(ctx, st, D, P, V, gk) {
   if (!P.isobars || (P.isobars.field || "mslp") !== "mslp" || !(P.lows || hlOn(P, D))) return [];
   try { return hlMarks(ctx, st, D, P, V, gk).map(o => hlBox(ctx, o[0], o[1], o[2])); } catch (e) { return []; }
 }
-function isoLabText(ctx, I, s, x, y, base) { haloText(ctx, s, x, y, ISO_LAB_FONT(), (I && I.color) || "#15171c", pt(3.2), "center", base); }
+function isoLabText(ctx, I, s, x, y, base, col) { haloText(ctx, s, x, y, ISO_LAB_FONT(), col || (I && I.color) || "#15171c", pt(3.2), "center", base); }
 function paintHL(ctx, out, I) {
   for (const [X, Y, v, hi] of out) {
-    isoLabText(ctx, I, hi ? "H" : "L", X, Y, "middle");
-    isoLabText(ctx, I, String(Math.round(v)), X, Y + pt(6.5), "top"); }
+    const col = hi ? HL_HIGH_COLOR : HL_LOW_COLOR;   // 11-01 7:43 PM (Benjamin t2053u): "make sure the L stays red and the H stays blue" (letter + number)
+    isoLabText(ctx, I, hi ? "H" : "L", X, Y, "middle", col);
+    isoLabText(ctx, I, String(Math.round(v)), X, Y + pt(6.5), "top", col); }
 }
 function drawEns(ctx, st, D, P, V, gk) {
   const E = D.ens; if (!E) return;
@@ -1559,8 +1560,8 @@ function drawEns(ctx, st, D, P, V, gk) {
     for (const [x, y, mb] of g.dots) { ctx.beginPath(); ctx.arc(x, y, r, 0, 2 * Math.PI); ctx.fillStyle = dotCol(mb); ctx.fill();
       ctx.lineWidth = pt(0.7); ctx.strokeStyle = "#ffffff"; ctx.stroke(); }
     for (const [x, y, v] of geo(`elowsm/${gk}`, () => hlDeclutter(ctx, g.means, 2))) {
-      isoLabText(ctx, P.isobars, "L", x, y, "middle");   // 11-01 t2051u: same style as the isobar numbers (was 900 18 pt red L, 900 11 pt mean)
-      isoLabText(ctx, P.isobars, String(Math.round(v)), x, y + pt(6.5), "top"); }
+      isoLabText(ctx, P.isobars, "L", x, y, "middle", HL_LOW_COLOR);   // t2053u: L red   // 11-01 t2051u: same style as the isobar numbers (was 900 18 pt red L, 900 11 pt mean)
+      isoLabText(ctx, P.isobars, String(Math.round(v)), x, y + pt(6.5), "top", HL_LOW_COLOR); }
     S.lowPanel = g;
   }
 }
