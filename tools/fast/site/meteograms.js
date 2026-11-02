@@ -146,7 +146,27 @@ const ptsSeries = (m, c) => memo(`pts/${m}/${c}`, async () => { const R = await 
 const memSeries = (m, c) => memo(`mem/${m}/${c}`, async () => {   // probe the first step: runs encoded before 10-30 evening have no member files
   const R = await loadRun(m, c), s0 = (R.steps || [])[0]; if (!s0) return null;
   const ok = (R.agg || []).includes("mem") || await fetch(`${DATA}runs/${m}/${c}/single/mem_f${String(s0.f).padStart(3, "0")}.json`, { method: "HEAD" }).then((r) => r.ok).catch(() => false);
-  if (!ok) return null; const st = await perStep(m, c, "mem"); return st.length ? { st } : null; });
+  if (!ok) return null; let st = await perStep(m, c, "mem"); if (!st.length) return null;
+  // 11-02: the ECMWF open-data index lists members in a shuffled order that differs per step. Runs encoded since 11-02 store
+  // the real member number of every row (mem json "num"); older runs get a re-ordered copy (memfix_all.json).
+  if (st.some((s) => !s.d.num)) try {
+    const A = await getJSON(`${DATA}runs/${m}/${c}/single/memfix_all.json`), by = new Map(A.f.map((f, i) => [f, A.d[i]]));
+    st = st.map((s) => (s.d.num || !by.get(s.f) ? s : Object.assign({}, s, { d: by.get(s.f) })));
+  } catch (e) { /* not re-ordered: rows flagged below */ }
+  return { st, bad: memOrder(st) }; });
+// row k = ECMWF member k + 1 at every step: sort each field's rows by member number; fields without numbers 1..n are "bad"
+function memOrder(st) {
+  const bad = new Set();
+  for (const s of st) for (const [k, rows] of Object.entries(s.d.v || {})) {
+    const num = s.d.num && s.d.num[k];
+    if (!num || num.length !== rows.length) { bad.add(k); continue; }
+    const o = num.map((n, r) => r).sort((a, b) => num[a] - num[b]);
+    if (o.some((r, i) => num[r] !== i + 1)) { bad.add(k); continue; }
+    s.d.v[k] = o.map((r) => rows[r]); s.d.num[k] = o.map((r) => num[r]);
+  }
+  return bad;
+}
+let MEMWARN = false;   // set by the ensemble builder when a field's member order could not be checked
 
 function townSeries(D, name) {   // per-step values of one place (same derivations as the map viewer's Meteogram)
   const i = D.points.findIndex((p) => p.n === name); if (i < 0) return null;
@@ -443,7 +463,7 @@ const ampm = (t) => hourLab(t);   // "5 PM"
 // old run line: "ECMWF ENS 0.25°, 50 members, 00Z run 10-23-26 (5 PM PT)"
 const runLine = (sec, c, every) => { const t = runTime(c); return `${sec.rl}, ${c.slice(8)}Z run ${fmt({ month: "numeric", day: "numeric", year: "2-digit" }).format(t).replace(/\//g, "-")} (${ampm(t)} PT)` + (every ? `, every ${every} h` : ""); };
 // old caption: "EPS 00Z run 10-23 (5 PM PT)"
-const capRun = (sec, c) => { const t = runTime(c); return `${sec.tag} ${c.slice(8)}Z run ${+c.slice(4, 6)}-${+c.slice(6, 8)} (${ampm(t)} PT)`; };
+const capRun = (sec, c) => { const t = runTime(c); return `${sec.tag} ${c.slice(8)}Z run ${fmt({ month: "numeric", day: "numeric" }).format(t).replace("/", "-")} (${ampm(t)} PT)`; };   // 11-02: PT date (00Z 11-2 = 4 PM PT 11-1)
 const mrLabel = (c) => `${c.slice(8)}Z ${+c.slice(4, 6)}/${+c.slice(6, 8)}`;
 const SHADES = ["#b5b7bb", "#8c8f95", "#6c6f75"];
 const floor0 = (top) => (lo, hi) => [0, Math.max(hi, top == null ? 0.25 : top)];
@@ -543,7 +563,7 @@ async function build(sec, prod, town) {
   if (!M) return memEmpty(sec, "Ensemble charts");
   const R = m === "eps" ? await refSeries(town) : null, t0 = runTime(c);
   const corr = town.pt.c || 0, id = (v) => v, H_ = ENS_HOURS;
-  const get = (field, f2v, maxF) => memTown(M, pn, field, f2v || id, maxF == null ? H_ : maxF);
+  const get = (field, f2v, maxF) => { MEMWARN = M.bad.has(field); return memTown(M, pn, field, f2v || id, maxF == null ? H_ : maxF); };
   const nm = (S_) => S_.m.length;
   const fr = (pid, title, ylab, items, legendLoc, ylim, extra) => Object.assign(base, { fig: "frame", title: `${name} ${title}`, sub: run, panels: [Object.assign({ ylab, legend: legendLoc || "upper right", ylim, items: expand(items) }, extra || {})] });
   const noField = (what) => ({ empty: ["Not in this model", `${sec.label} open data has no ${what} for the members.`] });
@@ -592,9 +612,9 @@ async function build(sec, prod, town) {
       R && ii.map((i) => refVal(R, "apcpTot", A.x[i], k === "grid_tp" ? t0 : A.x[i] - 24 * 36e5)), R) }); }
   if (k === "grid_gust") { const S0 = get("10fg"); if (!S0) return noField("10 m wind gust");
     const ii = S0.f.map((f, i) => i).filter((i) => S0.f[i] % 6 === 0);
-    // 10-31 EPS 3-hourly to F+144: each step's gust is the max of the 3 h before it there, so a 6 h column = the larger of the two 3 h maxes
+    // EPS 3-hourly steps to F+144: gust = max of the last 1 h (to F+90, 10fg) or 3 h (F+93-144, 10fg3); a 6 h column = the larger of its two steps (11-02 note)
     const g6 = (a, i) => { const j = S0.f.indexOf(S0.f[i] - 3); return j >= 0 && fin(a[j]) && fin(a[i]) ? Math.max(a[i], a[j]) : a[i]; };
-    return Object.assign(base, { fig: "grid", g: gridSpec(sec, name, run, "Max Wind Gust: Each Member + Mean", "mph", `Max 10 m gust in the 6 h ending at each time; ${sec.id === "eps" ? "ECMWF ENS" : sec.label} has no hourly output`,
+    return Object.assign(base, { fig: "grid", g: gridSpec(sec, name, run, "Max Wind Gust: Each Member + Mean", "mph", sec.id === "eps" ? "Max 10 m gust in each 6 h cell. To F+90 ECMWF gives each 3 h step only its last hour, so a cell covers 2 of its 6 hours; F+96 on: all 6 h" : `Max 10 m gust in the 6 h ending at each time; ${sec.label} has no hourly output`,
       ii.map((i) => [dayLab(S0.x[i]), hourLab(S0.x[i])]), S0.m.map((a) => ii.map((i) => g6(a, i))), (v) => v.toFixed(0), GL, GC, R && ii.map((i) => refGust6(R, S0.x[i])), R) }); }
   if (k === "snowens") { const S0 = get("sf", id, SNOW_HOURS); if (!S0) return memEmpty(sec, "Snow totals by member"); const A = withZero(S0, c);
     return Object.assign(base, { fig: "snowens", g: { title: `${name}  \u00b7  Snow Totals by Member`, sub: `${run}  \u00b7  0-${A.f[A.f.length - 1]} h`, credit, x: A.x, f: A.f, A: A.m,
@@ -613,7 +633,7 @@ const QC = ["#2f6f3f", "#3f9f4f", "#5fbf5a", "#9fd65a", "#e0e05a", "#f0b040", "#
 const GL = [10, 20, 30, 40, 45, 50, 58, 70];
 const GC = ["#3f6f9f", "#4f9fbf", "#6fbf8f", "#d6d65a", "#f0b040", "#f07a30", "#e04040", "#b02ab0"];
 function gridSpec(sec, name, run, title, unit, note, cols, M, f, levels, colors, ref, R) {
-  const nm = M.length;
+  const nm = M.length; if (MEMWARN) note = "Member numbers not checked for this run (older data)  \u00b7  " + note;
   if (R) return { title: `${name} ${title}`, sub: run, credit: sec.credit, cols, M, fmt: f, levels, colors, unit, note, ref: ref && ref.some(fin) ? ref : null,
     legend: `9 KM = ${REF_LABEL}, deterministic IFS 0.1\u00b0 ${R.c.slice(8)}Z run, 0-144 h (no control in the open ENS data)  \u00b7  rows 1-${nm} = members  \u00b7  MEAN = average of ${nm}`,
     ctrlNote: ref ? `${REF_LABEL}: no value at these times` : `${REF_LABEL}: not drawn for this chart (no 9 km daily max / min)` };

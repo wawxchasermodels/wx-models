@@ -146,11 +146,15 @@ class EpsReader:
         acc = {}; self.X = {}; self.M = {}
         MP = [p for p in (P or []) if p["n"] in MEM_POINTS] if crop else []   # member values at these places (meteograms page)
         self.mem_names = [p["n"] for p in MP]
-        def memo(par, a):   # a: cropped member field -> one int per place
+        # 11-02: the open-data index lists members in a shuffled order that differs per step, so every member list is sorted by the
+        # real ECMWF member number and the numbers are stored with the values (mem json "num"): row k is the same member at every step.
+        num_ = lambda x: int(x.get("number") or 0)
+        self.MN = {}
+        def memo(par, a, num):   # a: cropped member field -> one int per place; num: its ECMWF member number
             if not MP: return
-            try: self.M.setdefault(par, []).append([None if v is None else int(round(v * MEM_SCALE[par])) for v in sample_pts(a, MP)])
+            try: self.M.setdefault(par, []).append([None if v is None else int(round(v * MEM_SCALE[par])) for v in sample_pts(a, MP)]); self.MN.setdefault(par, []).append(num)
             except Exception as e: print(f"{kind} f{s:03d} members {par}: {str(e)[:80]}", flush=True)
-        core = [x for x in mem if x["param"] == "2t" or (x["param"] == zp and x.get("levelist") == "500")]
+        core = sorted([x for x in mem if x["param"] == "2t" or (x["param"] == zp and x.get("levelist") == "500")], key=num_)
         gh_members = []
         with ThreadPoolExecutor(8) as ex:
             for x, blob in ex.map(fetch, core):
@@ -159,14 +163,14 @@ class EpsReader:
                 a["n"] += 1; a["s"] += v; a["q"] += v * v
                 if par == "2t": a["c"] += v <= 273.15
                 if par == "gh" and crop: gh_members.append(self._crop(v).astype(np.float32))
-                if MP: memo(par, self._crop(v * (1.8 if par == "2t" else 1.0) - (459.67 if par == "2t" else 0.0)))   # 2 m temp in deg F
+                if MP: memo(par, self._crop(v * (1.8 if par == "2t" else 1.0) - (459.67 if par == "2t" else 0.0)), num_(x))   # 2 m temp in deg F
             if len(acc) < 2 or min(a["n"] for a in acc.values()) < 40: raise RuntimeError(f"eps f{s}: only {[(k, a['n']) for k, a in acc.items()]} members")
             self.n = acc["2t"]["n"]; self.A = acc
             if not crop: return
             # extras: one param at a time (cropped member stacks, float32)
             for name, (par, lev, kind_, sc, off) in ENS_EXTRA.items():
                 for p_ in (par if isinstance(par, tuple) else (par,)):   # first listed param this step carries (e.g. tcwv before tcw)
-                    xs = [x for x in mem if x["param"] == p_ and (lev is None or x.get("levelist") == lev)]
+                    xs = sorted([x for x in mem if x["param"] == p_ and (lev is None or x.get("levelist") == lev)], key=num_)
                     if len(xs) >= 40: break
                 if len(xs) < 40: continue
                 if kind == "aens" and name in ("tp", "sf"): sc = sc / 1000.0   # AIFS ENS precip / snow water come in kg/m2 (mm), IFS ENS in m
@@ -175,14 +179,13 @@ class EpsReader:
                 if name in ("tp", "sf"): st = np.clip(st, 0, None)
                 if name == "tcc" and float(np.nanmax(st)) <= 1.01: st = st * 100.0   # fraction -> %
                 if MP and name in MEM_SCALE:
-                    for a_ in st: memo(name, a_)
+                    for a_, x_ in zip(st, xs): memo(name, a_, num_(x_))
                 self.X[name] = st.mean(0)
                 if kind_ == "p90": self.X[name + "90"] = np.percentile(st, 90, axis=0)
                 if kind_ == "pc": self.X[name + "p"] = (st >= 500).mean(0) * 100
                 if name == "msl":
                     self.lows, self.X["lowp"] = self._lows(st)
-                    # 11-01: the open-data index lists members in a shuffled order (differs per step), so a low's stack index k is
-                    # not its member. Real ECMWF member number of each stack slice (ens json "mnum"; the site shows "Mem N").
+                    # 11-01: a low's stack index k -> real ECMWF member number (ens json "mnum"; the site shows "Mem N"); sorted since 11-02
                     self.lows_num = [int(x.get("number") or 0) for x in xs]
                 del st
         if gh_members: self.spag = self._spag(np.stack(gh_members)); del gh_members
@@ -586,7 +589,7 @@ def step_job(args):
         p = f"{out}/single/ens_f{s:03d}.json"; json.dump(dict(n=R.n, lows=getattr(R, "lows", []), spag=getattr(R, "spag", {}), **({"mnum": R.lows_num} if getattr(R, "lows_num", None) else {})), open(p, "w"), separators=(",", ":"))
         sizes["ens"] = os.path.getsize(p)
     if getattr(R, "M", None):   # ensemble members at MEM_POINTS: {"n": [places], "s": {field: scale}, "v": {field: [[place values] per member]}}
-        p = f"{out}/single/mem_f{s:03d}.json"; json.dump(dict(n=R.mem_names, s={k: MEM_SCALE[k] for k in R.M}, v=R.M), open(p, "w"), separators=(",", ":"))
+        p = f"{out}/single/mem_f{s:03d}.json"; json.dump(dict(n=R.mem_names, s={k: MEM_SCALE[k] for k in R.M}, v=R.M, num=R.MN), open(p, "w"), separators=(",", ":"))
         sizes["mem"] = os.path.getsize(p)
     if ptv:   # town / pass values for meteograms (one small JSON per step, order = run.json "points")
         p = f"{out}/single/pts_f{s:03d}.json"; json.dump(ptv, open(p, "w"), separators=(",", ":")); sizes["pts"] = os.path.getsize(p)
