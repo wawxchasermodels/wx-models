@@ -210,7 +210,9 @@ const K = { BG: "#15171c", PANEL: "#20232a", GRID: "#3a3e46", INK: "#f4f2ee", MU
   SNOW: "#8fd3ff", MEAN: "#ffffff", ICE: "#ff5fa2", PLUM: "#b48cff", ACCENT: "#ffc970" };
 const FONT = (w, px) => `${w} ${px}px Montserrat, system-ui, sans-serif`;
 const MINUS = "\u2212";
-function newFig(W, H, dpi) { const cv = document.createElement("canvas"); cv.width = W; cv.height = H; const c = cv.getContext("2d"); c.fillStyle = K.BG; c.fillRect(0, 0, W, H); return { cv, c, W, H, k: dpi / 72 }; }
+// 11-02 (Benjamin t2104u "at least 1.5x sharper"): charts render at MG_SC x the layout size (same layout, 2x the pixels; drawn client-side, no ingest change)
+const MG_SC = 2;
+function newFig(W, H, dpi) { const cv = document.createElement("canvas"); cv.width = Math.round(W * MG_SC); cv.height = Math.round(H * MG_SC); const c = cv.getContext("2d"); c.scale(MG_SC, MG_SC); c.fillStyle = K.BG; c.fillRect(0, 0, W, H); return { cv, c, W, H, k: dpi / 72 }; }
 function ftext(F, s, x, y, w, pt, color, base) { const c = F.c; c.font = FONT(w, pt * F.k); c.fillStyle = color; c.textAlign = "left"; c.textBaseline = base || "top"; c.fillText(s, x, y); }
 const rgba = (hex, a) => { const n = parseInt(hex.slice(1, 7), 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a == null ? 1 : a})`; };
 function niceTicks(lo, hi, nbins) {   // matplotlib MaxNLocator(steps=[1, 2, 2.5, 5, 10])
