@@ -89,6 +89,11 @@ function band(c, y0, y1, down) {
   const g = c.createLinearGradient(0, y0, 0, y1); const a = "rgba(13,15,19,0.90)", b = "rgba(13,15,19,0)";
   g.addColorStop(0, down ? a : b); g.addColorStop(1, down ? b : a); c.fillStyle = g; c.fillRect(0, y0, c.canvas.width, y1 - y0);
 }
+// 11-02 (Benjamin t2107u "a sharper drop shadow behind the text and bars"): one tight, dark, slightly offset shadow for the overlaid
+// text, badges and color bar on every Studio mode (was a soft 6-8 px blur, no offset). Frames are fixed-size output px, so it is
+// the same in the on-screen frames, Save PNG and Save MP4.
+function sharpShadow(c, k) { c.shadowColor = "rgba(0,0,0,0.88)"; c.shadowBlur = 2; c.shadowOffsetX = k === "v" ? 3 : 2.5; c.shadowOffsetY = k === "v" ? 3 : 2.5; }
+function noShadow(c) { c.shadowColor = "rgba(0,0,0,0)"; c.shadowBlur = 0; c.shadowOffsetX = 0; c.shadowOffsetY = 0; }
 function pill(c, x, y, txt, size, bg, fg) {
   c.font = `800 ${size}px Montserrat`; const w = c.measureText(txt).width + size * 0.9, h = size * 1.55;
   c.fillStyle = bg; c.beginPath(); c.roundRect ? c.roundRect(x, y, w, h, h / 2) : c.rect(x, y, w, h); c.fill();
@@ -102,8 +107,10 @@ function colorbar(c, P, x, y, w, h, size) {
   const KW = Array.isArray(P.kw) && P.kw.length === n ? P.kw : null, CW = [0]; for (let i = 0; i < n; i++) CW.push(CW[i] + (KW ? KW[i] : 1));
   const X = (v) => { let i = 0; while (i < n - 1 && v > L[i + 1]) i++; const fr = Math.min(1, Math.max(0, (v - L[i]) / ((L[i + 1] - L[i]) || 1)));
     return x + (CW[i] + fr * (CW[i + 1] - CW[i])) / CW[n] * w; };
+  const sh = [c.shadowColor, c.shadowBlur, c.shadowOffsetX, c.shadowOffsetY];
+  if (sh[1] || sh[2] || sh[3]) { c.fillStyle = "#000"; c.fillRect(x, y, w, h); c.shadowColor = "rgba(0,0,0,0)"; }
   for (let i = 0; i < C.length && i < L.length - 1; i++) { c.fillStyle = C[i]; c.fillRect(Math.floor(X(L[i])), y, Math.ceil(X(L[i + 1]) - X(L[i])) + 1, h); }
-  c.strokeStyle = "rgba(255,255,255,0.55)"; c.lineWidth = 1.5; c.strokeRect(x, y, w, h);
+  c.strokeStyle = "rgba(255,255,255,0.55)"; c.lineWidth = 1.5; c.strokeRect(x, y, w, h); c.shadowColor = sh[0];
   c.font = `600 ${size}px Montserrat`; c.fillStyle = "#e9ecf1"; c.textAlign = "center";
   // ticks: skip any whose label would touch the previous drawn one (precip keys bunch 0.01-0.5 into a few bins)
   // 11-01 8:55 AM (Benjamin t1992u "add a couple more numbers to the scale, maybe every 5 feet"): the max wave bars (5 ft numbers 40-85, one per bin)
@@ -195,7 +202,7 @@ function renderMg(k, frO) {
   const r = crop(k, fr); c.imageSmoothingEnabled = true; c.imageSmoothingQuality = "high";
   c.drawImage(MG.img, f.W / 2 - r.cx * r.kk, f.H / 2 - r.cy * r.kk, MG.img.naturalWidth * r.kk, MG.img.naturalHeight * r.kk);
   // the chart carries its own title, run line and ECMWF / NOAA data credit; place names: GeoNames (locked credit, 11-01 legal audit)
-  c.save(); c.font = `500 ${k === "v" ? 20 : 16}px Montserrat`; c.fillStyle = "rgba(220,224,230,0.85)"; c.shadowColor = "rgba(0,0,0,0.75)"; c.shadowBlur = 6;
+  c.save(); c.font = `500 ${k === "v" ? 20 : 16}px Montserrat`; c.fillStyle = "rgba(220,224,230,0.92)"; sharpShadow(c, k);
   c.textAlign = k === "v" ? "left" : "right"; c.fillText("Places: GeoNames (geonames.org), CC BY 4.0.", k === "v" ? f.pad : f.W - f.pad, f.H - (k === "v" ? 70 : 24)); c.restore();
   const cnr = BR.corner && LOGOS[BR.logo] ? cornerBox(k, k === "v" ? 120 : 40, k === "v" ? 120 : 40, f.H - (k === "v" ? 140 : 80)) : null; if (cnr) cornerLogo(c, cnr);
   window.__studio = (window.__studio || 0) + 1; window.__studioMg = (window.__studioMg || 0) + 1;
@@ -212,22 +219,22 @@ async function render(k, frO) {   // frO: camera override (MP4 storm-track pan)
     if (bx > ax && by > ay) c.drawImage(cv, ax, ay, bx - ax, by - ay, (ax - r.sx) * s, (ay - r.sy) * s, (bx - ax) * s, (by - ay) * s); }
   // header (10-31 7:28 PM, Benjamin: "remove the shading on the top and the bottom of the studio views": no dark bands; text keeps its shadow)
   const site = (S.man.models[m] || {}).site || m, R_ = S.runs[cur.run], x = f.pad; let y = k === "v" ? 120 : 34;
-  const pw = pill(c, x, y, site.toUpperCase(), Math.round(f.run * 0.95), "#2f8cff", "#fff");
-  c.font = `600 ${f.run}px Montserrat`; c.fillStyle = "#c9ced8"; c.shadowColor = "rgba(0,0,0,0.75)"; c.shadowBlur = 6; c.fillText(`${cur.run.split("/")[1].slice(8)}Z run`, x + pw + 14, y + f.run * 1.08); c.shadowBlur = 0;
+  c.save(); sharpShadow(c, k); const pw = pill(c, x, y, site.toUpperCase(), Math.round(f.run * 0.95), "#2f8cff", "#fff");
+  c.font = `600 ${f.run}px Montserrat`; c.fillStyle = "#c9ced8"; c.fillText(`${cur.run.split("/")[1].slice(8)}Z run`, x + pw + 14, y + f.run * 1.08);
   y += f.run * 1.55 + f.title * 1.02;
-  c.font = `800 ${f.title}px Montserrat`; c.fillStyle = "#fff"; c.shadowColor = "rgba(0,0,0,0.6)"; c.shadowBlur = 8;
+  c.font = `800 ${f.title}px Montserrat`; c.fillStyle = "#fff";
   const words = P.title.split(" "), maxW = f.W - 2 * f.pad - (k === "h" ? 260 : BR.corner && BR.cpos === "tr" && LOGOS[BR.logo] ? Math.round(f.W * 0.10) + 24 : 0); let line = "", lines = [];   // 9:16: keep the title clear of a top-right logo
   for (const w_ of words) { const t = line ? line + " " + w_ : w_; if (c.measureText(t).width > maxW && line) { lines.push(line); line = w_; } else line = t; } lines.push(line);
   lines.forEach((t, i) => c.fillText(t, x, y + i * f.title * 1.08)); y += (lines.length - 1) * f.title * 1.08 + f.valid * 1.4;
   c.font = `700 ${f.valid}px Montserrat`; c.fillStyle = "#ffc24d"; c.fillText((step.valid_line || "").replace(/^Valid /, ""), x, y);
-  c.shadowBlur = 0; const headBot = y + f.valid * 0.45;
+  const headBot = y + f.valid * 0.45;
   // F+ badge (top right)
   c.font = `800 ${Math.round(f.valid * 1.1)}px Montserrat`; const bt = `F+${step.f}`, bw = c.measureText(bt).width + 40, bx = f.W - f.pad - bw, by = k === "v" ? 120 : 34;
-  c.fillStyle = "rgba(17,19,22,0.85)"; c.strokeStyle = "rgba(255,255,255,0.35)"; c.lineWidth = 2; c.beginPath(); c.roundRect ? c.roundRect(bx, by, bw, f.valid * 1.9, 14) : c.rect(bx, by, bw, f.valid * 1.9); c.fill(); c.stroke();
-  c.fillStyle = "#fff"; c.textAlign = "center"; c.fillText(bt, bx + bw / 2, by + f.valid * 1.32); c.textAlign = "left";
+  c.fillStyle = "rgba(17,19,22,0.85)"; c.strokeStyle = "rgba(255,255,255,0.35)"; c.lineWidth = 2; c.beginPath(); c.roundRect ? c.roundRect(bx, by, bw, f.valid * 1.9, 14) : c.rect(bx, by, bw, f.valid * 1.9); c.fill(); noShadow(c); c.stroke(); sharpShadow(c, k);
+  c.fillStyle = "#fff"; c.textAlign = "center"; c.fillText(bt, bx + bw / 2, by + f.valid * 1.32); c.textAlign = "left"; c.restore();
   const cnr = BR.corner && LOGOS[BR.logo] ? cornerBox(k, by + f.valid * 1.9, headBot, f.H - f.bot + (k === "v" ? 110 : 62)) : null;
   // bottom: color bar + credit (no dark band any more: their text gets a shadow so it stays readable on the map)
-  c.save(); c.shadowColor = "rgba(0,0,0,0.75)"; c.shadowBlur = 6;
+  c.save(); sharpShadow(c, k);
   const cbW = k === "v" ? f.W - 2 * f.pad : Math.min(1100, f.W * 0.58), cbY = f.H - f.bot + (k === "v" ? 110 : 62), cbS = k === "v" ? 28 : 24;
   if (!colorbar(c, P, f.pad, cbY, cbW, k === "v" ? 34 : 26, cbS)) {
     try { const im = await getKey(cur.pid, cur.V === VIEWS()[S.view] ? S.view : S.view); const s_ = cbW / im.naturalWidth; c.drawImage(im, f.pad, cbY - 30, cbW, im.naturalHeight * s_); } catch (e) { /* no key */ }
