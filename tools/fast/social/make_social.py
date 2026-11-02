@@ -258,10 +258,11 @@ def hl(ax, g, P, view, k, F):
             fx, fy = (x - e[0]) / (e[1] - e[0]), (e[3] - y) / (e[3] - e[2])   # 0..1 across / down the frame
             top, bot = (0.30, 0.80) if k == "v" else (0.28, 0.76)
             if not (0.04 < fx < 0.96 and top < fy < bot): continue
-            ax.text(x, y, kind, transform=g["proj"], fontproperties=F["ExtraBold"], fontsize=(120 if k == "h" else 110) * 72 / 200, color=col,
-                    ha="center", va="center", zorder=10, path_effects=[pe.withStroke(linewidth=7, foreground="#000000d0")])
-            ax.text(x, y, f"\n\n{a[i, j]:.0f}", transform=g["proj"], fontproperties=F["Bold"], fontsize=44 * 72 / 200, color="white",
-                    ha="center", va="center", zorder=10, path_effects=[pe.withStroke(linewidth=5, foreground="#000000d0")])
+            # 11-01 t2051u (Benjamin): H / L and the centre pressure in the isobar labels' style (clabel: Bold, 34/32 px, white, 4 px dark halo)
+            fs = (34 if k == "h" else 32) * 72 / 200; fx_ = [pe.withStroke(linewidth=4, foreground="#000000b0")]
+            ax.text(x, y, kind, transform=g["proj"], fontproperties=F["Bold"], fontsize=fs, color="white", ha="center", va="center", zorder=10, path_effects=fx_)
+            ax.annotate(f"{a[i, j]:.0f}", xy=(x, y), xycoords=g["proj"]._as_mpl_transform(ax), xytext=(0, -fs * 0.65), textcoords="offset points",
+                        fontproperties=F["Bold"], fontsize=fs, color="white", ha="center", va="top", zorder=10, path_effects=fx_)
 
 def header(fig, P, R, run, f, k, W, H, F):
     v = k == "v"; x = 110; top = 270 if v else 100

@@ -725,7 +725,7 @@ async function render(lite) {
   if (P.barbs) drawBarbs(ctx, st, D, P, V);
   S.lowPanel = null;
   if (P.lows || P.spag) drawEns(ctx, st, D, P, V, gk);
-  if ((P.hl || (P.isobars && (P.isobars.field || "mslp") === "mslp")) && D.iso && !P.lows) drawHL(ctx, st, D, V, gk);   // every MSLP-isobar map (incl. MSLP + wind), not the ensemble-lows map
+  if ((P.hl || (P.isobars && (P.isobars.field || "mslp") === "mslp")) && D.iso && !P.lows) drawHL(ctx, st, D, V, gk, P);   // every MSLP-isobar map (incl. MSLP + wind), not the ensemble-lows map
   ctx.restore();
   // 4. towns (dots + names static) and live numbers
   const tmode = P.towns || "numbers";
@@ -1445,9 +1445,9 @@ function gridInv(V, st, fi, fj, guess) {   // [fi, fj] -> panel px, or null when
 const HL_VIEW = { na: [800, 3.0, 75], pnw: [400, 2.0, 50], pnwt: [400, 2.0, 50], pnwhr: [400, 2.0, 45] };   // radius km, prominence mb, smoothing km
 const HL_WA = [250, 1.5, 35];   // Washington-type frames (old HL_RADIUS_KM / HL_PROMINENCE_MB "wa")
 const HL_LOW_COLOR = "#d7191c", HL_HIGH_COLOR = "#1747c9";   // L red, H blue (Benjamin 10-31 1:42 AM; old site H blue #1747c9)
-function drawHL(ctx, st, D, V, gk) {
+function drawHL(ctx, st, D, V, gk, P) {
   const out = geo(`hl/${gk}`, () => hlGeom(st, D, V));
-  paintHL(ctx, out);
+  paintHL(ctx, out, P && P.isobars);
 }
 function hlGeom(st, D, V) {
   const raw = D.raw && D.raw.mslp ? D.raw.mslp.v : D.iso; if (!raw) return [];
@@ -1491,10 +1491,15 @@ function hlGeom(st, D, V) {
   }
   return out;
 }
-function paintHL(ctx, out) {
-  for (const [X, Y, v, hi] of out) { const col = hi ? HL_HIGH_COLOR : HL_LOW_COLOR;
-    haloText(ctx, hi ? "H" : "L", X, Y, `900 ${pt(16)}px Montserrat`, col, pt(2.4), "center", "middle");
-    haloText(ctx, String(Math.round(v)), X, Y + pt(9.5), `800 ${pt(9)}px Montserrat`, col, pt(2.2), "center", "top"); }
+// 11-01 6:43 PM (Benjamin t2051u: "make the L for low center and the correlating number be the same as the rest of the numbers used on
+// the isobars, same with H"): H / L and the centre pressure use the isobar value labels' exact style (paintIsobars: 700 10 pt Montserrat,
+// the isobar colour, 3.2 pt white halo). Letter centred on the centre, number right under it. (Was: 900 16 pt red L / blue H, 800 9 pt number.)
+const ISO_LAB_FONT = () => `700 ${pt(10)}px Montserrat`;
+function isoLabText(ctx, I, s, x, y, base) { haloText(ctx, s, x, y, ISO_LAB_FONT(), (I && I.color) || "#15171c", pt(3.2), "center", base); }
+function paintHL(ctx, out, I) {
+  for (const [X, Y, v, hi] of out) {
+    isoLabText(ctx, I, hi ? "H" : "L", X, Y, "middle");
+    isoLabText(ctx, I, String(Math.round(v)), X, Y + pt(6.5), "top"); }
 }
 function drawEns(ctx, st, D, P, V, gk) {
   const E = D.ens; if (!E) return;
@@ -1522,8 +1527,8 @@ function drawEns(ctx, st, D, P, V, gk) {
     for (const [x, y, mb] of g.dots) { ctx.beginPath(); ctx.arc(x, y, r, 0, 2 * Math.PI); ctx.fillStyle = dotCol(mb); ctx.fill();
       ctx.lineWidth = pt(0.7); ctx.strokeStyle = "#ffffff"; ctx.stroke(); }
     for (const [x, y, v] of g.means) {
-      haloText(ctx, "L", x, y, `900 ${pt(18)}px Montserrat`, "#d7191c", pt(2.4), "center", "middle");
-      haloText(ctx, String(Math.round(v)), x, y + pt(14), `900 ${pt(11)}px Montserrat`, "#1b1d22", pt(2.4), "center", "top"); }
+      isoLabText(ctx, P.isobars, "L", x, y, "middle");   // 11-01 t2051u: same style as the isobar numbers (was 900 18 pt red L, 900 11 pt mean)
+      isoLabText(ctx, P.isobars, String(Math.round(v)), x, y + pt(6.5), "top"); }
     S.lowPanel = g;
   }
 }
