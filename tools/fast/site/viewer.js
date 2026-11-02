@@ -109,7 +109,7 @@ function schedSharp() {
 // per hour on a 4x-slowed phone CPU, and the Studio frames did not change at all until the finger lifted). While the slider is
 // dragged in Studio the map is now drawn at RS 1 (9x fewer pixels) and the Studio frames follow every drawn hour; the sharp RS 3
 // frame is drawn once when the finger lifts.
-const STUDIO_DRAG_RS = 1, SETTLE_MS = 140;   // settle only with a mouse / trackpad: a full Studio frame takes ~0.5-1 s on a phone CPU
+const STUDIO_DRAG_RS = 1;   // FINE_PTR: mouse / trackpad (a full Studio frame takes ~0.5-1 s on a phone CPU, so touch keeps the light frames)
 const FINE_PTR = !!(window.matchMedia && matchMedia("(hover: hover) and (pointer: fine)").matches);
 function sizeMap(cv, V, keepRS) {   // bitmap = figure px x RS; context transform = RS, so all drawing stays in figure px
   const [LW, LH] = V.fig, rs = keepRS && Q.get("studio") && S.dragging ? STUDIO_DRAG_RS : keepRS && cv._lw === LW && cv._lh === LH ? (cv._rs || 1) : wantRS(LW, LH);
@@ -262,11 +262,7 @@ async function boot() {
   sl.addEventListener("pointerdown", () => { S.dragging = true; });
   sl.addEventListener("touchstart", () => { S.dragging = true; }, { passive: true });
   for (const ev of ["pointerup", "pointercancel", "touchend", "touchcancel", "change"]) sl.addEventListener(ev, endDrag);
-  // 11-02 (Benjamin t2093u: drag scrubbing in Studio looked lower res than arrow keys): while the slider is held, a light
-  // (RS 1, half-res fill) frame is drawn per hour, then the full-res frame (same as the keys) as soon as the hour has not
-  // changed for SETTLE_MS (pause with the mouse / finger still down); release draws it too.
-  sl.oninput = e => { const v = +e.target.value; if (v === S.i) return; S.i = v; draw();
-    if (Q.get("studio") && FINE_PTR) { clearTimeout(S.settleT); S.settleT = setTimeout(() => { if (S.dragging) { S.settle = true; draw(); } }, SETTLE_MS); } };
+  sl.oninput = e => { const v = +e.target.value; if (v === S.i) return; S.i = v; draw(); };
   $("prev").onclick = () => go(-1); $("next").onclick = () => go(1);
   $("play").onclick = () => { if (S.timer) { clearInterval(S.timer); S.timer = null; $("play").textContent = "Play"; }
                               else { S.timer = setInterval(() => go(1, true), 250); $("play").textContent = "Stop"; } };
@@ -633,7 +629,7 @@ async function pump() {
   // 11-02 (Benjamin t2098u, Mac: drag "still doesn't look as good" as the arrow keys): Studio with a mouse / trackpad draws
   // every drag frame on the full sharp path (light frames only on touch screens). Redraws stay coalesced: while one frame is
   // drawing, slider moves only update S.i and the next animation frame draws the newest hour (stale hours are skipped).
-  const lite = !!S.dragging && !S.settle && !(FINE_PTR && Q.get("studio")); S.settle = false;
+  const lite = !!S.dragging && !(FINE_PTR && Q.get("studio"));
   try { await render(lite); } catch (e) { showErr(e); }
   finally { S.busy = false; ws.forEach(r => r()); if (S.again || S.waiters.length) { S.again = false; if (!rafOn) { rafOn = true; requestAnimationFrame(pump); } } }
 }
