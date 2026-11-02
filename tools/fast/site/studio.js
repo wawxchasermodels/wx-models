@@ -16,7 +16,10 @@ if (CLEAN) {
   document.body.style.setProperty("--sbg", BG === "transparent" ? "transparent" : BG); if (BG === "transparent") document.documentElement.style.background = "transparent";
 }
 // framing per frame x view: {dx, dy, zoom} in output px; URL params win in clean mode
-const key = (k) => `studio:${k}:${S.view}`;
+// 11-02 (Benjamin t2095u): Meteogram mode. The meteograms page runs in a small iframe (its own Model / Town / Product pickers);
+// its finished chart image is drawn into both frames with the same drag / zoom / keys as the maps (framing saved under "mg").
+const MG = { on: !CLEAN && localStorage.getItem("studio:mode") === "mg", img: null, src: "" };
+const key = (k) => `studio:${k}:${MG.on ? "mg" : S.view}`;
 const getFr = (k) => {
   if (CLEAN && k === OUTQ && (SQ.has("dx") || SQ.has("dy") || SQ.has("zoom"))) return { dx: +SQ.get("dx") || 0, dy: +SQ.get("dy") || 0, zoom: +SQ.get("zoom") || 1 };
   try { return Object.assign({ dx: 0, dy: 0, zoom: 1 }, JSON.parse(localStorage.getItem(key(k)) || "{}")); } catch (e) { return { dx: 0, dy: 0, zoom: 1 }; }
@@ -50,7 +53,13 @@ function stateRect(V, m) {   // Washington's box in the wide view's figure px: t
   const t = wideRect(m), q = WA_IN_WAVIEW; if (!t) return null;
   return { x: t.x + q[0] * t.w, y: t.y + q[1] * t.h, w: q[2] * t.w, h: q[3] * t.h };
 }
+function mgBase(k) {   // meteogram: whole chart fitted inside the frame (9:16: centred a little above the middle)
+  const f = F[k], im = MG.img, iw = im.naturalWidth, ih = im.naturalHeight, padX = f.pad * 0.5, top = k === "v" ? 200 : 60, bot = k === "v" ? 200 : 70;
+  const k0 = Math.min((f.W - 2 * padX) / iw, (f.H - top - bot) / ih);
+  return { cx: iw / 2, cy: ih / 2 - ((top + (f.H - bot)) / 2 - f.H / 2) / k0, k0 };
+}
 function base(k) {   // camera at dx = dy = 0, zoom 1: centre (figure px) and scale (output px per figure px)
+  if (MG.on && MG.img) return mgBase(k);
   const f = F[k], V = last.cur.V, [px, py, pw, ph] = V.panel, t = V.studioWide ? stateRect(V, last.cur.run.split("/")[0]) : null;
   if (!t) return { cx: px + pw / 2, cy: py + ph / 2, k0: Math.max(f.W / pw, f.H / ph) };   // normal views: the map panel covers the frame
   // wide view (10-31 7:55 PM, Benjamin: "a little tighter", whole state with a little margin): Washington fits a band between the
@@ -65,6 +74,11 @@ function base(k) {   // camera at dx = dy = 0, zoom 1: centre (figure px) and sc
 }
 function crop(k, fr) {   // source rect (map bitmap px) for frame k: base camera, then zoom / pan; the panel stays covering the frame when it
   // can, and when it is smaller than the frame (wide view) it stays wholly in the frame (the rest is background)
+  if (MG.on && MG.img) {   // meteogram: pan freely while some of the chart stays in the frame
+    const B = base(k), kk = B.k0 * Math.max(1, fr.zoom || 1), im = MG.img, cl = (v, a, b) => Math.min(b, Math.max(a, v));
+    const cx = cl(B.cx - (fr.dx || 0) / kk, -F[k].W / kk / 2 + 40 / kk, im.naturalWidth + F[k].W / kk / 2 - 40 / kk), cy = cl(B.cy - (fr.dy || 0) / kk, -F[k].H / kk / 2 + 40 / kk, im.naturalHeight + F[k].H / kk / 2 - 40 / kk);
+    return { kk, cx, cy, bx: B.cx, by: B.cy, sx: 0, sy: 0, sw: F[k].W / kk, sh: F[k].H / kk, px: 0, py: 0, pw: im.naturalWidth, ph: im.naturalHeight, rs: 1 };
+  }
   const f = F[k], { cv, cur } = last, rs = cv._rs || 1, [px, py, pw, ph] = cur.V.panel, B = base(k);
   const kk = B.k0 * Math.max(1, fr.zoom || 1), sw = f.W / kk, sh = f.H / kk;
   const cl = (v, a, b) => Math.min(Math.max(a, b), Math.max(Math.min(a, b), v));
@@ -174,7 +188,20 @@ function titleCard(k, c, alpha, a0, a1) {   // over the first map; a0 / a1 = fir
   c.restore();
 }
 window.__studioBrand = { BR, titleCard: (k, a) => titleCard(k, F[k].cv.getContext("2d"), a == null ? 1 : a, null, null) };
+function renderMg(k, frO) {
+  const f = F[k], c = f.cv.getContext("2d"), fr = frO || getFr(k); f.zoom.value = Math.round((fr.zoom || 1) * 100);
+  c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, f.W, f.H); c.fillStyle = BG === "transparent" ? "#111316" : BG; c.fillRect(0, 0, f.W, f.H);
+  if (!MG.img) { c.font = `700 ${k === "v" ? 40 : 34}px Montserrat`; c.fillStyle = "#c9ced8"; c.textAlign = "center"; c.fillText(MG.msg || "Loading the meteogram\u2026", f.W / 2, f.H / 2); c.textAlign = "left"; return; }
+  const r = crop(k, fr); c.imageSmoothingEnabled = true; c.imageSmoothingQuality = "high";
+  c.drawImage(MG.img, f.W / 2 - r.cx * r.kk, f.H / 2 - r.cy * r.kk, MG.img.naturalWidth * r.kk, MG.img.naturalHeight * r.kk);
+  // the chart carries its own title, run line and ECMWF / NOAA data credit; place names: GeoNames (locked credit, 11-01 legal audit)
+  c.save(); c.font = `500 ${k === "v" ? 20 : 16}px Montserrat`; c.fillStyle = "rgba(220,224,230,0.85)"; c.shadowColor = "rgba(0,0,0,0.75)"; c.shadowBlur = 6;
+  c.textAlign = k === "v" ? "left" : "right"; c.fillText("Places: GeoNames (geonames.org), CC BY 4.0.", k === "v" ? f.pad : f.W - f.pad, f.H - (k === "v" ? 70 : 24)); c.restore();
+  const cnr = BR.corner && LOGOS[BR.logo] ? cornerBox(k, k === "v" ? 120 : 40, k === "v" ? 120 : 40, f.H - (k === "v" ? 140 : 80)) : null; if (cnr) cornerLogo(c, cnr);
+  window.__studio = (window.__studio || 0) + 1; window.__studioMg = (window.__studioMg || 0) + 1;
+}
 async function render(k, frO) {   // frO: camera override (MP4 storm-track pan)
+  if (MG.on) return renderMg(k, frO);
   if (!last) return; const f = F[k], c = f.cv.getContext("2d"), fr = frO || getFr(k), { cv, cur, step } = last, P = cur.P, [m] = cur.run.split("/");
   if (!frO) f.zoom.value = Math.round((fr.zoom || 1) * 100);
   c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, f.W, f.H);
@@ -249,6 +276,7 @@ for (const k of ["v", "h"]) {
   cv.addEventListener("pointerdown", (e) => { if (CLEAN || !last || REC.on) return; if (PIN.mode) { placePin(k, cv, e); return; }
     const hit = pinHit(k, cv, e); if (hit) { e.preventDefault(); cv.setPointerCapture(e.pointerId); PD = { k, n: hit, id: e.pointerId, off: pinOff(k, cv, e, hit) }; cv.classList.add("pindrag"); return; }
     cv.setPointerCapture(e.pointerId); cv.focus(); cv.classList.add("drag"); d = { x: e.clientX, y: e.clientY, fr: getFr(k) }; });
+  if (MG.on) cv.addEventListener("pointerdown", (e) => { if (!CLEAN && !last && MG.img) { cv.setPointerCapture(e.pointerId); cv.focus(); cv.classList.add("drag"); d = { x: e.clientX, y: e.clientY, fr: getFr(k) }; } });
   cv.addEventListener("pointermove", (e) => { if (PD && PD.k === k && PD.id === e.pointerId) { pinMove(k, cv, e); return; }
     if (!d && !PD && PIN.show && !PIN.mode && e.pointerType === "mouse") cv.style.cursor = pinHit(k, cv, e) ? "grab" : "";
     if (!d || pz) return; const s = f.W / cv.clientWidth, fr = getFr(k);
@@ -286,6 +314,9 @@ for (const k of ["v", "h"]) {
     const a = e.target.closest("button[data-a]"); if (!a || !last) return;
     if (a.dataset.a === "reset") { setFr(k, { dx: 0, dy: 0, zoom: 1 }); render(k); }
     if (a.dataset.a === "mp4") openMp4(k);
+    if (a.dataset.a === "png" && MG.on) { if (!MG.img) return; const nm = `meteogram_${(MG.src.split("#")[1] || "").replace(/[^a-z0-9=&_-]/gi, "").replace(/[=&]/g, "_")}_${k === "v" ? "1080x1920" : "1920x1080"}.png`;
+      cv.toBlob((b) => { const u = URL.createObjectURL(b), l = document.createElement("a"); l.href = u; l.download = nm; l.click(); setTimeout(() => URL.revokeObjectURL(u), 4000); }, "image/png"); return; }
+    if (MG.on && a.dataset.a !== "reset") return;   // MP4 / OBS: maps only
     if (a.dataset.a === "png") { const st = last.step, nm = `${last.cur.run.replace("/", "_")}_${last.cur.pid}_${S.view}_f${String(st.f).padStart(3, "0")}_${k === "v" ? "1080x1920" : "1920x1080"}.png`;
       cv.toBlob((b) => { const u = URL.createObjectURL(b), l = document.createElement("a"); l.href = u; l.download = nm; l.click(); setTimeout(() => URL.revokeObjectURL(u), 4000); }, "image/png"); }
     if (a.dataset.a === "obs") { const fr = getFr(k), [m] = last.cur.run.split("/"), u = new URL("studio.html", location.href);
@@ -849,7 +880,7 @@ if (!CLEAN) {
   for (const k of ["v", "h"]) {
     const f = F[k], cv = f.cv;
     cv.addEventListener("pointermove", (e) => {
-      if (e.pointerType !== "mouse" || e.buttons || !last || REC.on || PIN.mode || typeof readout !== "function") { tip.hidden = true; return; }
+      if (e.pointerType !== "mouse" || e.buttons || !last || MG.on || REC.on || PIN.mode || typeof readout !== "function") { tip.hidden = true; return; }
       const r = crop(k, getFr(k)), b = cv.getBoundingClientRect(), X = r.cx + ((e.clientX - b.left) * f.W / b.width - f.W / 2) / r.kk, Y = r.cy + ((e.clientY - b.top) * f.H / b.height - f.H / 2) / r.kk;
       if (X < r.px || Y < r.py || X > r.px + r.pw || Y > r.py + r.ph) { tip.hidden = true; return; }   // outside the map panel (wide view background)
       const m = document.getElementById("map"), mr = m.getBoundingClientRect(), LW = m._lw || m.width, LH = m._lh || m.height, vt = document.getElementById("tip");
@@ -864,6 +895,32 @@ if (!CLEAN) {
   // Request a change: reqbox.js (loaded after this file) makes #rqb; put it in a slot under the 16:9 frame
   const slot = document.createElement("div"); slot.id = "rqslot"; fh.appendChild(slot);
   addEventListener("DOMContentLoaded", () => { const b = document.getElementById("rqb"); if (b) { slot.appendChild(b); fitFrames(); } });
+}
+if (!CLEAN) {   // Studio: Map | Meteogram switch (first in the menu bar) + the meteograms page's pickers in a small iframe
+  const bar = document.getElementById("bar"), sw = document.createElement("label"); sw.id = "smodel";
+  sw.innerHTML = `Studio <select id="smode"><option value="map">Map</option><option value="mg">Meteogram</option></select>`; bar.insertBefore(sw, bar.firstChild);
+  const pnl = document.createElement("div"); pnl.id = "mgp"; bar.after(pnl);
+  const sel = document.getElementById("smode"); sel.value = MG.on ? "mg" : "map";
+  let fr_ = null, poll = 0;
+  const grab = () => { try {
+    const d = fr_.contentDocument, im = d && d.getElementById("meteo-img"), w = fr_.contentWindow;
+    if (!im || !w || !w.MG_DONE) return; const em = d.getElementById("meteo-empty"), src = im.hidden ? "" : im.src;
+    const h = w.location.hash; if (h) localStorage.setItem("studio:mghash", h);
+    if (src && im.complete && im.naturalWidth && (src !== MG.src || MG.img !== im)) { MG.img = im; MG.src = src + h; MG.msg = ""; renderAll(); }
+    else if (!src && em && !em.hidden && MG.msg !== em.textContent) { MG.img = null; MG.src = ""; MG.msg = (em.querySelector(".empty-title") || em).textContent; renderAll(); }
+  } catch (e) { /* iframe loading */ } };
+  const css = `.mast,.menubar,.skip,.meteo-grid,.colophon{display:none!important}body{margin:0;padding:6px 10px!important;background:#1d2027!important;min-height:0!important}.controls{margin:0!important;padding:0!important;gap:10px 18px!important}`;
+  const setMode = (on) => {
+    MG.on = on; localStorage.setItem("studio:mode", on ? "mg" : "map"); document.body.classList.toggle("mgmode", on); clearInterval(poll);
+    if (on && !fr_) { fr_ = document.createElement("iframe"); fr_.id = "mgf"; fr_.title = "Meteogram pickers";
+      fr_.src = "meteograms.html" + (localStorage.getItem("studio:mghash") || "#s=eps&w=seattle&p=eps_gust_members");
+      fr_.onload = () => { try { const st = fr_.contentDocument.createElement("style"); st.textContent = css; fr_.contentDocument.head.appendChild(st); } catch (e) { /* not ready */ } };
+      pnl.appendChild(fr_); }
+    if (on) poll = setInterval(grab, 300);
+    renderAll(); if (!on && last && window.onStudioDraw) window.onStudioDraw(last.cv, last.cur, last.step); fitFrames();
+  };
+  sel.onchange = () => setMode(sel.value === "mg");
+  if (MG.on) setMode(true);
 }
 if (!CLEAN) {
   let fq = 0; const fitSoon = () => { cancelAnimationFrame(fq); fq = requestAnimationFrame(fitFrames); };
