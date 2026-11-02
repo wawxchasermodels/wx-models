@@ -907,9 +907,13 @@ def static(m, out, views_only=None, x2_only=False):
     JET_L = list(M.JET_LEVELS); W5_L = list(M.W500_LEVELS)
     CM.update(qpf1=CM["qpf"], qpf3=CM["qpf"], qpf6=CM["qpf"], qpf12=CM["qpf"], qpf24=CM["qpf"], qpf48=CM["qpf"], mslpqpf=CM["qpf"],
               snow1=CM["snow"], snow6=CM["snow"], gust6=CM["gust10"])
-    T8A_L = np.arange(-15, 16, 1); SLPA_L = np.arange(-30, 31, 2)
+    T8A_L = np.arange(-15, 16, 1); SLPA_L = np.arange(-80, 31, 2)   # 11-02 (Benjamin t2103u): negative end 50 mb deeper (-30 -> -80)
     CM.update(t2ma=TM.t2a_cmap(), t850a=HS.cmap([HS._anom_color(27.0 * x) for x in (T8A_L[:-1] + T8A_L[1:]) / 2.0], HS.ANOM_UNDER, HS.ANOM_OVER))
-    CM.update(mslpa=HS.cmap([HS._anom_color(15.0 * x) for x in (SLPA_L[:-1] + SLPA_L[1:]) / 2.0], HS.ANOM_UNDER, HS.ANOM_OVER))   # +-30 mb onto the +-450 m anomaly ramp
+    # -30..+30 mb unchanged (onto the +-450 m anomaly ramp); 11-02: below -30 the light grays turn through gray-lavender, lavender,
+    # purple and deep violet to near-black violet at -80 (like the MSLP scale's deepest lows), under = darker still
+    SLPA_DEEP = [(-30, "#d6d6d8"), (-38, "#b3a8c2"), (-46, "#b58ad8"), (-54, "#9a52cc"), (-62, "#7228a8"), (-70, "#4c0f74"), (-80, "#22052f")]
+    _slpa_c = lambda x: HS._anom_color(15.0 * x) if x > -30 else HS.smooth([x], [v for v, _ in SLPA_DEEP[::-1]], [c for _, c in SLPA_DEEP[::-1]])[0]
+    CM.update(mslpa=HS.cmap([_slpa_c(x) for x in (SLPA_L[:-1] + SLPA_L[1:]) / 2.0], "#12021a", HS.ANOM_OVER))
     CM.update(w500=M.ramp(M.W500_LEVELS, M.W500_ANCH), w250=M.ramp(M.JET_LEVELS, M.JET_ANCH), z500anom=HS.anom_cmap())
     CM["w300"] = CM["w250"]   # 300 mb wind: jet colors
     CM.update(mucape=M.ramp(CAPE_L, CAPE_A), sbcape=M.ramp(CAPE_L, CAPE_A), ltng=M.ramp(LTNG_L, LTNG_A), ltgp=HS.cmap(LTGP_C, LTGP_C[0], LTGP_C[-1]))
@@ -1103,7 +1107,7 @@ def static(m, out, views_only=None, x2_only=False):
         # 10-31 (Benjamin 12:35 PM "give me true mslp"): MSLP anomaly vs the 1991-2020 NCEP/NCAR monthly normal, isobars on top.
         # Preview-only (manifest products_x) until the go. Over high terrain both pressures are reduced to sea level differently
         # (ECMWF vs NCEP), so plateau anomalies carry a few mb of method bias.
-        "mslpa": dict(title="MSLP Anomaly", fields=["mslp"], fill="anom", anom="mslp", clim="slp", key="Anomaly (mb)", ticks=list(range(-30, 31, 6)),
+        "mslpa": dict(title="MSLP Anomaly", fields=["mslp"], fill="anom", anom="mslp", clim="slp", key="Anomaly (mb)", ticks=list(range(-80, 31, 10)), keyver="_a80",
                       tickfmt=True, **table(SLPA_L, CM["mslpa"], "both"),
                       isobars=dict(field="mslp", every=4, sigma=2.5 if m == "ifs9" else 1.0, color=HS.ISOBAR_COLOR, lw=HS.ISOBAR_LW, halo=HS.ISOBAR_HALO), hl=True,
                       extra="vs 1991-2020 NCEP/NCAR monthly normal  \u00b7  isobars every 4 mb  \u00b7  {lo} to {hi} mb in view", pct=[0.5, 99.5],
