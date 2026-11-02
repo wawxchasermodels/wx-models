@@ -102,7 +102,7 @@ def build(models, man, out):
     json.dump(doc, open(sp, "w"), indent=1)
     print("sizes", sizes, "towns", towns_png, flush=True); return doc
 
-def town_slots(TM, vid, layer_fig, i0, i1, j0, j1, rs_):
+def town_slots(TM, vid, layer_fig, i0, i1, j0, j1, rs_, passes=False):
     """Town names + number slots for a view on a lat/lon model crop (same code as fast_encode.static): the site's own placement
     (temp_maps.towns) with "88" numbers; each number reads the grid point found by sampling lat and lon grids at the pins.
     Returns (figure with the names / dots, numbers hidden: the town layer), slots."""
@@ -112,6 +112,7 @@ def town_slots(TM, vid, layer_fig, i0, i1, j0, j1, rs_):
     tw_la, tw_lo = np.meshgrid(tw_la1, tw_lo1, indexing="ij")
     f88 = lambda v: None if not np.isfinite(v) else "88"
     fig, ax, ky = layer_fig(); arts = TM.towns(ax, vid, (tw_la1, tw_lo1, tw_la), f88) or []
+    if passes: add_passes(TM, ax, arts, (tw_la1, tw_lo1, tw_la))
     tv_la = dict(getattr(ax, "town_values", {}) or {})
     fig2, ax2, _ = layer_fig(); TM.towns(ax2, vid, (tw_la1, tw_lo1, tw_lo), f88); tv_lo = dict(getattr(ax2, "town_values", {}) or {}); plt.close(fig2)
     fig.canvas.draw(); r = fig.canvas.get_renderer(); Wd, Hd = fig.get_size_inches() * fig.dpi; slots = []; last = None
@@ -125,6 +126,36 @@ def town_slots(TM, vid, layer_fig, i0, i1, j0, j1, rs_):
                           fj=float(np.mod(plo, 360.0) / rs_ - j0), size=t.get_fontsize(), color=t.get_color()))
         t.set_visible(False)
     return fig, slots
+
+# 11-02 (Benjamin t2105u "Passes need to be added to maps on Washington wide for loops"): the Washington view's mountain passes
+# (temp_maps.WA_PASSES: Snoqualmie, Stevens, White, Chinook, Blewett, Sherman, Satus, Wauconda, Disautel; the 10-25 list without
+# Washington / Loup Loup / Cayuse) drawn on the wide view's town layer the same way as on the Washington view: small plum triangle +
+# italic name (temp_maps.pass_labels), names only (no numbers: keeps the loop frames uncluttered). Placed after the towns, clear of
+# every town name, number slot and dot; a name that does not fit is dropped (its triangle stays). Town placement is unchanged.
+# New file names only (static/{,x2/}towns_wawide_p1.png); the site points the wawide view at it (production keeps towns_wawide.png).
+PASS_PNG = "static/towns_wawide_p1.png"
+def add_passes(TM, ax, arts, field):
+    import matplotlib
+    fig = ax.figure; fig.canvas.draw(); r = fig.canvas.get_renderer(); pt = 72.0 / fig.dpi; axbb = ax.get_window_extent(r)
+    taken = [a.get_window_extent(r) for a in arts if a.get_visible()]
+    for ln in ax.lines:   # town dots
+        for x, y in ln.get_transform().transform(ln.get_xydata()): taken.append(matplotlib.transforms.Bbox([[x - 4, y - 4], [x + 4, y + 4]]))
+    keep = TM.WA_TOWNS; TM.WA_TOWNS = []   # pass_labels also blocks the Washington view's town dots; here the real dots are in taken
+    try: p_arts = TM.pass_labels(ax, field, lambda v: None, taken, r, pt, axbb)
+    finally: TM.WA_TOWNS = keep
+    print("passes:", [a.get_text() for a in p_arts], flush=True)
+
+def passes_layer(models, man, out):
+    import matplotlib.pyplot as plt
+    TM, HS, ccrs = setup(); os.makedirs(f"{out}/static/x2", exist_ok=True)
+    def layer_fig():
+        fig, ax, ky = TM.frame(VID); fig.patch.set_alpha(0); ax.patch.set_alpha(0); return fig, ax, ky
+    m = models[0]; i0, i1, j0, j1 = man["models"][m]["crop"]
+    fig0, slots0 = town_slots(TM, VID, layer_fig, i0, i1, j0, j1, FE.MODELS[m].get("res", 0.25)); plt.close(fig0)
+    fig, slots = town_slots(TM, VID, layer_fig, i0, i1, j0, j1, FE.MODELS[m].get("res", 0.25), passes=True)
+    assert slots == slots0, "town slots changed"
+    fig.savefig(f"{out}/{PASS_PNG}", dpi=FE.DPI, transparent=True); fig.savefig(f"{out}/{PASS_PNG}".replace("/static/", "/static/x2/"), dpi=FE.DPI * FE.X2, transparent=True)
+    plt.close(fig); json.dump(slots, open(f"{out}/slots_{m}.json", "w")); print("wrote", PASS_PNG, len(slots), "town slots", flush=True)
 
 # 10-31 8:17 PM (Benjamin: "Fix the pacific nw tight view"): static/towns_pnwt.png (built 10-30 by an older town list, kept since the
 # encoder only writes a missing layer) no longer matched the number slots in the manifest, so numbers sat on other towns' names.
@@ -159,5 +190,5 @@ def pnwt_fix(models, man, out):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(); ap.add_argument("--manifest", required=True); ap.add_argument("--out", required=True)
-    ap.add_argument("--models", default=",".join(GLOBAL)); ap.add_argument("--pnwt-fix", action="store_true"); a = ap.parse_args()
-    (pnwt_fix if a.pnwt_fix else build)(a.models.split(","), json.load(open(a.manifest)), a.out)
+    ap.add_argument("--models", default=",".join(GLOBAL)); ap.add_argument("--pnwt-fix", action="store_true"); ap.add_argument("--passes", action="store_true"); a = ap.parse_args()
+    (pnwt_fix if a.pnwt_fix else passes_layer if a.passes else build)(a.models.split(","), json.load(open(a.manifest)), a.out)

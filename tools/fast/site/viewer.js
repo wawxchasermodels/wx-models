@@ -159,6 +159,9 @@ function mergeRunsX(man) {
 // 10-31 7:30 PM (Benjamin: "a slightly more zoomed-out Washington view made specifically for Studio loop videos"): Studio only, an
 // extra view "Washington (wide, for loops)" = this model's Pacific NW tight / high-res map (src) that Studio frames on Washington so
 // the whole state fits both video frames. Same data, basemap, towns and key as src; the normal Washington view is unchanged.
+// 11-02 (Benjamin t2105u "Passes need to be added to maps on Washington wide for loops"): the global models' wide view uses a town
+// layer with the Washington view's 9 passes (plum triangle + italic name; studio_views.py --passes), shipped with the site ("@").
+const WAWIDE_PASSES_PNG = "@slayers/static/towns_wawide_p1.png";
 function addStudioViews(man, sv) {
   if (!Q.get("studio")) return man;
   // 10-31 7:55 PM (Benjamin: "city labels on the new washington wide are way too big"): the global models now get a real view
@@ -167,7 +170,7 @@ function addStudioViews(man, sv) {
   const SVM = (sv && sv.models) || {};
   for (const [m, M] of Object.entries(man.models || {})) { const V = M.views || {}, own = (SVM[m] || {}).wawide, src = V.pnwt ? "pnwt" : V.pnwhr ? "pnwhr" : null;
     if ((!own && !src) || !V.wa || V.wawide) continue; const out = {};
-    for (const [k, v] of Object.entries(V)) { out[k] = v; if (k === "wa") out.wawide = own ? Object.assign({}, own, { studioWide: "wa" }) : Object.assign({}, V[src], { label: "Washington (wide, for loops)", src, studioWide: "wa" }); }
+    for (const [k, v] of Object.entries(V)) { out[k] = v; if (k === "wa") out.wawide = own ? Object.assign({}, own, { studioWide: "wa", towns_png: WAWIDE_PASSES_PNG }) : Object.assign({}, V[src], { label: "Washington (wide, for loops)", src, studioWide: "wa" }); }
     M.views = out; }
   return man;
 }
@@ -424,7 +427,7 @@ async function viewStatic(vid) {
     const [lut, base] = await Promise.all([fetch(DATA + V.lut + SV()).then(r => r.arrayBuffer()).then(b => new Float32Array(b)),
                                            img(DATA + `static/base_${vid}.png` + SV())]);
     // towns layer is not needed for the first paint: draw without it, redraw when it lands (10-29 first-map speedup)
-    const tU = DATA + (V.towns_png || `static/towns_${vid}.png`) + SV();
+    const tP = V.towns_png || `static/towns_${vid}.png`, tU = (tP[0] === "@" ? tP.slice(1) : DATA + tP) + SV();
     const townsP = img(tU).then(im => { obj.towns = im; if (VSRC(S.view) === vid && window.__drawn) draw(); return im; }, () => null);
     // per-pixel source index + weights, made once per view from the coarse LUT (bilinear in panel px)
     const [px, py, pw, ph] = V.panel, x0 = Math.round(px), y0 = Math.round(py), W = Math.round(px + pw) - x0, H = Math.round(py + ph) - y0;
