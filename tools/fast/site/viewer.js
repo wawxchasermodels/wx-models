@@ -721,7 +721,7 @@ async function render(lite) {
     strokeLines(ctx, lines, P.freeze_color, pt(P.freeze_lw), [pt(3.7 * P.freeze_lw), pt(1.6 * P.freeze_lw)]);
   }
   const gk = `${run}/${pid}/${vid}/${f}`;
-  if (P.isobars && D.iso) drawIsobars(ctx, st, D, P, gk);
+  if (P.isobars && D.iso) drawIsobars(ctx, st, D, P, gk, V);
   if (P.barbs) drawBarbs(ctx, st, D, P, V);
   S.lowPanel = null;
   if (P.lows || P.spag) drawEns(ctx, st, D, P, V, gk);
@@ -1326,11 +1326,14 @@ function strokeLines(ctx, lines, color, lw, dash) {
   ctx.stroke(); ctx.setLineDash([]);
 }
 
-function drawIsobars(ctx, st, D, P, gk) {
-  const I = P.isobars, { all, labels } = geo(`iso/${gk}`, () => isoGeom(ctx, st, D, I));
+function drawIsobars(ctx, st, D, P, gk, V) {
+  // 11-01 7:26 PM (Benjamin t2052u: "make sure it doesn't overlap other MSLP numbers, move other MSLP numbers out of the way"):
+  // the H / L (or ensemble mean L) marker boxes are reserved first; isobar numbers that would land on one slide along their line
+  const I = P.isobars, avoid = hlAvoid(ctx, st, D, P, V, gk);
+  const { all, labels } = geo(`iso/${gk}`, () => isoGeom(ctx, st, D, I, avoid));
   paintIsobars(ctx, I, all, labels);
 }
-function isoGeom(ctx, st, D, I) {
+function isoGeom(ctx, st, D, I, avoid) {
   const G = cgrid(st, 4, k => sample(st, D.iso, k)), iso = G.g;   // only the 4 px points contour() reads: same lines
   let lo = Infinity, hi = -Infinity;
   for (let k = 0; k < iso.length; k++) { const v = iso[k]; if (v < lo) lo = v; if (v > hi) hi = v; }
@@ -1343,12 +1346,20 @@ function isoGeom(ctx, st, D, I) {
       if (len < 160) continue;
       const nlab = Math.max(1, Math.floor(len / 600));
       for (let q = 0; q < nlab; q++) {
-        const target = len * (q + 0.5) / nlab, k = cum.findIndex(c => c >= target), p = l[Math.max(0, k)];
-        if (labels.some(b => Math.hypot(b.x - p[0], b.y - p[1]) < 120)) continue;
-        if (p[0] < st.x0 + 20 || p[0] > st.x0 + st.W - 20 || p[1] < st.y0 + 12 || p[1] > st.y0 + st.H - 12) continue;
-        const a = l[Math.max(0, k - 3)], b = l[Math.min(l.length - 1, k + 3)]; let ang = Math.atan2(b[1] - a[1], b[0] - a[0]);
-        if (ang > Math.PI / 2) ang -= Math.PI; if (ang < -Math.PI / 2) ang += Math.PI;
-        labels.push({ x: p[0], y: p[1], ang, s: String(L), w: ctx.measureText(String(L)).width + pt(6) });
+        const target0 = len * (q + 0.5) / nlab, w = ctx.measureText(String(L)).width + pt(6);
+        // first the usual spot; if it sits on an H / L marker, the nearest clear spot along the line (both ways, up to LAB_SLIDE px)
+        const tries = [0]; if (avoid && avoid.length) for (let d = 12; d <= LAB_SLIDE; d += 12) tries.push(d, -d);
+        for (const dt of tries) {
+          const target = target0 + dt; if (target < 0 || target > len) continue;
+          const k = cum.findIndex(c => c >= target), p = l[Math.max(0, k)];
+          if (labels.some(b => Math.hypot(b.x - p[0], b.y - p[1]) < 120)) { if (dt === 0) break; continue; }
+          if (p[0] < st.x0 + 20 || p[0] > st.x0 + st.W - 20 || p[1] < st.y0 + 12 || p[1] > st.y0 + st.H - 12) { if (dt === 0) break; continue; }
+          const a = l[Math.max(0, k - 3)], b = l[Math.min(l.length - 1, k + 3)]; let ang = Math.atan2(b[1] - a[1], b[0] - a[0]);
+          if (ang > Math.PI / 2) ang -= Math.PI; if (ang < -Math.PI / 2) ang += Math.PI;
+          if (avoid && avoid.length) { const c = Math.abs(Math.cos(ang)), s_ = Math.abs(Math.sin(ang)), ex = c * w / 2 + s_ * pt(6), ey = s_ * w / 2 + c * pt(6);
+            if (avoid.some(B => p[0] + ex > B[0] && p[0] - ex < B[2] && p[1] + ey > B[1] && p[1] - ey < B[3])) continue; }
+          labels.push({ x: p[0], y: p[1], ang, s: String(L), w }); break;
+        }
       }
     }
   }
@@ -1446,7 +1457,7 @@ const HL_VIEW = { na: [800, 3.0, 75], pnw: [400, 2.0, 50], pnwt: [400, 2.0, 50],
 const HL_WA = [250, 1.5, 35];   // Washington-type frames (old HL_RADIUS_KM / HL_PROMINENCE_MB "wa")
 const HL_LOW_COLOR = "#d7191c", HL_HIGH_COLOR = "#1747c9";   // L red, H blue (Benjamin 10-31 1:42 AM; old site H blue #1747c9)
 function drawHL(ctx, st, D, V, gk, P) {
-  const out = geo(`hl/${gk}`, () => hlGeom(st, D, V));
+  const out = hlMarks(ctx, st, D, P, V, gk);
   paintHL(ctx, out, P && P.isobars);
 }
 function hlGeom(st, D, V) {
@@ -1495,6 +1506,27 @@ function hlGeom(st, D, V) {
 // the isobars, same with H"): H / L and the centre pressure use the isobar value labels' exact style (paintIsobars: 700 10 pt Montserrat,
 // the isobar colour, 3.2 pt white halo). Letter centred on the centre, number right under it. (Was: 900 16 pt red L / blue H, 800 9 pt number.)
 const ISO_LAB_FONT = () => `700 ${pt(10)}px Montserrat`;
+const LAB_SLIDE = 360;   // t2052u: an isobar number may slide this far (px along its line) off an H / L marker, else it is dropped
+function hlBox(ctx, X, Y, v) {   // letter (centred on Y) + number under it, in the isobar-label font, plus the white halo
+  ctx.save(); ctx.font = ISO_LAB_FONT(); const w = Math.max(ctx.measureText(String(Math.round(v))).width, ctx.measureText("H").width) + pt(4); ctx.restore();
+  return [X - w / 2, Y - pt(7.5), X + w / 2, Y + pt(6.5) + pt(12)];
+}
+function hlDeclutter(ctx, out, vi, hiOf) {   // t2052u: markers never overlap each other; the stronger centre (|p - 1013|) wins
+  const ord = out.map((o, n) => n).sort((a, b) => Math.abs(out[b][vi] - 1013) - Math.abs(out[a][vi] - 1013)), keep = [], boxes = [];
+  for (const n of ord) { const o = out[n], B = hlBox(ctx, o[0], o[1], o[vi]);
+    if (boxes.some(C => B[0] < C[2] && B[2] > C[0] && B[1] < C[3] && B[3] > C[1])) continue; boxes.push(B); keep.push(n); }
+  keep.sort((a, b) => a - b); return keep.map(n => out[n]);
+}
+const hlOn = (P, D) => (P.hl || (P.isobars && (P.isobars.field || "mslp") === "mslp")) && D.iso && !P.lows;
+function hlMarks(ctx, st, D, P, V, gk) {   // the markers that will be painted: [x, y, value]
+  if (P.lows) { const g = geo(`elows/${gk}`, () => lowGeom(st, D, P, V)); return geo(`elowsm/${gk}`, () => hlDeclutter(ctx, g.means, 2)); }
+  if (hlOn(P, D)) return geo(`hl/${gk}`, () => hlDeclutter(ctx, hlGeom(st, D, V), 2));
+  return [];
+}
+function hlAvoid(ctx, st, D, P, V, gk) {
+  if (!P.isobars || (P.isobars.field || "mslp") !== "mslp" || !(P.lows || hlOn(P, D))) return [];
+  try { return hlMarks(ctx, st, D, P, V, gk).map(o => hlBox(ctx, o[0], o[1], o[2])); } catch (e) { return []; }
+}
 function isoLabText(ctx, I, s, x, y, base) { haloText(ctx, s, x, y, ISO_LAB_FONT(), (I && I.color) || "#15171c", pt(3.2), "center", base); }
 function paintHL(ctx, out, I) {
   for (const [X, Y, v, hi] of out) {
@@ -1526,7 +1558,7 @@ function drawEns(ctx, st, D, P, V, gk) {
     const r = pt(V.label === "North America" ? 2.9 : 3.3);
     for (const [x, y, mb] of g.dots) { ctx.beginPath(); ctx.arc(x, y, r, 0, 2 * Math.PI); ctx.fillStyle = dotCol(mb); ctx.fill();
       ctx.lineWidth = pt(0.7); ctx.strokeStyle = "#ffffff"; ctx.stroke(); }
-    for (const [x, y, v] of g.means) {
+    for (const [x, y, v] of geo(`elowsm/${gk}`, () => hlDeclutter(ctx, g.means, 2))) {
       isoLabText(ctx, P.isobars, "L", x, y, "middle");   // 11-01 t2051u: same style as the isobar numbers (was 900 18 pt red L, 900 11 pt mean)
       isoLabText(ctx, P.isobars, String(Math.round(v)), x, y + pt(6.5), "top"); }
     S.lowPanel = g;

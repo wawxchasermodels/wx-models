@@ -221,11 +221,15 @@ def render(D, R, run, prod, view, f, k, out, F, logo="", dpi=200):
         cs = ax.contour(g["X"], g["Y"], c, levels=lv, colors="white", linewidths=lw * 1.15, linestyles=P["cstyle"], transform=g["proj"], zorder=7, alpha=0.95)
         for a_ in cs.collections if hasattr(cs, "collections") else [cs]:
             a_.set_path_effects([pe.withStroke(linewidth=lw * 3.2, foreground="#00000080")])
-        lab = ax.clabel(cs, fmt=lambda v: P["clab"].format(v), fontsize=(34 if k == "h" else 32) * 72 / 200, inline=True, inline_spacing=8)
-        for t in lab: t.set_fontproperties(F["Bold"]); t.set_fontsize((34 if k == "h" else 32) * 72 / 200); t.set_color("white"); t.set_path_effects([pe.withStroke(linewidth=4, foreground="#000000b0")])
+        hlb = hl(ax, g, P, view, k, F) if "hl" in P else None   # t2052u: H / L first, isobar numbers then keep clear of them
+        def _st(t): t.set_fontproperties(F["Bold"]); t.set_fontsize((34 if k == "h" else 32) * 72 / 200); t.set_color("white"); t.set_path_effects([pe.withStroke(linewidth=4, foreground="#000000b0")])
+        if hlb: lab = clabel_avoid(ax, cs, lambda v: P["clab"].format(v), (34 if k == "h" else 32) * 72 / 200, hlb, _st)
+        else:
+            lab = ax.clabel(cs, fmt=lambda v: P["clab"].format(v), fontsize=(34 if k == "h" else 32) * 72 / 200, inline=True, inline_spacing=8)
+            for t in lab: _st(t)
         if P.get("zero"):   # 0 °C at 850 mb: the snow-level-ish line, heavier
             z = ax.contour(g["X"], g["Y"], c, levels=[0], colors="#7fe3ff", linewidths=lw * 2.0, transform=g["proj"], zorder=7)
-    if "hl" in P: hl(ax, g, P, view, k, F)
+    if "hl" in P and "cont" not in P: hl(ax, g, P, view, k, F)
     # towns
     for n in V["towns"]:
         lon, lat = TOWNS[n]; x, y = g["proj"].transform_point(lon, lat, PC); e = g["ext"]
@@ -244,25 +248,63 @@ def render(D, R, run, prod, view, f, k, out, F, logo="", dpi=200):
     return P
 
 def hl(ax, g, P, view, k, F):
+    """Draw H / L centres; returns their display-px boxes (t2052u: markers never overlap each other, stronger |p - 1013| wins)."""
     a = P["hl"]; size = 25 if view == "na" else 13; mx = maximum_filter(a, size, mode="nearest"); mn = minimum_filter(a, size, mode="nearest")
-    e = g["ext"]; W, H = W_[k]
+    e = g["ext"]; W, H = W_[k]; allc = []
     for kind, mask, col in (("H", (a == mx) & (mx - minimum_filter(a, size * 2, mode="nearest") > 8), "#4d9bff"),
                             ("L", (a == mn) & (maximum_filter(a, size * 2, mode="nearest") - mn > 8), "#ff3b3b")):
         cand = sorted(zip(*np.nonzero(mask)), key=lambda ij: a[ij] if kind == "L" else -a[ij]); keep = []
         for i, j in cand:   # one marker per centre (flat tops give several equal cells); strongest first, >= `size` cells apart
             if any((i - p) ** 2 + (j - q) ** 2 < size * size for p, q in keep): continue
             keep.append((i, j))
-        for i, j in keep:
-            lat = 88.0 - (i + 0) * 0.25; lon = 150.0 + j * 0.25
-            x, y = g["proj"].transform_point(lon if lon <= 180 else lon - 360, lat, PC)
-            fx, fy = (x - e[0]) / (e[1] - e[0]), (e[3] - y) / (e[3] - e[2])   # 0..1 across / down the frame
-            top, bot = (0.30, 0.80) if k == "v" else (0.28, 0.76)
-            if not (0.04 < fx < 0.96 and top < fy < bot): continue
-            # 11-01 t2051u (Benjamin): H / L and the centre pressure in the isobar labels' style (clabel: Bold, 34/32 px, white, 4 px dark halo)
-            fs = (34 if k == "h" else 32) * 72 / 200; fx_ = [pe.withStroke(linewidth=4, foreground="#000000b0")]
-            ax.text(x, y, kind, transform=g["proj"], fontproperties=F["Bold"], fontsize=fs, color="white", ha="center", va="center", zorder=10, path_effects=fx_)
-            ax.annotate(f"{a[i, j]:.0f}", xy=(x, y), xycoords=g["proj"]._as_mpl_transform(ax), xytext=(0, -fs * 0.65), textcoords="offset points",
-                        fontproperties=F["Bold"], fontsize=fs, color="white", ha="center", va="top", zorder=10, path_effects=fx_)
+        allc += [(kind, i, j) for i, j in keep]
+    allc.sort(key=lambda c: -abs(float(a[c[1], c[2]]) - 1013.0))
+    r = ax.figure.canvas.get_renderer(); boxes = []
+    for kind, i, j in allc:
+        lat = 88.0 - (i + 0) * 0.25; lon = 150.0 + j * 0.25
+        x, y = g["proj"].transform_point(lon if lon <= 180 else lon - 360, lat, PC)
+        fx, fy = (x - e[0]) / (e[1] - e[0]), (e[3] - y) / (e[3] - e[2])   # 0..1 across / down the frame
+        top, bot = (0.30, 0.80) if k == "v" else (0.28, 0.76)
+        if not (0.04 < fx < 0.96 and top < fy < bot): continue
+        # 11-01 t2051u (Benjamin): H / L and the centre pressure in the isobar labels' style (clabel: Bold, 34/32 px, white, 4 px dark halo)
+        fs = (34 if k == "h" else 32) * 72 / 200; fx_ = [pe.withStroke(linewidth=4, foreground="#000000b0")]
+        t1 = ax.text(x, y, kind, transform=g["proj"], fontproperties=F["Bold"], fontsize=fs, color="white", ha="center", va="center", zorder=10, path_effects=fx_)
+        t2 = ax.annotate(f"{a[i, j]:.0f}", xy=(x, y), xycoords=g["proj"]._as_mpl_transform(ax), xytext=(0, -fs * 0.65), textcoords="offset points",
+                         fontproperties=F["Bold"], fontsize=fs, color="white", ha="center", va="top", zorder=10, path_effects=fx_)
+        b1, b2 = t1.get_window_extent(r), t2.get_window_extent(r); B = (min(b1.x0, b2.x0) - 6, min(b1.y0, b2.y0) - 6, max(b1.x1, b2.x1) + 6, max(b1.y1, b2.y1) + 6)
+        if any(B[0] < C[2] and B[2] > C[0] and B[1] < C[3] and B[3] > C[1] for C in boxes): t1.remove(); t2.remove(); continue
+        boxes.append(B)
+    return boxes
+
+LAB_SLIDE_PX = 700   # t2052u: an isobar number may slide this far (display px, 4K frame) along its line off an H / L marker, else dropped
+
+def clabel_avoid(ax, cs, fmt, fs, boxes, style):
+    """clabel, then any label on an H / L box slides along its own contour to the nearest clear spot (manual re-placement, inline)."""
+    lab = ax.clabel(cs, fmt=fmt, fontsize=fs, inline=False)
+    r = ax.figure.canvas.get_renderer(); hit = lambda B, C: B[0] < C[2] and B[2] > C[0] and B[1] < C[3] and B[3] > C[1]
+    info = []
+    for t, cv in zip(lab, list(cs.labelCValues)):
+        bb = t.get_window_extent(r); info.append((ax.transData.transform(t.get_position()), bb.width / 2 + 4, bb.height / 2 + 4, cv))
+    for t in list(cs.labelTexts): t.remove()
+    cs.labelTexts.clear(); cs.labelCValues.clear(); cs.labelXYs.clear()
+    placed, manual = [], []
+    def free(c, hw, hh): B = (c[0] - hw, c[1] - hh, c[0] + hw, c[1] + hh); return not any(hit(B, C) for C in boxes) and not any(hit(B, C) for C in placed)
+    for c, hw, hh, cv in info:
+        if free(c, hw, hh): placed.append((c[0] - hw, c[1] - hh, c[0] + hw, c[1] + hh)); manual.append(ax.transData.inverted().transform(c)); continue
+        li = int(np.argmin(np.abs(np.asarray(cs.levels) - cv))); best = None
+        for seg in cs.allsegs[li]:
+            if len(seg) < 2: continue
+            d = ax.transData.transform(seg); n0 = int(np.argmin(((d - c) ** 2).sum(1)))
+            if ((d[n0] - c) ** 2).sum() > 25: continue   # not the segment this label sat on
+            step = np.r_[0, np.cumsum(np.hypot(*np.diff(d, axis=0).T))]
+            for n in np.argsort(np.abs(step - step[n0])):
+                if abs(step[n] - step[n0]) > LAB_SLIDE_PX: break
+                if free(d[n], hw, hh): best = d[n]; break
+            if best is not None: break
+        if best is not None: placed.append((best[0] - hw, best[1] - hh, best[0] + hw, best[1] + hh)); manual.append(ax.transData.inverted().transform(best))
+    lab = ax.clabel(cs, fmt=fmt, fontsize=fs, inline=True, inline_spacing=8, manual=[tuple(m) for m in manual]) if manual else []
+    for t in lab: style(t)
+    return lab
 
 def header(fig, P, R, run, f, k, W, H, F):
     v = k == "v"; x = 110; top = 270 if v else 100
