@@ -376,8 +376,8 @@ function figGrid(g) {   // g: {title, sub, credit, cols: [[a, b]], ctrl: null, M
     if (outline) { c.strokeStyle = outline; c.lineWidth = 2; c.strokeRect(x0 + 1, y + 1, nc * cw - 2, rh - 2); }
     c.fillStyle = K.GRID; for (let j = 1; j < nc; j++) if (g.cols[j][0] !== g.cols[j - 1][0]) c.fillRect(x0 + j * cw, y, 1, rh);
   };
-  if (g.ref) row("9 KM", g.ref, y, REF_COLOR, true, REF_COLOR);
-  else { T(g.legend.startsWith("9 KM") ? "9 KM" : "CTRL", lw - 8, y + rh / 2, 800, 12, g.legend.startsWith("9 KM") ? REF_COLOR : K.ACCENT, "right", "middle");
+  if (g.ref) row(REF_TAG, g.ref, y, REF_COLOR, true, REF_COLOR);
+  else { T(g.legend.startsWith(REF_TAG + " =") ? REF_TAG : "CTRL", lw - 8, y + rh / 2, 800, 12, g.legend.startsWith(REF_TAG + " =") ? REF_COLOR : K.ACCENT, "right", "middle");
     c.fillStyle = K.PANEL; c.fillRect(x0, y, nc * cw, rh); c.strokeStyle = K.ACCENT; c.lineWidth = 2; c.strokeRect(x0 + 1, y + 1, nc * cw - 2, rh - 2);
     T(g.ctrlNote, x0 + 10, y + rh / 2, 600, 12, K.MUTED, "left", "middle"); }
   y += rh;
@@ -405,7 +405,7 @@ function figSnowEns(g) {   // g: {title, sub, credit, x: [ms], f: [h], A: [[memb
   c.fillStyle = K.ACCENT; c.fillRect(14, 16, 6, 113);
   T(g.title, 28, 12, 800, 28, K.INK); T(g.sub, 28, 52, 600, 16, K.ACCENT);
   T("Run-total snow at 10:1 from each member's snowfall (water equivalent x 10), inches, every 12 h", 28, 78, 500, 14, K.MUTED);
-  T(g.refRun ? `9 KM = ${REF_LABEL} (IFS 0.1\u00b0 ${g.refRun.slice(8)}Z, 0-144 h)  \u00b7  rows 1-${nm} = members  \u00b7  MEAN = mean  \u00b7  \u2265 rows = % of members at or above`
+  T(g.refRun ? `${REF_TAG} = ${g.refDesc}  \u00b7  rows 1-${nm} = members  \u00b7  MEAN = mean  \u00b7  \u2265 rows = % of members at or above`
     : `CTRL = control run  \u00b7  rows 1-${nm} = members  \u00b7  MEAN = ensemble mean  \u00b7  \u2265 rows = % of members at or above`, 28, 100, 700, 13, K.ACCENT);
   const kx = W - 22 - SN_LEVELS.length * 30, ky = 124, kw = 30;
   SN_LEVELS.forEach((lv, k) => { c.fillStyle = SN_COLORS[k]; c.fillRect(kx + k * kw, ky, kw - 1, 13); T(lv >= 1 ? String(lv) : lv.toFixed(1).replace(/^0/, ""), kx + k * kw, ky - 3, 600, 11, K.MUTED, "left", "bottom"); });
@@ -425,8 +425,8 @@ function figSnowEns(g) {   // g: {title, sub, credit, x: [ms], f: [h], A: [[memb
   };
   let y = gy0;
   const refC = g.ref ? ci.map((i) => g.ref[i]) : null;
-  if (refC && refC.some(fin)) row("9 KM", refC, y, REF_COLOR, true, REF_COLOR);
-  else { T(g.refRun ? "9 KM" : "CTRL", lw - 8, y + rh / 2, 800, 12, g.refRun ? REF_COLOR : K.ACCENT, "right", "middle");
+  if (refC && refC.some(fin)) row(REF_TAG, refC, y, REF_COLOR, true, REF_COLOR);
+  else { T(g.refRun ? REF_TAG : "CTRL", lw - 8, y + rh / 2, 800, 12, g.refRun ? REF_COLOR : K.ACCENT, "right", "middle");
     c.fillStyle = K.PANEL; c.fillRect(x0, y, nc * cw, rh); c.strokeStyle = K.ACCENT; c.lineWidth = 2; c.strokeRect(x0 + 1, y + 1, nc * cw - 2, rh - 2);
     T(g.ctrlNote, x0 + 10, y + rh / 2, 600, 11, K.MUTED, "left", "middle"); }
   y += rh + 6;
@@ -479,22 +479,24 @@ function bandsItems(x, A, color, label) {   // meteo_suite.bands(): A = members 
   return [{ t: "fill", x, lo: q[0], hi: q[4], color, alpha: 0.18, label: `${label} 10-90%` }, { t: "fill", x, lo: q[1], hi: q[3], color, alpha: 0.38, label: `${label} 25-75%` },
     { t: "line", x, y: q[2], color, lw: 2.6, label: `${label} median` }];
 }
-// ECMWF 9 km reference (Benjamin 10-31 6:29 AM "show the euro high res run as a reference row where the eps control used to
-// be"): the open ENS files have no control member, so EPS charts show the newest ECMWF 9 km (IFS 0.1 deg) deterministic run in its
-// place, matched by valid time. Limits of the 9 km data: 0-144 h and only places inside its Washington-scale views.
-const REF_COLOR = "#4fd1ff", REF_LABEL = "ECMWF 9 km (reference)";
-async function refSeries(town) {
-  if (!S.man || !S.man.models || !S.man.models.ifs9) return null;
-  for (const c of runsOf("ifs9")) { let D = null; try { D = await ptsSeries("ifs9", c); } catch (e) { D = null; }
-    const T = D && townSeries(D, town.pt.n); if (T) return { T, c, init: runTime(c) }; }
+// Deterministic reference row / line where the EPS control used to be (the open ENS files have no control member), matched by
+// valid time. 11-02 (Benjamin 10:32 AM "make the lower res euro the baseline on the meteograms"): ECMWF IFS 0.25 deg (HRES, same
+// grid as the EPS), the run with the same run time as the EPS run, else the newest one before it. Was ECMWF 9 km (IFS 0.1 deg).
+const REF_COLOR = "#4fd1ff", REF_MODEL = "ifs", REF_TAG = "IFS", REF_LABEL = "ECMWF IFS 0.25\u00b0";
+async function refSeries(town, ec) {
+  if (!S.man || !S.man.models || !S.man.models[REF_MODEL]) return null;
+  for (const c of runsOf(REF_MODEL).filter((r) => r <= ec)) { let D = null; try { D = await ptsSeries(REF_MODEL, c); } catch (e) { D = null; }
+    const T = D && townSeries(D, town.pt.n); if (T) return { T, c, init: runTime(c), same: c === ec }; }
   return null;
 }
+// "ECMWF IFS 0.25° deterministic (HRES) 00Z run 11-1 (4 PM PT), 0-360 h, same run time as the EPS"
+const refDesc = (R) => `${REF_LABEL} deterministic (HRES) ${R.c.slice(8)}Z run ${fmt({ month: "numeric", day: "numeric" }).format(R.init).replace("/", "-")} (${ampm(R.init)} PT), 0-${R.T.f[R.T.f.length - 1]} h, ${R.same ? "same run time as the EPS" : "newest IFS run before this EPS run"}`;
 function refVal(R, key, x, since) {   // value at valid time x; since (ms): amount accumulated after that time (run totals)
   if (!R || !R.T[key]) return null; const T = R.T, at = (t) => { if (t === R.init) return 0; const i = T.x.indexOf(t); return i < 0 || !fin(T[key][i]) ? null : T[key][i]; };
   const v = at(x); if (v == null) return null; if (since == null) return v; if (since < R.init) return null; const b = at(since); return b == null ? null : Math.max(0, v - b);
 }
-const refGust6 = (R, x) => { const a = refVal(R, "gust", x), b = refVal(R, "gust", x - 3 * 36e5); return a == null ? null : b == null ? a : Math.max(a, b); };   // 9 km gust = max in prior 3 h
-const refLine = (R, xs, f) => { const y = xs.map(f); return y.some(fin) ? [{ t: "line", x: xs, y, color: REF_COLOR, lw: 2.4, label: `${REF_LABEL} ${R.c.slice(8)}Z` }] : []; };
+const refGust6 = (R, x) => { const a = refVal(R, "gust", x), b = refVal(R, "gust", x - 3 * 36e5); return a == null ? null : b == null ? a : Math.max(a, b); };   // IFS gust: max of the last 1 h (to F+90) / 3 h (F+93-144) at each step, like the EPS
+const refLine = (R, xs, f) => { const y = xs.map(f); return y.some(fin) ? [{ t: "line", x: xs, y, color: REF_COLOR, lw: 2.4, label: `${REF_LABEL} ${R.c.slice(8)}Z ${fmt({ month: "numeric", day: "numeric" }).format(R.init).replace("/", "-")}` }] : []; };
 function withZero(S_, c) { return { x: [runTime(c), ...S_.x], f: [0, ...S_.f], m: S_.m.map((a) => [0, ...a]) }; }   // run totals start at 0
 function roll(S_, h) {   // running h-hour total from a run-total series
   return { x: S_.x, f: S_.f, m: S_.m.map((a) => S_.f.map((s, i) => { if (s < h) return null; const j = S_.f.indexOf(s - h); if (j < 0) return null; return fin(a[i]) && fin(a[j]) ? Math.max(0, a[i] - a[j]) : null; })) };
@@ -561,7 +563,7 @@ async function build(sec, prod, town) {
   // ---- ensemble (EPS / AIFS ENS): members at 47 places ----
   let M = null; try { M = await memSeries(m, c); } catch (e) { M = null; }
   if (!M) return memEmpty(sec, "Ensemble charts");
-  const R = m === "eps" ? await refSeries(town) : null, t0 = runTime(c);
+  const R = m === "eps" ? await refSeries(town, c) : null, t0 = runTime(c);
   const corr = town.pt.c || 0, id = (v) => v, H_ = ENS_HOURS;
   const get = (field, f2v, maxF) => { MEMWARN = M.bad.has(field); return memTown(M, pn, field, f2v || id, maxF == null ? H_ : maxF); };
   const nm = (S_) => S_.m.length;
@@ -618,7 +620,7 @@ async function build(sec, prod, town) {
       ii.map((i) => [dayLab(S0.x[i]), hourLab(S0.x[i])]), S0.m.map((a) => ii.map((i) => g6(a, i))), (v) => v.toFixed(0), GL, GC, R && ii.map((i) => refGust6(R, S0.x[i])), R) }); }
   if (k === "snowens") { const S0 = get("sf", id, SNOW_HOURS); if (!S0) return memEmpty(sec, "Snow totals by member"); const A = withZero(S0, c);
     return Object.assign(base, { fig: "snowens", g: { title: `${name}  \u00b7  Snow Totals by Member`, sub: `${run}  \u00b7  0-${A.f[A.f.length - 1]} h`, credit, x: A.x, f: A.f, A: A.m,
-      ref: R ? A.x.map((x) => refVal(R, "snowTot", x, t0)) : null, refRun: R && R.c,
+      ref: R ? A.x.map((x) => refVal(R, "snowTot", x, t0)) : null, refRun: R && R.c, refDesc: R && refDesc(R),
       ctrlNote: R ? `${REF_LABEL}: not at this place / time` : "control run: not stored in the fast data (members only)" } }); }
   if (k === "z500t850") { const z = get("gh", (v) => v / 10), t8 = get("t850"); if (!z || !t8) return noField("500 mb height / 850 mb temperature");
     return Object.assign(base, { fig: "z500", title: `${name} 500 mb Height and 850 mb Temperature`, sub: run + "  \u00b7  850 mb: 0\u00b0C dashed, -5\u00b0C dotted (lowland snow rule of thumb)",
@@ -635,8 +637,8 @@ const GC = ["#3f6f9f", "#4f9fbf", "#6fbf8f", "#d6d65a", "#f0b040", "#f07a30", "#
 function gridSpec(sec, name, run, title, unit, note, cols, M, f, levels, colors, ref, R) {
   const nm = M.length; if (MEMWARN) note = "Member numbers not checked for this run (older data)  \u00b7  " + note;
   if (R) return { title: `${name} ${title}`, sub: run, credit: sec.credit, cols, M, fmt: f, levels, colors, unit, note, ref: ref && ref.some(fin) ? ref : null,
-    legend: `9 KM = ${REF_LABEL}, deterministic IFS 0.1\u00b0 ${R.c.slice(8)}Z run, 0-144 h (no control in the open ENS data)  \u00b7  rows 1-${nm} = members  \u00b7  MEAN = average of ${nm}`,
-    ctrlNote: ref ? `${REF_LABEL}: no value at these times` : `${REF_LABEL}: not drawn for this chart (no 9 km daily max / min)` };
+    legend: `${REF_TAG} = ${refDesc(R)} (no control in the open ENS data)  \u00b7  rows 1-${nm} = members  \u00b7  MEAN = average of ${nm}`,
+    ctrlNote: ref ? `${REF_LABEL}: no value at these times` : `${REF_LABEL}: not drawn for this chart` };
   return { title: `${name} ${title}`, sub: run, credit: sec.credit, cols, M, fmt: f, levels, colors, unit, note,
     legend: `CTRL = control run (member 0, unperturbed)  \u00b7  rows 1-${nm} = perturbed members  \u00b7  MEAN = average of ${nm} members  \u00b7  control run not stored in the fast data`,
     ctrlNote: "control run (member 0): not stored in the fast data (members only)" };

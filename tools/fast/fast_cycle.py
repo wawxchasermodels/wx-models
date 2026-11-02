@@ -73,6 +73,10 @@ def main():
     models = a.models.split(",")
     # ECMWF 9 km (ifs9) rides the ECMWF job (no workflow change): after "ifs", once its static layers are in the manifest
     if "ifs" in models and "ifs9" not in models: models.insert(models.index("ifs") + 1, "ifs9")
+    # 11-02 (Benjamin 10:32 AM): models listed in env FAST_PAUSED (comma list, set in fast-models.yml) are skipped entirely.
+    # ECMWF 9 km is paused: its source kept answering 503 and the ECMWF job hit the 50 min timeout. Re-enable: remove ifs9 there.
+    paused = {x.strip() for x in os.environ.get("FAST_PAUSED", "").split(",") if x.strip()}
+    if paused & set(models): print("paused (FAST_PAUSED):", sorted(paused & set(models)), flush=True); models = [x for x in models if x not in paused]
     def one(m):
         if time.time() > t_end - 120: print("time budget used up", flush=True); MORE.add(m); return
         if m not in json.load(open(f"{D}/manifest.json")).get("models", {}): print(m, "no static layers in R2 yet, skipped", flush=True); return

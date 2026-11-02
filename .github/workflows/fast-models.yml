@@ -38,6 +38,8 @@ jobs:
       actions: write   # only for the re-dispatch step below
     env:
       WX_CACHE: ${{ github.workspace }}/.wx_cache
+      # 11-02: models to skip (comma list). ECMWF 9 km (ifs9, rides the ifs job) paused; to re-enable set this to "".
+      FAST_PAUSED: ifs9
       ON: ${{ contains(format(',{0},', inputs.models || 'hrrr,rrfs,nbm,gfs,ifs,aifs,eps,aens'), format(',{0},', matrix.model)) }}
     steps:
       - uses: actions/checkout@v4
