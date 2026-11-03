@@ -238,7 +238,7 @@ async function boot() {
   if (PV && PV.studio && sv) Object.assign(sv.models || (sv.models = {}), PV.studio);   // 11-03 preview supplement: Studio wide view
   S.man = addStudioViews(waveViews(viewFixes(mergeRunsX(man), vf), wv), sv);
   // runs: "model/cycle", newest first per model; models in a fixed order
-  const order = ["hrrr", "rrfs", "nbm", "gfs", "ifs", "ifs9", "aifs", "eps", "aens", "aensm", "gfsw", "oisst"].filter(m => S.man.models[m] && (S.man.runs[m] || []).length);
+  const order = ["hrrr", "rrfs", "nbm", "gfs", "ifs", "ifs9", "aifs", "eps", "aens", "aensm", "epsm", "gfsw", "oisst"].filter(m => S.man.models[m] && (S.man.runs[m] || []).length);
   const all = []; for (const m of order) for (const c of [...S.man.runs[m]].reverse()) all.push(`${m}/${c}`);
   const qr = Q.get("run"), qm = Q.get("model");
   // 11-01: a ?prod= link with no run/model (e.g. ?prod=waves) opens the first model that has that product
@@ -487,8 +487,8 @@ const getKey = (pid, vid) => { const u = keyURL(pid, vid); return keyImg[u] || (
 // ---------------------------------------------------------------- data images
 function fieldURL(run, name, f) {   // packed runs: several fields share one RGB PNG, one channel each (run.json steps[].packs)
   const R_ = S.runs[run], st = R_.steps.find(s => s.f === f), pk = st && st.packs && st.packs[name];
-  const file = pk ? pk[0] : name, ch = pk ? pk[1] : 0;
-  return [`${DATA}${R_.base}/` + R_.file.replace("{mem}", memPad()).replace("{name}", file).replace("{f:03d}", String(f).padStart(3, "0")), ch];
+  const file = pk ? pk[0] : name, ch = pk ? pk[1] : 0, tile = (pk && pk[2]) || 0;   // 11-03 EPS members: packs [file, channel, tile] (tiles stacked top to bottom)
+  return [`${DATA}${R_.base}/` + R_.file.replace("{mem}", memPad()).replace("{name}", file).replace("{f:03d}", String(f).padStart(3, "0")), ch, tile];
 }
 const pixCache = new Map();
 function getPixels(url) {   // one fetch + decode per image, shared by every field packed in it
@@ -510,8 +510,9 @@ function getField(run, name, f) {
   const p = (async () => {
     const st = S.runs[run].steps.find(s => s.f === f);
     if (!st || !st.ranges[name]) throw new Error(`nodata:${name}`);
-    const [url, ch] = fieldURL(run, name, f), I = await getPixels(url);
-    const [lo, hi] = st.ranges[name], sc = (hi - lo) / 255, n = I.w * I.h, out = new Float32Array(n), px = I.px;
+    const [url, ch0, tile] = fieldURL(run, name, f), I0 = await getPixels(url), T = S.runs[run].tiles || 1;
+    const I = T > 1 ? { w: I0.w, h: I0.h / T, bytes: I0.bytes } : I0, ch = ch0 + tile * I.w * I.h * 4;   // tile k = rows k*h .. (k+1)*h-1
+    const [lo, hi] = st.ranges[name], sc = (hi - lo) / 255, n = I.w * I.h, out = new Float32Array(n), px = I0.px;
     // image row 0 = first (southern) grid row: the encoder writes the grid as-is
     if (st.ranges[name][2] === 2) { const d = hi - lo; for (let k = 0; k < n; k++) { const q = px[k * 4 + ch] / 255; out[k] = lo + q * q * d; } }   // sqrt-coded precip
     else for (let k = 0; k < n; k++) out[k] = lo + px[k * 4 + ch] * sc;
@@ -521,14 +522,25 @@ function getField(run, name, f) {
   })();
   p.catch(() => S.fields.delete(key)); S.fields.set(key, p); return p;
 }
-function memUI() {   // AIFS ENS members: type or pick 1-50; only that member's files load
+function memUI() {   // AIFS ENS / EPS members: type or pick 1-50 (or < > / arrow up-down); only that member's files load
   const lab = $("memlab"), inp = $("mem"); if (!lab || !inp) return;
   const on = isMemRun(S.run); lab.hidden = !on; if (!on) return;
-  const ms = S.runs[S.run].members || []; inp.min = ms[0] || 1; inp.max = ms[ms.length - 1] || 50; inp.value = S.mem;
+  const ms = S.runs[S.run].members || []; inp.min = ms[0] || 1; inp.max = ms[ms.length - 1] || 50;
+  if (S.mem > +inp.max || S.mem < +inp.min) S.mem = Math.min(+inp.max, Math.max(+inp.min, S.mem));
+  inp.value = S.mem;
+  const site = (S.man.models[S.run.split("/")[0]] || {}).site || "Ensemble member"; lab.title = `${site} (${inp.min}-${inp.max}): only this member's maps load. Arrow up / down = next / previous member`;
   if (!inp.dataset.wired) { inp.dataset.wired = 1;
-    const go = () => { const v = Math.round(+inp.value); const lo = +inp.min, hi = +inp.max;
-      const n = Math.min(hi, Math.max(lo, isFinite(v) && v ? v : S.mem)); inp.value = n; if (n === S.mem) return; S.mem = n; draw(); };
-    inp.addEventListener("change", go); inp.addEventListener("keydown", e => { if (e.key === "Enter") go(); }); }
+    const set = n => { const lo = +inp.min, hi = +inp.max; n = Math.min(hi, Math.max(lo, n)); inp.value = n; if (n === S.mem) return; S.mem = n; draw(); };
+    const go = () => { const v = Math.round(+inp.value); set(isFinite(v) && v ? v : S.mem); };
+    const step = d => { const lo = +inp.min, hi = +inp.max; set(S.mem + d > hi ? lo : S.mem + d < lo ? hi : S.mem + d); };   // wraps 50 -> 1
+    inp.addEventListener("change", go); inp.addEventListener("keydown", e => { if (e.key === "Enter") go();
+      if (e.key === "ArrowUp" || e.key === "ArrowDown") { e.preventDefault(); e.stopPropagation(); step(e.key === "ArrowUp" ? 1 : -1); } });
+    const bp = $("memprev"), bn = $("memnext");
+    if (bp) bp.addEventListener("click", e => { e.preventDefault(); step(-1); });
+    if (bn) bn.addEventListener("click", e => { e.preventDefault(); step(1); });
+    addEventListener("keydown", e => { if (!isMemRun(S.run) || e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) return;
+      if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return; if (/^(INPUT|SELECT|TEXTAREA)$/.test((e.target && e.target.tagName) || "") || (e.target && e.target.isContentEditable)) return;
+      if (document.querySelector(".mg-open, dialog[open]")) return; e.preventDefault(); step(e.key === "ArrowUp" ? 1 : -1); }); }
 }
 function upHalf(a, w, h, W, H) {   // bilinear: point (i, j) of the half grid sits at (2i, 2j) of the full grid
   const o = new Float32Array(W * H);
@@ -875,7 +887,7 @@ async function render(lite) {
 // are drawn, PRISM / CPC / GPCP normals on the precip anomaly maps. NOAA keeps "Data: NOAA (public domain)" as before.
 const CREDIT_YEAR = new Date().getFullYear();
 function creditLines(pid, P, towns) {
-  const m = S.run.split("/")[0], name = (MD() && MD().name) || "", ec = /^ECMWF/.test(name) || /^(ifs|ifs9|aifs|eps|aens|aensm)$/.test(m);
+  const m = S.run.split("/")[0], name = (MD() && MD().name) || "", ec = /^ECMWF/.test(name) || /^(ifs|ifs9|aifs|eps|aens|aensm|epsm)$/.test(m);
   const L = [];
   if (P.clim === "pr" || /^qpf(a|pct)$/.test(pid)) L.push("Normals: PRISM Group, Oregon State University, https://prism.oregonstate.edu (accessed 30 Oct 2026); NOAA CPC & GPCP via NOAA PSL.");
   const a = [ec ? `Data: \u00a9 ${CREDIT_YEAR} ECMWF (www.ecmwf.int), CC BY 4.0. Modified.` : (pid === "t2m" ? "" : "Data: NOAA (public domain).")];

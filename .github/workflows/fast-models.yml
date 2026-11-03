@@ -15,8 +15,8 @@ on:
   workflow_dispatch:
     inputs:
       models:
-        description: "comma list: hrrr,rrfs,nbm,gfs,ifs,aifs,eps,aens,gfsw,aensm,oisst"
-        default: "hrrr,rrfs,nbm,gfs,ifs,aifs,eps,aens,gfsw,aensm,oisst"
+        description: "comma list: hrrr,rrfs,nbm,gfs,ifs,aifs,eps,aens,gfsw,aensm,epsm,oisst"
+        default: "hrrr,rrfs,nbm,gfs,ifs,aifs,eps,aens,gfsw,aensm,epsm,oisst"
       minutes:
         description: "time budget per model job"
         default: "40"
@@ -32,7 +32,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        model: [hrrr, rrfs, nbm, gfs, ifs, aifs, eps, aens, gfsw, aensm, oisst]   # 11-03: gfsw = NOAA WaveWatch III
+        model: [hrrr, rrfs, nbm, gfs, ifs, aifs, eps, aens, gfsw, aensm, epsm, oisst]   # 11-03: gfsw = NOAA WaveWatch III, epsm = EPS single members
     permissions:
       contents: read
       actions: write   # only for the re-dispatch step below
@@ -40,7 +40,7 @@ jobs:
       WX_CACHE: ${{ github.workspace }}/.wx_cache
       # 11-02: models to skip (comma list). ECMWF 9 km (ifs9, rides the ifs job) paused; to re-enable set this to "".
       FAST_PAUSED: ifs9
-      ON: ${{ contains(format(',{0},', inputs.models || 'hrrr,rrfs,nbm,gfs,ifs,aifs,eps,aens,gfsw,aensm,oisst'), format(',{0},', matrix.model)) }}
+      ON: ${{ contains(format(',{0},', inputs.models || 'hrrr,rrfs,nbm,gfs,ifs,aifs,eps,aens,gfsw,aensm,epsm,oisst'), format(',{0},', matrix.model)) }}
     steps:
       - uses: actions/checkout@v4
         if: env.ON == 'true'
@@ -65,6 +65,8 @@ jobs:
           # 11-03: aensm = AIFS ENS single members (tools/fast/aensm_cycle.py: newest 2 runs, one small file per member per hour)
           if [ "${{ matrix.model }}" = "oisst" ]; then python tools/fast/oisst_cycle.py; exit 0; fi   # 11-03: NOAA OISST SST anomaly (daily)
           if [ "${{ matrix.model }}" = "aensm" ]; then python tools/fast/aensm_cycle.py --minutes "${{ inputs.minutes || '40' }}" --workers 4; exit 0; fi
+          # 11-03: epsm = ECMWF EPS single members (tools/fast/epsm_cycle.py: newest 2 00Z/12Z runs, one 2-tile WebP per member per hour)
+          if [ "${{ matrix.model }}" = "epsm" ]; then python tools/fast/epsm_cycle.py --minutes "${{ inputs.minutes || '40' }}" --workers 4; exit 0; fi
           python tools/fast/fast_cycle.py --models "${{ matrix.model }}" --minutes "${{ inputs.minutes || '40' }}" --workers 4 --watch
       - name: Re-dispatch (this model still had hours to do when its time budget ran out)
         if: steps.run.outputs.more == 'true'
