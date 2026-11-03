@@ -85,6 +85,7 @@ table.pf td small.el{color:#a7abb3;font-weight:500;font-size:11px}table.pf td.fz
 #tabs{display:flex;gap:4px;flex:0 0 auto}
 #tabs button{background:#262931;color:#cfd3da;border:1px solid #4a4f5a;border-radius:15px;padding:4px 11px;font:inherit;font-size:13px;font-weight:600;white-space:nowrap;touch-action:manipulation;cursor:pointer}
 #tabs button.on{background:#2f8cff;border-color:#2f8cff;color:#fff}
+#tabs button.dim{opacity:.55;border-style:dashed}
 @media (max-width:700px){#tabs{flex:1 1 100%;gap:4px;overflow-x:auto;scrollbar-width:none}#tabs::-webkit-scrollbar{display:none}#tabs button{padding:5px 9px;font-size:12.5px}}
 
 /* Studio (10-31): the normal map is drawn off-screen (sharp, 2-3x) and cropped into two fixed video frames */
@@ -235,7 +236,7 @@ body.obsmode #mp4p .mp-row:has(#mpa),body.obsmode #mp4p .mp-row:has(#mpb),body.o
   if (q.get("from") && !q.get("f")) q.set("f", q.get("from"));
   history.replaceState(null, "", location.pathname + "?" + q.toString()); })();
 </script>
-<script src="viewer.js?v=20261103ml1"></script>
+<script src="viewer.js?v=20261103wt1"></script>
 <script src="stormfind.js?v=20261031c"></script>
 <script src="studio.js?v=20261103ml1"></script>
 <script src="reqbox.js?v=20261031b"></script>

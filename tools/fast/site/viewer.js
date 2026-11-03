@@ -252,9 +252,11 @@ async function boot() {
     return `${S.man.models[m].site} ${c.slice(8)}Z ${c.slice(4, 6)}-${c.slice(6, 8)}${p ? ` (loading, to F+${p[0]})` : ""}`; };
   // 10-31 6:08 PM (Benjamin "Go for it on the eps 3 hourly"): the group label says how often a model's maps come (manifest note, else here)
   const RUN_NOTE = { eps: "3-hourly to F+144, then 6-hourly" }, runNote = m => S.man.models[m].note || RUN_NOTE[m] || "";
-  const runMenu = (ord, al) => { $("run").innerHTML = ord.map(m => `<optgroup label="${S.man.models[m].site}${runNote(m) ? ` \u00b7 ${runNote(m)}` : ""}">` +
+  // 11-03 (Benjamin t2228u "Put these products under the waves tab"): the picker lists only the runs that belong to the open tab (runInTab)
+  const runMenu = (ord0, al0) => { S._runs = [ord0, al0]; const al = al0.filter(r => r === S.run || runInTab(r, S.tab)), ord = ord0.filter(m => al.some(r => r.startsWith(m + "/")));
+    $("run").innerHTML = ord.map(m => `<optgroup label="${S.man.models[m].site}${runNote(m) ? ` \u00b7 ${runNote(m)}` : ""}">` +
     al.filter(r => r.startsWith(m + "/")).map(r => `<option value="${r}"${r === S.run ? " selected" : ""}>${runLabel(r)}</option>`).join("") + "</optgroup>").join(""); };
-  runMenu(order, all);
+  runMenu(order, all); S.runMenu = () => S._runs && runMenu(...S._runs);
   // 10-31 frame at a time: every 2 min re-read the manifest so a run that just started shows up in the Runs menu without a reload
   setInterval(async () => {
     if (document.hidden) return; let M2; try { M2 = await (await fetch(DATA + "manifest.json", { cache: "no-cache" })).json(); } catch (e) { return; }
@@ -410,6 +412,12 @@ const TABS = [
   ["wav", "Waves", ["waves", "swper", "swellhs", "wavemax", "wavemax24", "ssta"]],   // 11-03: + NOAA OISST SST anomaly   // 11-03: NOAA WW3 swell period, wave height + swell period
 ];
 const tabOf = pid => (TABS.find(t => t[2].includes(pid)) || ["other"])[0];
+// 11-03 (Benjamin t2228u "Put these products under the waves tab"): NOAA WW3 and NOAA OISST (ocean-only models) live under the Waves tab.
+// Runs picker: on the Waves tab only models with wave products (ECMWF 0.25, NOAA WW3, NOAA OISST); on every other tab the weather models
+// (no WW3 / OISST). The shown run is always listed, so old ?model=gfsw / ?model=oisst / ?run= links still open. Compare frames: unchanged.
+const OCEAN = ["gfsw", "oisst"], WAVE_TAB = TABS.find(t => t[0] === "wav")[2];
+const hasWaves = m => { const P = allProds(S.man.models[m] || {}); return WAVE_TAB.some(k => P[k]); };
+const runInTab = (r, tab) => { const m = r.split("/")[0]; if (Q.get("embed")) return true; return tab === "wav" ? hasWaves(m) : !OCEAN.includes(m); };
 S.lastTab = {};
 function setLists() {   // products this run carries (all their fields present), views this model has
   const R_ = S.runs[S.run], has = new Set(R_.fields), P = PRODS(), V = VIEWS();
@@ -421,8 +429,11 @@ function setLists() {   // products this run carries (all their fields present),
   const inTab = id => tabs.some(t => t[0] === id && t[2].some(([k]) => k === S.prod));
   const cur = S.tab && inTab(S.tab) ? S.tab : tabOf(S.prod); S.tab = cur; S.lastTab[cur] = S.prod;
   $("tabs").innerHTML = tabs.map(([id, label]) => `<button type="button" role="tab" data-t="${id}" aria-selected="${id === cur}"${id === cur ? ' class="on"' : ""}>${label}</button>`).join("") +
-    (Q.get("embed") || Q.get("studio") || tabs.some(t => t[0] === "wav") || !(S.man.runs.ifs || []).length ? "" :
-      `<button type="button" data-t="wav" class="dim" title="Waves are ECMWF only: opens the newest ECMWF run">Waves</button>`) +
+    (Q.get("embed") || tabs.some(t => t[0] === "wav") || !(S.man.runs.ifs || []).length ? "" :
+      `<button type="button" data-t="wav" class="dim" title="Waves: ECMWF, NOAA WW3 and NOAA OISST. Opens the newest ECMWF run">Waves</button>`) +
+    // 11-03 (t2228u): on a NOAA WW3 / OISST run the weather tabs show dimmed and open the newest ECMWF run on that tab
+    (Q.get("embed") || !OCEAN.includes(S.run.split("/")[0]) || !(S.man.runs.ifs || []).length ? "" :
+      TABS.filter(t => t[0] !== "wav" && !tabs.some(x => x[0] === t[0])).map(([id, label]) => `<button type="button" data-t="${id}" data-wx="1" class="dim" title="${label}: opens the newest ECMWF run">${label}</button>`).join("")) +
     // WA Maps (10-31, Benjamin 8:58 AM): the posted Washington state-view maps, own page (wamaps.html)
     (Q.get("embed") || Q.get("studio") ? "" : `<button type="button" data-t="wamaps" title="Washington state-view forecast maps">WA Maps</button>` +
       `<button type="button" data-t="compare" title="Two maps side by side: two models, or two runs of one model">Compare</button>` +
@@ -436,6 +447,9 @@ function setLists() {   // products this run carries (all their fields present),
       location.href = `compare.html?l=${encodeURIComponent(S.run)}&r=${encodeURIComponent(other)}&prod=${S.prod}&view=${S.view}&valid=${encodeURIComponent(st.valid)}`; return; }
     if (b && b.dataset.t === "wav" && !tabs.some(x => x[0] === "wav")) {   // waves: ECMWF (or NOAA WW3) only -> newest ECMWF run, same valid time
       const rs = S.man.runs.ifs || []; if (!rs.length) return; S.prod = "waves"; S.tab = "wav"; $("run").value = `ifs/${rs[rs.length - 1]}`; $("run").onchange({ target: $("run") }); return; }
+    if (b && b.dataset.wx) {   // weather tab from a WW3 / OISST run -> newest ECMWF run, same valid time
+      const rs = S.man.runs.ifs || [], id = b.dataset.t; if (!rs.length) return; S.tab = id; S.prod = S.lastTab[id] || TABS.find(t => t[0] === id)[2][0];
+      $("run").onchange({ target: { value: `ifs/${rs[rs.length - 1]}` } }); return; }
     if (!b || b.dataset.t === S.tab) return;
     const t = tabs.find(x => x[0] === b.dataset.t), keep = S.lastTab[t[0]];
     S.tab = t[0]; S.prod = t[2].some(([k]) => k === keep) ? keep : t[2][0][0]; setLists(); draw(); };
@@ -444,6 +458,7 @@ function setLists() {   // products this run carries (all their fields present),
   fill($("prod"), tabs.find(t => t[0] === cur)[2].map(([k, p]) => [k, p.title]), S.prod);
   fill($("view"), Object.entries(V).filter(([k, v]) => !v.waveOnly || wavy).map(([k, v]) => [k, v.label]), S.view);
   $("step").max = R_.steps.length - 1; S.i = Math.min(S.i, R_.steps.length - 1);
+  S.runMenu && S.runMenu();   // 11-03 (t2228u): Runs picker follows the open tab
 }
 function fill(sel, opts, cur) { sel.innerHTML = opts.map(([v, t]) => `<option value="${v}"${v === cur ? " selected" : ""}>${t}</option>`).join(""); }
 function go(d, wrap) { const n = S.runs[S.run].steps.length; S.i = wrap ? (S.i + d + n) % n : Math.min(n - 1, Math.max(0, S.i + d)); $("step").value = S.i; draw(); }
