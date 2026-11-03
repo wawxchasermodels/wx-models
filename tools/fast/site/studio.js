@@ -324,12 +324,12 @@ function pinBar() {
   const mlh = (document.getElementById("memlab") || {}).hidden, key = innerWidth + ":" + mlh + ":" + Object.keys(S.man.models).join(",") + ":" + Object.values(S.man.runs).map(r => r.length).join(","); if (key === barPinned) return; barPinned = key;
   const tabs = document.getElementById("tabs"), probe = (el, html) => { const c = el.cloneNode(false); c.removeAttribute("id"); c.style.cssText = "position:absolute;visibility:hidden;left:-9999px;top:0;width:auto;min-width:0"; c.innerHTML = html; el.parentNode.appendChild(c); const w = c.getBoundingClientRect().width; c.remove(); return w; };
   const ml = document.getElementById("memlab"), phone = innerWidth <= 820;
-  if (ml) ml.classList.toggle("keep", phone);   // phones: the Member box keeps its slot (its own bar row); desktop: it takes tab space (below)
+  if (ml) ml.classList.toggle("keep", phone);   // phones: the Member box keeps its slot (its own bar row); desktop: it floats in the tab space (placeMem)
   if (tabs && typeof TABS !== "undefined") {   // desktop: the full ECMWF tab set's width, less the Member box when it shows (AIFS ENS members)
     const keepH = tabs.innerHTML, keepW = tabs.style.minWidth; tabs.style.minWidth = "0px";   // measured in the real #tabs (its own button style), put back at once
     tabs.innerHTML = [...TABS.map(t => t[1]), "Other"].map(l => `<button type="button">${l}</button>`).join(""); const w7 = Math.ceil(tabs.getBoundingClientRect().width); tabs.innerHTML = keepH; tabs.style.minWidth = keepW;
     const gap = parseFloat(getComputedStyle(bar).columnGap) || 10;
-    tabs.style.minWidth = phone ? "" : Math.max(0, w7 - (ml && !ml.hidden ? Math.ceil(ml.getBoundingClientRect().width + gap) : 0)) + "px"; }
+    void gap; tabs.style.minWidth = phone ? "" : w7 + "px"; }
   const opts = a => [...new Set(a)].map(t => `<option>${t}</option>`).join("");
   const titles = [], views = []; for (const md of Object.values(S.man.models)) { try { for (const p of Object.values(allProds(md))) if (p && p.title) titles.push(p.title); } catch (e) { /* no products */ } for (const v of Object.values(md.views || {})) if (v && v.label) views.push(v.label); }
   const pin = (id, list, cap) => { const el = document.getElementById(id); if (el && list.length) el.style.width = Math.min(cap, Math.ceil(probe(el, opts(list)))) + "px"; };
@@ -337,7 +337,15 @@ function pinBar() {
   const run = document.getElementById("run"); if (run) pin("run", [...run.options].map(o => o.textContent).concat(["ECMWF AIFS ENS 0.25\u00b0 00Z 11-03 (loading, to F+360)"]), 300);
 }
 if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { barPinned = ""; try { pinBar(); } catch (e) { /* not ready */ } });   // widths measured with the real fonts
-window.onStudioDraw = (cv, cur, step, lite) => { try { pinBar(); } catch (e) { /* bar not ready */ } last = { cv, cur, step, lite: !!lite }; renderAll(); try { scrubSync(); } catch (e) { /* scrubber not built */ } if (lite) return; if (PLAY.on) PLAY.next(); if (!REC.on && typeof mpSync === "function") try { mpSync(); } catch (e) { /* panel not ready */ } };
+// desktop: the AIFS ENS Member box floats at the right end of the tab space (AIFS ENS members have 2 tabs; the space is reserved for 7)
+function placeMem() {
+  const ml = document.getElementById("memlab"), tabs = document.getElementById("tabs"); if (!ml || !tabs) return;
+  if (CLEAN || innerWidth <= 820 || ml.hidden) { ml.style.position = ml.style.left = ml.style.top = ""; return; }
+  ml.style.position = "absolute"; const w = ml.getBoundingClientRect().width, h = ml.getBoundingClientRect().height;
+  ml.style.left = (tabs.offsetLeft + tabs.offsetWidth - w) + "px"; ml.style.top = (tabs.offsetTop + (tabs.offsetHeight - h) / 2) + "px";
+}
+addEventListener("resize", () => requestAnimationFrame(placeMem));
+window.onStudioDraw = (cv, cur, step, lite) => { try { pinBar(); placeMem(); } catch (e) { /* bar not ready */ } last = { cv, cur, step, lite: !!lite }; renderAll(); try { scrubSync(); } catch (e) { /* scrubber not built */ } if (lite) return; if (PLAY.on) PLAY.next(); if (!REC.on && typeof mpSync === "function") try { mpSync(); } catch (e) { /* panel not ready */ } };
 // drag / keys / zoom / buttons
 for (const k of ["v", "h"]) {
   const f = F[k], cv = f.cv; let d = null;
