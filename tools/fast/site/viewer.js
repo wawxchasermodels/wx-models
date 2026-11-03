@@ -381,10 +381,16 @@ const MD = () => S.man.models[S.run.split("/")[0]];
 // gray-lavender > lavender > purple > deep violet > near-black violet, under #12021a). Code-side over the manifest's products_x (no R2/manifest
 // change); keys "@mkeys/static/key_<m>_mslpa_a80_<view>.png" ship with the site ("@" = site-relative, not DATA). Made by fast_encode.py (keyver _a80).
 const MSLPA_A80 = {"levels":[-80.0,-78.0,-76.0,-74.0,-72.0,-70.0,-68.0,-66.0,-64.0,-62.0,-60.0,-58.0,-56.0,-54.0,-52.0,-50.0,-48.0,-46.0,-44.0,-42.0,-40.0,-38.0,-36.0,-34.0,-32.0,-30.0,-28.0,-26.0,-24.0,-22.0,-20.0,-18.0,-16.0,-14.0,-12.0,-10.0,-8.0,-6.0,-4.0,-2.0,0.0,2.0,4.0,6.0,8.0,10.0,12.0,14.0,16.0,18.0,20.0,22.0,24.0,26.0,28.0,30.0],"colors":["#260636","#2f0844","#370a52","#3f0c5f","#480e6d","#51127a","#5a1888","#641f94","#6d25a2","#772dac","#8138b6","#8b42be","#954dc8","#9d59ce","#a467d0","#ab75d4","#b283d6","#b58ed5","#b495d0","#b49dca","#b3a4c5","#b7aec5","#c0b9ca","#c9c5d0","#d2d0d5","#d6d6d8","#bcbcc0","#9e9fa4","#8f9095","#236630","#32803c","#4c9b4a","#74b866","#9fd089","#b5dc9c","#5f4bb0","#3e43ba","#366cd4","#72a7e8","#f7f7f5","#f7f7f5","#fcee9e","#fbdd62","#f6c23b","#f29f36","#ec7630","#e24e2c","#d12c2c","#b91733","#c31a5f","#d22d84","#dc57a6","#d97fbe","#cc9bcd","#c3aed8"],"ticks":[-80.0,-70.0,-60.0,-50.0,-40.0,-30.0,-20.0,-10.0,0.0,10.0,20.0,30.0],"under":"#12021a"};
+const ISO_MSLP = { every: 2, lw: 0.75, halo: 1.6 };
 const allProds = md => md._allP || (md._allP = (() => {
   const A = Object.assign({}, md.products, md.products_x || {}, md.products_p || {}, md.products_n || {}, md.products_t || {}, md.products_v || {});
   if (A.mslpa && A.mslpa.levels && A.mslpa.levels[0] > -80) A.mslpa = Object.assign({}, A.mslpa, MSLPA_A80,
     { keys: Object.fromEntries(Object.entries(A.mslpa.keys || {}).map(([v, k]) => [v, "@mkeys/" + k.replace("_mslpa_", "_mslpa_a80_")])) });
+  // 11-03 (Benjamin: "thin isobar lines WITH every 2 mb spacing", mock /workspace/isobar_mock 2_denser + 3_thinner): every MSLP isobar
+  // layer (all models, viewer + Studio + compare) draws every 2 mb at 0.75 pt with a 1.6 pt halo; smoothing (sigma) unchanged.
+  // Copies only: the manifest's own product objects are not touched (an R2 manifest edit is not needed for this).
+  for (const [k, P] of Object.entries(A)) if (P && P.isobars && (P.isobars.field || "mslp") === "mslp")
+    A[k] = Object.assign({}, P, { isobars: Object.assign({}, P.isobars, ISO_MSLP), extra: typeof P.extra === "string" ? P.extra.replace(/isobars every 4 mb/g, "isobars every 2 mb") : P.extra });
   return A; })());
 const PRODS = () => allProds(MD()), VIEWS = () => MD().views;
 // Product tabs (Benjamin 10-30 8:04 PM: "upper air tab, surface tab, precipitation tab, snow tab", Pivotal Weather style).
