@@ -238,7 +238,7 @@ async function boot() {
   if (PV && PV.studio && sv) Object.assign(sv.models || (sv.models = {}), PV.studio);   // 11-03 preview supplement: Studio wide view
   S.man = addStudioViews(waveViews(viewFixes(mergeRunsX(man), vf), wv), sv);
   // runs: "model/cycle", newest first per model; models in a fixed order
-  const order = ["hrrr", "rrfs", "nbm", "gfs", "ifs", "ifs9", "aifs", "eps", "aens", "aensm", "gfsw"].filter(m => S.man.models[m] && (S.man.runs[m] || []).length);
+  const order = ["hrrr", "rrfs", "nbm", "gfs", "ifs", "ifs9", "aifs", "eps", "aens", "aensm", "gfsw", "oisst"].filter(m => S.man.models[m] && (S.man.runs[m] || []).length);
   const all = []; for (const m of order) for (const c of [...S.man.runs[m]].reverse()) all.push(`${m}/${c}`);
   const qr = Q.get("run"), qm = Q.get("model");
   // 11-01: a ?prod= link with no run/model (e.g. ?prod=waves) opens the first model that has that product
@@ -247,6 +247,8 @@ async function boot() {
   await loadRun(S.run);
   // "Runs" menu (Benjamin 10-29 7:10 PM): every available run, grouped by model, newest first; picking one keeps the valid time
   const runLabel = r => { const [m, c] = r.split("/"), p = ((S.man.progress || {})[m] || {})[c];
+    if (m === "oisst") { const st = (S.runs[r] || {}).steps, d = x => { const v = new Date(x.valid); return `${v.getUTCMonth() + 1}-${v.getUTCDate()}`; };   // 11-03: daily analyses, not a run time
+      return `${S.man.models[m].site} daily ${c.slice(4, 6)}-${c.slice(6, 8)}` + (st && st.length ? ` to ${d(st[st.length - 1])}` : ""); }
     return `${S.man.models[m].site} ${c.slice(8)}Z ${c.slice(4, 6)}-${c.slice(6, 8)}${p ? ` (loading, to F+${p[0]})` : ""}`; };
   // 10-31 6:08 PM (Benjamin "Go for it on the eps 3 hourly"): the group label says how often a model's maps come (manifest note, else here)
   const RUN_NOTE = { eps: "3-hourly to F+144, then 6-hourly" }, runNote = m => S.man.models[m].note || RUN_NOTE[m] || "";
@@ -263,7 +265,7 @@ async function boot() {
     runMenu(o2, a2); loadNote();
   }, 120e3);
   setLists();
-  const f0 = Q.get("f"), steps = S.runs[S.run].steps; S.i = f0 ? Math.max(0, steps.findIndex(s => s.f == +f0)) : 0;
+  const f0 = Q.get("f"), steps = S.runs[S.run].steps; S.i = f0 ? Math.max(0, steps.findIndex(s => s.f == +f0)) : S.run.startsWith("oisst/") ? steps.length - 1 : 0;   // 11-03: daily analyses open on the newest day
   const vq = Date.parse(Q.get("valid") || ""); if (!f0 && vq) { let b = 0; steps.forEach((x, k) => { if (Math.abs(Date.parse(x.valid) - vq) < Math.abs(Date.parse(steps[b].valid) - vq)) b = k; }); S.i = b; }   // old-site links
   $("step").value = S.i;
   $("run").onchange = async e => {   // keep the same valid time when switching runs/models (nearest step)
@@ -399,7 +401,7 @@ const TABS = [
   ["svr", "Severe", ["refc", "refuh", "uh", "uhs", "sbcape", "mucape", "cape3", "srh03", "lr03", "lr75", "epcape", "ltng", "ltng6", "ltgp", "ntstm"]],
   // 11-01 (Benjamin 2:02 AM "We should probably make a waves tab"): ECMWF 0.25 wave products, out of Surface.
   // ECMWF (ifs) only: on other models the tab still shows (dimmed) and opens the newest ECMWF run.
-  ["wav", "Waves", ["waves", "swper", "swellhs", "wavemax", "wavemax24"]],   // 11-03: NOAA WW3 swell period, wave height + swell period
+  ["wav", "Waves", ["waves", "swper", "swellhs", "wavemax", "wavemax24", "ssta"]],   // 11-03: + NOAA OISST SST anomaly   // 11-03: NOAA WW3 swell period, wave height + swell period
 ];
 const tabOf = pid => (TABS.find(t => t[2].includes(pid)) || ["other"])[0];
 S.lastTab = {};
@@ -670,6 +672,14 @@ function sample(st, F, k) {   // bilinear value at panel pixel k
   const i = st.idx[k]; if (i < 0) return NaN; const tx = st.wx[k], ty = st.wy[k], g = st.gnx;
   return (F[i] * (1 - tx) + F[i + 1] * tx) * (1 - ty) + (F[i + g] * (1 - tx) + F[i + g + 1] * tx) * ty;
 }
+// 11-03 (SST anomaly): fields with a "no data" code under min_show (land / ice) blend only their valid corners, so the coast gets
+// no false dark-blue rim from mixing ocean values with the land code.
+function sampleMask(st, F, k, mins) {
+  const i = st.idx[k]; if (i < 0) return NaN; const tx = st.wx[k], ty = st.wy[k], g = st.gnx;
+  let s = 0, w = 0; const add = (v, ww) => { if (v >= mins && ww > 0) { s += v * ww; w += ww; } };
+  add(F[i], (1 - tx) * (1 - ty)); add(F[i + 1], tx * (1 - ty)); add(F[i + g], (1 - tx) * ty); add(F[i + g + 1], tx * ty);
+  return w > 0.25 ? s / w : NaN;
+}
 function sampleRC(F, w, fi, fj) {
   const r = Math.floor(fi), c = Math.floor(fj), ty = fi - r, tx = fj - c;
   return (F[r * w + c] * (1 - tx) + F[r * w + c + 1] * tx) * (1 - ty) + (F[(r + 1) * w + c] * (1 - tx) + F[(r + 1) * w + c + 1] * tx) * ty;
@@ -757,7 +767,7 @@ async function render(lite) {
   const V = VIEWS()[vid], P = PRODS()[pid], cv = $("map");
   const ctx = sizeMap(cv, V, lite), [LW, LH] = V.fig, rs = cv._rs; ctx.fillStyle = S.man.style.BG; ctx.fillRect(0, 0, LW, LH);
   // 1. color fill: value -> bin color, exactly the site's bins (contourf + BoundaryNorm)
-  const smp = P.fill === "prt" ? (/^(ifs|ifs9)$/.test(run.split("/")[0]) ? sampleType : sampleNN) : sample;
+  const smp = P.fill === "prt" ? (/^(ifs|ifs9)$/.test(run.split("/")[0]) ? sampleType : sampleNN) : (P.mask_edge || pid === "ssta") && P.min_show !== undefined ? (st_, F_, k_) => sampleMask(st_, F_, k_, P.min_show) : sample;
   const pal = palette(pid), mins = P.min_show, im = ctx.createImageData(st.W, st.H), o = im.data, F = D.fill, n = st.W * st.H;
   const vals = new Float32Array(n);
   if (lite) {   // half resolution: one sample per 2x2 block
@@ -1109,7 +1119,7 @@ function drawCoast(ctx, st, D, P, V, LW, LH, WT) {
   ctx.restore();
 }
 const MAXH_PIDS = /^wavemax(24)?$/;   // 11-01: products with the 'Max height: NN ft' line (viewer + Studio)
-const UNITS = { ivt: " kg/m/s", fog: "", waves: " ft", wavemax: " ft", ehigh: "\u00b0F", elow: "\u00b0F", d2m: "\u00b0F", feels: "\u00b0F", gustmax: " mph", t925w: "\u00b0C", t850w: "\u00b0C", t700w: "\u00b0C", t500w: "\u00b0C", t300w: "\u00b0C", w850: " kt", thick: " dam", slp: " mb", pw: " in", pwa: " in", ptype: "", qpfa: " in", qpfpct: "%", eqpf90: " in", esnow: " in", esnow90: " in", egust90: " mph", epcape: "%", elows: "%", spag: " m", nqpf1: " in", nqpf6: " in", nsnow6: " in", ntstm: "%", nmaxt: "\u00b0F", nmint: "\u00b0F", dsnod: " in", qpf3: " in", qpf12: " in", qpf48: " in", snow1: " in", snow6: " in", gust6: " mph", ltng6: " /km\u00b2/5 min", qpf1: " in", qpf6: " in", qpf24: " in", mslpqpf: " in", t2ma: "\u00b0F", t850a: "\u00b0C", et2sd: "\u00b0F", ep32: "%", ez500: " m", w500: " kt", w300: " kt", w250: " kt", z500anom: " m", mucape: " J/kg", sbcape: " J/kg", ltng: " /km\u00b2/5 min", ltgp: " in", t2m: "\u00b0F", gust10: " mph", aifswind: " mph", t850: "\u00b0C", t700: "\u00b0C", tcc: "%", vis: " mi", ir: "\u00b0C",
+const UNITS = { ssta: "\u00b0F", ivt: " kg/m/s", fog: "", waves: " ft", wavemax: " ft", ehigh: "\u00b0F", elow: "\u00b0F", d2m: "\u00b0F", feels: "\u00b0F", gustmax: " mph", t925w: "\u00b0C", t850w: "\u00b0C", t700w: "\u00b0C", t500w: "\u00b0C", t300w: "\u00b0C", w850: " kt", thick: " dam", slp: " mb", pw: " in", pwa: " in", ptype: "", qpfa: " in", qpfpct: "%", eqpf90: " in", esnow: " in", esnow90: " in", egust90: " mph", epcape: "%", elows: "%", spag: " m", nqpf1: " in", nqpf6: " in", nsnow6: " in", ntstm: "%", nmaxt: "\u00b0F", nmint: "\u00b0F", dsnod: " in", qpf3: " in", qpf12: " in", qpf48: " in", snow1: " in", snow6: " in", gust6: " mph", ltng6: " /km\u00b2/5 min", qpf1: " in", qpf6: " in", qpf24: " in", mslpqpf: " in", t2ma: "\u00b0F", t850a: "\u00b0C", et2sd: "\u00b0F", ep32: "%", ez500: " m", w500: " kt", w300: " kt", w250: " kt", z500anom: " m", mucape: " J/kg", sbcape: " J/kg", ltng: " /km\u00b2/5 min", ltgp: " in", t2m: "\u00b0F", gust10: " mph", aifswind: " mph", t850: "\u00b0C", t700: "\u00b0C", tcc: "%", vis: " mi", ir: "\u00b0C",
                 refc: " dBZ", qpf: " in", snow: " in", frz: " ft", snowlvl: " ft" };
 // value under the cursor / tap (item 1) and swipe to step (item 6)
 function readout(ev) {
