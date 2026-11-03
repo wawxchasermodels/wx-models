@@ -392,7 +392,8 @@ def _wave(R, m):
     return r
 # 11-03: NOAA GFS-Wave (WAVEWATCH III) global 0.25 deg on NOAA's AWS open-data bucket (public domain; NOMADS has the same files)
 WW3_URL = "https://noaa-gfs-bdp-pds.s3.amazonaws.com/gfs.{d}/{h:02d}/wave/gridded/gfswave.t{h:02d}z.global.0p25.f{s:03d}.grib2"
-WW3_PARS = {"swh": "HTSGW:surface", "dir": "DIRPW:surface", "swper": "SWPER:1 in sequence", "swdir": "SWDIR:1 in sequence"}
+WW3_PARS = {"swh": "HTSGW:surface", "dir": "DIRPW:surface", "swper": "SWPER:1 in sequence", "swdir": "SWDIR:1 in sequence",
+            "per": "PERPW:surface"}
 def _ww3(R, m):
     """NOAA WAVEWATCH III (GFS-Wave): significant wave height (ft; land -0.5), primary wave direction as a unit vector pointing where
     the waves travel, primary (partition 1) swell period (s; land -0.5) and its travel direction. Same layout as _wave (lon -180..180)."""
@@ -410,9 +411,11 @@ def _ww3(R, m):
         v = ec.codes_get_values(g).reshape(nj, ni).astype(float); ec.codes_release(g)
         v[v == mv] = np.nan; out[name] = np.roll(v, ni // 2, axis=1)   # lon 0..360 -> -180..180 (roll_ll turns it back)
     sea = np.isfinite(out["swh"]); th = np.radians(np.nan_to_num(out["dir"])); ts = np.radians(np.nan_to_num(out["swdir"]))   # directions waves come FROM
-    sp = np.isfinite(out["swper"]) & sea
+    # no swell partition (pure wind sea, e.g. sheltered water): the primary wave period and direction stand in (no blank holes)
+    sp = np.isfinite(out["swper"]) & sea; per = np.where(sp, np.nan_to_num(out["swper"]), np.nan_to_num(out["per"]))
+    tsd = np.where(sp, ts, th)
     R.cache["_ww3"] = r = dict(swh=np.where(sea, out["swh"] * 3.28084, -0.5), wdu=np.where(sea, -np.sin(th), 0.0), wdv=np.where(sea, -np.cos(th), 0.0),
-                               swper=np.where(sp, np.nan_to_num(out["swper"]), np.where(sea, 0.0, -0.5)), swdu=np.where(sp, -np.sin(ts), 0.0), swdv=np.where(sp, -np.cos(ts), 0.0))
+                               swper=np.where(sea, per, -0.5), swdu=np.where(sea, -np.sin(tsd), 0.0), swdv=np.where(sea, -np.cos(tsd), 0.0))
     return r
 def _wv(R, m): return _ww3(R, m) if m == "gfsw" else _wave(R, m)
 class _WaveOnlyR:   # gfsw: no atmosphere reader, the wave getters fetch their own GRIB ranges
@@ -1189,13 +1192,13 @@ def static(m, out, views_only=None, x2_only=False):
         "swper": dict(title="Swell Period", fields=["swper", "swdu", "swdv"], key="Swell period (s)", ticks=[4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 25],
                       tickfmt=True, **table(SWP_L, CM["swper"], "max"),
                       barbs=dict(u="swdu", v="swdv", color="#1b1d22", length=HS.BARB_LENGTH, lw=1.0, arrows=True, min=0.5, ref=1, fixed=True),
-                      extra="NOAA WAVEWATCH III (GFS-Wave 0.25\u00b0)  \u00b7  time between swells, primary swell  \u00b7  arrows = swell direction"
+                      extra="time between swells (primary swell; wind-wave period where there is no swell)  \u00b7  arrows = swell direction"
                       "  \u00b7  up to {hi} s in view", pct=[0, 99.9], dec=0, towns="none", only=("gfsw",)),
         "swellhs": dict(title="Wave Height + Swell Period", fields=["swh", "swper", "swdu", "swdv"], fill="swh", key="Wave height (ft)", cmap_of="waves",
                         ticks=[0, 2, 4, 6, 8, 10, 14, 20, 28, 40], tickfmt=True, **table(WV_L, CM["waves"], "max"),
                         barbs=dict(u="swdu", v="swdv", color="#1b1d22", length=HS.BARB_LENGTH, lw=1.0, arrows=True, min=0.5, ref=1, fixed=True),
                         isobars=dict(field="swper", scale=1, every=2, min=6, sigma=0.8, sea_only=True, unit="s", color="#101114", lw=1.1, halo=2.6),
-                        extra="NOAA WAVEWATCH III  \u00b7  shaded = significant wave height  \u00b7  lines = swell period every 2 s"
+                        extra="shaded = significant wave height  \u00b7  lines = swell period every 2 s"
                         "  \u00b7  arrows = swell direction  \u00b7  up to {hi} ft in view", pct=[0, 99.9], towns="none", only=("gfsw",)),
         "wavemax": dict(title="Estimated Max Wave Height", fields=["swh"], fill="hmax", key="Max wave (ft)", ticks=WVX_T, tickfmt=True, keyver="_85w", kw=WVX_KW,
                         **table(WVX_L, CM["wavemax"], "max"), extra="1.86 x significant height (largest of ~1000 waves, Rayleigh; as the old site)"
@@ -1308,7 +1311,7 @@ def static(m, out, views_only=None, x2_only=False):
     prods = {k: v for k, v in prods.items() if as_model(m) in v.pop("only", (as_model(m),))}
     if m == "gfsw":   # NOAA WW3: wave products only (products without an only= list are atmosphere products)
         prods = {k: v for k, v in prods.items() if set(v["fields"]) <= set(GFSW_FIELDS)}
-        if "waves" in prods: prods["waves"]["extra"] = "NOAA WAVEWATCH III (GFS-Wave 0.25\u00b0)  \u00b7  arrows = primary wave direction  \u00b7  up to {hi} ft in view"
+        if "waves" in prods: prods["waves"]["extra"] = "arrows = primary wave direction  \u00b7  up to {hi} ft in view"
     if m == "ifs9":   # 9 km: no waves (0.25 deg only) and no anomalies (would need 0.1 deg climatology files: more R2 space)
         prods = {k: v for k, v in prods.items() if not v.get("clim") and not set(v["fields"]) & IFS9_SKIP}
     if m == "nbm":   # National Blend: its own period fields (1/6 h precip, 6 h snow, 3 h thunder, 12 h max/min)
