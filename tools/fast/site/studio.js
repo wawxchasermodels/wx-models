@@ -7,8 +7,8 @@
 (() => {
 const SQ = new URLSearchParams(location.search), CLEAN = SQ.get("clean") === "1", OUTQ = SQ.get("out") || "v";
 const F = {
-  v: { cv: document.getElementById("cv"), zoom: document.getElementById("zv"), W: 1080, H: 1920, top: 250, bot: 330, title: 64, valid: 40, run: 26, pad: 64 },
-  h: { cv: document.getElementById("ch"), zoom: document.getElementById("zh"), W: 1920, H: 1080, top: 150, bot: 150, title: 58, valid: 36, run: 24, pad: 56 },
+  v: { cv: document.getElementById("cv"), zoom: document.getElementById("zv"), W: 1080, H: 1920, top: 250, bot: 330, title: 64, valid: 40, day: 51, run: 26, pad: 64 },
+  h: { cv: document.getElementById("ch"), zoom: document.getElementById("zh"), W: 1920, H: 1080, top: 150, bot: 150, title: 58, valid: 36, day: 46, run: 24, pad: 56 },
 };
 const BG = SQ.get("bg") || "#111316";
 if (CLEAN) {
@@ -92,7 +92,14 @@ function band(c, y0, y1, down) {
 // 11-02 (Benjamin t2107u "a sharper drop shadow behind the text and bars"): one tight, dark, slightly offset shadow for the overlaid
 // text, badges and color bar on every Studio mode (was a soft 6-8 px blur, no offset). Frames are fixed-size output px, so it is
 // the same in the on-screen frames, Save PNG and Save MP4.
-function sharpShadow(c, k) { c.shadowColor = "rgba(0,0,0,0.88)"; c.shadowBlur = 2; c.shadowOffsetX = k === "v" ? 3 : 2.5; c.shadowOffsetY = k === "v" ? 3 : 2.5; }
+function sharpShadow(c, k) { c.shadowColor = "rgba(0,0,0,0.92)"; c.shadowBlur = 1.5; c.shadowOffsetX = k === "v" ? 3 : 2.5; c.shadowOffsetY = k === "v" ? 3 : 2.5; }
+// 11-02 6:20 PM (Benjamin t2111u "drop shadow ... a little more pronounced with a bit of a fade so it doesn't look messy"): overlay text,
+// badges and bars are drawn (with the tight sharp core shadow above) into an off-screen layer, then that layer goes onto the frame once
+// with a soft short falloff shadow: sharp core + gentle fade, one pass, so overlapping glyph shadows never stack up into smudges.
+function ovLayer(f) { const o = f.ov || (f.ov = document.createElement("canvas")); if (o.width !== f.W || o.height !== f.H) { o.width = f.W; o.height = f.H; }
+  const oc = o.getContext("2d"); oc.setTransform(1, 0, 0, 1, 0, 0); oc.clearRect(0, 0, f.W, f.H); return oc; }
+function ovPut(c, f, k) { c.save(); c.shadowColor = "rgba(0,0,0,0.55)"; c.shadowBlur = k === "v" ? 14 : 12; c.shadowOffsetX = 0; c.shadowOffsetY = k === "v" ? 2 : 1.5;
+  c.drawImage(f.ov, 0, 0); c.restore(); }
 function noShadow(c) { c.shadowColor = "rgba(0,0,0,0)"; c.shadowBlur = 0; c.shadowOffsetX = 0; c.shadowOffsetY = 0; }
 function pill(c, x, y, txt, size, bg, fg) {
   c.font = `800 ${size}px Montserrat`; const w = c.measureText(txt).width + size * 0.9, h = size * 1.55;
@@ -195,6 +202,23 @@ function titleCard(k, c, alpha, a0, a1) {   // over the first map; a0 / a1 = fir
   c.restore();
 }
 window.__studioBrand = { BR, titleCard: (k, a) => titleCard(k, F[k].cv.getContext("2d"), a == null ? 1 : a, null, null) };
+// 11-02 (Benjamin t2111u "add the scale for what different colors represent on the ensemble lows on the right hand side"): member-dot key
+// for the ensemble low-centre maps (AIFS ENS / EPS "elows"): each dot = one member's low centre, colored by its central pressure in the
+// viewer's 8 bands (DOT_COLS / DOT_LABELS = ens_maps). Right edge, below the top-right webcam corner (16:9) / above the color bar (9:16).
+function lowKey(c, f, k) {
+  if (typeof DOT_COLS === "undefined") return;
+  const fs = k === "v" ? 25 : 21, rh = Math.round(fs * 1.45), rr = k === "v" ? 9 : 8, n = DOT_COLS.length;
+  c.save(); c.font = `700 ${fs}px Montserrat`; const head = ["Member low", "pressure (mb)"];
+  const lw = Math.max(...DOT_LABELS.map(t => c.measureText(t).width)), hw = Math.max(...head.map(t => c.measureText(t).width));
+  const w = Math.max(hw, rr * 2 + 12 + lw), x0 = f.W - f.pad - w, hH = fs * 2.5 + 8, tot = hH + n * rh;
+  const y0 = k === "v" ? f.H - f.bot + 40 - tot : 300;
+  c.fillStyle = "#e9ecf1"; c.textAlign = "left"; c.textBaseline = "alphabetic"; head.forEach((t, i) => c.fillText(t, x0, y0 + fs + i * fs * 1.2));
+  c.font = `600 ${fs}px Montserrat`; c.textBaseline = "middle";
+  for (let i = 0; i < n; i++) { const yy = y0 + hH + i * rh + rh / 2, cx = x0 + rr + 1;
+    c.beginPath(); c.arc(cx, yy, rr, 0, 2 * Math.PI); c.fillStyle = DOT_COLS[i]; c.fill(); c.lineWidth = 2; c.strokeStyle = "#ffffff"; c.stroke();
+    c.fillStyle = "#fff"; c.fillText(DOT_LABELS[i], cx + rr + 11, yy + 1); }
+  c.restore();
+}
 function renderMg(k, frO) {
   const f = F[k], c = f.cv.getContext("2d"), fr = frO || getFr(k); f.zoom.value = Math.round((fr.zoom || 1) * 100);
   c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, f.W, f.H); c.fillStyle = BG === "transparent" ? "#111316" : BG; c.fillRect(0, 0, f.W, f.H);
@@ -202,14 +226,14 @@ function renderMg(k, frO) {
   const r = crop(k, fr); c.imageSmoothingEnabled = true; c.imageSmoothingQuality = "high";
   c.drawImage(MG.img, f.W / 2 - r.cx * r.kk, f.H / 2 - r.cy * r.kk, MG.img.naturalWidth * r.kk, MG.img.naturalHeight * r.kk);
   // the chart carries its own title, run line and ECMWF / NOAA data credit; place names: GeoNames (locked credit, 11-01 legal audit)
-  c.save(); c.font = `500 ${k === "v" ? 20 : 16}px Montserrat`; c.fillStyle = "rgba(220,224,230,0.92)"; sharpShadow(c, k);
-  c.textAlign = k === "v" ? "left" : "right"; c.fillText("Places: GeoNames (geonames.org), CC BY 4.0.", k === "v" ? f.pad : f.W - f.pad, f.H - (k === "v" ? 70 : 24)); c.restore();
+  { const o = ovLayer(f); o.save(); o.font = `600 ${k === "v" ? 21 : 18}px Montserrat`; o.fillStyle = "rgba(236,239,244,0.95)"; sharpShadow(o, k);
+    o.textAlign = k === "v" ? "left" : "right"; o.fillText("Places: GeoNames (geonames.org), CC BY 4.0.", k === "v" ? f.pad : f.W - f.pad, f.H - (k === "v" ? 70 : 24)); o.restore(); ovPut(c, f, k); }
   const cnr = BR.corner && LOGOS[BR.logo] ? cornerBox(k, k === "v" ? 120 : 40, k === "v" ? 120 : 40, f.H - (k === "v" ? 140 : 80)) : null; if (cnr) cornerLogo(c, cnr);
   window.__studio = (window.__studio || 0) + 1; window.__studioMg = (window.__studioMg || 0) + 1;
 }
 async function render(k, frO) {   // frO: camera override (MP4 storm-track pan)
   if (MG.on) return renderMg(k, frO);
-  if (!last) return; const f = F[k], c = f.cv.getContext("2d"), fr = frO || getFr(k), { cv, cur, step } = last, P = cur.P, [m] = cur.run.split("/");
+  if (!last) return; const f = F[k], c0 = f.cv.getContext("2d"), fr = frO || getFr(k), { cv, cur, step } = last, P = cur.P, [m] = cur.run.split("/"); let c = c0;
   if (!frO) f.zoom.value = Math.round((fr.zoom || 1) * 100);
   c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, f.W, f.H);
   if (BG !== "transparent") { c.fillStyle = BG; c.fillRect(0, 0, f.W, f.H); }
@@ -219,15 +243,17 @@ async function render(k, frO) {   // frO: camera override (MP4 storm-track pan)
     if (bx > ax && by > ay) c.drawImage(cv, ax, ay, bx - ax, by - ay, (ax - r.sx) * s, (ay - r.sy) * s, (bx - ax) * s, (by - ay) * s); }
   // header (10-31 7:28 PM, Benjamin: "remove the shading on the top and the bottom of the studio views": no dark bands; text keeps its shadow)
   const site = (S.man.models[m] || {}).site || m, R_ = S.runs[cur.run], x = f.pad; let y = k === "v" ? 120 : 34;
+  c = ovLayer(f);   // header + bottom text / bars: off-screen layer, put on the frame with the soft falloff (ovPut)
   c.save(); sharpShadow(c, k); const pw = pill(c, x, y, site.toUpperCase(), Math.round(f.run * 0.95), "#2f8cff", "#fff");
   c.font = `600 ${f.run}px Montserrat`; c.fillStyle = "#c9ced8"; c.fillText(`${cur.run.split("/")[1].slice(8)}Z run`, x + pw + 14, y + f.run * 1.08);
   y += f.run * 1.55 + f.title * 1.02;
   c.font = `800 ${f.title}px Montserrat`; c.fillStyle = "#fff";
   const words = P.title.split(" "), maxW = f.W - 2 * f.pad - (k === "h" ? 260 : BR.corner && BR.cpos === "tr" && LOGOS[BR.logo] ? Math.round(f.W * 0.10) + 24 : 0); let line = "", lines = [];   // 9:16: keep the title clear of a top-right logo
   for (const w_ of words) { const t = line ? line + " " + w_ : w_; if (c.measureText(t).width > maxW && line) { lines.push(line); line = w_; } else line = t; } lines.push(line);
-  lines.forEach((t, i) => c.fillText(t, x, y + i * f.title * 1.08)); y += (lines.length - 1) * f.title * 1.08 + f.valid * 1.4;
-  c.font = `700 ${f.valid}px Montserrat`; c.fillStyle = "#ffc24d"; c.fillText((step.valid_line || "").replace(/^Valid /, ""), x, y);
-  const headBot = y + f.valid * 0.45;
+  lines.forEach((t, i) => c.fillText(t, x, y + i * f.title * 1.08)); y += (lines.length - 1) * f.title * 1.08 + f.day * 1.3;
+  // t2111u: the day / time line 27 % bigger (v 40 -> 51 px, h 36 -> 46 px) and extra bold, still under the title (64 / 58 px)
+  c.font = `800 ${f.day}px Montserrat`; c.fillStyle = "#ffc24d"; c.fillText((step.valid_line || "").replace(/^Valid /, ""), x, y);
+  const headBot = y + f.day * 0.45;
   // F+ badge (top right)
   c.font = `800 ${Math.round(f.valid * 1.1)}px Montserrat`; const bt = `F+${step.f}`, bw = c.measureText(bt).width + 40, bx = f.W - f.pad - bw, by = k === "v" ? 120 : 34;
   c.fillStyle = "rgba(17,19,22,0.85)"; c.strokeStyle = "rgba(255,255,255,0.35)"; c.lineWidth = 2; c.beginPath(); c.roundRect ? c.roundRect(bx, by, bw, f.valid * 1.9, 14) : c.rect(bx, by, bw, f.valid * 1.9); c.fill(); noShadow(c); c.stroke(); sharpShadow(c, k);
@@ -248,22 +274,28 @@ async function render(k, frO) {   // frO: camera override (MP4 storm-track pan)
     c.font = `800 ${Math.round(cbS * 1.15)}px Montserrat`; c.fillStyle = "#fff"; c.textAlign = "right";
     c.fillText(`Max height: ${Math.round(mx)} ft`, f.pad + cbW, cbY - cbS * 0.55); c.textAlign = "left";
   }
-  c.font = `500 ${k === "v" ? 22 : 18}px Montserrat`; c.fillStyle = "rgba(220,224,230,0.85)";
+  c.font = `600 ${k === "v" ? 22 : 19}px Montserrat`; c.fillStyle = "rgba(236,239,244,0.95)";
   const credit = `${(R_.runline || "").split(" run ")[0]}  \u00b7  ${cur.V.label}`, logo = SQ.get("logo") || "";
   // 9:16: credit under the bar, logo right; 16:9: bar fills the left 58 %, so credit (and logo above it) sit bottom-right
   const cB = cnr && (BR.cpos === "br" || BR.cpos === "bl") ? cnr : null;   // the credit steps aside for a logo on its row
-  if (k === "v") c.fillText(credit, f.pad + (cB && BR.cpos === "bl" ? cB.s + 18 : 0), f.H - 70); else { c.textAlign = "right"; c.fillText(credit, f.W - f.pad - (cB && BR.cpos === "br" ? cB.s + 20 : 0), f.H - 24); c.textAlign = "left"; }
+  const nDl = window.creditLines ? [].concat(...window.creditLines(cur.pid, cur.P, (cur.P.towns || "numbers") !== "none").map(l => l.replace("  Basemap: Natural Earth.", "").split("  "))).length : 0;
+  if (k === "v") c.fillText(credit, f.pad + (cB && BR.cpos === "bl" ? cB.s + 18 : 0), f.H - 70 - Math.max(0, nDl - 2) * ((k === "v" ? 19 : 17) + 9)); else { c.textAlign = "right"; c.fillText(credit, f.W - f.pad - (cB && BR.cpos === "br" ? cB.s + 20 : 0), f.H - 24); c.textAlign = "left"; }
   // 11-01-26 legal audit (Benjamin t2020u): data credit on every export (ECMWF: (c) year, www.ecmwf.int, CC BY 4.0, Modified; GeoNames when towns
   // show; PRISM normals on precip anomaly maps). 9:16: small lines under the credit; 16:9: right-aligned above it (logo text moves up for it)
-  const dl = window.creditLines ? window.creditLines(cur.pid, cur.P, (cur.P.towns || "numbers") !== "none").map(l => l.replace("  Basemap: Natural Earth.", "")) : [];
-  let dfs = k === "v" ? 17 : 15; c.font = `500 ${dfs}px Montserrat`;
+  // 11-02 (t2112u, legibility): the locked credit sentences unchanged, but each "  "-joined sentence gets its own line (it used to shrink to
+  // ~12-14 px to fit one line in 16:9), 600 weight, brighter, 17 / 16 px minimum 13, more line spacing
+  const dl = window.creditLines ? [].concat(...window.creditLines(cur.pid, cur.P, (cur.P.towns || "numbers") !== "none").map(l => l.replace("  Basemap: Natural Earth.", "").split("  "))) : [];
+  let dfs = k === "v" ? 19 : 17; c.font = `600 ${dfs}px Montserrat`; c.fillStyle = "rgba(236,239,244,0.95)";
   const dMax = k === "v" ? f.W - 2 * f.pad : f.W - 2 * f.pad - cbW - 40;
-  while (dfs > 11 && Math.max(0, ...dl.map(l => c.measureText(l).width)) > dMax) { dfs -= 1; c.font = `500 ${dfs}px Montserrat`; }
-  if (k === "v") dl.forEach((l, i) => c.fillText(l, f.pad, f.H - 70 + (dfs + 8) * (i + 1)));
-  else { c.textAlign = "right"; dl.forEach((l, i) => c.fillText(l, f.W - f.pad, f.H - 24 - 26 - (dl.length - 1 - i) * (dfs + 6))); c.textAlign = "left"; }
-  const dUp = k === "v" ? 0 : dl.length * (dfs + 6);
+  while (dfs > 13 && Math.max(0, ...dl.map(l => c.measureText(l).width)) > dMax) { dfs -= 1; c.font = `600 ${dfs}px Montserrat`; }
+  const dlh = dfs + 9;
+  if (k === "v") dl.forEach((l, i) => c.fillText(l, f.pad, f.H - 70 + dlh * (i + 1) - Math.max(0, dl.length - 2) * dlh));
+  else { c.textAlign = "right"; dl.forEach((l, i) => c.fillText(l, f.W - f.pad, f.H - 24 - 30 - (dl.length - 1 - i) * dlh)); c.textAlign = "left"; }
+  const dUp = k === "v" ? 0 : dl.length * dlh + 4;
   if (logo) { c.font = `800 ${k === "v" ? 34 : 28}px Montserrat`; c.fillStyle = "#fff"; c.textAlign = "right"; c.fillText(logo, f.W - f.pad, f.H - (k === "v" ? 70 : 60) - dUp); c.textAlign = "left"; }
+  if (P.lows) lowKey(c, f, k);
   c.restore();
+  c = c0; ovPut(c, f, k);
   if (cnr) cornerLogo(c, cnr);
   if (BR.lower) lowerThird(k, c);
   if (PIN.show && !REC.on) drawPins(k, c, r);
