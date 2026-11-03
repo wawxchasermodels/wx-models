@@ -58,7 +58,7 @@ MINFO = {"aens": dict(name="ECMWF AIFS Ensemble", site="AIFS ENS", res="0.25\u00
          "nbm": dict(name="NOAA NBM", site="NBM", res="2.5 km", noaa=True),
          "eps": dict(name="ECMWF Ensemble", site="ECMWF EPS", res="0.25\u00b0 \u00b7 50 members", credit_as="ifs"),
          "ifs9": dict(name="ECMWF IFS", site="ECMWF 9 km", res="9 km (0.1\u00b0)", credit_as="ifs"),
-         "gfsw": dict(name="NOAA WaveWatch III", site="NOAA WW3", res="0.25\u00b0 (GFS-Wave)", noaa=True)}
+         "gfsw": dict(name="NOAA WaveWatch III", site="NOAA WW3", res="0.25\u00b0", noaa=True)}
 def as_model(m): return MODELS.get(m, {}).get("as_model", m)   # ifs9 = IFS (same fields / products / units), only the files differ
 def minfo(m):
     import menu_maps as M
