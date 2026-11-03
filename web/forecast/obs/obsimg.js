@@ -16,16 +16,16 @@ const ObsImg = (() => {
   const RAD_WMS = "https://opengeo.ncep.noaa.gov/geoserver/conus/conus_bref_qcd/ows";
   const GIBS_WMS = "https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi";
   const GIBS_DOM = (layer) => `https://gibs.earthdata.nasa.gov/wmts/epsg4326/best/1.0.0/${layer}/default/2km/all/`;
-  // box = [west, south, east, north] degrees; px = image width x height (about 1 km radar detail, 1.4 km satellite detail)
+  // box = [west, south, east, north] degrees; px = image width x height (radar detail 0.0125 deg ~1 km, satellite detail 0.02 deg ~1.5-2 km)
   const SRC = {
     radar: { label: "Radar", kind: "rad", layer: "conus_bref_qcd", fmt: "image/png", alpha: 0.88, n: 12, stepMin: 5, refreshMin: 4,
-      tiles: { detail: { box: [-129, 40.5, -110, 51.5], px: [1520, 1100] }, wide: { box: [-130, 31, -102, 55], px: [1120, 1200] } },
+      tiles: { detail: { box: [-130, 39, -104, 53], px: [2080, 1120] }, wide: { box: [-130, 30, -100, 55], px: [1200, 1250] } },
       credit: "Radar: NOAA/NWS MRMS base reflectivity (public domain)" },
     ir: { label: "Clean IR", kind: "gibs", layer: "GOES-West_ABI_Band13_Clean_Infrared", fmt: "image/jpeg", alpha: 1, n: 12, stepMin: 10, refreshMin: 10,
-      tiles: { detail: { box: [-136, 38.5, -106, 55], px: [1600, 1100] }, wide: { box: [-166, 28, -96, 72], px: [1600, 1100] } },
+      tiles: { detail: { box: [-140, 37, -100, 57], px: [2000, 1000] }, wide: { box: [-170, 26, -94, 72], px: [1900, 1150] } },
       credit: "Satellite: NOAA GOES-West Clean IR (band 13) via NASA GIBS/ESDIS" },
     gc: { label: "GeoColor", kind: "gibs", layer: "GOES-West_ABI_GeoColor", fmt: "image/jpeg", alpha: 1, n: 12, stepMin: 10, refreshMin: 10,
-      tiles: { detail: { box: [-136, 38.5, -106, 55], px: [1600, 1100] }, wide: { box: [-166, 28, -96, 72], px: [1600, 1100] } },
+      tiles: { detail: { box: [-140, 37, -100, 57], px: [2000, 1000] }, wide: { box: [-170, 26, -94, 72], px: [1900, 1150] } },
       credit: "Satellite: NOAA GOES-West GeoColor (CIRA/NOAA) via NASA GIBS/ESDIS" },
   };
   const ST = { radar: false, sat: "", frames: { radar: [], ir: [], gc: [] }, img: new Map(), idx: -1, playing: true, timer: 0, last: 0,
@@ -107,8 +107,11 @@ const ObsImg = (() => {
         for (let tries = 0; tries < 5 && ST.frames[id].length; tries++) { const f = ST.frames[id]; if (await getImg(id, tile, f[f.length - 1]).p) break; }   // newest real frame first
       }
       prune(); if (ST.idx < 0 || ST.idx >= len()) ST.idx = len() - 1;
-      for (const id of on()) { const tile = tileFor(id); for (let i = ST.frames[id].length - 1; i >= 0; i--) { const t = ST.frames[id][i]; if (t) await getImg(id, tile, t).p; } }
-      for (const id of on()) { const tile = tileFor(id), f = ST.frames[id]; for (const t of f) await getImg(id, tile, t).p; }   // frames that slid in after blanks dropped out
+      ui(); bump(); Obs.redraw(); if (!ST.timer) tick();
+      for (let pass = 0; pass < 2; pass++) {   // pass 2: frames that slid in after black ones dropped out
+        const todo = []; for (const id of on()) { const tile = tileFor(id); for (const t of [...ST.frames[id]].reverse()) todo.push([id, tile, t]); }
+        await Promise.all([0, 1, 2].map(async () => { while (todo.length) { const [id, tile, t] = todo.shift(); await getImg(id, tile, t).p; } }));
+      }
       ui(); bump(); Obs.redraw();
     })().finally(() => { loading = null; });
     return loading;
@@ -119,11 +122,11 @@ const ObsImg = (() => {
 
   /* ---- loop ---- */
   function tick() {
-    clearTimeout(ST.timer); if (!on().length || ST.hold) return;
+    clearTimeout(ST.timer); ST.timer = 0; if (!on().length || ST.hold) return;
     if (!ST.playing || !ST.obs || !ST.obs.shown || document.hidden) { ST.timer = setTimeout(tick, 600); return; }
     const L = len(); if (L > 1) {
-      const nxt = (ST.idx + 1) % L, ready = on().every((id) => { const r = ST.img.get(id + "|" + tileFor(id) + "|" + tAt(id, nxt)); return r && (r.ok || r.bad); });
-      if (ready) { ST.idx = nxt; bump(); Obs.redraw(); uiTime(); }
+      const ready = (i) => on().every((id) => { const r = ST.img.get(id + "|" + tileFor(id) + "|" + tAt(id, i)); return r && r.ok; });
+      for (let s = 1; s <= L; s++) { const nxt = (ST.idx + s) % L; if (ready(nxt)) { if (nxt !== ST.idx) { ST.idx = nxt; bump(); Obs.redraw(); uiTime(); } break; } }
     }
     ST.timer = setTimeout(tick, ST.idx === L - 1 ? 1600 : 380);   // dwell on the newest frame
   }

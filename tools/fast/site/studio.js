@@ -274,10 +274,11 @@ function renderObs(k, frO) {
   c.fillStyle = "rgba(236,239,244,0.95)";
   if (k === "v") dl.forEach((l, i) => c.fillText(l, f.pad + (cB && BR.cpos === "bl" ? cB.s + 18 : 0), f.H - 70 - (dl.length - 1 - i) * dlh));
   else { c.textAlign = "right"; dl.forEach((l, i) => c.fillText(l, f.W - f.pad - (cB && BR.cpos === "br" ? cB.s + 20 : 0), f.H - 24 - (dl.length - 1 - i) * dlh)); c.textAlign = "left"; }
-  let lx = f.pad + (k === "h" && cB && BR.cpos === "bl" ? cB.s + 20 : 0); const ly = k === "v" ? f.H - 70 - (dl.length - 1) * dlh - dfs - 30 - lgS * 1.55 : f.H - 24 - lgS * 1.55 + lgS * 0.35;
+  let lx = f.pad + (k === "h" && cB && BR.cpos === "bl" ? cB.s + 20 : 0); let ly = k === "v" ? f.H - 70 - (dl.length - 1) * dlh - dfs - 30 - lgS * 1.55 : f.H - 24 - lgS * 1.55 + lgS * 0.35;
   for (const [id, lab, col] of I.on) {
     c.font = `800 ${lgS}px Montserrat`; const t = { plot: "Station plot: \u00b0F, gust mph, wind kt", hi: "High \u00b0F", lo: "Low \u00b0F", pk: "Peak gust mph", feel: "Feels like \u00b0F", mslp: "MSLP hPa" }[id] || lab, w = c.measureText(t).width + lgS * 1.2, h = lgS * 1.55;
-    if (k === "v" && lx + w > f.W - f.pad && lx > f.pad) break;
+    const img_ = String(id).startsWith("img_");
+    if (lx + w > (k === "v" ? f.W - f.pad : f.W * 0.46) && lx > f.pad + 1) { if (img_) { lx = f.pad + (k === "h" && cB && BR.cpos === "bl" ? cB.s + 20 : 0); ly -= h + 10; } else if (k === "v") break; }   // 11-03: radar / satellite pills wrap to a row above
     noShadow(c); c.fillStyle = "rgba(17,19,22,0.78)"; c.beginPath(); c.roundRect ? c.roundRect(lx, ly, w, h, h / 2) : c.rect(lx, ly, w, h); c.fill(); sharpShadow(c, k);
     c.fillStyle = col; c.textBaseline = "middle"; c.fillText(t, lx + lgS * 0.6, ly + h / 2 + 1); c.textBaseline = "alphabetic"; lx += w + 12;
   }
