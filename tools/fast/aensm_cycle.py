@@ -37,7 +37,7 @@ def step_meta(c, s):
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("--minutes", type=float, default=40); ap.add_argument("--workers", type=int, default=4); a = ap.parse_args()
     t_end = time.time() + a.minutes * 60; s3 = client(); more = False
-    man = r2_json(s3, "manifest.json"); crop = man["models"]["aensm"]["crop"]
+    man = r2_json(s3, "manifest.json"); crop = man["models"]["aens"]["crop"]   # same crop as aens_members.py
     now = dt.datetime.now(dt.timezone.utc).replace(minute=0, second=0, microsecond=0)
     cycles = [c for c in (now - dt.timedelta(hours=b) for b in range(0, 36)) if c.hour % 6 == 0 and src_has(c, AM.STEPS[0])][:KEEP]
     print("cycles out:", [f"{c:%Y%m%d%H}" for c in cycles], flush=True)
@@ -57,7 +57,7 @@ def main():
                     if err: print(cyc, f"f{s:03d}", err, flush=True); continue
                     for n in info["members"]:
                         p = f"{tmp}/m{n:02d}/mem_f{s:03d}.webp"; s3.upload_file(p, BUCKET, f"runs/aensm/{cyc}/m{n:02d}/mem_f{s:03d}.webp", ExtraArgs={"ContentType": "image/webp"}); os.remove(p)
-                    meta[s] = step_meta(c, s); mems = sorted(set(mems) | set(info["members"]))
+                    meta[s] = step_meta(c, s); mems = sorted(set(mems) & set(info["members"])) if mems else list(info["members"])   # members present at every hour
                     print(cyc, f"f{s:03d}", len(info["members"]), "members", f"{info['size']/1e3:.0f} KB", f"{info['sec']} s", flush=True)
                 steps = []
                 for s in AM.STEPS:
