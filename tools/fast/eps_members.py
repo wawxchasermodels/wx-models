@@ -9,7 +9,7 @@ import os, sys, json, time, argparse, datetime as dt, numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE); sys.path.insert(0, os.path.join(HERE, "..", "forecast"))
 import fast_encode as FE
 STEPS = list(range(6, 121, 6)) + list(range(132, 361, 12))   # same hours as aensm (40 steps)
-RNG = {"mslp": [920.0, 1070.0], "z500": [4600.0, 6000.0], "gust": [0.0, 255.0], "asnow": [0.0, 80.0, 2]}   # asnow: sqrt-coded (viewer ranges[2] == 2)
+RNG = {"mslp": [920.0, 1070.0], "z500": [4600.0, 6000.0], "gust": [0.0, 255.0], "asnow": [0.0, 200.0, 2]}   # asnow: sqrt-coded (viewer ranges[2] == 2)
 GUST = ("10fg", "10fg3", "10fg6")   # ECMWF names the gust by its window: 1 h to F+90, 3 h to F+144, 6 h after
 SRC = ["https://data.ecmwf.int/forecasts/{d}/{h:02d}z/ifs/0p25/enfo/{d}{h:02d}0000-{s}h-enfo-ef",
        "https://ecmwf-forecasts.s3.eu-central-1.amazonaws.com/{d}/{h:02d}z/ifs/0p25/enfo/{d}{h:02d}0000-{s}h-enfo-ef"]
