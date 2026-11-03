@@ -285,6 +285,8 @@ async function render(k, frO) {   // frO: camera override (MP4 storm-track pan)
   const credit = `${(R_.runline || "").split(" run ")[0]}  \u00b7  ${cur.V.label}`, logo = SQ.get("logo") || "";
   // 9:16: credit under the bar, logo right; 16:9: bar fills the left 58 %, so credit (and logo above it) sit bottom-right
   const cB = cnr && (BR.cpos === "br" || BR.cpos === "bl") ? cnr : null;   // the credit steps aside for a logo on its row
+  if (k === "h") { let fs_ = 19; const room = f.W - 2 * f.pad - cbW - 40 - (cB && BR.cpos === "br" ? cB.s + 20 : 0);   // 11-03: long run lines (NOAA OISST) shrink to clear the color bar
+    while (fs_ > 14 && c.measureText(credit).width > room) { fs_ -= 1; c.font = `600 ${fs_}px Montserrat`; } }
   if (k === "v") c.fillText(credit, f.pad + (cB && BR.cpos === "bl" ? cB.s + 18 : 0), crY); else { c.textAlign = "right"; c.fillText(credit, f.W - f.pad - (cB && BR.cpos === "br" ? cB.s + 20 : 0), f.H - 24); c.textAlign = "left"; }
   // 11-01-26 legal audit (Benjamin t2020u): data credit on every export (ECMWF: (c) year, www.ecmwf.int, CC BY 4.0, Modified; GeoNames when towns
   // show; PRISM normals on precip anomaly maps). 9:16: small lines under the credit; 16:9: right-aligned above it (logo text moves up for it)
