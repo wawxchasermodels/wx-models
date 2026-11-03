@@ -1001,6 +1001,10 @@ def static(m, out, views_only=None, x2_only=False):
     CM["waves"] = M.ramp(WV_L, [(0, "#283c96"), (2, "#2878c8"), (4, "#28afd2"), (6, "#32be8c"), (8, "#6ec846"), (10, "#c8dc3c"), (14, "#f0b432"),
                                 (20, "#e6642d"), (28, "#c82846"), (40, "#8c1e78")])
     # 11-03 NOAA WW3 swell period (s): short wind-sea periods cool/pale, long-period groundswell warm to violet (surf-forecast convention)
+    # 11-03 t2151u ("make wherever the swell period is a little more clear"): bold dark period lines on a wide white halo, big white
+    # "14 s" labels with a dark core + tight drop shadow (viewer isobars shadow_lab), fewer / farther-apart labels, no tiny loops
+    SWP_ISO = dict(field="swper", scale=1, every=2, min=6, sigma=1.2, sea_only=True, unit="s", color="#0d0f13", lw=1.9, halo=4.2,
+                   lab_pt=12.5, suffix=" s", lab_gap=520, lab_sep=170, min_len=70, shadow_lab=True)
     SWP_L = [0, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 22, 25]
     CM["swper"] = M.ramp(SWP_L, [(0, "#d9dde6"), (4, "#9fb3cf"), (6, "#5b8cc4"), (8, "#2f9fb0"), (10, "#3cb371"), (12, "#b5d334"), (14, "#f2c12e"),
                                  (16, "#ef7d2d"), (18, "#d7303a"), (20, "#a3215e"), (25, "#5a1570")])
@@ -1190,14 +1194,14 @@ def static(m, out, views_only=None, x2_only=False):
                       only=("ifs", "gfsw")),
         # 11-03 (Benjamin t2141u queue): NOAA WAVEWATCH III swell period and swell period + significant wave height (gfsw only)
         "swper": dict(title="Swell Period", fields=["swper", "swdu", "swdv"], key="Swell period (s)", ticks=[4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 25],
-                      tickfmt=True, **table(SWP_L, CM["swper"], "max"),
+                      tickfmt=True, **table(SWP_L, CM["swper"], "max"), isobars=SWP_ISO,
                       barbs=dict(u="swdu", v="swdv", color="#1b1d22", length=HS.BARB_LENGTH, lw=1.0, arrows=True, min=0.5, ref=1, fixed=True),
-                      extra="time between swells (primary swell; wind-wave period where there is no swell)  \u00b7  arrows = swell direction"
+                      extra="time between swells (primary swell; wind-wave period where there is no swell)  \u00b7  lines every 2 s  \u00b7  arrows = swell direction"
                       "  \u00b7  up to {hi} s in view", pct=[0, 99.9], dec=0, towns="none", only=("gfsw",)),
         "swellhs": dict(title="Wave Height + Swell Period", fields=["swh", "swper", "swdu", "swdv"], fill="swh", key="Wave height (ft)", cmap_of="waves",
                         ticks=[0, 2, 4, 6, 8, 10, 14, 20, 28, 40], tickfmt=True, **table(WV_L, CM["waves"], "max"),
                         barbs=dict(u="swdu", v="swdv", color="#1b1d22", length=HS.BARB_LENGTH, lw=1.0, arrows=True, min=0.5, ref=1, fixed=True),
-                        isobars=dict(field="swper", scale=1, every=2, min=6, sigma=0.8, sea_only=True, unit="s", color="#101114", lw=1.1, halo=2.6),
+                        isobars=SWP_ISO,
                         extra="shaded = significant wave height  \u00b7  lines = swell period every 2 s"
                         "  \u00b7  arrows = swell direction  \u00b7  up to {hi} ft in view", pct=[0, 99.9], towns="none", only=("gfsw",)),
         "wavemax": dict(title="Estimated Max Wave Height", fields=["swh"], fill="hmax", key="Max wave (ft)", ticks=WVX_T, tickfmt=True, keyver="_85w", kw=WVX_KW,

@@ -1365,28 +1365,30 @@ function isoGeom(ctx, st, D, I, avoid) {
   const G = cgrid(st, 4, k => sample(st, D.iso, k)), iso = G.g;   // only the 4 px points contour() reads: same lines
   let lo = Infinity, hi = -Infinity;
   for (let k = 0; k < iso.length; k++) { const v = iso[k]; if (v < lo) lo = v; if (v > hi) hi = v; }
-  const labels = [], all = [];
-  ctx.save(); ctx.font = `700 ${pt(10)}px Montserrat`;
+  const labels = [], all = [], sep = I.lab_sep || 120, sfx = I.suffix || "";
+  ctx.save(); ctx.font = isoLabFont(I);
   for (let L = Math.max(Math.ceil(lo / I.every) * I.every, I.min ?? -Infinity); L <= hi; L += I.every) {   // min: Radar + UH rings start at 75
-    const lines = contourG(st, G, L); all.push(lines);
+    let lines = contourG(st, G, L);
+    if (I.min_len) lines = lines.filter(l => { let n = 0; for (let k = 1; k < l.length && n < I.min_len; k++) n += Math.hypot(l[k][0] - l[k - 1][0], l[k][1] - l[k - 1][1]); return n >= I.min_len; });   // 11-03 swell lines: no specks
+    all.push(lines);
     for (const l of lines) {   // one label per ~600 px of line, inline (line cut under the label)
       let len = 0; const cum = [0]; for (let k = 1; k < l.length; k++) { len += Math.hypot(l[k][0] - l[k - 1][0], l[k][1] - l[k - 1][1]); cum.push(len); }
       if (len < 160) continue;
-      const nlab = Math.max(1, Math.floor(len / 600));
+      const nlab = Math.max(1, Math.floor(len / (I.lab_gap || 600)));
       for (let q = 0; q < nlab; q++) {
-        const target0 = len * (q + 0.5) / nlab, w = ctx.measureText(String(L)).width + pt(6);
+        const target0 = len * (q + 0.5) / nlab, w = ctx.measureText(String(L) + sfx).width + pt(6);
         // first the usual spot; if it sits on an H / L marker, the nearest clear spot along the line (both ways, up to LAB_SLIDE px)
         const tries = [0]; if (avoid && avoid.length) for (let d = 12; d <= LAB_SLIDE; d += 12) tries.push(d, -d);
         for (const dt of tries) {
           const target = target0 + dt; if (target < 0 || target > len) continue;
           const k = cum.findIndex(c => c >= target), p = l[Math.max(0, k)];
-          if (labels.some(b => Math.hypot(b.x - p[0], b.y - p[1]) < 120)) { if (dt === 0) break; continue; }
+          if (labels.some(b => Math.hypot(b.x - p[0], b.y - p[1]) < sep)) { if (dt === 0) break; continue; }
           if (p[0] < st.x0 + 20 || p[0] > st.x0 + st.W - 20 || p[1] < st.y0 + 12 || p[1] > st.y0 + st.H - 12) { if (dt === 0) break; continue; }
           const a = l[Math.max(0, k - 3)], b = l[Math.min(l.length - 1, k + 3)]; let ang = Math.atan2(b[1] - a[1], b[0] - a[0]);
           if (ang > Math.PI / 2) ang -= Math.PI; if (ang < -Math.PI / 2) ang += Math.PI;
           if (avoid && avoid.length) { const c = Math.abs(Math.cos(ang)), s_ = Math.abs(Math.sin(ang)), ex = c * w / 2 + s_ * pt(6), ey = s_ * w / 2 + c * pt(6);
             if (avoid.some(B => p[0] + ex > B[0] && p[0] - ex < B[2] && p[1] + ey > B[1] && p[1] - ey < B[3])) continue; }
-          labels.push({ x: p[0], y: p[1], ang, s: String(L), w }); break;
+          labels.push({ x: p[0], y: p[1], ang, s: String(L) + sfx, w }); break;
         }
       }
     }
@@ -1398,7 +1400,7 @@ function paintIsobars(ctx, I, all, labels) {
   ctx.save();   // clip out label boxes so lines break under the numbers (matplotlib clabel inline)
   ctx.beginPath(); ctx.rect(0, 0, ctx.canvas.width, ctx.canvas.height);
   for (const b of labels) {
-    const c = Math.cos(b.ang), s = Math.sin(b.ang), hw = b.w / 2, hh = pt(6);
+    const c = Math.cos(b.ang), s = Math.sin(b.ang), hw = b.w / 2, hh = pt(I.lab_pt ? I.lab_pt * 0.6 : 6);
     const pts = [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]].map(([x, y]) => [b.x + x * c - y * s, b.y + x * s + y * c]);
     ctx.moveTo(...pts[0]); for (let k = 3; k >= 1; k--) ctx.lineTo(...pts[k]); ctx.closePath();   // opposite winding
   }
@@ -1408,9 +1410,16 @@ function paintIsobars(ctx, I, all, labels) {
   ctx.restore();
   for (const b of labels) {
     ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(b.ang);
-    haloText(ctx, b.s, 0, 0, `700 ${pt(10)}px Montserrat`, I.color, pt(3.2), "center", "middle"); ctx.restore();
+    if (I.shadow_lab) {   // 11-03 (Benjamin t2151u "make the swell period more clear"): white bold numbers, dark core + tight drop shadow (Studio text style)
+      ctx.font = isoLabFont(I); ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.lineJoin = "round";
+      ctx.shadowColor = "rgba(0,0,0,0.9)"; ctx.shadowBlur = pt(1.2); ctx.shadowOffsetX = ctx.shadowOffsetY = pt(1.1);
+      ctx.strokeStyle = "#0d0f13"; ctx.lineWidth = pt(2.4); ctx.strokeText(b.s, 0, 0);
+      ctx.shadowColor = "transparent"; ctx.fillStyle = "#ffffff"; ctx.fillText(b.s, 0, 0);
+    } else haloText(ctx, b.s, 0, 0, `700 ${pt(10)}px Montserrat`, I.color, pt(3.2), "center", "middle");
+    ctx.restore();
   }
 }
+function isoLabFont(I) { return I && I.lab_pt ? `800 ${pt(I.lab_pt)}px Montserrat` : `700 ${pt(10)}px Montserrat`; }
 
 function drawBarbs(ctx, st, D, P, V) {   // matplotlib barbs (length 5.6 pt, 5 kt rounding, flags 50 / barbs 10 / half 5)
   const B = P.barbs, nx = V.barbs_across, ny = Math.max(4, Math.round(nx * st.H / st.W)), Lp = B.length * 3.21 * S.man.dpi / 72;   // matplotlib barb units: 5.6 -> 25 px at 100 dpi (measured)
