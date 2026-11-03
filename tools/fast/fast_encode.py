@@ -53,12 +53,16 @@ MODELS = {   # grid "lcc" = HRRR 3 km, "ll" = 0.25 deg global (lat 90 -> -90, lo
     # hourly to 120 h then 3-hourly to 384 h; kept 3-hourly to 120 h then 6-hourly to 384 h (84 steps). Wave fields only.
     "gfsw": dict(grid="ll", views=GLOBAL_VIEWS, cycles=(0, 6, 12, 18), steps=list(range(3, 121, 3)) + list(range(126, 385, 6)), keep=2, grid_from="gfs",
                  note="3-hourly to F+120, then 6-hourly"),
+    # 11-03 (Benjamin t2169u, waves tab): NOAA OISST v2.1 daily sea surface temperature anomaly (NCEI, public domain), regridded from its
+    # 0.125-offset 0.25 deg grid to the GFS 0.25 deg grid (same crop / layers); one "run" = the newest 14 daily analyses (tools/fast/oisst.py)
+    "oisst": dict(grid="ll", views=GLOBAL_VIEWS, cycles=(0,), steps=list(range(0, 14 * 24, 24)), keep=1, grid_from="gfs", note="daily analyses, newest 14 days"),
 }
 MINFO = {"aens": dict(name="ECMWF AIFS Ensemble", site="AIFS ENS", res="0.25\u00b0 \u00b7 50 members", credit_as="aifs"),
          "nbm": dict(name="NOAA NBM", site="NBM", res="2.5 km", noaa=True),
          "eps": dict(name="ECMWF Ensemble", site="ECMWF EPS", res="0.25\u00b0 \u00b7 50 members", credit_as="ifs"),
          "ifs9": dict(name="ECMWF IFS", site="ECMWF 9 km", res="9 km (0.1\u00b0)", credit_as="ifs"),
-         "gfsw": dict(name="NOAA WaveWatch III", site="NOAA WW3", res="0.25\u00b0", noaa=True)}
+         "gfsw": dict(name="NOAA WaveWatch III", site="NOAA WW3", res="0.25\u00b0", noaa=True),
+         "oisst": dict(name="NOAA OISST v2.1", site="NOAA OISST", res="0.25\u00b0 daily", noaa=True)}
 def as_model(m): return MODELS.get(m, {}).get("as_model", m)   # ifs9 = IFS (same fields / products / units), only the files differ
 def minfo(m):
     import menu_maps as M
@@ -1005,6 +1009,9 @@ def static(m, out, views_only=None, x2_only=False):
     # "14 s" labels with a dark core + tight drop shadow (viewer isobars shadow_lab), fewer / farther-apart labels, no tiny loops
     SWP_ISO = dict(field="swper", scale=1, every=2, min=6, sigma=1.2, sea_only=True, unit="s", color="#0d0f13", lw=1.9, halo=4.2,
                    lab_pt=12.5, suffix=" s", lab_gap=520, lab_sep=170, min_len=70, shadow_lab=True)
+    SSTA_L = [x / 2 for x in range(-14, 15)]   # -7 .. +7 F every 0.5
+    CM["ssta"] = M.ramp(SSTA_L, [(-7, "#2b0a5e"), (-5, "#2c3f9e"), (-3, "#3f86c6"), (-1.5, "#9cc9e6"), (-0.25, "#eef3f7"), (0.25, "#f7f1ea"),
+                                 (1.5, "#f6c08a"), (3, "#ec7f3c"), (5, "#c8282d"), (7, "#6e0f2b")])
     SWP_L = [0, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 22, 25]
     CM["swper"] = M.ramp(SWP_L, [(0, "#d9dde6"), (4, "#9fb3cf"), (6, "#5b8cc4"), (8, "#2f9fb0"), (10, "#3cb371"), (12, "#b5d334"), (14, "#f2c12e"),
                                  (16, "#ef7d2d"), (18, "#d7303a"), (20, "#a3215e"), (25, "#5a1570")])
@@ -1204,6 +1211,11 @@ def static(m, out, views_only=None, x2_only=False):
                         isobars=SWP_ISO,
                         extra="shaded = significant wave height  \u00b7  lines = swell period every 2 s"
                         "  \u00b7  arrows = swell direction  \u00b7  up to {hi} ft in view", pct=[0, 99.9], towns="none", only=("gfsw",)),
+        # 11-03 (Benjamin t2169u): NOAA OISST v2.1 daily SST anomaly (land is below min_show: the basemap shows through)
+        "ssta": dict(title="Sea Surface Temperature Anomaly", fields=["ssta"], key="SST anomaly (\u00b0F)", ticks=[-7, -6, -5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5, 6, 7],
+                     tickfmt=True, **table(SSTA_L, CM["ssta"], "both"), min_show=-8.0, dec=1,
+                     extra="NOAA OISST v2.1 daily analysis vs its 1991-2020 normal for the date  \u00b7  {lo} to {hi}\u00b0F in view", pct=[0.5, 99.5],
+                     towns="names", only=("oisst",)),
         "wavemax": dict(title="Estimated Max Wave Height", fields=["swh"], fill="hmax", key="Max wave (ft)", ticks=WVX_T, tickfmt=True, keyver="_85w", kw=WVX_KW,
                         **table(WVX_L, CM["wavemax"], "max"), extra="1.86 x significant height (largest of ~1000 waves, Rayleigh; as the old site)"
                         "  \u00b7  up to {hi} ft in view", pct=[0, 99.9], only=("ifs",)),
@@ -1316,6 +1328,7 @@ def static(m, out, views_only=None, x2_only=False):
     if m == "gfsw":   # NOAA WW3: wave products only (products without an only= list are atmosphere products)
         prods = {k: v for k, v in prods.items() if set(v["fields"]) <= set(GFSW_FIELDS)}
         if "waves" in prods: prods["waves"]["extra"] = "arrows = primary wave direction  \u00b7  up to {hi} ft in view"
+    if m == "oisst": prods = {k: v for k, v in prods.items() if k == "ssta"}
     if m == "ifs9":   # 9 km: no waves (0.25 deg only) and no anomalies (would need 0.1 deg climatology files: more R2 space)
         prods = {k: v for k, v in prods.items() if not v.get("clim") and not set(v["fields"]) & IFS9_SKIP}
     if m == "nbm":   # National Blend: its own period fields (1/6 h precip, 6 h snow, 3 h thunder, 12 h max/min)

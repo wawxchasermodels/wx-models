@@ -685,7 +685,7 @@ function brSync() { if (!$s("brcard")) return; $s("brcard").checked = BR.card; $
 // MP4 with the panel's settings (hours by forecast hour, speed, zoom, mode / pins of each view, preset; "Auto storm track" finds
 // the storm per map) and packs them in one .zip (stored, MP4s don't compress). Result: window.__batchResult.
 const BX = { on: false, cancel: false };
-const MORDER = ["hrrr", "rrfs", "nbm", "gfs", "ifs", "ifs9", "aifs", "eps", "aens", "aensm", "gfsw"];
+const MORDER = ["hrrr", "rrfs", "nbm", "gfs", "ifs", "ifs9", "aifs", "eps", "aens", "aensm", "gfsw", "oisst"];
 // 11-03 (WW3 swell-period labels under the 16:9 color bar): map line labels whose spot lands in the bottom color bar / credit band of
 // either frame are not drawn (the viewer asks while painting; the lines themselves stay)
 window.studioLabelHidden = (x, y) => {
