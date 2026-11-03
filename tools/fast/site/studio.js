@@ -321,15 +321,18 @@ window.onStudioSkip = () => { if (PLAY.on) PLAY.next(); };
 let barPinned = "";
 function pinBar() {
   if (CLEAN || !S.man) return; const bar = document.getElementById("bar"); if (!bar) return;
-  const key = innerWidth + ":" + Object.keys(S.man.models).join(",") + ":" + Object.values(S.man.runs).map(r => r.length).join(","); if (key === barPinned) return; barPinned = key;
+  const mlh = (document.getElementById("memlab") || {}).hidden, key = innerWidth + ":" + mlh + ":" + Object.keys(S.man.models).join(",") + ":" + Object.values(S.man.runs).map(r => r.length).join(","); if (key === barPinned) return; barPinned = key;
   const tabs = document.getElementById("tabs"), probe = (el, html) => { const c = el.cloneNode(false); c.removeAttribute("id"); c.style.cssText = "position:absolute;visibility:hidden;left:-9999px;top:0;width:auto;min-width:0"; c.innerHTML = html; el.parentNode.appendChild(c); const w = c.getBoundingClientRect().width; c.remove(); return w; };
-  if (tabs && typeof TABS !== "undefined") tabs.style.minWidth = Math.ceil(probe(tabs, [...TABS.map(t => t[1]), "Other"].map(l => `<button type="button">${l}</button>`).join(""))) + "px";
+  const ml = document.getElementById("memlab"), phone = innerWidth <= 820;
+  if (ml) ml.classList.toggle("keep", phone);   // phones: the Member box keeps its slot (its own bar row); desktop: it takes tab space (below)
+  if (tabs && typeof TABS !== "undefined") {   // desktop: the full ECMWF tab set's width, less the Member box when it shows (AIFS ENS members)
+    const w7 = Math.ceil(probe(tabs, [...TABS.map(t => t[1]), "Other"].map(l => `<button type="button">${l}</button>`).join(""))), gap = parseFloat(getComputedStyle(bar).columnGap) || 10;
+    tabs.style.minWidth = phone ? "" : Math.max(0, w7 - (ml && !ml.hidden ? Math.ceil(ml.getBoundingClientRect().width + gap) : 0)) + "px"; }
   const opts = a => [...new Set(a)].map(t => `<option>${t}</option>`).join("");
   const titles = [], views = []; for (const md of Object.values(S.man.models)) { try { for (const p of Object.values(allProds(md))) if (p && p.title) titles.push(p.title); } catch (e) { /* no products */ } for (const v of Object.values(md.views || {})) if (v && v.label) views.push(v.label); }
-  const pin = (id, list) => { const el = document.getElementById(id); if (el && list.length) el.style.width = Math.ceil(probe(el, opts(list))) + "px"; };
-  pin("prod", titles); pin("view", views);
-  const run = document.getElementById("run"); if (run) { const ls = [...run.options].map(o => o.textContent); const lg = ls.reduce((a, b) => (b.length > a.length ? b : a), ""); pin("run", ls.concat([lg + " (loading, to F+384)"])); }
-  const ml = document.getElementById("memlab"); if (ml) ml.classList.add("keep");
+  const pin = (id, list, cap) => { const el = document.getElementById(id); if (el && list.length) el.style.width = Math.min(cap, Math.ceil(probe(el, opts(list)))) + "px"; };
+  pin("prod", titles, 280); pin("view", views, 240);   // longest entry on any model (long names end in "..." in the closed menu)
+  const run = document.getElementById("run"); if (run) pin("run", [...run.options].map(o => o.textContent).concat(["ECMWF AIFS ENS 0.25\u00b0 00Z 11-03 (loading, to F+360)"]), 330);
 }
 window.onStudioDraw = (cv, cur, step, lite) => { try { pinBar(); } catch (e) { /* bar not ready */ } last = { cv, cur, step, lite: !!lite }; renderAll(); try { scrubSync(); } catch (e) { /* scrubber not built */ } if (lite) return; if (PLAY.on) PLAY.next(); if (!REC.on && typeof mpSync === "function") try { mpSync(); } catch (e) { /* panel not ready */ } };
 // drag / keys / zoom / buttons
