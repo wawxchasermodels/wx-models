@@ -20,6 +20,7 @@ def avail(m, c, s):
         if m in FE.NOAA: u = M.MODELS[m]["url"].format(d=f"{c:%Y%m%d}", h=c.hour, s=s) + ".idx"
         elif m in ("eps", "aens"): u = FE.ENS_SRC[m][0].format(d=f"{c:%Y%m%d}", h=c.hour, s=s) + ".index"
         elif m == "nbm": u = FE.NBM_URL.format(d=f"{c:%Y%m%d}", h=c.hour, s=s) + ".idx"
+        elif m == "gfsw": u = FE.WW3_URL.format(d=f"{c:%Y%m%d}", h=c.hour, s=s) + ".idx"   # 11-03 NOAA WaveWatch III (GFS-Wave)
         else: u = TM.MODELS[m]["url"]["sfc"].format(d=f"{c:%Y%m%d}", h=c.hour, s=s) + ".index"
         TM.get(u, (0, 10)); return True
     except Exception: return False
@@ -35,7 +36,7 @@ LASTMAN = {}
 MAN_EVERY = 300   # s between manifest rewrites while a run is coming in (run.json is updated every chunk)
 # --watch: minutes after the cycle time when the first step is usually out (measured 10-31 from R2 upload times and the
 # NOAA / ECMWF open-data files); watching starts WATCH_EARLY min before that, and stops WATCH_SPAN h after it or when complete
-DUE_MIN = {"hrrr": 45, "rrfs": 60, "nbm": 55, "gfs": 200, "ifs": 330, "ifs9": 420, "aifs": 320, "eps": 380, "aens": 350}
+DUE_MIN = {"hrrr": 45, "rrfs": 60, "nbm": 55, "gfs": 200, "ifs": 330, "ifs9": 420, "aifs": 320, "eps": 380, "aens": 350, "gfsw": 215}
 WATCH_EARLY, WATCH_SPAN = 60, 6
 
 def run_due(s3, m):

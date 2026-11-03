@@ -15,8 +15,8 @@ on:
   workflow_dispatch:
     inputs:
       models:
-        description: "comma list: hrrr,rrfs,nbm,gfs,ifs,aifs,eps,aens"
-        default: "hrrr,rrfs,nbm,gfs,ifs,aifs,eps,aens"
+        description: "comma list: hrrr,rrfs,nbm,gfs,ifs,aifs,eps,aens,gfsw"
+        default: "hrrr,rrfs,nbm,gfs,ifs,aifs,eps,aens,gfsw"
       minutes:
         description: "time budget per model job"
         default: "40"
@@ -32,7 +32,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        model: [hrrr, rrfs, nbm, gfs, ifs, aifs, eps, aens]
+        model: [hrrr, rrfs, nbm, gfs, ifs, aifs, eps, aens, gfsw]   # 11-03: gfsw = NOAA WaveWatch III
     permissions:
       contents: read
       actions: write   # only for the re-dispatch step below
@@ -40,7 +40,7 @@ jobs:
       WX_CACHE: ${{ github.workspace }}/.wx_cache
       # 11-02: models to skip (comma list). ECMWF 9 km (ifs9, rides the ifs job) paused; to re-enable set this to "".
       FAST_PAUSED: ifs9
-      ON: ${{ contains(format(',{0},', inputs.models || 'hrrr,rrfs,nbm,gfs,ifs,aifs,eps,aens'), format(',{0},', matrix.model)) }}
+      ON: ${{ contains(format(',{0},', inputs.models || 'hrrr,rrfs,nbm,gfs,ifs,aifs,eps,aens,gfsw'), format(',{0},', matrix.model)) }}
     steps:
       - uses: actions/checkout@v4
         if: env.ON == 'true'
