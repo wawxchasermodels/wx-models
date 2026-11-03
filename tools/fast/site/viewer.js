@@ -247,6 +247,8 @@ async function boot() {
   await loadRun(S.run);
   // "Runs" menu (Benjamin 10-29 7:10 PM): every available run, grouped by model, newest first; picking one keeps the valid time
   const runLabel = r => { const [m, c] = r.split("/"), p = ((S.man.progress || {})[m] || {})[c];
+    if (m === "oisst") { const st = (S.runs[r] || {}).steps, d = x => { const v = new Date(x.valid); return `${v.getUTCMonth() + 1}-${v.getUTCDate()}`; };   // 11-03: daily analyses, not a run time
+      return `${S.man.models[m].site} daily ${c.slice(4, 6)}-${c.slice(6, 8)}` + (st && st.length ? ` to ${d(st[st.length - 1])}` : ""); }
     return `${S.man.models[m].site} ${c.slice(8)}Z ${c.slice(4, 6)}-${c.slice(6, 8)}${p ? ` (loading, to F+${p[0]})` : ""}`; };
   // 10-31 6:08 PM (Benjamin "Go for it on the eps 3 hourly"): the group label says how often a model's maps come (manifest note, else here)
   const RUN_NOTE = { eps: "3-hourly to F+144, then 6-hourly" }, runNote = m => S.man.models[m].note || RUN_NOTE[m] || "";
