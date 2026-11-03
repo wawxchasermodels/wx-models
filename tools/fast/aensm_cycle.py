@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """11-03 (Benjamin t2176u "Push and deploy"): GitHub Actions job for AIFS ENS single members ("aensm", fast-models.yml matrix).
-Progressive, resumable: newest AIFS ENS cycle(s) out on data.ecmwf.int -> the hours not yet in R2 (aens_members.one: msl + z500 byte
-ranges, 50 lossless 0.5 deg WebP per hour) -> upload -> run.json (unbroken hours from F+6) -> manifest runs.aensm = newest 2 runs in R2
+Progressive, resumable: newest AIFS ENS cycle(s) out on data.ecmwf.int -> the hours not yet in R2 (aens_members.one: msl + z500 + sf +
+10u + 10v byte ranges, 50 lossless 0.5 deg 2-tile WebP per hour; 11-03 t2221u) -> upload -> run.json (unbroken hours from F+6) -> manifest runs.aensm = newest 2 runs in R2
 (ETag-checked) -> older aensm runs deleted. Manifest models.aensm (static entry) is written once from the box.
   aensm_cycle.py --minutes 40 --workers 4"""
 import os, sys, json, time, argparse, datetime as dt, tempfile, shutil
@@ -22,17 +22,7 @@ def r2_json(s3, k):
     try: return json.loads(s3.get_object(Bucket=BUCKET, Key=k)["Body"].read())
     except Exception: return None
 
-def run_json(c, steps_meta, mems, crop):
-    import temp_maps as TM; PT = TM.PT; i0, i1, j0, j1 = crop
-    return dict(model="aensm", cycle=f"{c:%Y%m%d%H}", init=c.isoformat(), base=f"runs/aensm/{c:%Y%m%d%H}", fields=["mslp", "z500"], grid=dict(ny=i1 - i0, nx=j1 - j0),
-                half=[(i1 - i0 + 1) // 2, (j1 - j0 + 1) // 2], members=mems,
-                runline=f"ECMWF AIFS ENS member {{mem}} 0.5\u00b0 {c:%HZ} run {c.astimezone(PT):%-m-%-d-%y (%-I %p PT)}", steps=steps_meta,
-                complete=len(steps_meta) == len(AM.STEPS), expected=len(AM.STEPS), file="m{mem}/{name}_f{f:03d}.webp")
-
-def step_meta(c, s):
-    import temp_maps as TM; PT = TM.PT; v = c + dt.timedelta(hours=s); vl = v.astimezone(PT)
-    return dict(f=s, valid=v.isoformat(), valid_line=f"Valid {vl:%a %-m-%-d} \u00b7 {vl:%-I %p} PT", badge=[f"F+{s}", f"{v:%HZ %a}".upper()],
-                ranges=dict(AM.RNG), packs={"mslp": ["mem", 0], "z500": ["mem", 1]})
+run_json, step_meta = AM.run_json, AM.step_meta   # 11-03 t2221u: 2-tile files "mx" (MSLP, 500 mb, snow total | 10 m u, v)
 
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("--minutes", type=float, default=40); ap.add_argument("--workers", type=int, default=4); a = ap.parse_args()
@@ -44,6 +34,16 @@ def main():
     from concurrent.futures import ProcessPoolExecutor
     for c in sorted(cycles):   # older first: finish it, then the newest
         cyc = f"{c:%Y%m%d%H}"; R = r2_json(s3, f"runs/aensm/{cyc}/run.json") or {}
+        old = bool(R) and R.get("tiles") != AM.TILES   # run made before the 2-tile format: redo it in new files (mx_), keep its run.json until caught up
+        nold = len(R.get("steps", [])) if old else 0
+        if old:   # resume a half-done redo from the mx_ files already in R2 (a step counts when all its members are there)
+            cnt = {}
+            for pg in s3.get_paginator("list_objects_v2").paginate(Bucket=BUCKET, Prefix=f"runs/aensm/{cyc}/"):
+                for o in pg.get("Contents", []):
+                    k = o["Key"].rsplit("/", 2)
+                    if k[-1].startswith(AM.FILE + "_f"): cnt.setdefault(int(k[-1][len(AM.FILE) + 2:-5]), set()).add(int(k[-2][1:]))
+            ok = {s: m for s, m in cnt.items() if len(m) >= 50}
+            R = dict(steps=[step_meta(c, s) for s in AM.STEPS if s in ok], members=sorted(set.intersection(*ok.values())) if ok else [])
         have = {x["f"] for x in R.get("steps", [])}; mems = R.get("members") or []
         todo = [s for s in AM.STEPS if s not in have]
         if not todo: print(cyc, "complete in R2", flush=True); continue
@@ -56,14 +56,14 @@ def main():
                 for s, info, err in ex.map(AM.one, [(c, s, crop, tmp) for s in batch]):
                     if err: print(cyc, f"f{s:03d}", err, flush=True); continue
                     for n in info["members"]:
-                        p = f"{tmp}/m{n:02d}/mem_f{s:03d}.webp"; s3.upload_file(p, BUCKET, f"runs/aensm/{cyc}/m{n:02d}/mem_f{s:03d}.webp", ExtraArgs={"ContentType": "image/webp"}); os.remove(p)
+                        p = f"{tmp}/m{n:02d}/{AM.FILE}_f{s:03d}.webp"; s3.upload_file(p, BUCKET, f"runs/aensm/{cyc}/m{n:02d}/{AM.FILE}_f{s:03d}.webp", ExtraArgs={"ContentType": "image/webp"}); os.remove(p)
                     meta[s] = step_meta(c, s); mems = sorted(set(mems) & set(info["members"])) if mems else list(info["members"])   # members present at every hour
                     print(cyc, f"f{s:03d}", len(info["members"]), "members", f"{info['size']/1e3:.0f} KB", f"{info['sec']} s", flush=True)
                 steps = []
                 for s in AM.STEPS:
                     if s in meta: steps.append(meta[s])
                     else: break
-                if steps: s3.put_object(Bucket=BUCKET, Key=f"runs/aensm/{cyc}/run.json", Body=json.dumps(run_json(c, steps, mems, crop)).encode(), ContentType="application/json")
+                if steps and len(steps) >= nold: s3.put_object(Bucket=BUCKET, Key=f"runs/aensm/{cyc}/run.json", Body=json.dumps(run_json(c, steps, mems, crop)).encode(), ContentType="application/json")
         shutil.rmtree(tmp, ignore_errors=True)
         if time.time() > t_end - 300: more = True
         if more: break
