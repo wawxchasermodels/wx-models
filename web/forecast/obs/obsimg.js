@@ -198,6 +198,7 @@ const ObsImg = (() => {
   const CSS = `.obs-root .obs-img{margin-top:-4px}.obs-root .obs-img .oi-sep{width:1px;height:22px;background:var(--o-rule);margin:0 4px}
     .obs-root .obs-img .oi-t{font:12.5px "IBM Plex Mono",ui-monospace,monospace;color:var(--o-muted);white-space:nowrap}
     .obs-root .obs-img input[type=range]{width:min(180px,32vw);accent-color:var(--o-verm)}
+    #obsov .obs-img button[aria-pressed="true"],#obsp .obs-img button[aria-pressed="true"],.obs-root .obs-img button[aria-pressed="true"]{background:#f4f2ee;color:#15171c;border-color:#f4f2ee;font-weight:600}
     .obs-root .obs-img button.oi-play{min-width:38px;padding:5px 10px}.obs-root .obs-img .oi-loop{display:contents}.obs-root .obs-img .oi-loop[hidden]{display:none!important}`;
   function mountUi(root) {
     if ($("oimg")) return;
