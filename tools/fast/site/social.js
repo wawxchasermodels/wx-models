@@ -23,13 +23,18 @@ function setLists() {
   fillSel($("prod"), prods.map(p => [p, PNAME[p] || p]), S.prod);
   fillSel($("view"), it.views.map(v => [v, VNAME[v] || v]), S.view);
   fillSel($("hour"), hrs.map(f => [f, `F+${f} · ${validLbl(f)} PT`]), S.hour);
+  S.hrs = hrs; const sr = $("shr"); sr.max = Math.max(0, hrs.length - 1); sr.value = Math.max(0, hrs.indexOf(S.hour));
   $("strip").innerHTML = hrs.map(f => `<button type="button" data-f="${f}"${f === S.hour ? ' class="on"' : ""}><img loading="lazy" src="${url(nm("h", f), true)}" alt=""><div>F+${f}</div></button>`).join("");
 }
-function show() {
+function show(lite) {
+  // lite (hour scrubber being dragged): the 1280 JPGs only, so dragging stays quick; the 4K PNGs load when the drag ends
   for (const k of ["v", "h"]) { const n = nm(k); $("i" + k).src = url(n, true);
-    const big = new Image(); big.onload = () => { if (nm(k) === n) $("i" + k).src = big.src; }; big.src = url(n);   // JPG first, the 4K PNG when it lands
+    if (!lite) { const big = new Image(); big.onload = () => { if (nm(k) === n) $("i" + k).src = big.src; }; big.src = url(n); }   // JPG first, the 4K PNG when it lands
     $("s" + k).href = url(n); $("s" + k).download = `ECMWF_${S.run}_${n}.png`; $("s" + k + "1").href = url(n, true); $("s" + k + "1").download = `ECMWF_${S.run}_${n}.jpg`; }
   for (const b of $("strip").children) b.classList.toggle("on", +b.dataset.f === S.hour);
+  if (S.hrs) { const k = S.hrs.indexOf(S.hour); if (k >= 0 && +$("shr").value !== k) $("shr").value = k;
+    $("slbl").textContent = `F+${S.hour} \u00b7 ${validLbl(S.hour)} PT (${k + 1}/${S.hrs.length})`;
+    $("sprev").disabled = k <= 0; $("snext").disabled = k >= S.hrs.length - 1; }
   const it = S.idx.items[S.run]; $("msg").textContent = `ECMWF IFS 0.25° ${S.run.slice(8)}Z run · ${it.files.length} frames · rendered on the box (updated ${S.idx.updated.slice(0, 16).replace("T", " ")} UTC)`;
   const u = new URL(location); u.searchParams.set("run", S.run); u.searchParams.set("prod", S.prod); u.searchParams.set("view", S.view); u.searchParams.set("f", S.hour);
   try { history.replaceState(null, "", u); } catch (e) {}
@@ -45,7 +50,11 @@ async function boot() {
   $("view").onchange = e => { S.view = e.target.value; setLists(); show(); };
   $("hour").onchange = e => { S.hour = +e.target.value; show(); };
   $("strip").onclick = e => { const b = e.target.closest("button[data-f]"); if (b) { S.hour = +b.dataset.f; $("hour").value = S.hour; show(); } };
-  addEventListener("keydown", e => { if (e.target.tagName === "SELECT") return; const o = [...$("hour").options].map(x => +x.value), i = o.indexOf(S.hour);
+  const toK = (k, lite) => { if (!S.hrs || !S.hrs.length) return; k = Math.max(0, Math.min(S.hrs.length - 1, k)); S.hour = S.hrs[k]; $("hour").value = S.hour; show(lite); };
+  $("shr").oninput = e => toK(+e.target.value, true);
+  $("shr").onchange = e => toK(+e.target.value, false);
+  $("sprev").onclick = () => toK(S.hrs.indexOf(S.hour) - 1); $("snext").onclick = () => toK(S.hrs.indexOf(S.hour) + 1);
+  addEventListener("keydown", e => { if (e.target.tagName === "SELECT" || e.target.id === "shr") return; const o = [...$("hour").options].map(x => +x.value), i = o.indexOf(S.hour);
     if (e.key === "ArrowRight" && i < o.length - 1) { S.hour = o[i + 1]; $("hour").value = S.hour; show(); } if (e.key === "ArrowLeft" && i > 0) { S.hour = o[i - 1]; $("hour").value = S.hour; show(); } });
   window.__ready = true;
 }
