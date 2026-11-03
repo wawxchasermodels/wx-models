@@ -654,6 +654,18 @@ function bin(pal, v) {   // index of the level band holding v (uniform: arithmet
 function sampleNN(st, F, k) {   // nearest grid point (categorical fields: precip type)
   const i = st.idx[k]; if (i < 0) return NaN; return F[i + (st.wx[k] >= 0.5 ? 1 : 0) + (st.wy[k] >= 0.5 ? st.gnx : 0)];
 }
+// 11-03 (Benjamin: ECMWF "MSLP + precip type" less blocky, "a hair of blending"): instead of the nearest 0.25 deg cell, each pixel blends
+// its 4 grid points: rate band = bilinear mix of the bands (dry = 0), so the edge of the precip area follows a smooth line; the type is
+// the one with the most weight among the wet points (types never mix into new colors). Dry when the blended band is under 0.5.
+function sampleType(st, F, k) {
+  const i = st.idx[k]; if (i < 0) return NaN; const tx = st.wx[k], ty = st.wy[k], g = st.gnx;
+  const c = [F[i], F[i + 1], F[i + g], F[i + g + 1]], w = [(1 - tx) * (1 - ty), tx * (1 - ty), (1 - tx) * ty, tx * ty];
+  let band = 0, hi = 0; const tw = [0, 0, 0, 0];
+  for (let q = 0; q < 4; q++) { const v = Math.round(c[q]), b = v & 15; if (!(v >= 1) || !b) continue; band += w[q] * b; tw[(v >> 4) & 3] += w[q]; if (b > hi) hi = b; }
+  if (band < 0.5) return 0;
+  let t = 0; for (let q = 1; q < 4; q++) if (tw[q] > tw[t]) t = q;
+  return (t << 4) | Math.min(hi, Math.max(1, Math.round(band)));
+}
 function sample(st, F, k) {   // bilinear value at panel pixel k
   const i = st.idx[k]; if (i < 0) return NaN; const tx = st.wx[k], ty = st.wy[k], g = st.gnx;
   return (F[i] * (1 - tx) + F[i + 1] * tx) * (1 - ty) + (F[i + g] * (1 - tx) + F[i + g + 1] * tx) * ty;
@@ -720,7 +732,7 @@ async function render(lite) {
   catch (e) {
     if (seq !== drawSeq) return;
     if (!String(e && e.message).startsWith("nodata:")) throw e;
-    S.derived.delete(`${run}/${pid}/${f}`);
+    S.derived.delete(`${rk(run)}/${pid}/${f}`);
     if (!window.__vjNoJump && !S.dragging) {   // while dragging the slider: no jumping under the finger (it jumps when you let go)
       let alt = null; try { alt = await findHour(run, pid, S.i, dir); } catch (err) { /* network: fall through to the message */ }
       if (seq !== drawSeq || S.run !== run || S.prod !== pid) return;
@@ -745,7 +757,7 @@ async function render(lite) {
   const V = VIEWS()[vid], P = PRODS()[pid], cv = $("map");
   const ctx = sizeMap(cv, V, lite), [LW, LH] = V.fig, rs = cv._rs; ctx.fillStyle = S.man.style.BG; ctx.fillRect(0, 0, LW, LH);
   // 1. color fill: value -> bin color, exactly the site's bins (contourf + BoundaryNorm)
-  const smp = P.fill === "prt" ? sampleNN : sample;
+  const smp = P.fill === "prt" ? (/^(ifs|ifs9)$/.test(run.split("/")[0]) ? sampleType : sampleNN) : sample;
   const pal = palette(pid), mins = P.min_show, im = ctx.createImageData(st.W, st.H), o = im.data, F = D.fill, n = st.W * st.H;
   const vals = new Float32Array(n);
   if (lite) {   // half resolution: one sample per 2x2 block
