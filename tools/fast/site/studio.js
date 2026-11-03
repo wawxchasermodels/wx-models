@@ -205,15 +205,16 @@ window.__studioBrand = { BR, titleCard: (k, a) => titleCard(k, F[k].cv.getContex
 // 11-02 (Benjamin t2111u "add the scale for what different colors represent on the ensemble lows on the right hand side"): member-dot key
 // for the ensemble low-centre maps (AIFS ENS / EPS "elows"): each dot = one member's low centre, colored by its central pressure in the
 // viewer's 8 bands (DOT_COLS / DOT_LABELS = ens_maps). Right edge, below the top-right webcam corner (16:9) / above the color bar (9:16).
-function lowKey(c, f, k) {
+function lowKey(c, f, k, cbY, cbS) {
   if (typeof DOT_COLS === "undefined") return;
   const fs = k === "v" ? 25 : 21, rh = Math.round(fs * 1.45), rr = k === "v" ? 9 : 8, n = DOT_COLS.length;
   c.save(); c.font = `700 ${fs}px Montserrat`; const head = ["Member low", "pressure (mb)"];
   const lw = Math.max(...DOT_LABELS.map(t => c.measureText(t).width)), hw = Math.max(...head.map(t => c.measureText(t).width));
-  const w = Math.max(hw, rr * 2 + 12 + lw), x0 = f.W - f.pad - w, hH = fs * 2.5 + 8, tot = hH + n * rh;
-  const pd = k === "v" ? 18 : 15, y0 = k === "v" ? f.H - f.bot + 30 - tot - pd : f.H - 150 - tot - 2 * pd;   // 16:9: lower right, above the credit lines
+  const w = Math.max(hw, rr * 2 + 12 + lw); let x0 = f.W - f.pad - w; const hH = fs * 2.5 + 8, tot = hH + n * rh;
+  // t2115u: flush against the right edge of the frame, 50 % translucent card, text with the frame's shadow (sharp core here + soft fade in ovPut)
+  const pd = k === "v" ? 18 : 15; x0 = f.W - w - pd; const y0 = k === "v" ? cbY - cbS * 1.6 - 22 - tot - pd : f.H - 150 - tot - 2 * pd;   // 9:16: just above the bar's label   // 16:9: lower right, above the credit lines
   // compact dark card (reads on the white map and over the map's own member list), keeps the frame's shadow style
-  c.fillStyle = "rgba(15,17,21,0.84)"; c.beginPath(); c.roundRect ? c.roundRect(x0 - pd, y0 - pd * 0.6, w + 2 * pd, tot + pd * 1.4, 14) : c.rect(x0 - pd, y0 - pd * 0.6, w + 2 * pd, tot + pd * 1.4); c.fill(); noShadow(c);
+  noShadow(c); c.fillStyle = "rgba(15,17,21,0.5)"; c.beginPath(); c.roundRect ? c.roundRect(x0 - pd, y0 - pd * 0.6, w + 2 * pd, tot + pd * 1.4, [14, 0, 0, 14]) : c.rect(x0 - pd, y0 - pd * 0.6, w + 2 * pd, tot + pd * 1.4); c.fill(); sharpShadow(c, k);
   c.fillStyle = "#e9ecf1"; c.textAlign = "left"; c.textBaseline = "alphabetic"; head.forEach((t, i) => c.fillText(t, x0, y0 + fs + i * fs * 1.2));
   c.font = `600 ${fs}px Montserrat`; c.textBaseline = "middle";
   for (let i = 0; i < n; i++) { const yy = y0 + hH + i * rh + rh / 2, cx = x0 + rr + 1;
@@ -263,7 +264,11 @@ async function render(k, frO) {   // frO: camera override (MP4 storm-track pan)
   const cnr = BR.corner && LOGOS[BR.logo] ? cornerBox(k, by + f.valid * 1.9, headBot, f.H - f.bot + (k === "v" ? 110 : 62)) : null;
   // bottom: color bar + credit (no dark band any more: their text gets a shadow so it stays readable on the map)
   c.save(); sharpShadow(c, k);
-  const cbW = k === "v" ? f.W - 2 * f.pad : Math.min(1100, f.W * 0.58), cbY = f.H - f.bot + (k === "v" ? 110 : 62), cbS = k === "v" ? 28 : 24;
+  // 11-02 (Benjamin t2115u "move the scale further down"): 9:16: the bar sits just above the credit line (tick numbers ~14 px clear of it;
+  // the credit moves up for 3+ data lines and the bar with it); 16:9: 10 px lower (it was already at the bottom, credits are bottom right)
+  const nDl = window.creditLines ? [].concat(...window.creditLines(cur.pid, cur.P, (cur.P.towns || "numbers") !== "none").map(l => l.replace("  Basemap: Natural Earth.", "").split("  "))).length : 0;
+  const crY = f.H - 70 - Math.max(0, nDl - 2) * ((k === "v" ? 19 : 17) + 9);
+  const cbW = k === "v" ? f.W - 2 * f.pad : Math.min(1100, f.W * 0.58), cbS = k === "v" ? 28 : 24, cbY = k === "v" ? Math.round(crY - 22 - 14 - 34 - cbS * 1.35) : f.H - f.bot + 72;
   if (!colorbar(c, P, f.pad, cbY, cbW, k === "v" ? 34 : 26, cbS)) {
     try { const im = await getKey(cur.pid, cur.V === VIEWS()[S.view] ? S.view : S.view); const s_ = cbW / im.naturalWidth; c.drawImage(im, f.pad, cbY - 30, cbW, im.naturalHeight * s_); } catch (e) { /* no key */ }
   }
@@ -280,8 +285,7 @@ async function render(k, frO) {   // frO: camera override (MP4 storm-track pan)
   const credit = `${(R_.runline || "").split(" run ")[0]}  \u00b7  ${cur.V.label}`, logo = SQ.get("logo") || "";
   // 9:16: credit under the bar, logo right; 16:9: bar fills the left 58 %, so credit (and logo above it) sit bottom-right
   const cB = cnr && (BR.cpos === "br" || BR.cpos === "bl") ? cnr : null;   // the credit steps aside for a logo on its row
-  const nDl = window.creditLines ? [].concat(...window.creditLines(cur.pid, cur.P, (cur.P.towns || "numbers") !== "none").map(l => l.replace("  Basemap: Natural Earth.", "").split("  "))).length : 0;
-  if (k === "v") c.fillText(credit, f.pad + (cB && BR.cpos === "bl" ? cB.s + 18 : 0), f.H - 70 - Math.max(0, nDl - 2) * ((k === "v" ? 19 : 17) + 9)); else { c.textAlign = "right"; c.fillText(credit, f.W - f.pad - (cB && BR.cpos === "br" ? cB.s + 20 : 0), f.H - 24); c.textAlign = "left"; }
+  if (k === "v") c.fillText(credit, f.pad + (cB && BR.cpos === "bl" ? cB.s + 18 : 0), crY); else { c.textAlign = "right"; c.fillText(credit, f.W - f.pad - (cB && BR.cpos === "br" ? cB.s + 20 : 0), f.H - 24); c.textAlign = "left"; }
   // 11-01-26 legal audit (Benjamin t2020u): data credit on every export (ECMWF: (c) year, www.ecmwf.int, CC BY 4.0, Modified; GeoNames when towns
   // show; PRISM normals on precip anomaly maps). 9:16: small lines under the credit; 16:9: right-aligned above it (logo text moves up for it)
   // 11-02 (t2112u, legibility): the locked credit sentences unchanged, but each "  "-joined sentence gets its own line (it used to shrink to
@@ -295,7 +299,7 @@ async function render(k, frO) {   // frO: camera override (MP4 storm-track pan)
   else { c.textAlign = "right"; dl.forEach((l, i) => c.fillText(l, f.W - f.pad, f.H - 24 - 30 - (dl.length - 1 - i) * dlh)); c.textAlign = "left"; }
   const dUp = k === "v" ? 0 : dl.length * dlh + 4;
   if (logo) { c.font = `800 ${k === "v" ? 34 : 28}px Montserrat`; c.fillStyle = "#fff"; c.textAlign = "right"; c.fillText(logo, f.W - f.pad, f.H - (k === "v" ? 70 : 60) - dUp); c.textAlign = "left"; }
-  if (P.lows) lowKey(c, f, k);
+  if (P.lows) lowKey(c, f, k, cbY, cbS);
   c.restore();
   c = c0; ovPut(c, f, k);
   if (cnr) cornerLogo(c, cnr);
