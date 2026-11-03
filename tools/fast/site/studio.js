@@ -211,7 +211,9 @@ function lowKey(c, f, k) {
   c.save(); c.font = `700 ${fs}px Montserrat`; const head = ["Member low", "pressure (mb)"];
   const lw = Math.max(...DOT_LABELS.map(t => c.measureText(t).width)), hw = Math.max(...head.map(t => c.measureText(t).width));
   const w = Math.max(hw, rr * 2 + 12 + lw), x0 = f.W - f.pad - w, hH = fs * 2.5 + 8, tot = hH + n * rh;
-  const y0 = k === "v" ? f.H - f.bot + 40 - tot : 300;
+  const pd = k === "v" ? 18 : 15, y0 = k === "v" ? f.H - f.bot + 30 - tot - pd : f.H - 150 - tot - 2 * pd;   // 16:9: lower right, above the credit lines
+  // compact dark card (reads on the white map and over the map's own member list), keeps the frame's shadow style
+  c.fillStyle = "rgba(15,17,21,0.84)"; c.beginPath(); c.roundRect ? c.roundRect(x0 - pd, y0 - pd * 0.6, w + 2 * pd, tot + pd * 1.4, 14) : c.rect(x0 - pd, y0 - pd * 0.6, w + 2 * pd, tot + pd * 1.4); c.fill(); noShadow(c);
   c.fillStyle = "#e9ecf1"; c.textAlign = "left"; c.textBaseline = "alphabetic"; head.forEach((t, i) => c.fillText(t, x0, y0 + fs + i * fs * 1.2));
   c.font = `600 ${fs}px Montserrat`; c.textBaseline = "middle";
   for (let i = 0; i < n; i++) { const yy = y0 + hH + i * rh + rh / 2, cx = x0 + rr + 1;
