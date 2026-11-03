@@ -10,7 +10,13 @@
                 part of NASA's Earth Science Data and Information System (ESDIS)." GeoColor: please credit CIRA/NOAA.
    Each frame is one lat/lon (plate carree) image of a fixed box; a WebGL pass reprojects it per pixel into the obs map's own
    Lambert projection and the current zoom / pan, then the result is drawn under the coastlines, borders, isobars and stations.
-   Two boxes per source: "detail" (Pacific NW, used when zoomed in) and "wide" (West + western Canada view). */
+   Two boxes per source: "detail" (Pacific NW, used when zoomed in) and "wide" (West + western Canada view).
+   11-03 (t2224u) Mid-level water vapor (GOES-West ABI band 9, 6.9 um). NASA GIBS has no band 9, so it comes from the Iowa Environmental
+     Mesonet (IEM) GOES-West WMS https://mesonet.agron.iastate.edu/cgi-bin/wms/goes_west.cgi (CORS "*", AccessConstraints None; NOAA
+     GOES-18 data via Unidata), IEM's colour WV table: PNW box = conus_ch09 (2 km, every 5 min) over fulldisk_ch09 (6 km, every 10 min,
+     fills north of the CONUS sector); wide box = fulldisk_ch09. IEM only serves the newest image, so the loop is built here: each new
+     frame is saved in this browser (IndexedDB, the site's own origin, last 3 hours) while the layer is on, and the loop grows to 12.
+   11-03 (t2226u) "Hide menu" button: collapses the view / layer / satellite chips (choice kept in localStorage obsMenuMin). */
 "use strict";
 const ObsImg = (() => {
   const RAD_WMS = "https://opengeo.ncep.noaa.gov/geoserver/conus/conus_bref_qcd/ows";
@@ -27,9 +33,13 @@ const ObsImg = (() => {
     gc: { label: "GeoColor", kind: "gibs", layer: "GOES-West_ABI_GeoColor", fmt: "image/jpeg", alpha: 1, n: 12, stepMin: 10, refreshMin: 10,
       tiles: { detail: { box: [-140, 37, -100, 57], px: [2000, 1000] }, wide: { box: [-170, 26, -94, 72], px: [1900, 1150] } },
       credit: "Satellite: NOAA GOES-West GeoColor (CIRA/NOAA) via NASA GIBS/ESDIS" },
+    wv: { label: "Water vapor", kind: "iem", alpha: 1, n: 12, stepMin: 5, refreshMin: 1,
+      tiles: { detail: { box: [-140, 37, -100, 57], px: [2000, 1000] }, wide: { box: [-170, 26, -94, 72], px: [1900, 1150] } },
+      credit: "Satellite: NOAA GOES-West Mid-Level Water Vapor (band 9) via Iowa Environmental Mesonet" },
   };
-  const ST = { radar: false, sat: "", frames: { radar: [], ir: [], gc: [] }, img: new Map(), idx: -1, playing: true, timer: 0, last: 0,
-    timesAt: {}, hold: false, blank: new Set(), all: { radar: [], ir: [], gc: [] }, gl: null, glFail: "", sig: 0, msg: "", obs: null };
+  const PILL = { radar: "Radar", ir: "Satellite Clean IR (band 13)", gc: "Satellite GeoColor", wv: "Satellite Mid-Level Water Vapor (band 9)" };
+  const ST = { radar: false, sat: "", frames: { radar: [], ir: [], gc: [], wv: [] }, img: new Map(), idx: -1, playing: true, timer: 0, last: 0,
+    timesAt: {}, hold: false, blank: new Set(), all: { radar: [], ir: [], gc: [], wv: [] }, gl: null, glFail: "", sig: 0, msg: "", obs: null };
   const tf = new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", hour: "numeric", minute: "2-digit" });
   const $ = (id) => document.getElementById(id);
   const on = () => [...(ST.radar ? ["radar"] : []), ...(ST.sat ? [ST.sat] : [])];
@@ -38,6 +48,7 @@ const ObsImg = (() => {
   /* ---- frame times ---- */
   async function times(id) {
     const s = SRC[id], now = Date.now();
+    if (s.kind === "iem") return wvTimes(id);
     if (ST.timesAt[id] && now - ST.timesAt[id] < s.refreshMin * 60e3 && ST.frames[id].length) return ST.frames[id];
     let all = [];
     // a frame that was still black last time gets another try with each new time list
@@ -70,6 +81,13 @@ const ObsImg = (() => {
   }
   function getImg(id, tile, t) {   // cached Image (decoded); resolves null on failure
     const key = id + "|" + tile + "|" + t; let r = ST.img.get(key);
+    if (!r && SRC[id].kind === "iem") {   // water vapor frames come from this browser's own store (blob: URL, same origin)
+      const im = new Image(); im.decoding = "async"; r = { im, ok: false };
+      r.p = wvGet(tile + "|" + t).then((rec) => !rec ? (r.bad = true, null) : new Promise((res) => {
+        im.onload = () => { r.ok = true; res(im); bump(); if (ST.obs) Obs.redraw(); }; im.onerror = () => { r.bad = true; res(null); };
+        r.u = URL.createObjectURL(rec.blob); im.src = r.u; }));
+      ST.img.set(key, r);
+    }
     if (!r) {
       const im = new Image(); im.crossOrigin = "anonymous"; im.decoding = "async";
       r = { im, ok: false, p: new Promise((res) => { im.onload = () => {
@@ -86,13 +104,65 @@ const ObsImg = (() => {
   }
   function prune() {   // keep only images of the current frame lists
     const keep = new Set(); for (const id of Object.keys(SRC)) for (const t of ST.all[id]) for (const tile of ["detail", "wide"]) keep.add(id + "|" + tile + "|" + t);
-    for (const k of [...ST.img.keys()]) if (!keep.has(k) || !on().includes(k.split("|")[0])) { const r = ST.img.get(k); r.im.src = ""; ST.img.delete(k); }
+    for (const k of [...ST.img.keys()]) if (!keep.has(k) || !on().includes(k.split("|")[0])) { const r = ST.img.get(k); r.im.src = ""; if (r.u) URL.revokeObjectURL(r.u); ST.img.delete(k); }
   }
   const tileFor = (id) => { const S = ST.obs; if (!S) return "detail";
     const T = SRC[id].tiles.detail.box, kmpx = 1 / (S.k * Math.min(S.dpr || 1, 2));   // device-pixel scale
     if (kmpx > 2.2) return "wide";
     // zoomed in: detail box, unless the view centre is outside it
     const ll = inv(S.cx, S.cy); return ll && ll[0] > T[0] && ll[0] < T[2] && ll[1] > T[1] && ll[1] < T[3] ? "detail" : "wide"; };
+
+  /* ---- water vapor (IEM, newest image only): capture each new frame into a small store, the loop is read back from it ---- */
+  const IEM = "https://mesonet.agron.iastate.edu/cgi-bin/wms/goes_west.cgi";
+  const IEMJ = (sec) => `https://mesonet.agron.iastate.edu/data/gis/images/GOES/${sec}/channel09/GOES-18_C09.json`;
+  const WV_KEEP_MS = 3 * 3600e3, MEM = new Map(); let dbp = null, memLoaded = null;
+  function db() {
+    if (!dbp) dbp = new Promise((res) => { try { const q = indexedDB.open("obsimg-wv", 1);
+      q.onupgradeneeded = () => q.result.createObjectStore("f", { keyPath: "k" }); q.onsuccess = () => res(q.result); q.onerror = () => res(null); q.onblocked = () => res(null);
+    } catch (e) { res(null); } });
+    return dbp;
+  }
+  const idb = async (mode, fn) => { const d = await db(); if (!d) return null; return new Promise((res) => { try { const tx = d.transaction("f", mode), q = fn(tx.objectStore("f"));
+    tx.oncomplete = () => res(q && q.result); tx.onerror = tx.onabort = () => res(null); } catch (e) { res(null); } }); };
+  function wvLoad() { return memLoaded || (memLoaded = idb("readonly", (o) => o.getAll()).then((all) => { for (const r of all || []) if (!MEM.has(r.k)) MEM.set(r.k, r); })); }
+  async function wvGet(k) { await wvLoad(); return MEM.get(k) || null; }
+  async function wvPrune() {
+    for (const tile of ["detail", "wide"]) {
+      const rs = [...MEM.values()].filter((r) => r.tile === tile).sort((a, b) => Date.parse(a.t) - Date.parse(b.t));
+      const drop = rs.filter((r, i) => Date.now() - Date.parse(r.t) > WV_KEEP_MS || i < rs.length - 24);
+      for (const r of drop) { MEM.delete(r.k); await idb("readwrite", (o) => o.delete(r.k)); }
+    }
+  }
+  async function wvValid(sec) { const j = await (await fetch(IEMJ(sec), { cache: "no-store" })).json(); return new Date(Date.parse(j.meta.valid)).toISOString().replace(".000Z", "Z"); }
+  const wms = (layer, T, v) => new Promise((res, rej) => { const im = new Image(); im.crossOrigin = "anonymous";
+    im.onload = () => res(im); im.onerror = () => rej(new Error("water vapor image"));
+    im.src = `${IEM}?SERVICE=WMS&REQUEST=GetMap&VERSION=1.1.1&LAYERS=${layer}&STYLES=&SRS=EPSG:4326&BBOX=${T.box.join(",")}&WIDTH=${T.px[0]}&HEIGHT=${T.px[1]}&FORMAT=image/png&TRANSPARENT=TRUE&v=${encodeURIComponent(v)}`; });
+  const wvBusy = {};
+  async function wvCapture(tile, again) {
+    const sec = tile === "detail" ? "conus" : "fulldisk", T = SRC.wv.tiles[tile];
+    const v0 = await wvValid(sec), k = tile + "|" + v0; await wvLoad(); if (MEM.has(k)) return;
+    if (Date.now() - Date.parse(v0) > WV_KEEP_MS) throw new Error("no recent water vapor image");
+    const fd = tile === "detail" ? await wvValid("fulldisk").catch(() => v0) : v0;
+    const ims = await Promise.all([wms("fulldisk_ch09", T, fd), ...(tile === "detail" ? [wms("conus_ch09", T, v0)] : [])]);
+    if (await wvValid(sec) !== v0) { if (!again) return wvCapture(tile, true); return; }   // the image changed while loading: take the new one
+    const c = document.createElement("canvas"); c.width = T.px[0]; c.height = T.px[1]; const g = c.getContext("2d", { willReadFrequently: true });
+    for (const im of ims) g.drawImage(im, 0, 0, c.width, c.height);   // full disk first, the 2 km CONUS sector on top
+    if (blank(c)) return;
+    const enc = (type) => new Promise((res) => c.toBlob(res, type, 0.9));
+    let blob = await enc("image/webp"); if (!blob || blob.type !== "image/webp") blob = await enc("image/jpeg");   // Safari cannot write WebP
+    if (!blob) return;
+    const rec = { k, tile, t: v0, blob, saved: Date.now() }; MEM.set(k, rec); await idb("readwrite", (o) => o.put(rec)); await wvPrune();
+  }
+  async function wvTimes(id) {
+    const s = SRC[id], tile = tileFor(id), now = Date.now();
+    if (ST.timesAt[id] && ST.wvTile === tile && now - ST.timesAt[id] < s.refreshMin * 60e3 && ST.frames[id].length) return ST.frames[id];
+    try { await (wvBusy[tile] = wvBusy[tile] || wvCapture(tile).finally(() => { wvBusy[tile] = null; })); } catch (e) { ST.wvErr = e.message || String(e); }
+    await wvPrune();
+    const ts = [...MEM.values()].filter((r) => r.tile === tile && now - Date.parse(r.t) <= WV_KEEP_MS).map((r) => r.t).sort();
+    const pick = [], gap = (tile === "detail" ? s.stepMin : 10) * 60e3 - 30e3;
+    for (let i = ts.length - 1; i >= 0 && pick.length < s.n; i--) { const t = Date.parse(ts[i]); if (!pick.length || Date.parse(pick[0]) - t >= gap) pick.unshift(ts[i]); }
+    ST.all[id] = pick; ST.timesAt[id] = now; ST.wvTile = tile; return pickFrames(id);
+  }
 
   /* ---- loading: newest frame first (shows at once), then the rest in the background ---- */
   let loading = null;
@@ -199,35 +269,56 @@ const ObsImg = (() => {
     .obs-root .obs-img .oi-t{font:12.5px "IBM Plex Mono",ui-monospace,monospace;color:var(--o-muted);white-space:nowrap}
     .obs-root .obs-img input[type=range]{width:min(180px,32vw);accent-color:var(--o-verm)}
     #obsov .obs-img button[aria-pressed="true"],#obsp .obs-img button[aria-pressed="true"],.obs-root .obs-img button[aria-pressed="true"]{background:#f4f2ee;color:#15171c;border-color:#f4f2ee;font-weight:600}
-    .obs-root .obs-img button.oi-play{min-width:38px;padding:5px 10px}.obs-root .obs-img .oi-loop{display:contents}.obs-root .obs-img .oi-loop[hidden]{display:none!important}`;
+    .obs-root .obs-img button.oi-play{min-width:38px;padding:5px 10px}.obs-root .obs-img .oi-loop{display:contents}.obs-root .obs-img .oi-loop[hidden]{display:none!important}
+    .obs-root .obs-img .oi-lab{font-size:13px;color:var(--o-muted)}
+    .obs-root.obs-min #oviews,.obs-root.obs-min #olayers,.obs-root.obs-min .obs-img>:not(.oi-loop),.obs-root.obs-min .obs-img .oi-loop>.oi-sep:first-child{display:none!important}
+    .obs-root.obs-min .obs-img{margin-top:0}
+    .obs-root .oi-mrow{margin:2px 0 6px}.obs-root .oi-mrow button,#obsov .mg-top #oi-menu{white-space:nowrap}
+    #obsov .obs-root.obs-min .obs-stage{height:max(320px,calc(100dvh - 130px));max-height:none}`;
   function mountUi(root) {
     if ($("oimg")) return;
     const st = document.createElement("style"); st.textContent = CSS; document.head.appendChild(st);
     const bar = document.createElement("div"); bar.className = "obs-bar obs-img"; bar.id = "oimg"; bar.setAttribute("role", "group"); bar.setAttribute("aria-label", "Radar and satellite (off by default)");
     bar.innerHTML = `<button type="button" id="oi-radar" aria-pressed="false" title="NWS radar mosaic (MRMS base reflectivity), last hour">Radar</button>
       <span class="oi-sep"></span>
-      <button type="button" id="oi-ir" aria-pressed="false" title="GOES-West Clean IR (band 13), last 2 hours, about 40-60 min behind">Satellite: Clean IR</button>
-      <button type="button" id="oi-gc" aria-pressed="false" title="GOES-West GeoColor (true color by day, IR at night), last 2 hours, about 40-60 min behind">Satellite: GeoColor</button>
+      <span class="oi-lab">Satellite:</span>
+      <button type="button" id="oi-ir" aria-pressed="false" title="GOES-West Clean IR (band 13, 10.3 um): cloud-top temperature, day and night. Last 2 hours, about 40-60 min behind">Clean IR</button>
+      <button type="button" id="oi-gc" aria-pressed="false" title="GOES-West GeoColor (true color by day, IR at night), last 2 hours, about 40-60 min behind">GeoColor</button>
+      <button type="button" id="oi-wv" aria-pressed="false" title="GOES-West mid-level water vapor (band 9, 6.9 um): moisture around 500 mb (white/blue moist, yellow dry). Newest image about 5-15 min behind; the loop builds from the frames saved while this is on">Water vapor</button>
       <span class="oi-loop" id="oi-loop" hidden><span class="oi-sep"></span><button type="button" class="oi-play" id="oi-play" aria-label="Pause loop">&#10074;&#10074;</button>
       <input type="range" id="oi-slide" min="0" max="0" value="0" aria-label="Loop frame"><span class="oi-t" id="oi-t"></span></span>`;
     const ly = root.querySelector("#olayers"); ly.after(bar);
     $("oi-radar").onclick = () => set({ radar: !ST.radar });
     $("oi-ir").onclick = () => set({ sat: ST.sat === "ir" ? "" : "ir" });
     $("oi-gc").onclick = () => set({ sat: ST.sat === "gc" ? "" : "gc" });
+    $("oi-wv").onclick = () => set({ sat: ST.sat === "wv" ? "" : "wv" });
+    menuUi(root);
     $("oi-play").onclick = () => { ST.playing = !ST.playing; ui(); tick(); };
     $("oi-slide").oninput = (e) => { ST.playing = false; ST.idx = +e.target.value; bump(); ui(); Obs.drawNow(); };
     ui();
   }
+  // "Hide menu" (t2226u): in the viewer's Observations window the button sits in its title bar, elsewhere (Studio) above the chips
+  function menuUi(root) {
+    if ($("oi-menu")) return;
+    const b = document.createElement("button"); b.type = "button"; b.id = "oi-menu"; b.setAttribute("aria-controls", "oviews olayers oimg");
+    const top = root.parentElement && root.parentElement.querySelector(":scope > .mg-top");
+    if (top) top.insertBefore(b, top.querySelector("#obsx")); else { const row = document.createElement("div"); row.className = "obs-bar oi-mrow"; row.append(b); root.prepend(row); }
+    let min = false; try { min = localStorage.getItem("obsMenuMin") === "1"; } catch (e) { /* private mode */ }
+    const apply = () => { root.classList.toggle("obs-min", min); b.textContent = min ? "Show menu \u25be" : "Hide menu \u25b4"; b.setAttribute("aria-expanded", String(!min)); };
+    b.onclick = () => { min = !min; try { localStorage.setItem("obsMenuMin", min ? "1" : "0"); } catch (e) { /* private mode */ } apply(); };
+    apply();
+  }
   function ui() {
     if (!$("oimg")) return;
-    $("oi-radar").setAttribute("aria-pressed", String(ST.radar)); $("oi-ir").setAttribute("aria-pressed", String(ST.sat === "ir")); $("oi-gc").setAttribute("aria-pressed", String(ST.sat === "gc"));
+    $("oi-radar").setAttribute("aria-pressed", String(ST.radar)); $("oi-ir").setAttribute("aria-pressed", String(ST.sat === "ir")); $("oi-gc").setAttribute("aria-pressed", String(ST.sat === "gc")); $("oi-wv").setAttribute("aria-pressed", String(ST.sat === "wv"));
     $("oi-loop").hidden = !on().length; $("oi-play").innerHTML = ST.playing ? "&#10074;&#10074;" : "&#9654;"; $("oi-play").setAttribute("aria-label", ST.playing ? "Pause loop" : "Play loop");
     const sl = $("oi-slide"); sl.max = String(Math.max(0, len() - 1)); sl.value = String(Math.max(0, ST.idx)); uiTime();
   }
   function uiTime() {
     const el = $("oi-t"); if (!el) return;
     const parts = on().map((id) => { const t = (ST.shown && ST.shown[id]) || tAt(id, Math.max(0, ST.idx)); return t ? `${id === "radar" ? "Radar" : SRC[id].label} ${tf.format(new Date(t))}` : ""; }).filter(Boolean);
-    const txt = ST.glFail || ST.msg || (parts.length ? parts.join(" \u00b7 ") + " PT" : "loading\u2026");
+    const wvN = ST.sat === "wv" ? ST.frames.wv.length : 99;
+    const txt = ST.glFail || ST.msg || (parts.length ? parts.join(" \u00b7 ") + " PT" + (wvN < 4 ? " \u00b7 water vapor loop builds while open" : "") : "loading\u2026");
     if (el.textContent !== txt) el.textContent = txt; const sl = $("oi-slide"); if (sl && document.activeElement !== sl) sl.value = String(Math.max(0, ST.idx));
   }
   function set(o) {
@@ -247,9 +338,9 @@ const ObsImg = (() => {
 
   // Studio: credit lines, the shown frame times, and a hold + seek for the MP4 export (loop frames follow the video's progress)
   function credits() { return on().map((id) => SRC[id].credit); }
-  function info() { return on().map((id) => ({ id, label: id === "radar" ? "Radar" : "Satellite " + SRC[id].label, t: (ST.shown && ST.shown[id]) || tAt(id, Math.max(0, ST.idx)) })); }
+  function info() { return on().map((id) => ({ id, label: PILL[id], t: (ST.shown && ST.shown[id]) || tAt(id, Math.max(0, ST.idx)) })); }
   function hold(h) { ST.hold = !!h; if (!h) tick(); }
   function seek(p) { const L = len(); if (!L) return; ST.idx = Math.max(0, Math.min(L - 1, Math.floor(p * L * 0.999))); bump(); Obs.drawNow(); uiTime(); }
-  return { set, state: () => ({ radar: ST.radar, sat: ST.sat, idx: ST.idx, n: len(), playing: ST.playing, frames: ST.frames, shown: ST.shown, msg: ST.msg, glFail: ST.glFail, imgs: ST.img.size, loaded: [...ST.img.values()].filter((r) => r.ok).length }),
+  return { set, state: () => ({ radar: ST.radar, sat: ST.sat, idx: ST.idx, n: len(), playing: ST.playing, frames: ST.frames, shown: ST.shown, msg: ST.msg, wvErr: ST.wvErr || "", glFail: ST.glFail, imgs: ST.img.size, loaded: [...ST.img.values()].filter((r) => r.ok).length }),
     active: () => on().length > 0, credits, info, hold, seek, refresh, ready: () => loading || Promise.resolve() };
 })();

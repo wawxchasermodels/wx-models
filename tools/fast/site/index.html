@@ -84,7 +84,7 @@ body.phone canvas{max-height:none}
 #obsov .mg-top{display:flex;gap:10px;align-items:center;padding:8px 12px;background:#1d2027;border-bottom:1px solid #2c3039}
 #obsov button{background:#262931;color:#f4f2ee;border:1px solid #7d828c;border-radius:6px;padding:5px 8px;font:inherit}
 #obsov #obsx{margin-left:auto}
-#obsov #obs-root{flex:1;min-height:0;position:relative}
+#obsov #obs-root{flex:1;min-height:0;position:relative;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;padding:0 0 calc(72px + env(safe-area-inset-bottom))}/* 11-03 t2226u: the whole Observations menu scrolls on phones (foot, notes and credits were cut off) */
 #obsov[hidden]{display:none}
 #pfbtn .sm,#mgpage .sm,#obsbtn .sm{display:none}@media (max-width:700px){#pfbtn .lg,#mgpage .lg,#obsbtn .lg{display:none}#pfbtn .sm,#mgpage .sm,#obsbtn .sm{display:inline}#mg #mgpage{padding:5px 6px}}
 #mgbody{flex:1;min-height:0;overflow:auto;padding:4px 8px calc(8px + env(safe-area-inset-bottom))}
