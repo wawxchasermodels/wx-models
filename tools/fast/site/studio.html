@@ -144,6 +144,8 @@ body.clean .sfr canvas,body.clean #fv canvas,body.clean #fh canvas{width:auto!im
 #scrub button{padding:3px 12px;font-size:16px;line-height:1.2}
 #scrub .sw{position:relative;flex:1 1 320px;min-width:200px;padding-bottom:16px}
 #hscrub{width:100%;margin:0;height:26px;accent-color:#2f8cff;cursor:pointer;touch-action:none}
+/* 11-03 (t2186u zoom lock): no browser double-tap page zoom on the scrubber row or the frame headers (iPhone / iPad Safari) */
+#scrub,#scrub button,.shd,.shd button,.shd input{touch-action:manipulation}
 #sticks{position:absolute;left:0;right:0;bottom:0;height:14px;font-size:10.5px;color:#8e939c;pointer-events:none}
 #sticks span{position:absolute;transform:translateX(-50%);white-space:nowrap}
 #shour{font-size:13px;color:#ffc24d;white-space:nowrap;min-width:150px}
@@ -221,7 +223,7 @@ body.mgmode #bar>:not(#smodel){display:none!important}body.mgmode #scrub,body.mg
 </script>
 <script src="viewer.js?v=20261103p1"></script>
 <script src="stormfind.js?v=20261031c"></script>
-<script src="studio.js?v=20261103m1"></script>
+<script src="studio.js?v=20261103z1"></script>
 <script src="reqbox.js?v=20261031b"></script>
 <footer class="lic"><details><summary>Data: &copy; <span class="yr">2026</span> ECMWF (www.ecmwf.int), CC BY 4.0 &middot; Places: GeoNames, CC BY 4.0 &middot; NOAA (public domain) &middot; Natural Earth &middot; <u>Credits</u></summary>
 <p>Based on data and products of the European Centre for Medium-Range Weather Forecasts (ECMWF). Copyright &copy; <span class="yr">2026</span> ECMWF, <a href="https://www.ecmwf.int">www.ecmwf.int</a>. Licensed under CC BY 4.0 (<a href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a>). Maps are modified from the original data. ECMWF does not accept any liability whatsoever for any error or omission in the data, their availability, or for any loss or damage arising from their use.</p>

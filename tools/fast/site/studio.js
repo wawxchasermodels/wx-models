@@ -320,32 +320,38 @@ for (const k of ["v", "h"]) {
   // grabbing a shown pin drags it (live), anywhere else drags the frame as before
   cv.addEventListener("pointerdown", (e) => { if (CLEAN || !last || REC.on) return; if (PIN.mode) { placePin(k, cv, e); return; }
     const hit = pinHit(k, cv, e); if (hit) { e.preventDefault(); cv.setPointerCapture(e.pointerId); PD = { k, n: hit, id: e.pointerId, off: pinOff(k, cv, e, hit) }; cv.classList.add("pindrag"); return; }
-    cv.setPointerCapture(e.pointerId); cv.focus(); cv.classList.add("drag"); d = { x: e.clientX, y: e.clientY, fr: getFr(k) }; });
+    if (e.pointerType === "touch" && (S.dragging || !e.isPrimary)) return;   // 11-03: a second finger, or a finger while the scrubber is held: no frame drag
+    cv.setPointerCapture(e.pointerId); cv.focus({ preventScroll: true }); cv.classList.add("drag"); d = { x: e.clientX, y: e.clientY, fr: getFr(k), id: e.pointerId }; });
   if (MG.on) cv.addEventListener("pointerdown", (e) => { if (!CLEAN && !last && MG.img) { cv.setPointerCapture(e.pointerId); cv.focus(); cv.classList.add("drag"); d = { x: e.clientX, y: e.clientY, fr: getFr(k) }; } });
   cv.addEventListener("pointermove", (e) => { if (PD && PD.k === k && PD.id === e.pointerId) { pinMove(k, cv, e); return; }
     if (!d && !PD && PIN.show && !PIN.mode && e.pointerType === "mouse") cv.style.cursor = pinHit(k, cv, e) ? "grab" : "";
-    if (!d || pz) return; const s = f.W / cv.clientWidth, fr = getFr(k);
+    if (!d || pz || (d.id !== undefined && e.pointerId !== d.id)) return; const s = f.W / cv.clientWidth, fr = getFr(k);
     fr.dx = d.fr.dx + (e.clientX - d.x) * s; fr.dy = d.fr.dy + (e.clientY - d.y) * s; const r = crop(k, fr);   // keep the stored offset inside the panel
     fr.dx = (r.bx - r.cx) * r.kk; fr.dy = (r.by - r.cy) * r.kk; setFr(k, fr); render(k); });
-  const up = (e) => { if (PD && PD.k === k) { PD = null; cv.classList.remove("pindrag"); mpInfo(); renderAll(); } d = null; cv.classList.remove("drag"); }; cv.addEventListener("pointerup", up); cv.addEventListener("pointercancel", up);
+  const up = (e) => { if (PD && PD.k === k) { PD = null; cv.classList.remove("pindrag"); mpInfo(); renderAll(); } d = null; cv.classList.remove("drag"); }; cv.addEventListener("pointerup", up); cv.addEventListener("pointercancel", up); cv.addEventListener("lostpointercapture", (e) => { if (d && e.pointerId === d.id) up(e); });
   // 10-31 1:39 PM (Benjamin, iPhone): two-finger pinch zooms the frame (1-2.5x) about the fingers' midpoint; moving both fingers pans
   let pz = null;
   const oxy = (t) => { const b = cv.getBoundingClientRect(); return [(t.clientX - b.left) * f.W / b.width, (t.clientY - b.top) * f.H / b.height]; };
   cv.addEventListener("touchstart", (e) => {
     if (PD) { e.preventDefault(); return; }   // dragging a pin: no pinch / page scroll
-    if (CLEAN || !last || REC.on || PIN.mode || e.touches.length !== 2) return; e.preventDefault(); d = null;
-    const [a, b] = [oxy(e.touches[0]), oxy(e.touches[1])], fr0 = getFr(k), r0 = crop(k, fr0), ox = (a[0] + b[0]) / 2, oy = (a[1] + b[1]) / 2;
+    // 11-03 (Benjamin t2186u/t2187u "the zoom changes when I click on the hours scrubber"): the pinch counted every finger on the
+    // screen (e.touches), so a finger on the hour scrubber (or the other frame, a button, ...) plus one resting on this frame was taken
+    // as a pinch and zoomed the frame as the scrubber finger moved. Only a real two-finger pinch on this frame zooms it now
+    // (targetTouches = fingers that started on this canvas, and no other finger on the screen).
+    if (CLEAN || !last || REC.on || PIN.mode || e.targetTouches.length !== 2 || e.touches.length !== 2) { if (pz && e.targetTouches.length !== 2) pz = null; return; }
+    e.preventDefault(); d = null;
+    const [a, b] = [oxy(e.targetTouches[0]), oxy(e.targetTouches[1])], fr0 = getFr(k), r0 = crop(k, fr0), ox = (a[0] + b[0]) / 2, oy = (a[1] + b[1]) / 2;
     pz = { d: Math.max(10, Math.hypot(a[0] - b[0], a[1] - b[1])), z: Math.max(1, fr0.zoom || 1), mx: r0.cx + (ox - f.W / 2) / r0.kk, my: r0.cy + (oy - f.H / 2) / r0.kk };
   }, { passive: false });
   cv.addEventListener("touchmove", (e) => {
     if (PD) { e.preventDefault(); return; }
-    if (!pz) return; e.preventDefault(); if (e.touches.length < 2) return;
-    const [a, b] = [oxy(e.touches[0]), oxy(e.touches[1])], ox = (a[0] + b[0]) / 2, oy = (a[1] + b[1]) / 2;
+    if (!pz) return; e.preventDefault(); if (e.targetTouches.length !== 2 || e.touches.length !== 2) return;   // a finger elsewhere (scrubber, other frame, a third one): hold the zoom
+    const [a, b] = [oxy(e.targetTouches[0]), oxy(e.targetTouches[1])], ox = (a[0] + b[0]) / 2, oy = (a[1] + b[1]) / 2;
     const z = Math.min(2.5, Math.max(1, pz.z * Math.max(10, Math.hypot(a[0] - b[0], a[1] - b[1])) / pz.d)), kk = base(k).k0 * z;
     const fr = frAt(k, pz.mx - (ox - f.W / 2) / kk, pz.my - (oy - f.H / 2) / kk, z), r = crop(k, fr);   // map point under the fingers stays under them
     fr.dx = (r.bx - r.cx) * r.kk; fr.dy = (r.by - r.cy) * r.kk; setFr(k, fr); render(k); window.__spinch = { k, zoom: z };
   }, { passive: false });
-  const pend = (e) => { if (pz && e.touches.length < 2) pz = null; };
+  const pend = (e) => { if (pz && e.targetTouches.length < 2) pz = null; };
   cv.addEventListener("touchend", pend); cv.addEventListener("touchcancel", pend);
   cv.addEventListener("keydown", (e) => {
     const fr = getFr(k), st = e.shiftKey ? 10 : 1; let hit = true;
