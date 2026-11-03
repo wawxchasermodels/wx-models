@@ -333,7 +333,7 @@ function pinBar() {
   const opts = a => [...new Set(a)].map(t => `<option>${t}</option>`).join("");
   const titles = [], views = []; for (const md of Object.values(S.man.models)) { try { for (const p of Object.values(allProds(md))) if (p && p.title) titles.push(p.title); } catch (e) { /* no products */ } for (const v of Object.values(md.views || {})) if (v && v.label) views.push(v.label); }
   const pin = (id, list, cap) => { const el = document.getElementById(id); if (el && list.length) el.style.width = Math.min(cap, Math.ceil(probe(el, opts(list)))) + "px"; };
-  pin("prod", titles, 250); pin("view", views, 230);   // longest entry on any model (long names end in "..." in the closed menu)
+  pin("prod", titles, 250); pin("view", views, 270);   // longest entry on any model (long names end in "..." in the closed menu)
   const run = document.getElementById("run"); if (run) pin("run", [...run.options].map(o => o.textContent).concat(["ECMWF AIFS ENS 0.25\u00b0 00Z 11-03 (loading, to F+360)"]), 300);
 }
 if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { barPinned = ""; try { pinBar(); } catch (e) { /* not ready */ } });   // widths measured with the real fonts
