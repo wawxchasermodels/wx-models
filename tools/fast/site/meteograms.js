@@ -392,8 +392,10 @@ function figGrid(g) {   // g: {title, sub, credit, cols: [[a, b]], ctrl: null, M
 }
 // snow totals by member (snow_ens.snow_ens_png): 12 h columns, CTRL / members / MEAN / chance rows, member-spread chart below
 const SN_LEVELS = [0.1, 0.5, 1, 2, 3, 4, 6, 8, 10, 12, 15, 18, 24, 30, 36];
-const SN_COLORS = ["#24414f", "#2b5d6b", "#2f7a80", "#33988c", "#4fb38a", "#82c97f", "#b6da75", "#e3e46b", "#f3cf57", "#f6ad45", "#f08a3a", "#e46536", "#cc4436", "#a82d3f", "#7d2140"];
-const SN_THRESH = [1, 3, 6, 12], SN_BAND = "#4fb3a0";
+// 11-03 (Benjamin t2189u "a cooler scale that is in line with snow and cold"): cool snow scale, no greens / yellows / reds:
+// dim steel blue (trace) -> blues -> light blues -> white near 10 in -> lavender -> purples for the big totals; spread band ice blue
+const SN_COLORS = ["#22344a", "#244a6e", "#285f93", "#2f77b6", "#3f91d3", "#62ade6", "#8cc6f1", "#b7dcf7", "#e4f2fd", "#d6cdf3", "#bca9ea", "#a086dd", "#8566cc", "#6a49b5", "#523196"];
+const SN_THRESH = [1, 3, 6, 12], SN_BAND = "#7fc4f2";
 function figSnowEns(g) {   // g: {title, sub, credit, x: [ms], f: [h], A: [[member values per step]] (members x steps), every: 12}
   const every = 12, ci = g.f.map((f, i) => i).filter((i) => g.f[i] && g.f[i] % every === 0), nc = ci.length, nm = g.A.length;
   const G = g.A.map((a) => ci.map((i) => a[i])), mean = ci.map((_, j) => nanmean(G.map((r) => r[j])));
