@@ -57,7 +57,7 @@ const Obs = (() => {
   }
   const S = { base: null, P: null, pathCache: {}, st: [], placed: [], cities: [], regionsShown: [], view: "pnw", cx: 0, cy: 0, k: 1, w: 0, h: 0, dpr: 1,
     loaded: 0, loading: null, timer: 0, counts: null, inited: false, shown: false, raf: 0,
-    raw: [], on: new Set(["plot"]), dayCA: new Map(), dayCAfeat: new Map(), dayCAloaded: 0, dayCAloading: null, dayCAstate: "", iso: null };
+    raw: [], on: new Set(["plot"]), dayCA: new Map(), dayCAfeat: new Map(), dayCAloaded: 0, dayCAloading: null, dayCAstate: "", iso: null, hooks: { under: [], credit: [], mount: [] } };
   const $ = (id) => document.getElementById(id);
 
   /* ---- basemap (Path2D in projected km, cached per projection) ---- */
@@ -372,6 +372,8 @@ const Obs = (() => {
     g.lineJoin = "round";
     g.fillStyle = C.land; g.fill(P.land, "evenodd");
     g.fillStyle = C.lake; g.fill(P.lakes, "evenodd");
+    // 11-03 underlays (radar / satellite from obsimg.js on the fast site): drawn over the land fill, under coast, borders, isobars and stations
+    for (const fn of S.hooks.under) { g.save(); try { fn(g, S); } catch (e) { /* an underlay never breaks the map */ } g.restore(); }
     const lw = (px) => px / S.k;
     g.strokeStyle = C.coast; g.lineWidth = lw(0.8); g.stroke(P.land); g.stroke(P.lakes);
     g.strokeStyle = C.state; g.lineWidth = lw(1); g.stroke(P.states);
@@ -812,7 +814,7 @@ const Obs = (() => {
     g.fillStyle = "#c9d3dd"; g.font = `${Math.round(11 * d)}px 'IBM Plex Mono', monospace`; g.textBaseline = "middle";
     const names = LAYERS.filter((l) => S.on.has(l.id)).map((l) => l.label).join(", ") || "none";
     const daily = needDay() ? " (today = since local midnight)" : "";
-    g.fillText(`Observed ${tfmt.format(new Date(S.loaded))} PT · ${names}${daily} · Data: ECCC (OGL-Canada), NOAA/NWS via IEM · Natural Earth · GeoNames (CC BY 4.0)`, 8 * d, c.height + strip / 2);
+    g.fillText(`Observed ${tfmt.format(new Date(S.loaded))} PT · ${names}${daily} · Data: ECCC (OGL-Canada), NOAA/NWS via IEM · Natural Earth · GeoNames (CC BY 4.0)${S.hooks.credit.map((fn) => { try { return fn() || ""; } catch (e) { return ""; } }).filter(Boolean).map((t) => " · " + t).join("")}`, 8 * d, c.height + strip / 2);
     o.toBlob((b) => { const a = document.createElement("a"); a.href = URL.createObjectURL(b);
       const lt = [...S.on].join("-"), tag = lt === "plot" ? "" : "_" + (lt || "none");
       a.download = `obs_${S.view || "custom"}${tag}_${stamp.slice(0, 8)}_${stamp.slice(8, 12)}PT.png`; document.body.append(a); a.click(); a.remove();
@@ -836,6 +838,7 @@ const Obs = (() => {
       <p class="obs-hint">Scroll or pinch to zoom, drag to pan, tap a station for details. Turn layers on and off with the buttons above the map; they combine, and the sample number on each button is its colour on the map. Temperatures (high, current, low) and the current gust sit left of each station, pressure, wind chill / heat index and peak gust sit right of it. Each wind barb starts at the station's location, a ring means calm wind, and a station with no wind report has its numbers centred on it. More stations appear as you zoom in; airports and official stations are shown first. Updates every 10 minutes.</p>
       <p class="obs-credit">Observations: latest report in the past 90 minutes, checked against nearby stations. High, low and peak gust are for today since local midnight at each station: US values are the Iowa Environmental Mesonet daily summary for the station's own local day, Canadian values are built from the hourly reports since local midnight. Peak gust is the highest reported gust (US) or highest hourly peak wind (Canada); a station that reported no gust today shows none. Wind chill and heat index use the NWS formulas on the current reading. MSLP isobars are an automatic analysis of the station values, drawn only where stations are close enough. Canada: Environment and Climate Change Canada, MSC surface weather observations (SWOB). Contains information licensed under the <a href="https://open.canada.ca/en/open-government-licence-canada">Open Government Licence &ndash; Canada</a>. United States: NOAA/NWS ASOS and AWOS stations via the <a href="https://mesonet.agron.iastate.edu/">Iowa Environmental Mesonet</a>. Basemap: Natural Earth (public domain). Town names: <a href="https://www.geonames.org/">GeoNames</a>, licensed under <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>.</p>`;
     S.root = el; S.onChange = opts.onChange || null; wire(); S.inited = true;
+    for (const fn of S.hooks.mount) try { fn(el); } catch (e) { /* hook */ }
   }
   function hide() { S.shown = false; hideTip(); }
 
@@ -863,5 +866,8 @@ const Obs = (() => {
     const p = { s: { wd, ws: kt, lon: 0, kind: 0 }, px: canvas.width / 2, py: canvas.height / 2 }; p.bg = barbGeom(p.s, p.px, p.py);
     g.fillStyle = C.land; g.fillRect(0, 0, canvas.width, canvas.height); drawBarb(g, p); S.P = keep;
   }
-  return { mount, show, hide, setView, viewId, load, setLayers, layers, _state: S, _testBarb };
+  // 11-03 hooks for add-on layers: hook("under", fn(g, state)) draws in map km space; hook("credit", fn() -> text) adds to the
+  // downloaded image's credit strip; hook("mount", fn(rootEl)) runs once the markup exists (at once if already mounted)
+  function hook(kind, fn) { S.hooks[kind].push(fn); if (kind === "mount" && S.inited && S.root) fn(S.root); }
+  return { mount, show, hide, setView, viewId, load, setLayers, layers, hook, redraw: req, drawNow: draw, _state: S, _testBarb };
 })();

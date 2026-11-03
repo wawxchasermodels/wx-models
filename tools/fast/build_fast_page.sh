@@ -2,7 +2,7 @@
 # Build the hidden fast page (branch "fast" of Pages project wx-forecast-maps; data comes from R2 via functions/d)
 set -e; cd "$(dirname "$0")"; SRC=site
 rm -rf public; mkdir -p public/fonts
-mkdir -p public/obs; OBS=${OBS_SRC:-../../web/forecast/obs}; cp $OBS/obs.js $OBS/obs.css $OBS/basemap.json public/obs/   # live obs module (read-only copy of the old site's)
+mkdir -p public/obs; OBS=${OBS_SRC:-../../web/forecast/obs}; cp $OBS/obs.js $OBS/obs.css $OBS/basemap.json public/obs/; [ ! -f $OBS/obsimg.js ] || cp $OBS/obsimg.js public/obs/   # live obs module (read-only copy of the old site's); 11-03 obsimg.js = radar + GOES-West layers (fast site only)
 cp $SRC/viewer.js public/; cp $SRC/fonts/Montserrat-sub.woff2 public/fonts/
 # meteograms page (10-30): own page + read-only copies of the old site's page styles and fonts (same layout as the old Meteograms tab)
 OLD=${OLD_SRC:-../../web/forecast}; mkdir -p public/old/fonts; cp $OLD/base.css $OLD/forecast.css public/old/; cp $OLD/fonts/*.ttf public/old/fonts/

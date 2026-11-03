@@ -239,10 +239,13 @@ const OBS_TF = new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles
 function obsInfo() {
   const S_ = typeof Obs !== "undefined" && Obs._state; if (!S_) return null;
   const on = OBS_LAYERS.filter((l) => S_.on.has(l[0])), t = S_.loaded ? new Date(S_.loaded) : null;
+  // 11-03 radar / GOES-West layers (obsimg.js): one legend pill each with the frame time shown
+  const IM = typeof ObsImg !== "undefined" && ObsImg.active() ? ObsImg.info() : [], itf = (x) => (x ? " " + new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", hour: "numeric", minute: "2-digit" }).format(new Date(x)) + " PT" : "");
+  const imPills = IM.map((m) => ["img_" + m.id, m.label + itf(m.t), m.id === "radar" ? "#7cf08c" : "#d6dee8"]);
   const T1 = { hi: "Today's High Temperatures", lo: "Today's Low Temperatures", pk: "Today's Peak Wind Gusts", feel: "Wind Chill / Heat Index", mslp: "Sea-Level Pressure" };
-  const title = on.length === 1 && T1[on[0][0]] ? T1[on[0][0]] : on.length === 2 && S_.on.has("hi") && S_.on.has("lo") ? "Today's Highs and Lows" : "Current Observations";
+  const title = !on.length && IM.length ? (IM.length > 1 ? "Radar and Satellite" : IM[0].id === "radar" ? "Radar" : "GOES-West Satellite") : on.length === 1 && T1[on[0][0]] ? T1[on[0][0]] : on.length === 2 && S_.on.has("hi") && S_.on.has("lo") ? "Today's Highs and Lows" : "Current Observations";
   let when = ""; if (t) { const p = Object.fromEntries(OBS_TF.formatToParts(t).map((x) => [x.type, x.value])); when = `${p.weekday} ${p.month}-${p.day} \u00b7 ${p.hour}:${p.minute} ${p.dayPeriod} PT`; }
-  return { on, t, title, when, view: S_.view };
+  return { on: [...on, ...imPills], t, title, when, view: S_.view, img: IM };
 }
 function renderObs(k, frO) {
   const f = F[k], c0 = f.cv.getContext("2d"), fr = frO || getFr(k); if (!frO) f.zoom.value = Math.round((fr.zoom || 1) * 100);
@@ -263,7 +266,7 @@ function renderObs(k, frO) {
   const cnr = BR.corner && LOGOS[BR.logo] ? cornerBox(k, by + f.valid * 1.9, headBot, f.H - f.bot + (k === "v" ? 110 : 62)) : null;
   // bottom: a legend of the layers shown (number colours, like the obs page's chips) in place of the color bar, then the locked credit lines
   c.save(); sharpShadow(c, k);
-  const dl = OBS_CREDIT, cB = cnr && (BR.cpos === "br" || BR.cpos === "bl") ? cnr : null;
+  const dl = [...(I.img && I.img.length && typeof ObsImg !== "undefined" ? ObsImg.credits() : []), ...OBS_CREDIT], cB = cnr && (BR.cpos === "br" || BR.cpos === "bl") ? cnr : null;
   let dfs = k === "v" ? 19 : 17; c.font = `600 ${dfs}px Montserrat`;
   const dMax = k === "v" ? f.W - 2 * f.pad : Math.round(f.W * 0.52);
   while (dfs > 13 && Math.max(...dl.map((l) => c.measureText(l).width)) > dMax) { dfs -= 1; c.font = `600 ${dfs}px Montserrat`; }
@@ -735,15 +738,18 @@ async function makeObsMp4() {
   const fr0 = getFr(k), z0 = $s("mpz0").value === "f" ? Math.max(1, fr0.zoom || 1) : +$s("mpz0").value, z1 = $s("mpz1").value === "f" ? z0 : +$s("mpz1").value, c0 = crop(k, fr0);
   const zoomAt = (t) => z0 * Math.pow(z1 / z0, ease(t)), moveN = Math.round(+($s("mpdur").value || 6) * FPS), holdN = Math.round(+$s("mph").value * FPS), totN = moveN + holdN;
   const t0 = performance.now(); let enc = null;
+  const OI_ = typeof ObsImg !== "undefined" && ObsImg.active() ? ObsImg : null; if (OI_) { mpSt("Loading radar / satellite frames\u2026"); await OI_.ready(); OI_.hold(true); }   // loop frames follow the video
   REC.on = true; REC.cancel = false; $s("mpout").hidden = true; $s("mpgo").disabled = true; $s("mpstop").hidden = false; document.body.classList.add("rec");
   try {
     enc = await makeEncoder(f.cv, f.W, f.H); const pg = $s("mpprog"); pg.hidden = false; pg.value = 0; let off = 0;
     const frT = (tt) => pan ? frAt(k, lerp(pins.a.x, pins.b.x, ease(tt)), lerp(pins.a.y, pins.b.y, ease(tt)), zoomAt(tt)) : frAt(k, c0.cx, c0.cy, zoomAt(tt));
+    if (OI_) OI_.seek(0);
     if (BR.card) { const cN = Math.round(1.5 * FPS), fN = Math.round(0.5 * FPS), c = f.cv.getContext("2d"), fake = { valid: I.t.toISOString(), f: 0, valid_line: I.when };
       for (let j = 0; j < cN; j++) { await render(k, frT(0)); titleCard(k, c, j < cN - fN ? 1 : (cN - j) / fN, fake, fake); await enc.add(j); } off = cN; }
     for (let n = 0; n < totN; n++) {
       if (REC.cancel) throw new Error("stopped");
       if (n % 3 === 0) mpSt(`Making video\u2026 ${Math.round(100 * n / totN)} %`);
+      if (OI_) OI_.seek(n / Math.max(1, totN - 1));
       await render(k, frT(Math.min(1, n / Math.max(1, moveN - 1)))); await enc.add(n + off); if (n % 6 === 0) { pg.value = n / totN; if (enc.idle) enc.idle(); }
     }
     pg.value = 1; mpSt("Finishing\u2026"); const how = enc.how, blob = await enc.done(); enc = null;
@@ -754,7 +760,7 @@ async function makeObsMp4() {
     const n = totN + off; $s("mpout").hidden = false; window.__mp4 = { name: nm, obs: true, pan: pan ? { a: pins.a, b: pins.b } : null, z0, z1, bytes: blob.size, frames: n, seconds: n / FPS, how, ms: Math.round(performance.now() - t0), blob };
     mpSt(`Done: ${(blob.size / 1e6).toFixed(1)} MB, ${(n / FPS).toFixed(1)} s, made in ${((performance.now() - t0) / 1000).toFixed(0)} s`);
   } catch (e) { if (enc) enc.abort(); mpSt(e.message === "stopped" ? "Stopped." : "Could not make the video: " + (e.message || e)); window.__mp4 = { error: String(e.message || e) }; }
-  finally { REC.on = false; $s("mpgo").disabled = false; $s("mpstop").hidden = true; $s("mpprog").hidden = true; document.body.classList.remove("rec"); renderAll(); }
+  finally { if (OI_) OI_.hold(false); REC.on = false; $s("mpgo").disabled = false; $s("mpstop").hidden = true; $s("mpprog").hidden = true; document.body.classList.remove("rec"); renderAll(); }
 }
 // ---- storm finder (10-31 3:17 PM, Benjamin: "Oh I like this idea, yes develop that"): the lows in this view (the same L
 // centres the map draws, from this model's sea-level pressure) are linked hour to hour into tracks; the deepest track gives the
@@ -1120,7 +1126,7 @@ if (!CLEAN) {   // Studio: Map | Meteogram switch (first in the menu bar) + the 
   // region / layer chips and Refresh; its map canvas is drawn off-screen at a fixed 1600 x 1600 CSS px and both frames crop it
   let ob_ = null, obsLoad = null, osig = "";
   const ograb = () => { const S_ = typeof Obs !== "undefined" && Obs._state, cv_ = document.getElementById("obs-canvas"); if (!S_ || !cv_ || !cv_.width) return;
-    const sig = [S_.loaded, S_.view, S_.cx, S_.cy, S_.k, [...S_.on].join(), cv_.width, cv_.height, S_.dayCAloaded, S_.st.length, S_.raf ? 1 : 0].join("|");
+    const sig = [S_.loaded, S_.view, S_.cx, S_.cy, S_.k, [...S_.on].join(), cv_.width, cv_.height, S_.dayCAloaded, S_.st.length, S_.raf ? 1 : 0, S_.imgSig || ""].join("|");
     if (sig !== osig || MG.img !== cv_) { osig = sig; MG.img = S_.loaded ? cv_ : null; MG.msg = S_.loaded ? "" : "Loading observations\u2026"; if (!REC.on && !PV.on) renderAll(); } };
   const setMode = (mode) => {
     const on = mode === "mg" || mode === "obs", wasObs = OBSM(); if (on && MG.kind !== mode) { MG.img = null; MG.src = ""; MG.msg = ""; }
@@ -1131,7 +1137,9 @@ if (!CLEAN) {   // Studio: Map | Meteogram switch (first in the menu bar) + the 
       if (!ob_) { ob_ = document.createElement("div"); ob_.id = "obsp"; ob_.innerHTML = `<div id="obs-root"></div>`; pnl.appendChild(ob_); }
       obsLoad = obsLoad || new Promise((ok, bad) => {
         const l = document.createElement("link"); l.rel = "stylesheet"; l.href = "obs/obs.css"; document.head.appendChild(l);
-        const sc = document.createElement("script"); sc.src = "obs/obs.js"; sc.onload = ok; sc.onerror = bad; document.body.appendChild(sc); });
+        const sc = document.createElement("script"); sc.src = "obs/obs.js"; sc.onerror = bad; document.body.appendChild(sc);
+        // 11-03: radar + GOES-West layers (obs/obsimg.js, off by default); the obs map still opens if it fails to load
+        sc.onload = () => { const s2 = document.createElement("script"); s2.src = "obs/obsimg.js?v=20261103rg1"; s2.onload = ok; s2.onerror = ok; document.body.appendChild(s2); }; });
       MG.msg = "Loading observations\u2026"; osig = "";
       obsLoad.then(() => { if (OBSM()) { Obs.show(); fitFrames(); } }, () => { obsLoad = null; MG.msg = "Observations could not load."; renderAll(); });
       poll = setInterval(ograb, 400);
