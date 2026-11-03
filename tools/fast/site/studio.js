@@ -266,7 +266,7 @@ async function render(k, frO) {   // frO: camera override (MP4 storm-track pan)
   c.save(); sharpShadow(c, k);
   // 11-02 (Benjamin t2115u "move the scale further down"): 9:16: the bar sits just above the credit line (tick numbers ~14 px clear of it;
   // the credit moves up for 3+ data lines and the bar with it); 16:9: 10 px lower (it was already at the bottom, credits are bottom right)
-  const nDl = window.creditLines ? [].concat(...window.creditLines(cur.pid, cur.P, (cur.P.towns || "numbers") !== "none").map(l => l.replace("  Basemap: Natural Earth.", "").split("  "))).length : 0;
+  const nDl = window.creditLines ? [].concat(...window.creditLines(cur.pid, cur.P, (cur.P.towns || "numbers") !== "none").map(l => (NE_KEEP.has(cur.pid) ? l : l.replace("  Basemap: Natural Earth.", "")).split("  "))).length : 0;
   const crY = f.H - 70 - Math.max(0, nDl - 2) * ((k === "v" ? 19 : 17) + 9);
   const cbW = k === "v" ? f.W - 2 * f.pad : Math.min(1100, f.W * 0.58), cbS = k === "v" ? 28 : 24, cbY = k === "v" ? Math.round(crY - 22 - 14 - 34 - cbS * 1.35) : f.H - f.bot + 72;
   if (!colorbar(c, P, f.pad, cbY, cbW, k === "v" ? 34 : 26, cbS)) {
@@ -290,7 +290,7 @@ async function render(k, frO) {   // frO: camera override (MP4 storm-track pan)
   // show; PRISM normals on precip anomaly maps). 9:16: small lines under the credit; 16:9: right-aligned above it (logo text moves up for it)
   // 11-02 (t2112u, legibility): the locked credit sentences unchanged, but each "  "-joined sentence gets its own line (it used to shrink to
   // ~12-14 px to fit one line in 16:9), 600 weight, brighter, 17 / 16 px minimum 13, more line spacing
-  const dl = window.creditLines ? [].concat(...window.creditLines(cur.pid, cur.P, (cur.P.towns || "numbers") !== "none").map(l => l.replace("  Basemap: Natural Earth.", "").split("  "))) : [];
+  const dl = window.creditLines ? [].concat(...window.creditLines(cur.pid, cur.P, (cur.P.towns || "numbers") !== "none").map(l => (NE_KEEP.has(cur.pid) ? l : l.replace("  Basemap: Natural Earth.", "")).split("  "))) : [];
   let dfs = k === "v" ? 19 : 17; c.font = `600 ${dfs}px Montserrat`; c.fillStyle = "rgba(236,239,244,0.95)";
   const dMax = k === "v" ? f.W - 2 * f.pad : f.W - 2 * f.pad - cbW - 40;
   while (dfs > 13 && Math.max(0, ...dl.map(l => c.measureText(l).width)) > dMax) { dfs -= 1; c.font = `600 ${dfs}px Montserrat`; }
@@ -312,7 +312,42 @@ const VIS = { v: true, h: true };
 if ("IntersectionObserver" in window) for (const k of ["v", "h"]) new IntersectionObserver((es) => { for (const e of es) VIS[k] = e.isIntersecting; }).observe(F[k].cv);
 const renderAll = () => { if (REC.on) return; if (CLEAN) render(OUTQ); else for (const k of ["v", "h"]) if (!(last && last.lite) || VIS[k]) render(k); };
 window.onStudioSkip = () => { if (PLAY.on) PLAY.next(); };
-window.onStudioDraw = (cv, cur, step, lite) => { last = { cv, cur, step, lite: !!lite }; renderAll(); try { scrubSync(); } catch (e) { /* scrubber not built */ } if (lite) return; if (PLAY.on) PLAY.next(); if (!REC.on && typeof mpSync === "function") try { mpSync(); } catch (e) { /* panel not ready */ } };
+// ---- 11-03 (Benjamin: "make the time scrubber on ALL models sit in exactly the same position as for ECMWF, on both 9:16 and 16:9"):
+// the frames and the hour scrubber are laid out under the top menu bar, whose height and wrapping changed with the model (number of
+// product tabs, Product / View menu widths, the AIFS ENS Member box, slider wrapping). The bar's parts now take the same space on
+// every model: tabs reserve the full ECMWF tab set, the Product / View / Runs menus are as wide as their longest entry on any model,
+// the Member box keeps its slot (hidden), and the hour readout next to the scrubber has a fixed width. Same bar -> same frames ->
+// same scrubber, px for px.
+// 11-03 (Benjamin t2184u "keep natural earth credit"): the NOAA ocean maps keep the "Basemap: Natural Earth." line on the Studio frames
+const NE_KEEP = new Set(["ssta", "ssha"]);
+let barPinned = "";
+function pinBar() {
+  if (CLEAN || !S.man) return; const bar = document.getElementById("bar"); if (!bar) return;
+  const mlh = (document.getElementById("memlab") || {}).hidden, key = innerWidth + ":" + mlh + ":" + Object.keys(S.man.models).join(",") + ":" + Object.values(S.man.runs).map(r => r.length).join(","); if (key === barPinned) return; barPinned = key;
+  const tabs = document.getElementById("tabs"), probe = (el, html) => { const c = el.cloneNode(false); c.removeAttribute("id"); c.style.cssText = "position:absolute;visibility:hidden;left:-9999px;top:0;width:auto;min-width:0"; c.innerHTML = html; el.parentNode.appendChild(c); const w = c.getBoundingClientRect().width; c.remove(); return w; };
+  const ml = document.getElementById("memlab"), phone = innerWidth <= 820;
+  if (ml) ml.classList.toggle("keep", phone);   // phones: the Member box keeps its slot (its own bar row); desktop: it floats in the tab space (placeMem)
+  if (tabs && typeof TABS !== "undefined") {   // desktop: the full ECMWF tab set's width, less the Member box when it shows (AIFS ENS members)
+    const keepH = tabs.innerHTML, keepW = tabs.style.minWidth; tabs.style.minWidth = "0px";   // measured in the real #tabs (its own button style), put back at once
+    tabs.innerHTML = [...TABS.map(t => t[1]), "Other"].map(l => `<button type="button">${l}</button>`).join(""); const w7 = Math.ceil(tabs.getBoundingClientRect().width); tabs.innerHTML = keepH; tabs.style.minWidth = keepW;
+    const gap = parseFloat(getComputedStyle(bar).columnGap) || 10;
+    void gap; tabs.style.minWidth = phone ? "" : w7 + "px"; }
+  const opts = a => [...new Set(a)].map(t => `<option>${t}</option>`).join("");
+  const titles = [], views = []; for (const md of Object.values(S.man.models)) { try { for (const p of Object.values(allProds(md))) if (p && p.title) titles.push(p.title); } catch (e) { /* no products */ } for (const v of Object.values(md.views || {})) if (v && v.label) views.push(v.label); }
+  const pin = (id, list, cap) => { const el = document.getElementById(id); if (el && list.length) el.style.width = Math.min(cap, Math.ceil(probe(el, opts(list)))) + "px"; };
+  pin("prod", titles, 250); pin("view", views, 270);   // longest entry on any model (long names end in "..." in the closed menu)
+  const run = document.getElementById("run"); if (run) pin("run", [...run.options].map(o => o.textContent).concat(["ECMWF AIFS ENS 0.25\u00b0 00Z 11-03 (loading, to F+360)"]), 300);
+}
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { barPinned = ""; try { pinBar(); } catch (e) { /* not ready */ } });   // widths measured with the real fonts
+// desktop: the AIFS ENS Member box floats at the right end of the tab space (AIFS ENS members have 2 tabs; the space is reserved for 7)
+function placeMem() {
+  const ml = document.getElementById("memlab"), tabs = document.getElementById("tabs"); if (!ml || !tabs) return;
+  if (CLEAN || innerWidth <= 820 || ml.hidden) { ml.style.position = ml.style.left = ml.style.top = ""; return; }
+  ml.style.position = "absolute"; const w = ml.getBoundingClientRect().width, h = ml.getBoundingClientRect().height;
+  ml.style.left = (tabs.offsetLeft + tabs.offsetWidth - w) + "px"; ml.style.top = (tabs.offsetTop + (tabs.offsetHeight - h) / 2) + "px";
+}
+addEventListener("resize", () => requestAnimationFrame(placeMem));
+window.onStudioDraw = (cv, cur, step, lite) => { try { pinBar(); placeMem(); } catch (e) { /* bar not ready */ } last = { cv, cur, step, lite: !!lite }; renderAll(); try { scrubSync(); } catch (e) { /* scrubber not built */ } if (lite) return; if (PLAY.on) PLAY.next(); if (!REC.on && typeof mpSync === "function") try { mpSync(); } catch (e) { /* panel not ready */ } };
 // drag / keys / zoom / buttons
 for (const k of ["v", "h"]) {
   const f = F[k], cv = f.cv; let d = null;
