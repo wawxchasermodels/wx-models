@@ -110,7 +110,7 @@ const ObsImg = (() => {
       ui(); bump(); Obs.redraw(); if (!ST.timer) tick();
       for (let pass = 0; pass < 2; pass++) {   // pass 2: frames that slid in after black ones dropped out
         const todo = []; for (const id of on()) { const tile = tileFor(id); for (const t of [...ST.frames[id]].reverse()) todo.push([id, tile, t]); }
-        await Promise.all([0, 1, 2].map(async () => { while (todo.length) { const [id, tile, t] = todo.shift(); await getImg(id, tile, t).p; } }));
+        await Promise.all([0, 1, 2].map(async () => { while (todo.length) { const [id, tile, t] = todo.shift(); if (on().includes(id) && tileFor(id) === tile) await getImg(id, tile, t).p; } }));
       }
       ui(); bump(); Obs.redraw();
     })().finally(() => { loading = null; });
