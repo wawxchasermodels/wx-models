@@ -18,8 +18,11 @@ if (CLEAN) {
 // framing per frame x view: {dx, dy, zoom} in output px; URL params win in clean mode
 // 11-02 (Benjamin t2095u): Meteogram mode. The meteograms page runs in a small iframe (its own Model / Town / Product pickers);
 // its finished chart image is drawn into both frames with the same drag / zoom / keys as the maps (framing saved under "mg").
-const MG = { on: !CLEAN && localStorage.getItem("studio:mode") === "mg", img: null, src: "" };
-const key = (k) => `studio:${k}:${MG.on ? "mg" : S.view}`;
+// 11-03 (Benjamin t2192u "the Observations map viewable in Studio mode"): MG.kind "obs" = the live obs module's canvas as the image source
+const MG = { on: !CLEAN && ["mg", "obs"].includes(localStorage.getItem("studio:mode")), kind: localStorage.getItem("studio:mode") === "obs" ? "obs" : "mg", img: null, src: "" };
+const OBSM = () => MG.on && MG.kind === "obs";
+const IW = (im) => im.naturalWidth || im.width, IH = (im) => im.naturalHeight || im.height;
+const key = (k) => `studio:${k}:${MG.on ? MG.kind : S.view}`;
 const getFr = (k) => {
   if (CLEAN && k === OUTQ && (SQ.has("dx") || SQ.has("dy") || SQ.has("zoom"))) return { dx: +SQ.get("dx") || 0, dy: +SQ.get("dy") || 0, zoom: +SQ.get("zoom") || 1 };
   try { return Object.assign({ dx: 0, dy: 0, zoom: 1 }, JSON.parse(localStorage.getItem(key(k)) || "{}")); } catch (e) { return { dx: 0, dy: 0, zoom: 1 }; }
@@ -54,6 +57,7 @@ function stateRect(V, m) {   // Washington's box in the wide view's figure px: t
   return { x: t.x + q[0] * t.w, y: t.y + q[1] * t.h, w: q[2] * t.w, h: q[3] * t.h };
 }
 function mgBase(k) {   // meteogram: whole chart fitted inside the frame (9:16: centred a little above the middle)
+  if (OBSM()) { const f = F[k], iw = IW(MG.img), ih = IH(MG.img); return { cx: iw / 2, cy: ih / 2, k0: Math.max(f.W / iw, f.H / ih) }; }   // obs: the map covers the frame
   const f = F[k], im = MG.img, iw = im.naturalWidth, ih = im.naturalHeight, padX = f.pad * 0.5, top = k === "v" ? 200 : 60, bot = k === "v" ? 200 : 70;
   const k0 = Math.min((f.W - 2 * padX) / iw, (f.H - top - bot) / ih);
   return { cx: iw / 2, cy: ih / 2 - ((top + (f.H - bot)) / 2 - f.H / 2) / k0, k0 };
@@ -74,6 +78,11 @@ function base(k) {   // camera at dx = dy = 0, zoom 1: centre (figure px) and sc
 }
 function crop(k, fr) {   // source rect (map bitmap px) for frame k: base camera, then zoom / pan; the panel stays covering the frame when it
   // can, and when it is smaller than the frame (wide view) it stays wholly in the frame (the rest is background)
+  if (OBSM() && MG.img) {   // obs map: zoom in / pan, the map always covers the frame
+    const B = base(k), kk = B.k0 * Math.max(1, fr.zoom || 1), iw = IW(MG.img), ih = IH(MG.img), cl = (v, a, b) => Math.min(b, Math.max(a, v)), hw = F[k].W / kk / 2, hh = F[k].H / kk / 2;
+    const cx = cl(B.cx - (fr.dx || 0) / kk, hw, iw - hw), cy = cl(B.cy - (fr.dy || 0) / kk, hh, ih - hh);
+    return { kk, cx, cy, bx: B.cx, by: B.cy, sx: 0, sy: 0, sw: F[k].W / kk, sh: F[k].H / kk, px: 0, py: 0, pw: iw, ph: ih, rs: 1 };
+  }
   if (MG.on && MG.img) {   // meteogram: pan freely while some of the chart stays in the frame
     const B = base(k), kk = B.k0 * Math.max(1, fr.zoom || 1), im = MG.img, cl = (v, a, b) => Math.min(b, Math.max(a, v));
     const cx = cl(B.cx - (fr.dx || 0) / kk, -F[k].W / kk / 2 + 40 / kk, im.naturalWidth + F[k].W / kk / 2 - 40 / kk), cy = cl(B.cy - (fr.dy || 0) / kk, -F[k].H / kk / 2 + 40 / kk, im.naturalHeight + F[k].H / kk / 2 - 40 / kk);
@@ -192,11 +201,12 @@ function titleCard(k, c, alpha, a0, a1) {   // over the first map; a0 / a1 = fir
   const ls = k === "v" ? 380 : 300, cx = f.W / 2; let y = k === "v" ? 520 : 150;
   if (lg) { c.drawImage(lg, cx - ls / 2, y, ls, ls); y += ls + (k === "v" ? 110 : 90); } else y += k === "v" ? 300 : 220;
   c.textAlign = "center"; c.fillStyle = "#fff"; c.font = `900 ${k === "v" ? 76 : 80}px Montserrat`;
-  const words = (BR.title || BR.storm || last.cur.P.title).split(" "), maxW = f.W - 2 * f.pad, lines = []; let line = "";
+  const OI = OBSM() ? obsInfo() : null, words = (BR.title || BR.storm || (OI ? OI.title : last.cur.P.title)).split(" "), maxW = f.W - 2 * f.pad, lines = []; let line = "";
   for (const w_ of words) { const t = line ? line + " " + w_ : w_; if (c.measureText(t).width > maxW && line) { lines.push(line); line = w_; } else line = t; } lines.push(line);
   lines.slice(0, 3).forEach((t, i) => c.fillText(t, cx, y + i * (k === "v" ? 86 : 88))); y += (Math.min(3, lines.length) - 1) * (k === "v" ? 86 : 88) + (k === "v" ? 80 : 74);
   if (BR.storm && BR.title) { c.font = `800 ${k === "v" ? 48 : 46}px Montserrat`; c.fillStyle = "#ffc24d"; c.fillText(BR.storm, cx, y); y += k === "v" ? 70 : 64; }
   c.font = `600 ${k === "v" ? 38 : 36}px Montserrat`; c.fillStyle = "#cfd3da";
+  if (OI) { c.fillText(`Station reports \u00b7 ${OI.when}`, cx, y); c.restore(); return; }
   c.fillText(`${runText()} \u00b7 ${last.cur.P.title}`, cx, y); y += k === "v" ? 58 : 54;
   if (a0 && a1) c.fillText(`${ptTime(a0.valid, { weekday: "short", month: "short", day: "numeric", hour: "numeric" })} \u2013 ${ptTime(a1.valid, { weekday: "short", month: "short", day: "numeric", hour: "numeric" })} PT`, cx, y);
   c.restore();
@@ -222,7 +232,58 @@ function lowKey(c, f, k, cbY, cbS) {
     c.fillStyle = "#fff"; c.fillText(DOT_LABELS[i], cx + rr + 11, yy + 1); }
   c.restore();
 }
+// ---- Observations in Studio (11-03, t2192u): same header / badge / credit style as the maps; the obs module's own map is the picture
+const OBS_LAYERS = [["plot", "Station plot", "#ffffff"], ["hi", "High", "#ff8a6e"], ["lo", "Low", "#7f97ff"], ["pk", "Peak gust", "#ffd23f"], ["feel", "Wind chill / heat index", "#c9a2ff"], ["mslp", "MSLP", "#7fe0b5"]];
+const OBS_CREDIT = ["Data: NOAA/NWS ASOS/AWOS via Iowa Environmental Mesonet; Environment and Climate Change Canada (OGL-Canada).", "Places: GeoNames (geonames.org), CC BY 4.0.", "Basemap: Natural Earth."];
+const OBS_TF = new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", weekday: "short", month: "2-digit", day: "2-digit", hour: "numeric", minute: "2-digit" });
+function obsInfo() {
+  const S_ = window.Obs && Obs._state; if (!S_) return null;
+  const on = OBS_LAYERS.filter((l) => S_.on.has(l[0])), t = S_.loaded ? new Date(S_.loaded) : null;
+  const title = on.length === 1 && on[0][0] !== "plot" ? `Observed ${on[0][1]}${on[0][0] === "hi" || on[0][0] === "lo" || on[0][0] === "pk" ? " Today" : ""}` : "Current Observations";
+  let when = ""; if (t) { const p = Object.fromEntries(OBS_TF.formatToParts(t).map((x) => [x.type, x.value])); when = `${p.weekday} ${p.month}-${p.day} \u00b7 ${p.hour}:${p.minute} ${p.dayPeriod} PT`; }
+  return { on, t, title, when, view: S_.view };
+}
+function renderObs(k, frO) {
+  const f = F[k], c0 = f.cv.getContext("2d"), fr = frO || getFr(k); if (!frO) f.zoom.value = Math.round((fr.zoom || 1) * 100);
+  c0.setTransform(1, 0, 0, 1, 0, 0); c0.clearRect(0, 0, f.W, f.H); c0.fillStyle = BG === "transparent" ? "#111316" : BG; c0.fillRect(0, 0, f.W, f.H);
+  const I = obsInfo();
+  if (!MG.img || !I || !I.t) { c0.font = `700 ${k === "v" ? 40 : 34}px Montserrat`; c0.fillStyle = "#c9ced8"; c0.textAlign = "center"; c0.fillText(MG.msg || "Loading observations\u2026", f.W / 2, f.H / 2); c0.textAlign = "left"; return; }
+  const r = crop(k, fr); c0.imageSmoothingEnabled = true; c0.imageSmoothingQuality = "high";
+  c0.drawImage(MG.img, f.W / 2 - r.cx * r.kk, f.H / 2 - r.cy * r.kk, IW(MG.img) * r.kk, IH(MG.img) * r.kk);
+  const c = ovLayer(f), x = f.pad; let y = k === "v" ? 120 : 34;
+  c.save(); sharpShadow(c, k); const pw = pill(c, x, y, "OBSERVED", Math.round(f.run * 0.95), "#16a34a", "#fff");
+  c.font = `600 ${f.run}px Montserrat`; c.fillStyle = "#c9ced8"; c.fillText("station reports", x + pw + 14, y + f.run * 1.08);
+  y += f.run * 1.55 + f.title * 1.02; c.font = `800 ${f.title}px Montserrat`; c.fillStyle = "#fff"; c.fillText(I.title, x, y);
+  y += f.day * 1.3; c.font = `800 ${f.day}px Montserrat`; c.fillStyle = "#ffc24d"; c.fillText(I.when, x, y);
+  const headBot = y + f.day * 0.45;
+  c.font = `800 ${Math.round(f.valid * 1.1)}px Montserrat`; const bt = "LIVE", bw = c.measureText(bt).width + 40, bx = f.W - f.pad - bw, by = k === "v" ? 120 : 34;
+  c.fillStyle = "rgba(17,19,22,0.85)"; c.strokeStyle = "rgba(255,255,255,0.35)"; c.lineWidth = 2; c.beginPath(); c.roundRect ? c.roundRect(bx, by, bw, f.valid * 1.9, 14) : c.rect(bx, by, bw, f.valid * 1.9); c.fill(); noShadow(c); c.stroke(); sharpShadow(c, k);
+  c.fillStyle = "#fff"; c.textAlign = "center"; c.fillText(bt, bx + bw / 2, by + f.valid * 1.32); c.textAlign = "left"; c.restore();
+  const cnr = BR.corner && LOGOS[BR.logo] ? cornerBox(k, by + f.valid * 1.9, headBot, f.H - f.bot + (k === "v" ? 110 : 62)) : null;
+  // bottom: a legend of the layers shown (number colours, like the obs page's chips) in place of the color bar, then the locked credit lines
+  c.save(); sharpShadow(c, k);
+  const dl = OBS_CREDIT, cB = cnr && (BR.cpos === "br" || BR.cpos === "bl") ? cnr : null;
+  let dfs = k === "v" ? 19 : 17; c.font = `600 ${dfs}px Montserrat`;
+  const dMax = k === "v" ? f.W - 2 * f.pad : Math.round(f.W * 0.52);
+  while (dfs > 13 && Math.max(...dl.map((l) => c.measureText(l).width)) > dMax) { dfs -= 1; c.font = `600 ${dfs}px Montserrat`; }
+  const dlh = dfs + 9, lgS = k === "v" ? 30 : 26;
+  c.fillStyle = "rgba(236,239,244,0.95)";
+  if (k === "v") dl.forEach((l, i) => c.fillText(l, f.pad + (cB && BR.cpos === "bl" ? cB.s + 18 : 0), f.H - 70 - (dl.length - 1 - i) * dlh));
+  else { c.textAlign = "right"; dl.forEach((l, i) => c.fillText(l, f.W - f.pad - (cB && BR.cpos === "br" ? cB.s + 20 : 0), f.H - 24 - (dl.length - 1 - i) * dlh)); c.textAlign = "left"; }
+  let lx = f.pad + (k === "h" && cB && BR.cpos === "bl" ? cB.s + 20 : 0); const ly = k === "v" ? f.H - 70 - (dl.length - 1) * dlh - dfs - 30 - lgS * 1.55 : f.H - 24 - lgS * 1.55 + lgS * 0.35;
+  for (const [id, lab, col] of I.on) {
+    c.font = `800 ${lgS}px Montserrat`; const t = id === "feel" ? "Feels like" : lab, w = c.measureText(t).width + lgS * 1.2, h = lgS * 1.55;
+    if (k === "v" && lx + w > f.W - f.pad && lx > f.pad) break;
+    noShadow(c); c.fillStyle = "rgba(17,19,22,0.78)"; c.beginPath(); c.roundRect ? c.roundRect(lx, ly, w, h, h / 2) : c.rect(lx, ly, w, h); c.fill(); sharpShadow(c, k);
+    c.fillStyle = col; c.textBaseline = "middle"; c.fillText(t, lx + lgS * 0.6, ly + h / 2 + 1); c.textBaseline = "alphabetic"; lx += w + 12;
+  }
+  c.restore(); ovPut(c0, f, k);
+  if (cnr) cornerLogo(c0, cnr);
+  if (PIN.show && !REC.on) drawPins(k, c0, r);
+  window.__studio = (window.__studio || 0) + 1; window.__studioObs = (window.__studioObs || 0) + 1;
+}
 function renderMg(k, frO) {
+  if (OBSM()) return renderObs(k, frO);
   const f = F[k], c = f.cv.getContext("2d"), fr = frO || getFr(k); f.zoom.value = Math.round((fr.zoom || 1) * 100);
   c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, f.W, f.H); c.fillStyle = BG === "transparent" ? "#111316" : BG; c.fillRect(0, 0, f.W, f.H);
   if (!MG.img) { c.font = `700 ${k === "v" ? 40 : 34}px Montserrat`; c.fillStyle = "#c9ced8"; c.textAlign = "center"; c.fillText(MG.msg || "Loading the meteogram\u2026", f.W / 2, f.H / 2); c.textAlign = "left"; return; }
@@ -401,7 +462,10 @@ for (const k of ["v", "h"]) {
   cv.parentNode.querySelector(".shd").addEventListener("click", async (e) => {
     const a = e.target.closest("button[data-a]"); if (!a || !last) return;
     if (a.dataset.a === "reset") { setFr(k, { dx: 0, dy: 0, zoom: 1 }); render(k); }
-    if (a.dataset.a === "mp4") openMp4(k);
+    if (a.dataset.a === "mp4" && (!MG.on || OBSM())) openMp4(k);
+    if (a.dataset.a === "png" && OBSM()) { if (!MG.img) return; const I = obsInfo(), st = I && I.t ? new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(I.t).replace(/[^0-9]/g, "") : "now";
+      const nm = `obs_${I ? I.view : "pnw"}_${I ? I.on.map((l) => l[0]).join("-") : "plot"}_${st}_${k === "v" ? "1080x1920" : "1920x1080"}.png`;
+      cv.toBlob((b) => { const u = URL.createObjectURL(b), l = document.createElement("a"); l.href = u; l.download = nm; l.click(); setTimeout(() => URL.revokeObjectURL(u), 4000); }, "image/png"); return; }
     if (a.dataset.a === "png" && MG.on) { if (!MG.img) return; const nm = `meteogram_${(MG.src.split("#")[1] || "").replace(/[^a-z0-9=&_-]/gi, "").replace(/[=&]/g, "_")}_${k === "v" ? "1080x1920" : "1920x1080"}.png`;
       cv.toBlob((b) => { const u = URL.createObjectURL(b), l = document.createElement("a"); l.href = u; l.download = nm; l.click(); setTimeout(() => URL.revokeObjectURL(u), 4000); }, "image/png"); return; }
     if (MG.on && a.dataset.a !== "reset") return;   // MP4 / OBS: maps only
@@ -423,7 +487,7 @@ const REC = { on: false, cancel: false }, PIN = { mode: null, show: false }, FPS
 const TRK = { list: [], sel: -1, run: null, view: null };   // storm finder tracks (see findStorms)
 const $s = (id) => document.getElementById(id), sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const lerp = (a, b, t) => a + (b - a) * t, ease = (t) => t * t * (3 - 2 * t);
-const pinKey = () => `studio:pins:${S.view}`;
+const pinKey = () => `studio:pins:${OBSM() ? "obs" : S.view}`;
 const getPins = () => { try { return JSON.parse(localStorage.getItem(pinKey()) || "{}"); } catch (e) { return {}; } };
 const setPins = (p) => { try { localStorage.setItem(pinKey(), JSON.stringify(p)); } catch (e) { /* private mode */ } };
 function frAt(k, x, y, zoom) {   // camera centred on map point (x, y) at this zoom, as a {dx, dy, zoom} framing
@@ -550,6 +614,9 @@ function mpSync() {
   document.body.classList.add("mprange");
 }
 function mpInfo() {
+  if (OBSM()) { const p = getPins(), pan = $s("mpmode").value === "pan", d = +($s("mpdur").value || 6), h = +$s("mph").value;
+    $s("mpinfo").textContent = `Live observations: one map, ${d} s camera move + ${h} s hold = ${d + h} s at 30 fps` + (pan ? (p.a && p.b ? " \u00b7 pans A \u2192 B" : " \u00b7 set pins A and B") : "");
+    const t = $s("mppins"); if (t) t.textContent = p.a && p.b ? "A and B set" : p.a ? "A set" : ""; return; }
   mpSync(); const s0 = +$s("mps").value, s1 = $s("mps1").value; $s("mpsv").textContent = `${s0} map${s0 === 1 ? "" : "s"}/s`;
   const idx = pickIdx(), T = loopTimes(idx.length), hold = +$s("mph").value, p = getPins(), pan = $s("mpmode").value === "pan";
   const zv = (id) => $s(id).value === "f" ? null : +$s(id).value, za = zv("mpz0"), zb = zv("mpz1");
@@ -593,6 +660,7 @@ async function makeEncoder(cv, W, H) {
 }
 const mpSt = (t) => { $s("mpst").textContent = t; };
 async function makeMp4() {
+  if (OBSM()) return makeObsMp4();
   if (!last || REC.on) return;
   const k = $s("mpk").value, f = F[k], pan = $s("mpmode").value === "pan", pins = getPins(), idx = pickIdx(), steps = S.runs[S.run].steps;
   if (idx.length < 2) { mpSt("Pick an end hour after the start hour."); return; }
@@ -649,6 +717,37 @@ async function makeMp4() {
     mpSt(`Done: ${(blob.size / 1e6).toFixed(1)} MB, ${(n / FPS).toFixed(1)} s, made in ${((performance.now() - t0) / 1000).toFixed(0)} s`);
   } catch (e) { if (enc) enc.abort(); mpSt(e.message === "stopped" ? "Stopped." : "Could not make the video: " + (e.message || e)); window.__mp4 = { error: String(e.message || e) }; }
   finally { REC.on = false; window.__vjNoJump = false; $s("mpgo").disabled = false; $s("mpstop").hidden = true; $s("mpprog").hidden = true; document.body.classList.remove("rec"); if (S.run === run) { S.i = keep; $("step").value = keep; } draw(); }
+}
+// Observations MP4 (11-03, t2192u "A to B camera"): one live map, the camera eases pin A -> pin B (Pan mode) and / or Start -> End zoom
+// over the chosen length, then holds; same encoder, branding and 30 fps as the map loops
+async function makeObsMp4() {
+  if (REC.on || !MG.img) return;
+  const k = $s("mpk").value, f = F[k], pan = $s("mpmode").value === "pan", pins = getPins(), I = obsInfo();
+  if (pan && !(pins.a && pins.b)) { mpSt("Pan A \u2192 B needs pins: tap the frame where the video starts (A), then where it ends (B)."); startPin(pins.a ? "b" : "a"); return; }
+  if ((BR.corner || BR.card || BR.lower) && LOGOS[BR.logo]) { const t_ = performance.now(); while (!getLogo() && performance.now() - t_ < 4000) await sleep(50); }
+  const fr0 = getFr(k), z0 = $s("mpz0").value === "f" ? Math.max(1, fr0.zoom || 1) : +$s("mpz0").value, z1 = $s("mpz1").value === "f" ? z0 : +$s("mpz1").value, c0 = crop(k, fr0);
+  const zoomAt = (t) => z0 * Math.pow(z1 / z0, ease(t)), moveN = Math.round(+($s("mpdur").value || 6) * FPS), holdN = Math.round(+$s("mph").value * FPS), totN = moveN + holdN;
+  const t0 = performance.now(); let enc = null;
+  REC.on = true; REC.cancel = false; $s("mpout").hidden = true; $s("mpgo").disabled = true; $s("mpstop").hidden = false; document.body.classList.add("rec");
+  try {
+    enc = await makeEncoder(f.cv, f.W, f.H); const pg = $s("mpprog"); pg.hidden = false; pg.value = 0; let off = 0;
+    const frT = (tt) => pan ? frAt(k, lerp(pins.a.x, pins.b.x, ease(tt)), lerp(pins.a.y, pins.b.y, ease(tt)), zoomAt(tt)) : frAt(k, c0.cx, c0.cy, zoomAt(tt));
+    if (BR.card) { const cN = Math.round(1.5 * FPS), fN = Math.round(0.5 * FPS), c = f.cv.getContext("2d"), fake = { valid: I.t.toISOString(), f: 0, valid_line: I.when };
+      for (let j = 0; j < cN; j++) { await render(k, frT(0)); titleCard(k, c, j < cN - fN ? 1 : (cN - j) / fN, fake, fake); await enc.add(j); } off = cN; }
+    for (let n = 0; n < totN; n++) {
+      if (REC.cancel) throw new Error("stopped");
+      if (n % 3 === 0) mpSt(`Making video\u2026 ${Math.round(100 * n / totN)} %`);
+      await render(k, frT(Math.min(1, n / Math.max(1, moveN - 1)))); await enc.add(n + off); if (n % 6 === 0) { pg.value = n / totN; if (enc.idle) enc.idle(); }
+    }
+    pg.value = 1; mpSt("Finishing\u2026"); const how = enc.how, blob = await enc.done(); enc = null;
+    const stp = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(I.t).replace(/[^0-9]/g, "");
+    const nm = `obs_${I.view}_${I.on.map((l) => l[0]).join("-")}_${stp}_${k === "v" ? "1080x1920" : "1920x1080"}${pan ? "_AtoB" : ""}.${blob.type.includes("mp4") ? "mp4" : "webm"}`;
+    const u = URL.createObjectURL(blob), v = $s("mpv"), dl = $s("mpdl"); if (v.dataset.u) URL.revokeObjectURL(v.dataset.u); v.dataset.u = u; v.src = u; dl.href = u; dl.download = nm;
+    const file = new File([blob], nm, { type: blob.type }); $s("mpshare").hidden = !(navigator.canShare && navigator.canShare({ files: [file] })); $s("mpshare").onclick = () => navigator.share({ files: [file] }).catch(() => {});
+    const n = totN + off; $s("mpout").hidden = false; window.__mp4 = { name: nm, obs: true, pan: pan ? { a: pins.a, b: pins.b } : null, z0, z1, bytes: blob.size, frames: n, seconds: n / FPS, how, ms: Math.round(performance.now() - t0), blob };
+    mpSt(`Done: ${(blob.size / 1e6).toFixed(1)} MB, ${(n / FPS).toFixed(1)} s, made in ${((performance.now() - t0) / 1000).toFixed(0)} s`);
+  } catch (e) { if (enc) enc.abort(); mpSt(e.message === "stopped" ? "Stopped." : "Could not make the video: " + (e.message || e)); window.__mp4 = { error: String(e.message || e) }; }
+  finally { REC.on = false; $s("mpgo").disabled = false; $s("mpstop").hidden = true; $s("mpprog").hidden = true; document.body.classList.remove("rec"); renderAll(); }
 }
 // ---- storm finder (10-31 3:17 PM, Benjamin: "Oh I like this idea, yes develop that"): the lows in this view (the same L
 // centres the map draws, from this model's sea-level pressure) are linked hour to hour into tracks; the deepest track gives the
@@ -863,7 +962,7 @@ if (!CLEAN && $s("mp4p")) {
     else if (m_ === "sf") findStorms();
     else if (m_ === "c") { setPins({}); mpInfo(); render("v"); render("h"); }
     else if (m_ === "go") makeMp4(); else if (m_ === "stop") REC.cancel = true; });
-  for (const id of ["mpa", "mpb", "mpe", "mps", "mps1", "mph", "mpz0", "mpz1"]) $s(id).addEventListener("change", mpInfo);
+  for (const id of ["mpa", "mpb", "mpe", "mps", "mps1", "mph", "mpz0", "mpz1", "mpdur"]) $s(id).addEventListener("change", mpInfo);
   for (const id of OPT_IDS) $s(id).addEventListener("change", (e) => { saveOpts(); if (e.isTrusted) $s("mppre").value = ""; });
   $s("mppre").addEventListener("change", (e) => { if (e.target.value === "storm") findStorms(); else applyPreset(e.target.value); });
   $s("mpsfl").addEventListener("change", (e) => applyStorm(+e.target.value));
@@ -993,9 +1092,9 @@ if (!CLEAN) {
 }
 if (!CLEAN) {   // Studio: Map | Meteogram switch (first in the menu bar) + the meteograms page's pickers in a small iframe
   const bar = document.getElementById("bar"), sw = document.createElement("label"); sw.id = "smodel";
-  sw.innerHTML = `Studio <select id="smode"><option value="map">Map</option><option value="mg">Meteogram</option></select>`; bar.insertBefore(sw, bar.firstChild);
+  sw.innerHTML = `Studio <select id="smode"><option value="map">Map</option><option value="mg">Meteogram</option><option value="obs">Observations</option></select>`; bar.insertBefore(sw, bar.firstChild);
   const pnl = document.createElement("div"); pnl.id = "mgp"; bar.after(pnl);
-  const sel = document.getElementById("smode"); sel.value = MG.on ? "mg" : "map";
+  const sel = document.getElementById("smode"); sel.value = MG.on ? MG.kind : "map";
   let fr_ = null, poll = 0;
   const grab = () => { try {
     const d = fr_.contentDocument, im = d && d.getElementById("meteo-img"), w = fr_.contentWindow;
@@ -1005,8 +1104,27 @@ if (!CLEAN) {   // Studio: Map | Meteogram switch (first in the menu bar) + the 
     else if (!src && em && !em.hidden && MG.msg !== em.textContent) { MG.img = null; MG.src = ""; MG.msg = (em.querySelector(".empty-title") || em).textContent; renderAll(); }
   } catch (e) { /* iframe loading */ } };
   const css = `.mast,.menubar,.skip,.meteo-grid,.colophon{display:none!important}body{margin:0;padding:6px 10px!important;background:#1d2027!important;min-height:0!important}.controls{margin:0!important;padding:0!important;gap:10px 18px!important}`;
-  const setMode = (on) => {
-    MG.on = on; localStorage.setItem("studio:mode", on ? "mg" : "map"); document.body.classList.toggle("mgmode", on); clearInterval(poll);
+  // Observations (11-03, t2192u): the live obs module (obs/, same as the viewer's Observations window) runs in the panel with its
+  // region / layer chips and Refresh; its map canvas is drawn off-screen at a fixed 1600 x 1600 CSS px and both frames crop it
+  let ob_ = null, obsLoad = null, osig = "";
+  const ograb = () => { const S_ = window.Obs && Obs._state, cv_ = document.getElementById("obs-canvas"); if (!S_ || !cv_ || !cv_.width) return;
+    const sig = [S_.loaded, S_.view, S_.cx, S_.cy, S_.k, [...S_.on].join(), cv_.width, cv_.height, S_.dayCAloaded, S_.st.length, S_.raf ? 1 : 0].join("|");
+    if (sig !== osig || MG.img !== cv_) { osig = sig; MG.img = S_.loaded ? cv_ : null; MG.msg = S_.loaded ? "" : "Loading observations\u2026"; if (!REC.on && !PV.on) renderAll(); } };
+  const setMode = (mode) => {
+    const on = mode === "mg" || mode === "obs", wasObs = OBSM(); if (on && MG.kind !== mode) { MG.img = null; MG.src = ""; MG.msg = ""; }
+    MG.on = on; if (on) MG.kind = mode; localStorage.setItem("studio:mode", on ? mode : "map"); clearInterval(poll);
+    document.body.classList.toggle("mgmode", on && mode === "mg"); document.body.classList.toggle("obsmode", on && mode === "obs");
+    if (wasObs && !OBSM() && window.Obs) { Obs.hide(); PIN.show = false; PIN.mode = null; }
+    if (on && mode === "obs") {
+      if (!ob_) { ob_ = document.createElement("div"); ob_.id = "obsp"; ob_.innerHTML = `<div id="obs-root"></div>`; pnl.appendChild(ob_); }
+      obsLoad = obsLoad || new Promise((ok, bad) => {
+        const l = document.createElement("link"); l.rel = "stylesheet"; l.href = "obs/obs.css"; document.head.appendChild(l);
+        const sc = document.createElement("script"); sc.src = "obs/obs.js"; sc.onload = ok; sc.onerror = bad; document.body.appendChild(sc); });
+      MG.msg = "Loading observations\u2026"; osig = "";
+      obsLoad.then(() => { if (OBSM()) { Obs.show(); fitFrames(); } }, () => { obsLoad = null; MG.msg = "Observations could not load."; renderAll(); });
+      poll = setInterval(ograb, 400);
+      renderAll(); fitFrames(); return;
+    }
     if (on && !fr_) { fr_ = document.createElement("iframe"); fr_.id = "mgf"; fr_.title = "Meteogram pickers";
       fr_.src = "meteograms.html" + (localStorage.getItem("studio:mghash") || "#s=eps&w=seattle&p=eps_gust_members");
       fr_.onload = () => { try { const st = fr_.contentDocument.createElement("style"); st.textContent = css; fr_.contentDocument.head.appendChild(st); } catch (e) { /* not ready */ } };
@@ -1014,8 +1132,8 @@ if (!CLEAN) {   // Studio: Map | Meteogram switch (first in the menu bar) + the 
     if (on) poll = setInterval(grab, 300);
     renderAll(); if (!on && last && window.onStudioDraw) window.onStudioDraw(last.cv, last.cur, last.step); fitFrames();
   };
-  sel.onchange = () => setMode(sel.value === "mg");
-  if (MG.on) setMode(true);
+  sel.onchange = () => setMode(sel.value);
+  if (MG.on) setMode(MG.kind);
 }
 if (!CLEAN) {
   let fq = 0; const fitSoon = () => { cancelAnimationFrame(fq); fq = requestAnimationFrame(fitFrames); };

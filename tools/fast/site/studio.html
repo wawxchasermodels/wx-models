@@ -159,6 +159,15 @@ body.clean #scrub,body.clean #rqslot,body.clean #stip{display:none!important}
 #mgp{display:none}body.mgmode #mgp{display:block;flex:0 0 auto;background:#1d2027;border-bottom:1px solid #2c3039}#mgf{display:block;width:100%;height:118px;border:0}
 body.mgmode #bar>:not(#smodel){display:none!important}body.mgmode #scrub,body.mgmode #pinhint,body.mgmode .shd button[data-a="mp4"],body.mgmode .shd button[data-a="obs"]{display:none!important}
 @media (max-width:820px){#mgf{height:190px}}
+/* 11-03 (t2192u): Studio > Observations: the obs module's region / layer chips + status in the panel, its map drawn off-screen */
+#mpdurr{display:none}body.obsmode #mpdurr{display:flex}
+body.obsmode #mgp{display:block;flex:0 0 auto;background:#1d2027;border-bottom:1px solid #2c3039;padding:6px 10px}#obsp{display:none}body.obsmode #obsp{display:block}body.obsmode #mgf{display:none}
+body.obsmode #bar>:not(#smodel){display:none!important}body.obsmode #scrub,body.obsmode .shd button[data-a="obs"]{display:none!important}
+body.obsmode #mp4p .mp-row:has(#mpa),body.obsmode #mp4p .mp-row:has(#mpb),body.obsmode #mp4p .mp-row:has(#mpe),body.obsmode #mp4p .mp-row:has(#mps),body.obsmode #mpsfr,body.obsmode #mp4p .mp-row:has(#mppre){display:none!important}
+#obsp .obs-root{display:flex;flex-wrap:wrap;align-items:center;gap:4px 14px;min-height:0;height:auto;background:none;position:static}
+#obsp #ostage{position:fixed!important;left:-20000px!important;top:0!important;width:1600px!important;height:1600px!important;flex:none!important;visibility:visible}
+#obsp .obs-zoom,#obsp #dl-obs,#obsp .obs-hint,#obsp #obs-tip,#obsp .obs-credit{display:none!important}
+
 #memlab[hidden]{display:none!important}#memlab.keep[hidden]{display:block!important;visibility:hidden}/* 11-03: Studio keeps the Member slot so the bar (and the frames under it) never move */
 #bar select,#bar button,#bar input[type=range],#bar label,#mem{box-sizing:border-box;height:30px}#bar label{display:inline-flex;align-items:center;gap:4px}#tabs button{height:26px}
 #shour{flex:0 0 212px;width:212px;min-width:212px!important;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
@@ -190,6 +199,7 @@ body.mgmode #bar>:not(#smodel){display:none!important}body.mgmode #scrub,body.mg
   <div class="mp-row"><label>End <select id="mpb"></select></label><button type="button" data-m="sb" title="Use the hour the map is on now">End = now</button><span id="mpnow" class="mp-note"></span></div>
   <div class="mp-row"><label>Every <select id="mpe"><option value="0">hour in the run</option><option value="3">3 h</option><option value="6">6 h</option><option value="12">12 h</option><option value="24">24 h</option></select></label>
   <label>Hold end <select id="mph"><option value="0">0 s</option><option value="0.5">0.5 s</option><option value="1" selected>1 s</option><option value="2">2 s</option></select></label></div>
+  <div class="mp-row" id="mpdurr"><label>Length <select id="mpdur" title="How long the camera move takes (then Hold end)"><option value="4">4 s</option><option value="6" selected>6 s</option><option value="8">8 s</option><option value="10">10 s</option><option value="15">15 s</option></select></label><span class="mp-note">Observations: one live map, the camera moves</span></div>
   <div class="mp-row"><label>Speed <input type="range" id="mps" min="0.5" max="15" step="0.5" value="4"></label><b id="mpsv">4 maps/s</b>
   <label>End speed <select id="mps1"><option value="">same</option><option value="0.5">0.5</option><option value="1">1</option><option value="1.5">1.5</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="6">6</option><option value="8">8</option><option value="10">10</option><option value="12">12</option><option value="15">15</option></select></label></div>
   <div class="mp-row"><label>Start zoom <select id="mpz0"><option value="f">as framed</option><option value="1">1&times;</option><option value="1.2">1.2&times;</option><option value="1.4">1.4&times;</option><option value="1.6">1.6&times;</option><option value="1.8">1.8&times;</option><option value="2">2&times;</option><option value="2.2">2.2&times;</option><option value="2.5">2.5&times;</option><option value="2.8">2.8&times;</option><option value="3">3&times;</option></select></label>
@@ -227,7 +237,7 @@ body.mgmode #bar>:not(#smodel){display:none!important}body.mgmode #scrub,body.mg
 </script>
 <script src="viewer.js?v=20261103r1"></script>
 <script src="stormfind.js?v=20261031c"></script>
-<script src="studio.js?v=20261103r3"></script>
+<script src="studio.js?v=20261103o1"></script>
 <script src="reqbox.js?v=20261031b"></script>
 <footer class="lic"><details><summary>Data: &copy; <span class="yr">2026</span> ECMWF (www.ecmwf.int), CC BY 4.0 &middot; Places: GeoNames, CC BY 4.0 &middot; NOAA (public domain) &middot; Natural Earth &middot; <u>Credits</u></summary>
 <p>Based on data and products of the European Centre for Medium-Range Weather Forecasts (ECMWF). Copyright &copy; <span class="yr">2026</span> ECMWF, <a href="https://www.ecmwf.int">www.ecmwf.int</a>. Licensed under CC BY 4.0 (<a href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a>). Maps are modified from the original data. ECMWF does not accept any liability whatsoever for any error or omission in the data, their availability, or for any loss or damage arising from their use.</p>
