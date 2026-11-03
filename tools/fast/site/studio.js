@@ -237,7 +237,7 @@ const OBS_LAYERS = [["plot", "Station plot", "#ffffff"], ["hi", "High", "#ff8a6e
 const OBS_CREDIT = ["Data: NOAA/NWS ASOS/AWOS via Iowa Environmental Mesonet; Environment and Climate Change Canada (OGL-Canada).", "Places: GeoNames (geonames.org), CC BY 4.0.", "Basemap: Natural Earth."];
 const OBS_TF = new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", weekday: "short", month: "2-digit", day: "2-digit", hour: "numeric", minute: "2-digit" });
 function obsInfo() {
-  const S_ = window.Obs && Obs._state; if (!S_) return null;
+  const S_ = typeof Obs !== "undefined" && Obs._state; if (!S_) return null;
   const on = OBS_LAYERS.filter((l) => S_.on.has(l[0])), t = S_.loaded ? new Date(S_.loaded) : null;
   const title = on.length === 1 && on[0][0] !== "plot" ? `Observed ${on[0][1]}${on[0][0] === "hi" || on[0][0] === "lo" || on[0][0] === "pk" ? " Today" : ""}` : "Current Observations";
   let when = ""; if (t) { const p = Object.fromEntries(OBS_TF.formatToParts(t).map((x) => [x.type, x.value])); when = `${p.weekday} ${p.month}-${p.day} \u00b7 ${p.hour}:${p.minute} ${p.dayPeriod} PT`; }
@@ -1107,14 +1107,14 @@ if (!CLEAN) {   // Studio: Map | Meteogram switch (first in the menu bar) + the 
   // Observations (11-03, t2192u): the live obs module (obs/, same as the viewer's Observations window) runs in the panel with its
   // region / layer chips and Refresh; its map canvas is drawn off-screen at a fixed 1600 x 1600 CSS px and both frames crop it
   let ob_ = null, obsLoad = null, osig = "";
-  const ograb = () => { const S_ = window.Obs && Obs._state, cv_ = document.getElementById("obs-canvas"); if (!S_ || !cv_ || !cv_.width) return;
+  const ograb = () => { const S_ = typeof Obs !== "undefined" && Obs._state, cv_ = document.getElementById("obs-canvas"); if (!S_ || !cv_ || !cv_.width) return;
     const sig = [S_.loaded, S_.view, S_.cx, S_.cy, S_.k, [...S_.on].join(), cv_.width, cv_.height, S_.dayCAloaded, S_.st.length, S_.raf ? 1 : 0].join("|");
     if (sig !== osig || MG.img !== cv_) { osig = sig; MG.img = S_.loaded ? cv_ : null; MG.msg = S_.loaded ? "" : "Loading observations\u2026"; if (!REC.on && !PV.on) renderAll(); } };
   const setMode = (mode) => {
     const on = mode === "mg" || mode === "obs", wasObs = OBSM(); if (on && MG.kind !== mode) { MG.img = null; MG.src = ""; MG.msg = ""; }
     MG.on = on; if (on) MG.kind = mode; localStorage.setItem("studio:mode", on ? mode : "map"); clearInterval(poll);
     document.body.classList.toggle("mgmode", on && mode === "mg"); document.body.classList.toggle("obsmode", on && mode === "obs");
-    if (wasObs && !OBSM() && window.Obs) { Obs.hide(); PIN.show = false; PIN.mode = null; }
+    if (wasObs && !OBSM() && typeof Obs !== "undefined") { Obs.hide(); PIN.show = false; PIN.mode = null; }
     if (on && mode === "obs") {
       if (!ob_) { ob_ = document.createElement("div"); ob_.id = "obsp"; ob_.innerHTML = `<div id="obs-root"></div>`; pnl.appendChild(ob_); }
       obsLoad = obsLoad || new Promise((ok, bad) => {
