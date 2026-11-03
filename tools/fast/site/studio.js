@@ -239,7 +239,8 @@ const OBS_TF = new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles
 function obsInfo() {
   const S_ = typeof Obs !== "undefined" && Obs._state; if (!S_) return null;
   const on = OBS_LAYERS.filter((l) => S_.on.has(l[0])), t = S_.loaded ? new Date(S_.loaded) : null;
-  const title = on.length === 1 && on[0][0] !== "plot" ? `Observed ${on[0][1]}${on[0][0] === "hi" || on[0][0] === "lo" || on[0][0] === "pk" ? " Today" : ""}` : "Current Observations";
+  const T1 = { hi: "Today's High Temperatures", lo: "Today's Low Temperatures", pk: "Today's Peak Wind Gusts", feel: "Wind Chill / Heat Index", mslp: "Sea-Level Pressure" };
+  const title = on.length === 1 && T1[on[0][0]] ? T1[on[0][0]] : on.length === 2 && S_.on.has("hi") && S_.on.has("lo") ? "Today's Highs and Lows" : "Current Observations";
   let when = ""; if (t) { const p = Object.fromEntries(OBS_TF.formatToParts(t).map((x) => [x.type, x.value])); when = `${p.weekday} ${p.month}-${p.day} \u00b7 ${p.hour}:${p.minute} ${p.dayPeriod} PT`; }
   return { on, t, title, when, view: S_.view };
 }
@@ -272,7 +273,7 @@ function renderObs(k, frO) {
   else { c.textAlign = "right"; dl.forEach((l, i) => c.fillText(l, f.W - f.pad - (cB && BR.cpos === "br" ? cB.s + 20 : 0), f.H - 24 - (dl.length - 1 - i) * dlh)); c.textAlign = "left"; }
   let lx = f.pad + (k === "h" && cB && BR.cpos === "bl" ? cB.s + 20 : 0); const ly = k === "v" ? f.H - 70 - (dl.length - 1) * dlh - dfs - 30 - lgS * 1.55 : f.H - 24 - lgS * 1.55 + lgS * 0.35;
   for (const [id, lab, col] of I.on) {
-    c.font = `800 ${lgS}px Montserrat`; const t = id === "feel" ? "Feels like" : lab, w = c.measureText(t).width + lgS * 1.2, h = lgS * 1.55;
+    c.font = `800 ${lgS}px Montserrat`; const t = { plot: "Station plot: \u00b0F, gust mph, wind kt", hi: "High \u00b0F", lo: "Low \u00b0F", pk: "Peak gust mph", feel: "Feels like \u00b0F", mslp: "MSLP hPa" }[id] || lab, w = c.measureText(t).width + lgS * 1.2, h = lgS * 1.55;
     if (k === "v" && lx + w > f.W - f.pad && lx > f.pad) break;
     noShadow(c); c.fillStyle = "rgba(17,19,22,0.78)"; c.beginPath(); c.roundRect ? c.roundRect(lx, ly, w, h, h / 2) : c.rect(lx, ly, w, h); c.fill(); sharpShadow(c, k);
     c.fillStyle = col; c.textBaseline = "middle"; c.fillText(t, lx + lgS * 0.6, ly + h / 2 + 1); c.textBaseline = "alphabetic"; lx += w + 12;
@@ -487,7 +488,7 @@ const REC = { on: false, cancel: false }, PIN = { mode: null, show: false }, FPS
 const TRK = { list: [], sel: -1, run: null, view: null };   // storm finder tracks (see findStorms)
 const $s = (id) => document.getElementById(id), sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const lerp = (a, b, t) => a + (b - a) * t, ease = (t) => t * t * (3 - 2 * t);
-const pinKey = () => `studio:pins:${OBSM() ? "obs" : S.view}`;
+const pinKey = () => `studio:pins:${OBSM() ? "obs:" + ((typeof Obs !== "undefined" && Obs._state.view) || "pnw") : S.view}`;   // obs: per region (pins are obs-map px)
 const getPins = () => { try { return JSON.parse(localStorage.getItem(pinKey()) || "{}"); } catch (e) { return {}; } };
 const setPins = (p) => { try { localStorage.setItem(pinKey(), JSON.stringify(p)); } catch (e) { /* private mode */ } };
 function frAt(k, x, y, zoom) {   // camera centred on map point (x, y) at this zoom, as a {dx, dy, zoom} framing
