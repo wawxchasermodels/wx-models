@@ -326,7 +326,9 @@ function pinBar() {
   const ml = document.getElementById("memlab"), phone = innerWidth <= 820;
   if (ml) ml.classList.toggle("keep", phone);   // phones: the Member box keeps its slot (its own bar row); desktop: it takes tab space (below)
   if (tabs && typeof TABS !== "undefined") {   // desktop: the full ECMWF tab set's width, less the Member box when it shows (AIFS ENS members)
-    const w7 = Math.ceil(probe(tabs, [...TABS.map(t => t[1]), "Other"].map(l => `<button type="button">${l}</button>`).join(""))), gap = parseFloat(getComputedStyle(bar).columnGap) || 10;
+    const keepH = tabs.innerHTML, keepW = tabs.style.minWidth; tabs.style.minWidth = "0px";   // measured in the real #tabs (its own button style), put back at once
+    tabs.innerHTML = [...TABS.map(t => t[1]), "Other"].map(l => `<button type="button">${l}</button>`).join(""); const w7 = Math.ceil(tabs.getBoundingClientRect().width); tabs.innerHTML = keepH; tabs.style.minWidth = keepW;
+    const gap = parseFloat(getComputedStyle(bar).columnGap) || 10;
     tabs.style.minWidth = phone ? "" : Math.max(0, w7 - (ml && !ml.hidden ? Math.ceil(ml.getBoundingClientRect().width + gap) : 0)) + "px"; }
   const opts = a => [...new Set(a)].map(t => `<option>${t}</option>`).join("");
   const titles = [], views = []; for (const md of Object.values(S.man.models)) { try { for (const p of Object.values(allProds(md))) if (p && p.title) titles.push(p.title); } catch (e) { /* no products */ } for (const v of Object.values(md.views || {})) if (v && v.label) views.push(v.label); }

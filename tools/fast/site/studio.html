@@ -23,6 +23,7 @@ html,body{overscroll-behavior:none}
 #stat{color:#a7abb3;font-size:12px;min-width:260px}
 #loadnote{display:none;color:#ffd27a;font-size:12px;font-weight:600;white-space:nowrap;padding:3px 8px;border:1px solid #6b5a2e;border-radius:10px;background:#2a2416}
 #loadnote.on{display:inline-block}
+#loadnote{position:absolute;right:0;top:50%;transform:translateY(-50%);pointer-events:none;z-index:2}#stepctl{position:relative}/* 11-03: the loading note floats over the slider's end, so it never pushes the bar (and the frames) around */
 body.phone #loadnote{font-size:11px;padding:2px 6px;flex:0 0 auto}
 body.phone #dock #step{min-width:90px}
 #wrap{position:relative;flex:1 1 auto;min-height:0;display:flex;align-items:center;justify-content:center;padding:4px;box-sizing:border-box}
@@ -224,7 +225,7 @@ body.mgmode #bar>:not(#smodel){display:none!important}body.mgmode #scrub,body.mg
 </script>
 <script src="viewer.js?v=20261103p1"></script>
 <script src="stormfind.js?v=20261031c"></script>
-<script src="studio.js?v=20261103t3"></script>
+<script src="studio.js?v=20261103t4"></script>
 <script src="reqbox.js?v=20261031b"></script>
 <footer class="lic"><details><summary>Data: &copy; <span class="yr">2026</span> ECMWF (www.ecmwf.int), CC BY 4.0 &middot; Places: GeoNames, CC BY 4.0 &middot; NOAA (public domain) &middot; Natural Earth &middot; <u>Credits</u></summary>
 <p>Based on data and products of the European Centre for Medium-Range Weather Forecasts (ECMWF). Copyright &copy; <span class="yr">2026</span> ECMWF, <a href="https://www.ecmwf.int">www.ecmwf.int</a>. Licensed under CC BY 4.0 (<a href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a>). Maps are modified from the original data. ECMWF does not accept any liability whatsoever for any error or omission in the data, their availability, or for any loss or damage arising from their use.</p>
