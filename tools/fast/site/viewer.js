@@ -263,7 +263,7 @@ async function boot() {
     runMenu(o2, a2); loadNote();
   }, 120e3);
   setLists();
-  const f0 = Q.get("f"), steps = S.runs[S.run].steps; S.i = f0 ? Math.max(0, steps.findIndex(s => s.f == +f0)) : 0;
+  const f0 = Q.get("f"), steps = S.runs[S.run].steps; S.i = f0 ? Math.max(0, steps.findIndex(s => s.f == +f0)) : S.run.startsWith("oisst/") ? steps.length - 1 : 0;   // 11-03: daily analyses open on the newest day
   const vq = Date.parse(Q.get("valid") || ""); if (!f0 && vq) { let b = 0; steps.forEach((x, k) => { if (Math.abs(Date.parse(x.valid) - vq) < Math.abs(Date.parse(steps[b].valid) - vq)) b = k; }); S.i = b; }   // old-site links
   $("step").value = S.i;
   $("run").onchange = async e => {   // keep the same valid time when switching runs/models (nearest step)
@@ -670,6 +670,14 @@ function sample(st, F, k) {   // bilinear value at panel pixel k
   const i = st.idx[k]; if (i < 0) return NaN; const tx = st.wx[k], ty = st.wy[k], g = st.gnx;
   return (F[i] * (1 - tx) + F[i + 1] * tx) * (1 - ty) + (F[i + g] * (1 - tx) + F[i + g + 1] * tx) * ty;
 }
+// 11-03 (SST anomaly): fields with a "no data" code under min_show (land / ice) blend only their valid corners, so the coast gets
+// no false dark-blue rim from mixing ocean values with the land code.
+function sampleMask(st, F, k, mins) {
+  const i = st.idx[k]; if (i < 0) return NaN; const tx = st.wx[k], ty = st.wy[k], g = st.gnx;
+  let s = 0, w = 0; const add = (v, ww) => { if (v >= mins && ww > 0) { s += v * ww; w += ww; } };
+  add(F[i], (1 - tx) * (1 - ty)); add(F[i + 1], tx * (1 - ty)); add(F[i + g], (1 - tx) * ty); add(F[i + g + 1], tx * ty);
+  return w > 0.25 ? s / w : NaN;
+}
 function sampleRC(F, w, fi, fj) {
   const r = Math.floor(fi), c = Math.floor(fj), ty = fi - r, tx = fj - c;
   return (F[r * w + c] * (1 - tx) + F[r * w + c + 1] * tx) * (1 - ty) + (F[(r + 1) * w + c] * (1 - tx) + F[(r + 1) * w + c + 1] * tx) * ty;
@@ -757,7 +765,7 @@ async function render(lite) {
   const V = VIEWS()[vid], P = PRODS()[pid], cv = $("map");
   const ctx = sizeMap(cv, V, lite), [LW, LH] = V.fig, rs = cv._rs; ctx.fillStyle = S.man.style.BG; ctx.fillRect(0, 0, LW, LH);
   // 1. color fill: value -> bin color, exactly the site's bins (contourf + BoundaryNorm)
-  const smp = P.fill === "prt" ? (/^(ifs|ifs9)$/.test(run.split("/")[0]) ? sampleType : sampleNN) : sample;
+  const smp = P.fill === "prt" ? (/^(ifs|ifs9)$/.test(run.split("/")[0]) ? sampleType : sampleNN) : (P.mask_edge || pid === "ssta") && P.min_show !== undefined ? (st_, F_, k_) => sampleMask(st_, F_, k_, P.min_show) : sample;
   const pal = palette(pid), mins = P.min_show, im = ctx.createImageData(st.W, st.H), o = im.data, F = D.fill, n = st.W * st.H;
   const vals = new Float32Array(n);
   if (lite) {   // half resolution: one sample per 2x2 block
