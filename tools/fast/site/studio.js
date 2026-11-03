@@ -319,10 +319,16 @@ async function render(k, frO) {   // frO: camera override (MP4 storm-track pan)
   // t2111u: the day / time line 27 % bigger (v 40 -> 51 px, h 36 -> 46 px) and extra bold, still under the title (64 / 58 px)
   c.font = `800 ${f.day}px Montserrat`; c.fillStyle = "#ffc24d"; c.fillText((step.valid_line || "").replace(/^Valid /, ""), x, y);
   const headBot = y + f.day * 0.45;
+  // 11-03 small fixes: header box (pill + run, title lines, day line) kept for studioLabelHidden, so map line labels never sit under it
+  { let hw = 0; c.font = `800 ${f.title}px Montserrat`; for (const t of lines) hw = Math.max(hw, c.measureText(t).width);
+    c.font = `800 ${f.day}px Montserrat`; hw = Math.max(hw, c.measureText((step.valid_line || "").replace(/^Valid /, "")).width);
+    c.font = `600 ${f.run}px Montserrat`; hw = Math.max(hw, pw + 14 + c.measureText("daily analysis").width);
+    f.hdr = [x - 12, (k === "v" ? 120 : 34) - 12, x + hw + 16, headBot + 14]; }
   // F+ badge (top right)
   c.font = `800 ${Math.round(f.valid * 1.1)}px Montserrat`; const bt = m === "oisst" && step.badge ? step.badge[0] : `F+${step.f}`, bw = c.measureText(bt).width + 40, bx = f.W - f.pad - bw, by = k === "v" ? 120 : 34;
   c.fillStyle = "rgba(17,19,22,0.85)"; c.strokeStyle = "rgba(255,255,255,0.35)"; c.lineWidth = 2; c.beginPath(); c.roundRect ? c.roundRect(bx, by, bw, f.valid * 1.9, 14) : c.rect(bx, by, bw, f.valid * 1.9); c.fill(); noShadow(c); c.stroke(); sharpShadow(c, k);
   c.fillStyle = "#fff"; c.textAlign = "center"; c.fillText(bt, bx + bw / 2, by + f.valid * 1.32); c.textAlign = "left"; c.restore();
+  f.badge = [bx - 12, by - 12, bx + bw + 12, by + f.valid * 1.9 + 12];
   const cnr = BR.corner && LOGOS[BR.logo] ? cornerBox(k, by + f.valid * 1.9, headBot, f.H - f.bot + (k === "v" ? 110 : 62)) : null;
   // bottom: color bar + credit (no dark band any more: their text gets a shadow so it stays readable on the map)
   c.save(); sharpShadow(c, k);
@@ -834,7 +840,12 @@ const MORDER = ["hrrr", "rrfs", "nbm", "gfs", "ifs", "ifs9", "aifs", "eps", "aen
 window.studioLabelHidden = (x, y) => {
   if (!last || MG.on) return false;
   return ["v", "h"].some((k) => { const f = F[k]; if (!f) return false; const r = crop(k, getFr(k)), X = (x - r.sx / r.rs) * r.kk, Y = (y - r.sy / r.rs) * r.kk;
-    return X > -60 && X < f.W + 60 && Y > f.H - (k === "v" ? 250 : 135) && Y < f.H + 30; });
+    if (X > -60 && X < f.W + 60 && Y > f.H - (k === "v" ? 250 : 135) && Y < f.H + 30) return true;
+    // 11-03 small fixes (a swell-period "10 s" sat under the 16:9 title): also the header block and the F+ badge (boxes from the last
+    // frame paint; before the first paint an estimate from the frame's font sizes), with ~half a label of margin
+    const top = k === "v" ? 120 : 34, hd = f.hdr || [0, 0, f.pad + (k === "v" ? f.W : f.W * 0.42), top + f.run * 1.55 + f.title * 1.02 + f.day * 1.75 + 14],
+      bg = f.badge || [f.W - f.pad - 220, top - 12, f.W, top + f.valid * 1.9 + 12], m_ = 30;
+    return [hd, bg].some((b) => X > b[0] - m_ && X < b[2] + m_ && Y > b[1] - m_ && Y < b[3] + m_); });
 };
 function bxFill() {
   const ck = (id, v, t, on) => `<label><input type="checkbox" data-g="${id}" value="${v}"${on ? " checked" : ""}> ${t}</label>`, [m0] = S.run.split("/"), R_ = S.runs[S.run];

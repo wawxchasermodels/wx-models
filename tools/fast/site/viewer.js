@@ -800,7 +800,10 @@ async function render(lite) {
     strokeLines(ctx, lines, P.freeze_color, pt(P.freeze_lw), [pt(3.7 * P.freeze_lw), pt(1.6 * P.freeze_lw)]);
   }
   const gk = `${rk(run)}/${pid}/${vid}/${f}`;
-  if (P.isobars && D.iso) drawIsobars(ctx, st, D, P, gk, V);
+  // 11-03 small fixes (tight wave views: swell-period line labels hidden under town / buoy labels, leaving a gap cut in the line):
+  // on wave maps the coast + buoy label boxes are worked out first (dry run, nothing drawn), and the line labels slide off them
+  const coastAvoid = WAVE_PIDS.test(pid) && MD().grid === "ll" && P.isobars && P.isobars.shadow_lab ? () => coastTaken(st, D, P, V, LW, LH) : null;
+  if (P.isobars && D.iso) drawIsobars(ctx, st, D, P, gk, V, coastAvoid);
   if (P.barbs) drawBarbs(ctx, st, D, P, V);
   S.lowPanel = null;
   if (P.lows || P.spag) drawEns(ctx, st, D, P, V, gk);
@@ -1078,9 +1081,9 @@ function seaVal(D, la, lo) {   // model value at a coast town: bilinear when the
   return v;
 }
 function drawCoast(ctx, st, D, P, V, LW, LH, WT) {
-  const C = WT.C; if (!C) { drawBuoys(ctx, st, D, P, V, LW, LH, WT.boxes || []); return; }
+  const C = WT.C; if (!C) { WT.taken = WT.boxes = WT.boxes || []; drawBuoys(ctx, st, D, P, V, LW, LH, WT.taken); return; }
   const wa = C.style === "wa", fName = `600 ${pt(wa ? 9.5 : 8.5)}px Montserrat`, fNum = `800 ${pt(wa ? 10.5 : 9.5)}px Montserrat`, gap = pt(wa ? 3.5 : 3.0), hh = pt(6.5);
-  const X0 = st.x0, Y0 = st.y0, X1 = st.x0 + st.W, Y1 = st.y0 + st.H, taken = WT.boxes.slice(), dots = [], resv = [];
+  const X0 = st.x0, Y0 = st.y0, X1 = st.x0 + st.W, Y1 = st.y0 + st.H, taken = WT.boxes.slice(), dots = [], resv = []; WT.taken = taken;
   const hit = (b, g = pt(2.5)) => b[0] < X0 + 2 || b[1] < Y0 + 2 || b[2] > X1 - 2 || b[3] > Y1 - 2 || taken.concat(resv).some(a => b[0] < a[2] + g && b[2] > a[0] - g && b[1] < a[3] + g && b[3] > a[1] - g);
   // the WA buoys' dots are kept free of town labels (Benjamin: those buoys matter most); the buoys themselves don't see this reserve
   // (only buoys the spacing rule will keep: same 30 pt rule as drawBuoys), and so are the re-placed cities' own dots
@@ -1406,11 +1409,16 @@ function strokeLines(ctx, lines, color, lw, dash) {
   ctx.stroke(); ctx.setLineDash([]);
 }
 
-function drawIsobars(ctx, st, D, P, gk, V) {
+function coastTaken(st, D, P, V, LW, LH) {   // boxes the coast towns + buoys will take (drawCoast on a 1 px scratch canvas)
+  const c = document.createElement("canvas"); c.width = c.height = 1; const x = c.getContext("2d"), k0 = window.__coast, b0 = window.__buoyLog;
+  try { const W2 = coastPlan(x, st, V, LW, LH); drawCoast(x, st, D, P, V, LW, LH, W2); return W2.taken || []; } catch (e) { return []; }
+  finally { window.__coast = k0; window.__buoyLog = b0; }
+}
+function drawIsobars(ctx, st, D, P, gk, V, extraAvoid) {
   // 11-01 7:26 PM (Benjamin t2052u: "make sure it doesn't overlap other MSLP numbers, move other MSLP numbers out of the way"):
   // the H / L (or ensemble mean L) marker boxes are reserved first; isobar numbers that would land on one slide along their line
   const I = P.isobars, avoid = hlAvoid(ctx, st, D, P, V, gk);
-  const { all, labels } = geo(`iso/${gk}`, () => isoGeom(ctx, st, D, I, avoid));
+  const { all, labels } = geo(`iso/${gk}`, () => isoGeom(ctx, st, D, I, extraAvoid ? avoid.concat(extraAvoid()) : avoid));
   paintIsobars(ctx, I, all, labels);
 }
 function isoGeom(ctx, st, D, I, avoid) {
@@ -1709,7 +1717,10 @@ function lowGeom(st, D, P, V) {
   // 11-01 (Benjamin: "include which ensemble member # is showing the individual strongest or lowest lows"): the list and the map
   // label use the real ECMWF member number (ens json "mnum"). Older files have none (their stack order was shuffled per step, so
   // the old "#k" was not the member) -> no number shown for them.
-  const tagged = L.map(o => [o.mb, o.num]).sort((x, y) => x[0] - y[0]);
+  // 11-03 small fixes ("EPS duplicate Mem 45"): one member can have two or more lows in view, so the same "Mem N" was listed twice.
+  // Each list now shows a member once: "10 strongest" uses each member's deepest low in view, "10 weakest" each member's weakest.
+  const byMem = pick => { const M = new Map(); for (const o of L) { const q = M.get(o.mem); if (!q || pick(o.mb, q.mb)) M.set(o.mem, o); } return [...M.values()].map(o => [o.mb, o.num]); };
+  const strongL = byMem((a, b) => a < b).sort((x, y) => x[0] - y[0]), weakL = byMem((a, b) => a > b).sort((x, y) => y[0] - x[0]);
   const top = L.length ? L.reduce((a, b) => (b.mb < a.mb ? b : a)) : null;
   // list box on the side that hides fewer member dots / mean lows (old site: box outside the map, which a fixed basemap can't do)
   const PW = 0.092 * V.fig[0] + 0.03 * V.fig[0], hid = x0_ => dots.filter(d => d[0] >= x0_ && d[0] <= x0_ + PW).length + 10 * means.filter(d => d[0] >= x0_ && d[0] <= x0_ + PW).length;
@@ -1717,7 +1728,7 @@ function lowGeom(st, D, P, V) {
   // does the same thing"; t2023u: likes the list on the right): the side used to be re-picked every hour (whichever side hid fewer dots),
   // so the list and the dot legend flipped left/right while scrubbing. Now always the right side (AIFS ENS + ECMWF EPS, every view).
   const side = "right"; void hid;
-  return { side, dots, core, means, top, hasNum: !!E.mnum, strong: tagged.slice(0, 10), weak: tagged.slice().reverse().slice(0, 10), n: E.n || 50,
+  return { side, dots, core, means, top, hasNum: !!E.mnum, strong: strongL.slice(0, 10), weak: weakL.slice(0, 10), n: E.n || 50,
            meanVals: means.map(x => x[2]).sort((x, y) => x - y) };
 }
 function paintLowPanel(ctx, st, V, g) {   // ens_maps.low_panel, drawn inside the left edge of the map + the dot legend
@@ -1751,11 +1762,23 @@ function paintLowPanel(ctx, st, V, g) {   // ens_maps.low_panel, drawn inside th
   const T = g.top; if (T && g.hasNum && T.num) {
     ctx.beginPath(); ctx.arc(T.x, T.y, pt(6.2), 0, 2 * Math.PI); ctx.lineWidth = pt(1.6); ctx.strokeStyle = "#ffffff"; ctx.stroke();
     ctx.lineWidth = pt(0.9); ctx.strokeStyle = "#0b0d12"; ctx.stroke();
-    const s = `Mem ${T.num} \u00b7 ${Math.round(T.mb)}`; ctx.font = `800 ${pt(10.5)}px Montserrat`; const w = ctx.measureText(s).width, gap = pt(9);
-    const pL = [x0, x0 + PW], blocked = xa => xa < st.x0 + pt(3) || xa + w > st.x0 + st.W - pt(3) || (xa + w > pL[0] && xa < pL[1]) ||
-      g.means.some(([mx, my]) => Math.abs(my - (T.y - pt(9))) < pt(22) && mx > xa - pt(8) && mx < xa + w + pt(8));
-    let xa = T.x + gap; if (blocked(xa) && !blocked(T.x - gap - w)) xa = T.x - gap - w;
-    haloText(ctx, s, xa, T.y - pt(9), `800 ${pt(10.5)}px Montserrat`, "#0b0d12", pt(2.6), "left", "middle"); }
+    const s = `Mem ${T.num} \u00b7 ${Math.round(T.mb)}`; ctx.font = `800 ${pt(10.5)}px Montserrat`; const w = ctx.measureText(s).width, gap = pt(9), hh = pt(7.5);
+    // 11-03 small fixes (EPS lows: "Mem 10 \u00b7 951" could sit on the mean red L): the label is a box tested against every mean L
+    // (letter + number, hlBox), the list box, the dot key and the map edge; it tries up-right, up-left, down-right, down-left, level,
+    // then further out, and if every spot touches something it takes the spot with the least overlap.
+    const lwK = pt(78), lhK = pt(11) * (DOT_LABELS.length + 1) + pt(8), kx = g.side === "right" ? x0 - lwK - pt(5) : x0 + PW + pt(5), ky = st.y0 + st.H - lhK - pt(5);
+    const obs = g.means.map(([mx, my, mv]) => hlBox(ctx, mx, my, mv)).concat([[x0, y0, x0 + PW, y0 + H], [kx, ky, kx + lwK, ky + lhK]]);
+    const ov = (a, b) => Math.max(0, Math.min(a[2], b[2]) - Math.max(a[0], b[0])) * Math.max(0, Math.min(a[3], b[3]) - Math.max(a[1], b[1]));
+    const pad = pt(2), cands = [];
+    for (const k of [1, 1.9, 2.8]) for (const [sx, dy] of [[1, -1], [-1, -1], [1, 1], [-1, 1], [1, 0], [-1, 0]]) {
+      const xa = sx > 0 ? T.x + gap * k : T.x - gap * k - w, yc = T.y + dy * pt(9) * k; cands.push([xa, yc]); }
+    let best = null;
+    for (const [xa, yc] of cands) { const R = [xa - pad, yc - hh - pad, xa + w + pad, yc + hh + pad];
+      const out = R[0] < st.x0 + pt(3) || R[2] > st.x0 + st.W - pt(3) || R[1] < st.y0 + pt(3) || R[3] > st.y0 + st.H - pt(3);
+      const cost = (out ? 1e9 : 0) + obs.reduce((a, b) => a + ov(R, b), 0);
+      if (!best || cost < best[2]) best = [xa, yc, cost, R]; if (cost === 0) break; }
+    window.__memLab = { s, rect: best[3], cost: best[2], means: g.means.length };   // QA hook (no effect on drawing)
+    haloText(ctx, s, best[0], best[1], `800 ${pt(10.5)}px Montserrat`, "#0b0d12", pt(2.6), "left", "middle"); }
   // "Member low (mb)" legend, lower left of the map just right of the list (old: matplotlib legend, lower left)
   const lw = pt(78), rh = pt(11), lhgt = rh * (DOT_LABELS.length + 1) + pt(8), lx = g.side === "right" ? x0 - lw - pt(5) : x0 + PW + pt(5), ly = st.y0 + st.H - lhgt - pt(5);
   ctx.globalAlpha = 0.92; ctx.fillStyle = "#ffffff"; ctx.fillRect(lx, ly, lw, lhgt); ctx.globalAlpha = 1; ctx.strokeStyle = "#c9c4b8"; ctx.strokeRect(lx, ly, lw, lhgt);
