@@ -29,7 +29,7 @@ const ObsImg = (() => {
       credit: "Satellite: NOAA GOES-West GeoColor (CIRA/NOAA) via NASA GIBS/ESDIS" },
   };
   const ST = { radar: false, sat: "", frames: { radar: [], ir: [], gc: [] }, img: new Map(), idx: -1, playing: true, timer: 0, last: 0,
-    timesAt: {}, hold: false, gl: null, glFail: "", sig: 0, msg: "", obs: null };
+    timesAt: {}, hold: false, blank: new Set(), all: { radar: [], ir: [], gc: [] }, gl: null, glFail: "", sig: 0, msg: "", obs: null };
   const tf = new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", hour: "numeric", minute: "2-digit" });
   const $ = (id) => document.getElementById(id);
   const on = () => [...(ST.radar ? ["radar"] : []), ...(ST.sat ? [ST.sat] : [])];
@@ -40,6 +40,8 @@ const ObsImg = (() => {
     const s = SRC[id], now = Date.now();
     if (ST.timesAt[id] && now - ST.timesAt[id] < s.refreshMin * 60e3 && ST.frames[id].length) return ST.frames[id];
     let all = [];
+    // a frame that was still black last time gets another try with each new time list
+    for (const k of [...ST.blank]) if (k.startsWith(id + "|")) { ST.blank.delete(k); const t = k.slice(id.length + 1); for (const tl of ["detail", "wide"]) ST.img.delete(id + "|" + tl + "|" + t); }
     if (s.kind === "rad") {
       const x = await (await fetch(RAD_WMS + "?service=WMS&request=GetCapabilities&version=1.3.0", { cache: "no-store" })).text();
       const m = x.match(/<Dimension[^>]*name="time"[^>]*>([^<]*)</); if (!m) throw new Error("radar times");
@@ -57,9 +59,10 @@ const ObsImg = (() => {
     }
     // newest n frames at least stepMin apart (radar comes every ~2 min; a 5-min step gives a 1-hour loop)
     const pick = [], gap = s.stepMin * 60e3 - 30e3;
-    for (let i = all.length - 1; i >= 0 && pick.length < s.n; i--) { const t = Date.parse(all[i]); if (!pick.length || Date.parse(pick[0]) - t >= gap) pick.unshift(all[i]); }
-    ST.frames[id] = pick; ST.timesAt[id] = now; return pick;
+    for (let i = all.length - 1; i >= 0 && pick.length < s.n + (s.kind === "gibs" ? 4 : 0); i--) { const t = Date.parse(all[i]); if (!pick.length || Date.parse(pick[0]) - t >= gap) pick.unshift(all[i]); }
+    ST.all[id] = pick; ST.timesAt[id] = now; return pickFrames(id);
   }
+  function pickFrames(id) { const s = SRC[id]; ST.frames[id] = ST.all[id].filter((t) => !ST.blank.has(id + "|" + t)).slice(-s.n); return ST.frames[id]; }
   function url(id, tile, t) {
     const s = SRC[id], T = s.tiles[tile], [w, so, e, n] = T.box, [W, H] = T.px;
     if (s.kind === "rad") return `${RAD_WMS}?SERVICE=WMS&REQUEST=GetMap&VERSION=1.3.0&LAYERS=${s.layer}&STYLES=&CRS=CRS:84&BBOX=${w},${so},${e},${n}&WIDTH=${W}&HEIGHT=${H}&FORMAT=${encodeURIComponent(s.fmt)}&TRANSPARENT=TRUE&TIME=${t}`;
@@ -69,13 +72,20 @@ const ObsImg = (() => {
     const key = id + "|" + tile + "|" + t; let r = ST.img.get(key);
     if (!r) {
       const im = new Image(); im.crossOrigin = "anonymous"; im.decoding = "async";
-      r = { im, ok: false, p: new Promise((res) => { im.onload = () => { r.ok = true; res(im); bump(); if (ST.obs) Obs.redraw(); }; im.onerror = () => { r.bad = true; res(null); }; }) };
+      r = { im, ok: false, p: new Promise((res) => { im.onload = () => {
+        // GIBS lists the newest times before every tile of them is filled in: such a frame comes back all black. Drop it (the loop uses the rest)
+        if (SRC[id].kind === "gibs" && blank(im)) { r.bad = true; ST.blank.add(id + "|" + t); pickFrames(id); res(null); bump(); return; }
+        r.ok = true; res(im); bump(); if (ST.obs) Obs.redraw(); }; im.onerror = () => { r.bad = true; res(null); }; }) };
       im.src = url(id, tile, t); ST.img.set(key, r);
     }
     return r;
   }
+  function blank(im) {
+    const c = document.createElement("canvas"); c.width = 32; c.height = 22; const g = c.getContext("2d", { willReadFrequently: true }); g.drawImage(im, 0, 0, 32, 22);
+    const d = g.getImageData(0, 0, 32, 22).data; let m = 0; for (let i = 0; i < d.length; i += 4) m = Math.max(m, d[i], d[i + 1], d[i + 2]); return m < 12;
+  }
   function prune() {   // keep only images of the current frame lists
-    const keep = new Set(); for (const id of Object.keys(SRC)) for (const t of ST.frames[id]) for (const tile of ["detail", "wide"]) keep.add(id + "|" + tile + "|" + t);
+    const keep = new Set(); for (const id of Object.keys(SRC)) for (const t of ST.all[id]) for (const tile of ["detail", "wide"]) keep.add(id + "|" + tile + "|" + t);
     for (const k of [...ST.img.keys()]) if (!keep.has(k) || !on().includes(k.split("|")[0])) { const r = ST.img.get(k); r.im.src = ""; ST.img.delete(k); }
   }
   const tileFor = (id) => { const S = ST.obs; if (!S) return "detail";
@@ -93,10 +103,12 @@ const ObsImg = (() => {
       for (const id of on()) {
         try { await times(id); } catch (e) { ST.msg = SRC[id].label + " times unavailable"; continue; }
         const fr = ST.frames[id]; if (!fr.length) { ST.msg = SRC[id].label + ": no recent frames"; continue; }
-        const tile = tileFor(id); getImg(id, tile, fr[fr.length - 1]);
+        const tile = tileFor(id);
+        for (let tries = 0; tries < 5 && ST.frames[id].length; tries++) { const f = ST.frames[id]; if (await getImg(id, tile, f[f.length - 1]).p) break; }   // newest real frame first
       }
       prune(); if (ST.idx < 0 || ST.idx >= len()) ST.idx = len() - 1;
-      for (const id of on()) { const tile = tileFor(id); for (let i = ST.frames[id].length - 2; i >= 0; i--) await getImg(id, tile, ST.frames[id][i]).p; }
+      for (const id of on()) { const tile = tileFor(id); for (let i = ST.frames[id].length - 1; i >= 0; i--) { const t = ST.frames[id][i]; if (t) await getImg(id, tile, t).p; } }
+      for (const id of on()) { const tile = tileFor(id), f = ST.frames[id]; for (const t of f) await getImg(id, tile, t).p; }   // frames that slid in after blanks dropped out
       ui(); bump(); Obs.redraw();
     })().finally(() => { loading = null; });
     return loading;
