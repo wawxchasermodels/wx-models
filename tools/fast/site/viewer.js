@@ -46,6 +46,16 @@ const pvU = u => { if (!PV || typeof u !== "string" || !u.startsWith(DATA)) retu
   return PV.re.test(r) ? "pdata/" + r : u; };
 const pvMerge = M => { if (PV) { Object.assign(M.models || (M.models = {}), PV.models); Object.assign(M.runs || (M.runs = {}), PV.runs); } return M; };
 { const f0 = window.fetch.bind(window); window.fetch = (u, o) => f0(pvU(u), o); }
+// 11-03 AIFS ENS single members (model "aensm", Benjamin t2147u / t2148u / t2153u): one file per member per hour (run.json file has {mem});
+// the member box under Runs picks the member, and only that member's files are fetched. Cache keys carry the member.
+S.mem = Math.min(50, Math.max(1, parseInt(Q.get("mem") || "1", 10) || 1));
+const isMemRun = r => !!(S.runs[r] && S.runs[r].file && S.runs[r].file.includes("{mem}"));
+const rk = r => isMemRun(r) ? `${r}#m${S.mem}` : r;   // run key incl. member (field / product / line caches)
+const memPad = () => String(S.mem).padStart(2, "0");
+function prepRun(R_) {   // runline "... member {mem} ..." follows the picked member
+  if (R_ && typeof R_.runline === "string" && R_.runline.includes("{mem}")) { const t = R_.runline; Object.defineProperty(R_, "runline", { get: () => t.replace("{mem}", S.mem), configurable: true }); }
+  return R_;
+}
 const img = src => new Promise((ok, no) => { const im = new Image(); im.onload = () => ok(im); im.onerror = no; im.src = pvU(src); });
 
 function fitPhone() {   // phones: map as large as fits between the menus and the slider bar, placed right under the menus
@@ -228,7 +238,7 @@ async function boot() {
   if (PV && PV.studio && sv) Object.assign(sv.models || (sv.models = {}), PV.studio);   // 11-03 preview supplement: Studio wide view
   S.man = addStudioViews(waveViews(viewFixes(mergeRunsX(man), vf), wv), sv);
   // runs: "model/cycle", newest first per model; models in a fixed order
-  const order = ["hrrr", "rrfs", "nbm", "gfs", "ifs", "ifs9", "aifs", "eps", "aens", "gfsw"].filter(m => S.man.models[m] && (S.man.runs[m] || []).length);
+  const order = ["hrrr", "rrfs", "nbm", "gfs", "ifs", "ifs9", "aifs", "eps", "aens", "aensm", "gfsw"].filter(m => S.man.models[m] && (S.man.runs[m] || []).length);
   const all = []; for (const m of order) for (const c of [...S.man.runs[m]].reverse()) all.push(`${m}/${c}`);
   const qr = Q.get("run"), qm = Q.get("model");
   // 11-01: a ?prod= link with no run/model (e.g. ?prod=waves) opens the first model that has that product
@@ -259,7 +269,8 @@ async function boot() {
   $("run").onchange = async e => {   // keep the same valid time when switching runs/models (nearest step)
     const vt = Date.parse(S.runs[S.run].steps[S.i].valid); S.run = e.target.value; await loadRun(S.run); setLists();
     const st = S.runs[S.run].steps; let b = 0; st.forEach((x, k) => { if (Math.abs(Date.parse(x.valid) - vt) < Math.abs(Date.parse(st[b].valid) - vt)) b = k; });
-    S.i = b; $("step").value = b; draw(); loadNote(); };
+    S.i = b; $("step").value = b; memUI(); draw(); loadNote(); };
+  memUI();
   // phones: hour slider under the map (Benjamin 10-29 9:01 PM)
   const mq = matchMedia("(max-width: 700px), (max-height: 500px)"), placeSteps = () => {
     const ph = mq.matches; document.body.classList.toggle("phone", ph);
@@ -309,7 +320,7 @@ async function refreshPartial() {
   let N; try { N = await (await fetch(`${DATA}runs/${r}/${runFile(r)}`, { cache: "no-cache" })).json(); } catch (e) { return; }
   if (S.run !== r || !N || !N.steps || N.steps.length < R_.steps.length) return;
   const newF = N.fields.join() !== R_.fields.join();
-  S.runs[r] = N; if (newF) setLists(); $("step").max = N.steps.length - 1; $("step").value = S.i; loadNote();
+  S.runs[r] = prepRun(N); if (newF) setLists(); $("step").max = N.steps.length - 1; $("step").value = S.i; loadNote();
 }
 // Side-by-side viewer (10-31, Benjamin: "a side by side viewer"): compare.html shows two of these pages in frames (?embed=compare&id=L|R).
 // Each frame tells the page what it shows after every draw; the page sends "set" to the other frame when sync is on.
@@ -355,7 +366,7 @@ async function onCompareMsg(e) {
     st.forEach((x, k) => { if (Math.abs(Date.parse(x.valid) - vt) < Math.abs(Date.parse(st[b].valid) - vt)) b = k; }); S.i = b; $("step").value = b; }
   cmpEcho = !lead; draw(); loadNote();
 }
-async function loadRun(r) { if (!S.runs[r]) S.runs[r] = await (await fetch(`${DATA}runs/${r}/${runFile(r)}`, { cache: "no-cache" })).json(); return S.runs[r]; }
+async function loadRun(r) { if (!S.runs[r]) S.runs[r] = prepRun(await (await fetch(`${DATA}runs/${r}/${runFile(r)}`, { cache: "no-cache" })).json()); return S.runs[r]; }
 const SV = () => (S.man.static_v ? `?v=${S.man.static_v}` : "");   // cache-buster for static layers (they are cached 1 day)
 const MD = () => S.man.models[S.run.split("/")[0]];
 // Severe tab (10-31): new products are published under the manifest's products_x (production's older viewer only reads "products")
@@ -469,7 +480,7 @@ const getKey = (pid, vid) => { const u = keyURL(pid, vid); return keyImg[u] || (
 function fieldURL(run, name, f) {   // packed runs: several fields share one RGB PNG, one channel each (run.json steps[].packs)
   const R_ = S.runs[run], st = R_.steps.find(s => s.f === f), pk = st && st.packs && st.packs[name];
   const file = pk ? pk[0] : name, ch = pk ? pk[1] : 0;
-  return [`${DATA}${R_.base}/` + R_.file.replace("{name}", file).replace("{f:03d}", String(f).padStart(3, "0")), ch];
+  return [`${DATA}${R_.base}/` + R_.file.replace("{mem}", memPad()).replace("{name}", file).replace("{f:03d}", String(f).padStart(3, "0")), ch];
 }
 const pixCache = new Map();
 function getPixels(url) {   // one fetch + decode per image, shared by every field packed in it
@@ -486,7 +497,7 @@ function getPixels(url) {   // one fetch + decode per image, shared by every fie
   p.catch(() => pixCache.delete(url)); pixCache.set(url, p); return p;
 }
 function getField(run, name, f) {
-  const key = `${run}/${name}/${f}`;
+  const key = `${rk(run)}/${name}/${f}`;
   if (S.fields.has(key)) return S.fields.get(key);
   const p = (async () => {
     const st = S.runs[run].steps.find(s => s.f === f);
@@ -496,9 +507,27 @@ function getField(run, name, f) {
     // image row 0 = first (southern) grid row: the encoder writes the grid as-is
     if (st.ranges[name][2] === 2) { const d = hi - lo; for (let k = 0; k < n; k++) { const q = px[k * 4 + ch] / 255; out[k] = lo + q * q * d; } }   // sqrt-coded precip
     else for (let k = 0; k < n; k++) out[k] = lo + px[k * 4 + ch] * sc;
+    const G = S.runs[run].grid;
+    if (S.runs[run].half && G) return { v: upHalf(out, I.w, I.h, G.nx, G.ny), w: G.nx, h: G.ny, bytes: I.bytes };   // 0.5 deg member files -> the 0.25 deg crop grid
     return { v: out, w: I.w, h: I.h, bytes: I.bytes };
   })();
   p.catch(() => S.fields.delete(key)); S.fields.set(key, p); return p;
+}
+function memUI() {   // AIFS ENS members: type or pick 1-50; only that member's files load
+  const lab = $("memlab"), inp = $("mem"); if (!lab || !inp) return;
+  const on = isMemRun(S.run); lab.hidden = !on; if (!on) return;
+  const ms = S.runs[S.run].members || []; inp.min = ms[0] || 1; inp.max = ms[ms.length - 1] || 50; inp.value = S.mem;
+  if (!inp.dataset.wired) { inp.dataset.wired = 1;
+    const go = () => { const v = Math.round(+inp.value); const lo = +inp.min, hi = +inp.max;
+      const n = Math.min(hi, Math.max(lo, isFinite(v) && v ? v : S.mem)); inp.value = n; if (n === S.mem) return; S.mem = n; draw(); };
+    inp.addEventListener("change", go); inp.addEventListener("keydown", e => { if (e.key === "Enter") go(); }); }
+}
+function upHalf(a, w, h, W, H) {   // bilinear: point (i, j) of the half grid sits at (2i, 2j) of the full grid
+  const o = new Float32Array(W * H);
+  for (let y = 0; y < H; y++) { const fy = Math.min(h - 1, y / 2), y0 = Math.floor(fy), y1 = Math.min(h - 1, y0 + 1), ty = fy - y0;
+    for (let x = 0; x < W; x++) { const fx = Math.min(w - 1, x / 2), x0 = Math.floor(fx), x1 = Math.min(w - 1, x0 + 1), tx = fx - x0;
+      o[y * W + x] = (a[y0 * w + x0] * (1 - tx) + a[y0 * w + x1] * tx) * (1 - ty) + (a[y1 * w + x0] * (1 - tx) + a[y1 * w + x1] * tx) * ty; } }
+  return o;
 }
 function blur(a, w, h, sigma) {               // separable gaussian (scipy gaussian_filter, mode reflect, truncate 4)
   const r = Math.ceil(4 * sigma), k = []; let s = 0;
@@ -511,7 +540,7 @@ function blur(a, w, h, sigma) {               // separable gaussian (scipy gauss
   return o;
 }
 async function productFields(run, pid, f) {
-  const P = allProds(S.man.models[run.split("/")[0]])[pid], key = `${run}/${pid}/${f}`;
+  const P = allProds(S.man.models[run.split("/")[0]])[pid], key = `${rk(run)}/${pid}/${f}`;
   if (S.derived.has(key)) return S.derived.get(key);
   const p = (async () => {
     const F = {}; for (const n of P.fields) F[n] = await getField(run, n, f);
@@ -748,7 +777,7 @@ async function render(lite) {
     strokeLines(ctx, lines, "#ffffff", pt(3.0), [pt(3.7 * P.freeze_lw), pt(1.6 * P.freeze_lw)]);   // matplotlib halo: 3 pt stroke, dashed with the line
     strokeLines(ctx, lines, P.freeze_color, pt(P.freeze_lw), [pt(3.7 * P.freeze_lw), pt(1.6 * P.freeze_lw)]);
   }
-  const gk = `${run}/${pid}/${vid}/${f}`;
+  const gk = `${rk(run)}/${pid}/${vid}/${f}`;
   if (P.isobars && D.iso) drawIsobars(ctx, st, D, P, gk, V);
   if (P.barbs) drawBarbs(ctx, st, D, P, V);
   S.lowPanel = null;
@@ -805,6 +834,7 @@ async function render(lite) {
   // iOS Safari throws after 100 history.replaceState calls in 10 s: update the URL once things settle
   if (!Q.get("clean")) clearTimeout(urlTimer), urlTimer = setTimeout(() => { const u = new URL(location); u.searchParams.set("prod", pid); u.searchParams.set("view", vid);
     u.searchParams.set("f", f); u.searchParams.set("run", run); u.searchParams.delete("model");
+    if (isMemRun(run)) u.searchParams.set("mem", S.mem); else u.searchParams.delete("mem");
     u.searchParams.delete("mg"); u.searchParams.delete("obs"); try { history.replaceState(null, "", u); } catch (e) {} }, 400);
   preload(run, pid, S.i);
   if (window.onStudioDraw) window.onStudioDraw(cv_(), S.cur, step);
@@ -814,7 +844,7 @@ async function render(lite) {
 // are drawn, PRISM / CPC / GPCP normals on the precip anomaly maps. NOAA keeps "Data: NOAA (public domain)" as before.
 const CREDIT_YEAR = new Date().getFullYear();
 function creditLines(pid, P, towns) {
-  const m = S.run.split("/")[0], name = (MD() && MD().name) || "", ec = /^ECMWF/.test(name) || /^(ifs|ifs9|aifs|eps|aens)$/.test(m);
+  const m = S.run.split("/")[0], name = (MD() && MD().name) || "", ec = /^ECMWF/.test(name) || /^(ifs|ifs9|aifs|eps|aens|aensm)$/.test(m);
   const L = [];
   if (P.clim === "pr" || /^qpf(a|pct)$/.test(pid)) L.push("Normals: PRISM Group, Oregon State University, https://prism.oregonstate.edu (accessed 30 Oct 2026); NOAA CPC & GPCP via NOAA PSL.");
   const a = [ec ? `Data: \u00a9 ${CREDIT_YEAR} ECMWF (www.ecmwf.int), CC BY 4.0. Modified.` : (pid === "t2m" ? "" : "Data: NOAA (public domain).")];
@@ -1397,6 +1427,8 @@ function isoGeom(ctx, st, D, I, avoid) {
   return { all, labels };
 }
 function paintIsobars(ctx, I, all, labels) {
+  // 11-03: Studio hides line labels that would sit under its color bar / credit rows (window.studioLabelHidden, studio.js); lines stay
+  if (window.studioLabelHidden && Q.get("studio")) labels = labels.filter(b => { try { return !window.studioLabelHidden(b.x, b.y); } catch (e) { return true; } });
   ctx.save();   // clip out label boxes so lines break under the numbers (matplotlib clabel inline)
   ctx.beginPath(); ctx.rect(0, 0, ctx.canvas.width, ctx.canvas.height);
   for (const b of labels) {

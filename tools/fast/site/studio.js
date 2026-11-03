@@ -245,7 +245,7 @@ async function render(k, frO) {   // frO: camera override (MP4 storm-track pan)
     const s = f.W / r.sw, ax = Math.max(r.sx, r.px * r.rs), ay = Math.max(r.sy, r.py * r.rs), bx = Math.min(r.sx + r.sw, (r.px + r.pw) * r.rs), by = Math.min(r.sy + r.sh, (r.py + r.ph) * r.rs);
     if (bx > ax && by > ay) c.drawImage(cv, ax, ay, bx - ax, by - ay, (ax - r.sx) * s, (ay - r.sy) * s, (bx - ax) * s, (by - ay) * s); }
   // header (10-31 7:28 PM, Benjamin: "remove the shading on the top and the bottom of the studio views": no dark bands; text keeps its shadow)
-  const site = (S.man.models[m] || {}).site || m, R_ = S.runs[cur.run], x = f.pad; let y = k === "v" ? 120 : 34;
+  const site = m === "aensm" ? `AIFS ENS member ${S.mem}` : (S.man.models[m] || {}).site || m, R_ = S.runs[cur.run], x = f.pad; let y = k === "v" ? 120 : 34;   // 11-03: member number in the pill
   c = ovLayer(f);   // header + bottom text / bars: off-screen layer, put on the frame with the soft falloff (ovPut)
   c.save(); sharpShadow(c, k); const pw = pill(c, x, y, site.toUpperCase(), Math.round(f.run * 0.95), "#2f8cff", "#fff");
   c.font = `600 ${f.run}px Montserrat`; c.fillStyle = "#c9ced8"; c.fillText(`${cur.run.split("/")[1].slice(8)}Z run`, x + pw + 14, y + f.run * 1.08);
@@ -685,7 +685,14 @@ function brSync() { if (!$s("brcard")) return; $s("brcard").checked = BR.card; $
 // MP4 with the panel's settings (hours by forecast hour, speed, zoom, mode / pins of each view, preset; "Auto storm track" finds
 // the storm per map) and packs them in one .zip (stored, MP4s don't compress). Result: window.__batchResult.
 const BX = { on: false, cancel: false };
-const MORDER = ["hrrr", "rrfs", "nbm", "gfs", "ifs", "ifs9", "aifs", "eps", "aens", "gfsw"];
+const MORDER = ["hrrr", "rrfs", "nbm", "gfs", "ifs", "ifs9", "aifs", "eps", "aens", "aensm", "gfsw"];
+// 11-03 (WW3 swell-period labels under the 16:9 color bar): map line labels whose spot lands in the bottom color bar / credit band of
+// either frame are not drawn (the viewer asks while painting; the lines themselves stay)
+window.studioLabelHidden = (x, y) => {
+  if (!last || MG.on) return false;
+  return ["v", "h"].some((k) => { const f = F[k]; if (!f) return false; const r = crop(k, getFr(k)), X = (x - r.sx / r.rs) * r.kk, Y = (y - r.sy / r.rs) * r.kk;
+    return X > -60 && X < f.W + 60 && Y > f.H - (k === "v" ? 250 : 135) && Y < f.H + 30; });
+};
 function bxFill() {
   const ck = (id, v, t, on) => `<label><input type="checkbox" data-g="${id}" value="${v}"${on ? " checked" : ""}> ${t}</label>`, [m0] = S.run.split("/"), R_ = S.runs[S.run];
   $s("bxm").innerHTML = MORDER.filter((m) => S.man.models[m] && (S.man.runs[m] || []).length).map((m) => ck("m", m, S.man.models[m].site || m, m === m0)).join("");

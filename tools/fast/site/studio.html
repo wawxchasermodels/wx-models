@@ -156,10 +156,11 @@ body.clean #scrub,body.clean #rqslot,body.clean #stip{display:none!important}
 #mgp{display:none}body.mgmode #mgp{display:block;flex:0 0 auto;background:#1d2027;border-bottom:1px solid #2c3039}#mgf{display:block;width:100%;height:118px;border:0}
 body.mgmode #bar>:not(#smodel){display:none!important}body.mgmode #scrub,body.mgmode #pinhint,body.mgmode .shd button[data-a="mp4"],body.mgmode .shd button[data-a="obs"]{display:none!important}
 @media (max-width:820px){#mgf{height:190px}}
+#memlab[hidden]{display:none!important}#mem{background:#262931;color:#f4f2ee;border:1px solid #7d828c;border-radius:6px;padding:4px 6px;font:inherit}
 </style></head>
 <body>
 <div id="bar">
-  <label>Runs <select id="run" aria-label="Runs"></select></label>
+  <label>Runs <select id="run" aria-label="Runs"></select></label><label id="memlab" hidden title="AIFS ENS member (1-50): only this member's maps load">Member <input id="mem" type="number" min="1" max="50" step="1" inputmode="numeric" aria-label="AIFS ENS member" style="width:4.2em"></label>
   <div id="tabs" role="tablist" aria-label="Product groups"></div>
   <label>Product <select id="prod"></select></label>
   <label>View <select id="view"></select></label>
@@ -218,9 +219,9 @@ body.mgmode #bar>:not(#smodel){display:none!important}body.mgmode #scrub,body.mg
   if (q.get("from") && !q.get("f")) q.set("f", q.get("from"));
   history.replaceState(null, "", location.pathname + "?" + q.toString()); })();
 </script>
-<script src="viewer.js?v=20261103w2"></script>
+<script src="viewer.js?v=20261103m1"></script>
 <script src="stormfind.js?v=20261031c"></script>
-<script src="studio.js?v=20261103w1"></script>
+<script src="studio.js?v=20261103m1"></script>
 <script src="reqbox.js?v=20261031b"></script>
 <footer class="lic"><details><summary>Data: &copy; <span class="yr">2026</span> ECMWF (www.ecmwf.int), CC BY 4.0 &middot; Places: GeoNames, CC BY 4.0 &middot; NOAA (public domain) &middot; Natural Earth &middot; <u>Credits</u></summary>
 <p>Based on data and products of the European Centre for Medium-Range Weather Forecasts (ECMWF). Copyright &copy; <span class="yr">2026</span> ECMWF, <a href="https://www.ecmwf.int">www.ecmwf.int</a>. Licensed under CC BY 4.0 (<a href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a>). Maps are modified from the original data. ECMWF does not accept any liability whatsoever for any error or omission in the data, their availability, or for any loss or damage arising from their use.</p>
