@@ -428,12 +428,13 @@ function setLists() {   // products this run carries (all their fields present),
     const t = tabs.find(t => t[0] === (S.tab || tabOf(S.prod))) || tabs.find(t => t[0] === tabOf(S.prod)); S.prod = (t ? t[2][0] : prods[0])[0]; }
   const inTab = id => tabs.some(t => t[0] === id && t[2].some(([k]) => k === S.prod));
   const cur = S.tab && inTab(S.tab) ? S.tab : tabOf(S.prod); S.tab = cur; S.lastTab[cur] = S.prod;
-  $("tabs").innerHTML = tabs.map(([id, label]) => `<button type="button" role="tab" data-t="${id}" aria-selected="${id === cur}"${id === cur ? ' class="on"' : ""}>${label}</button>`).join("") +
-    (Q.get("embed") || tabs.some(t => t[0] === "wav") || !(S.man.runs.ifs || []).length ? "" :
-      `<button type="button" data-t="wav" class="dim" title="Waves: ECMWF, NOAA WW3 and NOAA OISST. Opens the newest ECMWF run">Waves</button>`) +
-    // 11-03 (t2228u): on a NOAA WW3 / OISST run the weather tabs show dimmed and open the newest ECMWF run on that tab
+  $("tabs").innerHTML =
+    // 11-03 (t2228u): on a NOAA WW3 / OISST run the weather tabs show dimmed (same order as usual, before Waves) and open the newest ECMWF run on that tab
     (Q.get("embed") || !OCEAN.includes(S.run.split("/")[0]) || !(S.man.runs.ifs || []).length ? "" :
       TABS.filter(t => t[0] !== "wav" && !tabs.some(x => x[0] === t[0])).map(([id, label]) => `<button type="button" data-t="${id}" data-wx="1" class="dim" title="${label}: opens the newest ECMWF run">${label}</button>`).join("")) +
+    tabs.map(([id, label]) => `<button type="button" role="tab" data-t="${id}" aria-selected="${id === cur}"${id === cur ? ' class="on"' : ""}>${label}</button>`).join("") +
+    (Q.get("embed") || tabs.some(t => t[0] === "wav") || !(S.man.runs.ifs || []).length ? "" :
+      `<button type="button" data-t="wav" class="dim" title="Waves: ECMWF, NOAA WW3 and NOAA OISST. Opens the newest ECMWF run">Waves</button>`) +
     // WA Maps (10-31, Benjamin 8:58 AM): the posted Washington state-view maps, own page (wamaps.html)
     (Q.get("embed") || Q.get("studio") ? "" : `<button type="button" data-t="wamaps" title="Washington state-view forecast maps">WA Maps</button>` +
       `<button type="button" data-t="compare" title="Two maps side by side: two models, or two runs of one model">Compare</button>` +
