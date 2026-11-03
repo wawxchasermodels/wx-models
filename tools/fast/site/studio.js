@@ -685,7 +685,7 @@ function brSync() { if (!$s("brcard")) return; $s("brcard").checked = BR.card; $
 // MP4 with the panel's settings (hours by forecast hour, speed, zoom, mode / pins of each view, preset; "Auto storm track" finds
 // the storm per map) and packs them in one .zip (stored, MP4s don't compress). Result: window.__batchResult.
 const BX = { on: false, cancel: false };
-const MORDER = ["hrrr", "rrfs", "nbm", "gfs", "ifs", "ifs9", "aifs", "eps", "aens"];
+const MORDER = ["hrrr", "rrfs", "nbm", "gfs", "ifs", "ifs9", "aifs", "eps", "aens", "gfsw"];
 function bxFill() {
   const ck = (id, v, t, on) => `<label><input type="checkbox" data-g="${id}" value="${v}"${on ? " checked" : ""}> ${t}</label>`, [m0] = S.run.split("/"), R_ = S.runs[S.run];
   $s("bxm").innerHTML = MORDER.filter((m) => S.man.models[m] && (S.man.runs[m] || []).length).map((m) => ck("m", m, S.man.models[m].site || m, m === m0)).join("");

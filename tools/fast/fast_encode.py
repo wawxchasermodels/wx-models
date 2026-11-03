@@ -48,11 +48,17 @@ MODELS = {   # grid "lcc" = HRRR 3 km, "ll" = 0.25 deg global (lat 90 -> -90, lo
     # AIFS ensemble (stage 4): 50 members, 00/06/12/18Z, 6-hourly to 360 h; 2 m temp + 500 mb height (z / g), same products as "eps"
     # 10-31: + 06/18Z (AIFS ENS 06/18Z run the full 360 h)
     "aens": dict(grid="ll", views=GLOBAL_VIEWS, cycles=(0, 6, 12, 18), steps=list(range(6, 361, 6)), keep=4, grid_from="ifs"),
+    # 11-03 (Benjamin t2141u queue: "NOAA WaveWatch III ... swell period, swell period + significant wave height, significant wave height"):
+    # NOAA GFS-Wave (WAVEWATCH III, global 0.25 deg, the same grid as GFS), public domain, NOAA's AWS open-data bucket. 00/06/12/18Z,
+    # hourly to 120 h then 3-hourly to 384 h; kept 3-hourly to 120 h then 6-hourly to 384 h (84 steps). Wave fields only.
+    "gfsw": dict(grid="ll", views=GLOBAL_VIEWS, cycles=(0, 6, 12, 18), steps=list(range(3, 121, 3)) + list(range(126, 385, 6)), keep=2, grid_from="gfs",
+                 note="3-hourly to F+120, then 6-hourly"),
 }
 MINFO = {"aens": dict(name="ECMWF AIFS Ensemble", site="AIFS ENS", res="0.25\u00b0 \u00b7 50 members", credit_as="aifs"),
          "nbm": dict(name="NOAA NBM", site="NBM", res="2.5 km", noaa=True),
          "eps": dict(name="ECMWF Ensemble", site="ECMWF EPS", res="0.25\u00b0 \u00b7 50 members", credit_as="ifs"),
-         "ifs9": dict(name="ECMWF IFS", site="ECMWF 9 km", res="9 km (0.1\u00b0)", credit_as="ifs")}
+         "ifs9": dict(name="ECMWF IFS", site="ECMWF 9 km", res="9 km (0.1\u00b0)", credit_as="ifs"),
+         "gfsw": dict(name="NOAA WaveWatch III", site="NOAA WW3", res="0.25\u00b0 (GFS-Wave)", noaa=True)}
 def as_model(m): return MODELS.get(m, {}).get("as_model", m)   # ifs9 = IFS (same fields / products / units), only the files differ
 def minfo(m):
     import menu_maps as M
@@ -384,6 +390,35 @@ def _wave(R, m):
     R.cache["_wave"] = r = dict(swh=np.where(sea, out["swh"] * 3.28084, -0.5), wdu=np.where(sea, -np.sin(th), 0.0), wdv=np.where(sea, -np.cos(th), 0.0),
                                 mwp=np.where(sea, np.nan_to_num(out["mwp"]), 0.0))
     return r
+# 11-03: NOAA GFS-Wave (WAVEWATCH III) global 0.25 deg on NOAA's AWS open-data bucket (public domain; NOMADS has the same files)
+WW3_URL = "https://noaa-gfs-bdp-pds.s3.amazonaws.com/gfs.{d}/{h:02d}/wave/gridded/gfswave.t{h:02d}z.global.0p25.f{s:03d}.grib2"
+WW3_PARS = {"swh": "HTSGW:surface", "dir": "DIRPW:surface", "swper": "SWPER:1 in sequence", "swdir": "SWDIR:1 in sequence"}
+def _ww3(R, m):
+    """NOAA WAVEWATCH III (GFS-Wave): significant wave height (ft; land -0.5), primary wave direction as a unit vector pointing where
+    the waves travel, primary (partition 1) swell period (s; land -0.5) and its travel direction. Same layout as _wave (lon -180..180)."""
+    if m != "gfsw": raise KeyError("ww3")
+    if "_ww3" in R.cache: return R.cache["_ww3"]
+    import temp_maps as TM, eccodes as ec
+    url = WW3_URL.format(d=f"{R.c:%Y%m%d}", h=R.c.hour, s=R.s)
+    idx = TM.get(url + ".idx").decode().splitlines(); out = {}
+    for name, vl in WW3_PARS.items():
+        k = next((k for k, l in enumerate(idx) if ":".join(l.split(":")[3:5]) == vl), None)
+        if k is None: raise KeyError(f"ww3 {vl}")
+        a = int(idx[k].split(":")[1]); b = int(idx[k + 1].split(":")[1]) - 1 if k + 1 < len(idx) else None
+        blob = TM.get(url, (a, b) if b is not None else (a, a + 40_000_000)); g = ec.codes_new_from_message(blob)
+        ni, nj = ec.codes_get(g, "Ni"), ec.codes_get(g, "Nj"); mv = ec.codes_get(g, "missingValue")
+        v = ec.codes_get_values(g).reshape(nj, ni).astype(float); ec.codes_release(g)
+        v[v == mv] = np.nan; out[name] = np.roll(v, ni // 2, axis=1)   # lon 0..360 -> -180..180 (roll_ll turns it back)
+    sea = np.isfinite(out["swh"]); th = np.radians(np.nan_to_num(out["dir"])); ts = np.radians(np.nan_to_num(out["swdir"]))   # directions waves come FROM
+    sp = np.isfinite(out["swper"]) & sea
+    R.cache["_ww3"] = r = dict(swh=np.where(sea, out["swh"] * 3.28084, -0.5), wdu=np.where(sea, -np.sin(th), 0.0), wdv=np.where(sea, -np.cos(th), 0.0),
+                               swper=np.where(sp, np.nan_to_num(out["swper"]), np.where(sea, 0.0, -0.5)), swdu=np.where(sp, -np.sin(ts), 0.0), swdv=np.where(sp, -np.cos(ts), 0.0))
+    return r
+def _wv(R, m): return _ww3(R, m) if m == "gfsw" else _wave(R, m)
+class _WaveOnlyR:   # gfsw: no atmosphere reader, the wave getters fetch their own GRIB ranges
+    def __init__(self, c, s): self.c, self.s, self.cache, self.bytes = c, s, {}, 0
+GFSW_FIELDS = ("swh", "wdu", "wdv", "swper", "swdu", "swdv")
+def key_field(m): return "swh" if m == "gfsw" else "t2m"
 IVT_P = (1000, 925, 850, 700, 600, 500, 400, 300)
 def _ivt(R, m):
     """Integrated vapor transport (kg/m/s), east and north parts: (1/g) * integral of q*V dp, 1000-300 mb, trapezoid over the
@@ -495,7 +530,8 @@ FIELDS = {   # name: (getter, units)
     "pw": (_f("pwat", lambda v: v / 25.4), "in"),
     "prt": (_prt, "code"),
     "kinc": (_kinc, "in"), "fzinc": (_fzinc, "in"),
-    "swh": (lambda R, m: _wave(R, m)["swh"], "ft"), "wdu": (lambda R, m: _wave(R, m)["wdu"], "1"), "wdv": (lambda R, m: _wave(R, m)["wdv"], "1"),
+    "swh": (lambda R, m: _wv(R, m)["swh"], "ft"), "wdu": (lambda R, m: _wv(R, m)["wdu"], "1"), "wdv": (lambda R, m: _wv(R, m)["wdv"], "1"),
+    "swper": (lambda R, m: _ww3(R, m)["swper"], "s"), "swdu": (lambda R, m: _ww3(R, m)["swdu"], "1"), "swdv": (lambda R, m: _ww3(R, m)["swdv"], "1"),
     "ivtu": (lambda R, m: _ivt(R, m)[0], "kg/m/s"), "ivtv": (lambda R, m: _ivt(R, m)[1], "kg/m/s"),
     # ECMWF ENS (model "eps" only)
     "t2sd": (_ens("t2sd"), "F"), "p32": (_ens("p32"), "%"), "z5sd": (_ens("z5sd"), "m"),
@@ -512,7 +548,7 @@ PACKS = {"wind": ("mslp", "u10", "v10"), "aloft": ("t850", "t700", "frz"), "accu
          "e2t": ("t2m", "t2sd", "p32"), "e500": ("z500", "z5sd"), "eqp": ("apcp", "apcp90", "asnow"), "eqs": ("asnow90", "gust", "gust90"),
          "emsl": ("mslp", "t850", "lowp"), "ecape": ("mucape", "pcape"),
          "w850": ("u850", "v850", "t925"), "w925": ("u925", "v925", "z1000"), "w700": ("u700", "v700", "t500"), "w300": ("u300", "v300", "t300"),
-         "etx": ("maxt", "mint"), "moist": ("d2m", "pw", "prt"), "kfz": ("kinc", "fzinc"), "ivt": ("ivtu", "ivtv"), "wave": ("swh", "wdu", "wdv"),
+         "etx": ("maxt", "mint"), "moist": ("d2m", "pw", "prt"), "kfz": ("kinc", "fzinc"), "ivt": ("ivtu", "ivtv"), "wave": ("swh", "wdu", "wdv"), "swell": ("swper", "swdu", "swdv"),
          "nbm1": ("t2m", "gust", "tcc"), "svr": ("uh", "cape3", "srh03"), "lapse": ("lr03", "lr75"), "nbm2": ("nq1", "nq6", "ns6"), "nbm3": ("tstm", "maxt", "mint")}
 
 IFS9_SKIP = {"swh", "wdu", "wdv"}   # ECMWF waves are 0.25 deg only (separate WAM files): not on the 9 km grid
@@ -548,15 +584,16 @@ def step_job(args):
     c = dt.datetime.strptime(c_str, "%Y%m%d%H").replace(tzinfo=dt.timezone.utc)
     i0, i1, j0, j1 = crop; t = time.time(); ranges, sizes, q = {}, {}, {}
     _patch_models(M)
-    try: R = EpsReader(c, s, m, crop, P) if m in ("eps", "aens") else NbmReader(c, s) if m == "nbm" else M.Reader(m, c, s)
+    try: R = EpsReader(c, s, m, crop, P) if m in ("eps", "aens") else NbmReader(c, s) if m == "nbm" else _WaveOnlyR(c, s) if m == "gfsw" else M.Reader(m, c, s)
     except Exception as e: return s, None, str(e), 0, 0
     mg = as_model(m)   # getters see "ifs" for ifs9 (same params / units); R reads the 0.1 deg files
     for name, (get, units) in (NBM_FIELDS if m == "nbm" else dict(FIELDS, **ENS_FIELDS) if m in ("eps", "aens") else FIELDS).items():
         if m == "ifs9" and name in IFS9_SKIP: continue
+        if m == "gfsw" and name not in GFSW_FIELDS: continue
         try: a = get(R, mg)
         except (KeyError, StopIteration): continue
         except Exception as e:
-            if name == "t2m" or "404" in str(e): return s, None, f"{name}: {e}", 0, time.time() - t   # step (or its prs file) not out yet: retry next pass
+            if name == key_field(m) or "404" in str(e): return s, None, f"{name}: {e}", 0, time.time() - t   # step (or its prs file) not out yet: retry next pass
             print(f"{m} f{s:03d} {name}: {str(e)[:120]}", flush=True); continue
         if isinstance(a, Cropped): a = np.asarray(a, float)
         else:
@@ -960,6 +997,10 @@ def static(m, out, views_only=None, x2_only=False):
     WV_L = [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 40]
     CM["waves"] = M.ramp(WV_L, [(0, "#283c96"), (2, "#2878c8"), (4, "#28afd2"), (6, "#32be8c"), (8, "#6ec846"), (10, "#c8dc3c"), (14, "#f0b432"),
                                 (20, "#e6642d"), (28, "#c82846"), (40, "#8c1e78")])
+    # 11-03 NOAA WW3 swell period (s): short wind-sea periods cool/pale, long-period groundswell warm to violet (surf-forecast convention)
+    SWP_L = [0, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 22, 25]
+    CM["swper"] = M.ramp(SWP_L, [(0, "#d9dde6"), (4, "#9fb3cf"), (6, "#5b8cc4"), (8, "#2f9fb0"), (10, "#3cb371"), (12, "#b5d334"), (14, "#f2c12e"),
+                                 (16, "#ef7d2d"), (18, "#d7303a"), (20, "#a3215e"), (25, "#5a1570")])
     # Benjamin 11-01 7:30 AM "adjust the max wave height scale to go up to at least 60'", 7:38 AM "make the scale go to 85ft", 8:05 AM (after the
     # grey/pink 85c try) "let's start over ... I like the color scale here [the 60 ft one]. Basically keep the same order of colors, and just add a
     # couple more transitional shades up to the max wave height of 85": max wave products only (wavemax, wavemax24; Significant Wave Height keeps 0-40).
@@ -1143,7 +1184,19 @@ def static(m, out, views_only=None, x2_only=False):
                       tickfmt=True, **table(WV_L, CM["waves"], "max"),
                       barbs=dict(u="wdu", v="wdv", color="#1b1d22", length=HS.BARB_LENGTH, lw=1.0, arrows=True, min=0.5, ref=1, fixed=True),
                       extra="ECMWF wave model (WAM 0.25\u00b0)  \u00b7  arrows = mean wave direction  \u00b7  up to {hi} ft in view", pct=[0, 99.9],
-                      only=("ifs",)),
+                      only=("ifs", "gfsw")),
+        # 11-03 (Benjamin t2141u queue): NOAA WAVEWATCH III swell period and swell period + significant wave height (gfsw only)
+        "swper": dict(title="Swell Period", fields=["swper", "swdu", "swdv"], key="Swell period (s)", ticks=[4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 25],
+                      tickfmt=True, **table(SWP_L, CM["swper"], "max"),
+                      barbs=dict(u="swdu", v="swdv", color="#1b1d22", length=HS.BARB_LENGTH, lw=1.0, arrows=True, min=0.5, ref=1, fixed=True),
+                      extra="NOAA WAVEWATCH III (GFS-Wave 0.25\u00b0)  \u00b7  time between swells, primary swell  \u00b7  arrows = swell direction"
+                      "  \u00b7  up to {hi} s in view", pct=[0, 99.9], dec=0, towns="none", only=("gfsw",)),
+        "swellhs": dict(title="Wave Height + Swell Period", fields=["swh", "swper", "swdu", "swdv"], fill="swh", key="Wave height (ft)", cmap_of="waves",
+                        ticks=[0, 2, 4, 6, 8, 10, 14, 20, 28, 40], tickfmt=True, **table(WV_L, CM["waves"], "max"),
+                        barbs=dict(u="swdu", v="swdv", color="#1b1d22", length=HS.BARB_LENGTH, lw=1.0, arrows=True, min=0.5, ref=1, fixed=True),
+                        isobars=dict(field="swper", scale=1, every=2, min=6, sigma=0.8, sea_only=True, unit="s", color="#101114", lw=1.1, halo=2.6),
+                        extra="NOAA WAVEWATCH III  \u00b7  shaded = significant wave height  \u00b7  lines = swell period every 2 s"
+                        "  \u00b7  arrows = swell direction  \u00b7  up to {hi} ft in view", pct=[0, 99.9], towns="none", only=("gfsw",)),
         "wavemax": dict(title="Estimated Max Wave Height", fields=["swh"], fill="hmax", key="Max wave (ft)", ticks=WVX_T, tickfmt=True, keyver="_85w", kw=WVX_KW,
                         **table(WVX_L, CM["wavemax"], "max"), extra="1.86 x significant height (largest of ~1000 waves, Rayleigh; as the old site)"
                         "  \u00b7  up to {hi} ft in view", pct=[0, 99.9], only=("ifs",)),
@@ -1253,6 +1306,9 @@ def static(m, out, views_only=None, x2_only=False):
     ALLP = {k: dict(v) for k, v in prods.items()}   # before the per-model filter (ensemble picks shared products below)
     for v in ALLP.values(): v.pop("only", None)
     prods = {k: v for k, v in prods.items() if as_model(m) in v.pop("only", (as_model(m),))}
+    if m == "gfsw":   # NOAA WW3: wave products only (products without an only= list are atmosphere products)
+        prods = {k: v for k, v in prods.items() if set(v["fields"]) <= set(GFSW_FIELDS)}
+        if "waves" in prods: prods["waves"]["extra"] = "NOAA WAVEWATCH III (GFS-Wave 0.25\u00b0)  \u00b7  arrows = primary wave direction  \u00b7  up to {hi} ft in view"
     if m == "ifs9":   # 9 km: no waves (0.25 deg only) and no anomalies (would need 0.1 deg climatology files: more R2 space)
         prods = {k: v for k, v in prods.items() if not v.get("clim") and not set(v["fields"]) & IFS9_SKIP}
     if m == "nbm":   # National Blend: its own period fields (1/6 h precip, 6 h snow, 3 h thunder, 12 h max/min)
@@ -1366,7 +1422,7 @@ def static(m, out, views_only=None, x2_only=False):
     if "ntstm" in prods: prods["ntstm"]["min_show"] = 10
     for k in ("uh", "uhs", "cape3", "srh03", "refuh"):
         if k in prods: prods[k]["min_show"] = prods[k]["levels"][0]
-    for k in ("waves", "wavemax", "wavemax24"):   # land (swh -0.5) drawn in the basemap land tone (11-01: wavemax24 too, its land was black)
+    for k in ("waves", "wavemax", "wavemax24", "swper", "swellhs"):   # land (swh -0.5) drawn in the basemap land tone (11-01: wavemax24 too, its land was black)
         if k in prods: prods[k]["under"] = "#ece8df"
     for k in ("fog", "ivt"):   # light below the first level (old site: clear over the light basemap)
         if k in prods: prods[k]["under"] = "#f4f5f7"
@@ -1448,7 +1504,7 @@ def steps(m, cycle, want, out, workers, only_missing=True, deadline=None):
     with ProcessPoolExecutor(workers) as ex:
         P = town_points(man, m)
         for s, sizes, ranges, nb, tt in ex.map(step_job, [(m, cycle, s, crop, rd, P) for s in todo]):
-            if sizes is None or "t2m" not in (ranges or {}): print(f"{m} f{s:03d} not ready ({str(ranges)[:80]})", flush=True); continue
+            if sizes is None or key_field(m) not in (ranges or {}): print(f"{m} f{s:03d} not ready ({str(ranges)[:80]})", flush=True); continue
             done[s] = ranges; new.append(s); print(f"{m} f{s:03d} {len(ranges)} fields {sum(sizes.values())/1e3:.0f} KB grib {nb/1e6:.1f} MB {tt:.1f} s", flush=True)
             if deadline and time.time() > deadline: break
     meta = {s_["f"]: s_ for s_ in (run or {}).get("steps", [])}
@@ -1468,6 +1524,7 @@ def steps(m, cycle, want, out, workers, only_missing=True, deadline=None):
                runline=f"{MM['name']} {MM['res']} {c:%HZ} run {c.astimezone(PT):%-m-%-d-%y (%-I %p PT)}", steps=ordered,
                complete=len(ordered) == len(want), expected=len(want), file="single/{name}_f{f:03d}.png",
                points=[{k: v for k, v in p_.items() if k in ("n", "k", "c")} for p_ in town_points(man, m)], pts_file="single/pts_f{f:03d}.json")
+    if m == "gfsw": run.pop("points"); run.pop("pts_file")   # wave-only model: no town meteogram points
     json.dump(run, open(rj, "w"), indent=1)
     return run, new
 

@@ -38,7 +38,15 @@ const S = { man: null, runs: {}, view: Q.get("view") || "wa", prod: Q.get("prod"
 window.__S = S;
 
 const pt = v => v * S.man.dpi / 72;                 // points -> canvas px (same as matplotlib at the encoder dpi)
-const img = src => new Promise((ok, no) => { const im = new Image(); im.onload = () => ok(im); im.onerror = no; im.src = src; });
+// 11-03 hidden preview (NOAA WW3, no R2 writes): a site-shipped supplement (pdata/manifest_pv.json: models + runs for new models) is
+// merged into the manifest, and data URLs for those models (runs/<m>/, static lut_/key_<m>_) are read from the site's pdata/ copy.
+// No pdata/ on the site (production) -> nothing changes.
+let PV = null;
+const pvU = u => { if (!PV || typeof u !== "string" || !u.startsWith(DATA)) return u; const r = u.slice(DATA.length);
+  return PV.re.test(r) ? "pdata/" + r : u; };
+const pvMerge = M => { if (PV) { Object.assign(M.models || (M.models = {}), PV.models); Object.assign(M.runs || (M.runs = {}), PV.runs); } return M; };
+{ const f0 = window.fetch.bind(window); window.fetch = (u, o) => f0(pvU(u), o); }
+const img = src => new Promise((ok, no) => { const im = new Image(); im.onload = () => ok(im); im.onerror = no; im.src = pvU(src); });
 
 function fitPhone() {   // phones: map as large as fits between the menus and the slider bar, placed right under the menus
   const cv = $("map"); if (!cv) return;
@@ -210,14 +218,17 @@ async function boot() {
   if (Q.get("slim")) {
     let lh = 0; new ResizeObserver(() => { const h = cslimH(); if (Math.abs(h - lh) > 2 && parent !== window) { lh = h; parent.postMessage({ wx: "size", id: Q.get("id"), h }, "*"); } }).observe(document.body); }
   // 10-29: manifest, fonts and the shown run's run.json in parallel; other runs load when picked
-  const [man, sv, vf, wv] = await Promise.all([fetch(DATA + "manifest.json", { cache: "no-cache" }).then(r => r.json()),
+  PV = await fetch("pdata/manifest_pv.json", { cache: "no-cache" }).then(r => r.ok ? r.json() : null).catch(() => null);
+  if (PV) PV.re = new RegExp(`^(runs/(${Object.keys(PV.models).join("|")})/|static/(x2/)?(lut|key)_(${Object.keys(PV.models).join("|")})_)`);
+  const [man, sv, vf, wv] = await Promise.all([fetch(DATA + "manifest.json", { cache: "no-cache" }).then(r => r.json()).then(pvMerge),
                                    Q.get("studio") ? fetch(DATA + "static/studio_views.json", { cache: "no-cache" }).then(r => r.ok ? r.json() : null, () => null) : null,
                                    fetch(DATA + "static/view_fixes.json", { cache: "no-cache" }).then(r => r.ok ? r.json() : null, () => null),
                                    fetch(DATA + "static/wave_views.json", { cache: "no-cache" }).then(r => r.ok ? r.json() : null, () => null),
                                    document.fonts.load("800 20px Montserrat"), document.fonts.load("500 12px Montserrat")]);
+  if (PV && PV.studio && sv) Object.assign(sv.models || (sv.models = {}), PV.studio);   // 11-03 preview supplement: Studio wide view
   S.man = addStudioViews(waveViews(viewFixes(mergeRunsX(man), vf), wv), sv);
   // runs: "model/cycle", newest first per model; models in a fixed order
-  const order = ["hrrr", "rrfs", "nbm", "gfs", "ifs", "ifs9", "aifs", "eps", "aens"].filter(m => S.man.models[m] && (S.man.runs[m] || []).length);
+  const order = ["hrrr", "rrfs", "nbm", "gfs", "ifs", "ifs9", "aifs", "eps", "aens", "gfsw"].filter(m => S.man.models[m] && (S.man.runs[m] || []).length);
   const all = []; for (const m of order) for (const c of [...S.man.runs[m]].reverse()) all.push(`${m}/${c}`);
   const qr = Q.get("run"), qm = Q.get("model");
   // 11-01: a ?prod= link with no run/model (e.g. ?prod=waves) opens the first model that has that product
@@ -235,7 +246,7 @@ async function boot() {
   // 10-31 frame at a time: every 2 min re-read the manifest so a run that just started shows up in the Runs menu without a reload
   setInterval(async () => {
     if (document.hidden) return; let M2; try { M2 = await (await fetch(DATA + "manifest.json", { cache: "no-cache" })).json(); } catch (e) { return; }
-    mergeRunsX(M2); if (JSON.stringify([M2.runs, M2.progress]) === JSON.stringify([S.man.runs, S.man.progress])) return;
+    mergeRunsX(pvMerge(M2)); if (JSON.stringify([M2.runs, M2.progress]) === JSON.stringify([S.man.runs, S.man.progress])) return;
     S.man.runs = M2.runs; S.man.progress = M2.progress; S.man.mgruns = M2.mgruns;
     const o2 = order.filter(m => (S.man.runs[m] || []).length), a2 = []; for (const m of o2) for (const c of [...S.man.runs[m]].reverse()) a2.push(`${m}/${c}`);
     if (!a2.includes(S.run)) a2.push(S.run);
@@ -377,7 +388,7 @@ const TABS = [
   ["svr", "Severe", ["refc", "refuh", "uh", "uhs", "sbcape", "mucape", "cape3", "srh03", "lr03", "lr75", "epcape", "ltng", "ltng6", "ltgp", "ntstm"]],
   // 11-01 (Benjamin 2:02 AM "We should probably make a waves tab"): ECMWF 0.25 wave products, out of Surface.
   // ECMWF (ifs) only: on other models the tab still shows (dimmed) and opens the newest ECMWF run.
-  ["wav", "Waves", ["waves", "wavemax", "wavemax24"]],
+  ["wav", "Waves", ["waves", "swper", "swellhs", "wavemax", "wavemax24"]],   // 11-03: NOAA WW3 swell period, wave height + swell period
 ];
 const tabOf = pid => (TABS.find(t => t[2].includes(pid)) || ["other"])[0];
 S.lastTab = {};
@@ -404,7 +415,7 @@ function setLists() {   // products this run carries (all their fields present),
     if (b && b.dataset.t === "compare") { const R_ = S.runs[S.run], st = R_.steps[S.i], [m] = S.run.split("/"), rs = (S.man.runs[m] || []);
       const other = rs.length > 1 ? `${m}/${rs[rs.length - 1] === S.run.split("/")[1] ? rs[rs.length - 2] : rs[rs.length - 1]}` : S.run;
       location.href = `compare.html?l=${encodeURIComponent(S.run)}&r=${encodeURIComponent(other)}&prod=${S.prod}&view=${S.view}&valid=${encodeURIComponent(st.valid)}`; return; }
-    if (b && b.dataset.t === "wav" && !tabs.some(x => x[0] === "wav")) {   // waves: ECMWF only -> newest ECMWF run, same valid time
+    if (b && b.dataset.t === "wav" && !tabs.some(x => x[0] === "wav")) {   // waves: ECMWF (or NOAA WW3) only -> newest ECMWF run, same valid time
       const rs = S.man.runs.ifs || []; if (!rs.length) return; S.prod = "waves"; S.tab = "wav"; $("run").value = `ifs/${rs[rs.length - 1]}`; $("run").onchange({ target: $("run") }); return; }
     if (!b || b.dataset.t === S.tab) return;
     const t = tabs.find(x => x[0] === b.dataset.t), keep = S.lastTab[t[0]];
@@ -567,7 +578,8 @@ async function productFields(run, pid, f) {
     if (P.lows && F.mslp) out.mslpRaw = F.mslp.v;   // ensemble-mean lows (L + central pressure)
     if (P.lows || P.spag) out.ens = await fetch(`${DATA}runs/${run}/single/ens_f${String(f).padStart(3, "0")}.json`).then(r => r.ok ? r.json() : null, () => null);
     if (P.isobars && F[P.isobars.field || "mslp"]) { const I = P.isobars, src = F[I.field || "mslp"].v, sc = I.scale || 1, a = new Float32Array(src.length);
-      for (let k = 0; k < a.length; k++) a[k] = src[k] * sc; out.iso = blur(a, g.w, g.h, I.sigma); }
+      for (let k = 0; k < a.length; k++) a[k] = src[k] * sc; out.iso = blur(a, g.w, g.h, I.sigma);
+      if (I.sea_only) for (let k = 0; k < a.length; k++) if (!(src[k] > 0)) out.iso[k] = NaN; }   // 11-03 swell period lines: none over land / no swell
     return out;
   })();
   S.derived.set(key, p); return p;
@@ -848,7 +860,7 @@ function fmtVal(P, v) {   // temp_maps fmt_int / fmt_vis
 // the MODEL value at the buoy point in bold 9.5 pt (same field as the fill, so it matches the colors; not a live observation).
 // Placement: right of the dot, then left / above / below / diagonals; a buoy whose label would touch a city label, another buoy or the
 // map edge is left out. Values: bilinear when the 4 grid points around the buoy are all sea, else the nearest sea point; none -> skipped.
-const WAVE_PIDS = /^(waves|wavemax|wavemax24)$/;
+const WAVE_PIDS = /^(waves|wavemax|wavemax24|swper|swellhs)$/;
 const WC_BUOYS = ["46041", "46029", "46050", "46006", "46005", "46002", "46059", "46022", "46014", "46013", "46026", "46042", "46028", "46011", "46054",
   "46025", "46047", "46086", "46087", "46089", "46027", "46015", "46229", "46036", "46214"];
 const LOCAL_VIEWS = new Set(["wa", "puget", "newa", "wwa"]), isWaB = (tag, loc) => tag === "wa" || (loc && /inner/.test(tag || ""));
@@ -1068,7 +1080,7 @@ function readout(ev) {
   if (C.pid === "ptype") { const c = Math.round(v), t = ["Rain", "Snow", "Sleet / mix", "Freezing rain"][c >> 4], b = c & 15;
     s = c < 1 || !t || !b ? "No precip" : `${t} \u00b7 ${["", "< 0.01", "0.01-0.02", "0.02-0.05", "0.05-0.1", "0.1-0.2", "0.2-0.4", "0.4+", "0.4+"][b] || ""} in/h`; }
   if (C.D.iso && C.P.isobars) { const m = sample(C.st, C.D.iso, k), mb = !C.P.isobars.field || C.P.isobars.field === "mslp";
-    if (isFinite(m)) s += mb ? ` \u00b7 ${m.toFixed(C.pid === "aifswind" ? 1 : 0)} mb` : ` \u00b7 ${Math.round(m)} dam`; }
+    if (isFinite(m)) s += mb ? ` \u00b7 ${m.toFixed(C.pid === "aifswind" ? 1 : 0)} mb` : ` \u00b7 ${Math.round(m)} ${C.P.isobars.unit || "dam"}`; }
   tip.textContent = s; tip.hidden = false;
   const wr = $("wrap").getBoundingClientRect(); tip.style.left = (ev.clientX - wr.left + 14) + "px"; tip.style.top = (ev.clientY - wr.top - 30) + "px";
 }
