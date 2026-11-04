@@ -188,7 +188,7 @@ const ObsImg = (() => {
     const raw = new Image(); raw.crossOrigin = "anonymous"; raw.decoding = "async";
     return new Promise((res) => { raw.onerror = () => { r.bad = true; res(null); };
       raw.onload = async () => {
-        let out = null; try { out = await starClean(raw, sec); } catch (e) { out = null; } raw.src = "";
+        let out = null; try { out = await starClean(raw, sec); } catch (e) { out = null; } raw.onload = raw.onerror = null; raw.src = "";   // free the raw copy
         if (out === "moved") { ST.wvMoved = true; r.bad = true; res(null); return; }
         if (!out) { r.bad = true; res(null); return; }
         r.u = URL.createObjectURL(out); r.im.onload = () => { r.ok = true; res(r.im); bump(); if (ST.obs) Obs.redraw(); };
