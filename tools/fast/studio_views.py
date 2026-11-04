@@ -23,9 +23,12 @@ VID = os.environ.get("STUDIO_VIEW", "wawide")
 # 11-04 (Benjamin t2289u "Make me a coastal view for studio that is a little bigger and wider, centered over the ocean, land in the right
 # third. Call it 'coast view'"): STUDIO_VIEW=coast builds "Coast view" (vid coast) the same way. Its camera boxes (lon0, lon1, lat0, lat1):
 # COAST_H = the 16:9 frame (Washington's coast ~2/3 across, Seattle inside the right third), COAST_V = the 9:16 frame (coast ~2/3 across)
-COAST_H = (-134.5, -118.5, 43.1, 49.6)
-COAST_V = (-129.6, -120.2, 41.3, 52.8)
-STATE = COAST_H if VID == "coast" else (-124.85, -116.9, 45.54, 49.0)   # Washington's lon / lat box: the part the Studio camera fits in the frame ("fit")
+# 11-04 (t2300u "a little tighter, a bit less Oregon, make sure Westport gets in there"): tighter boxes, south edge just below the
+# Columbia mouth; built as STUDIO_VIEW=coast_t (new R2 file names, the site's view id stays "coast")
+COAST_H = (-131.2, -120.1, 45.5, 49.7)
+COAST_V = (-127.35, -120.05, 44.4, 51.6)
+COAST = VID.startswith("coast")
+STATE = COAST_H if COAST else (-124.85, -116.9, 45.54, 49.0)   # Washington's lon / lat box: the part the Studio camera fits in the frame ("fit")
 GLOBAL = ("gfs", "ifs", "ifs9", "aifs", "eps", "aens")
 
 def setup():
@@ -44,19 +47,19 @@ def setup():
     # + four eastern Washington towns from the site's Washington list (they fill the gaps east of the Cascades; this process
     # builds only this view, so the shared requested list is extended here only)
     TM.REGION_REQUESTED = tuple(TM.REGION_REQUESTED) + tuple(n for n in ("Ellensburg", "Moses Lake", "Pullman", "Colville") if n not in TM.REGION_REQUESTED)
-    if VID == "coast":
+    if COAST:
         # ~62 figure px per degree of longitude (wide view: ~81), Lambert centred on the ocean; the figure covers both camera boxes + room to pan
         TM.VIEWS[VID] = dict(label="Coast view", size=(14, 12.5),
                              proj=ccrs.LambertConformal(central_longitude=-126.0, central_latitude=46.3, standard_parallels=(44, 49)),
-                             ll=(-137.0, -116.0, 40.6, 53.0), box=(-139.0, -114.0, 39.5, 54.0))
+                             ll=(-134.0, -115.5, 43.3, 54.0), box=(-136.0, -113.5, 42.5, 55.0))
         TM.REGION_TOWNS[VID] = ((400000, 60000, 20000), 60)   # Victoria (~290k) after the coast towns, so Neah Bay keeps its spot
         # t2290u: the western Washington coast towns the site already has (Washington view list + the Western Washington view's coast towns)
         wwa = {t[0]: t for t in FE.EXTRA_TOWNS["wwa"]}; have = {t[0] for t in TM.WA_TOWNS}
         TM.WA_TOWNS = list(TM.WA_TOWNS) + [wwa[n] for n in ("Ocean Shores", "Westport", "Hoquiam", "Raymond") if n not in have]
-        coast = ("Neah Bay", "Forks", "Port Angeles", "Ocean Shores", "Westport", "Aberdeen", "Hoquiam", "Raymond", "Long Beach", "Cannon Beach", "Victoria")
+        coast = ("Neah Bay", "Forks", "Port Angeles", "Ocean Shores", "Westport", "Aberdeen", "Hoquiam", "Raymond", "Long Beach", "Astoria", "Victoria")
         TM.REGION_REQUESTED = coast + tuple(n for n in TM.REGION_REQUESTED if n not in coast)
         # towns only where both frames can show their labels: west of 119.6 W (16:9 right edge 118.5 W) and between 42.9 N (9:16 key) and 49.3 N (F+ badge; Vancouver 49.28 N kept)
-        rp = TM.region_places; TM.region_places = lambda vid: [t for t in rp(vid) if vid != VID or (t[2] <= -119.6 and 42.9 <= t[1] <= 49.3)]
+        rp = TM.region_places; TM.region_places = lambda vid: [t for t in rp(vid) if vid != VID or (t[2] <= -121.6 and 46.0 <= t[1] <= 49.3)]
     return TM, HS, ccrs
 
 def build(models, man, out):
@@ -86,7 +89,7 @@ def build(models, man, out):
     xs = [p[0] for p in sp]; ys = [H - p[1] for p in sp]
     fit = [float(min(xs)), float(min(ys)), float(max(xs) - min(xs)), float(max(ys) - min(ys))]
     fitV = None
-    if VID == "coast":
+    if COAST:
         B = COAST_V; sp = [tr.transform((lo, la)) for lo in np.linspace(B[0], B[1], 40) for la in B[2:]] + [tr.transform((lo, la)) for lo in B[:2] for la in np.linspace(B[2], B[3], 40)]
         xs = [p[0] for p in sp]; ys = [H - p[1] for p in sp]; fitV = [float(min(xs)), float(min(ys)), float(max(xs) - min(xs)), float(max(ys) - min(ys))]
     plt.close(fig)

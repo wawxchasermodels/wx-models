@@ -196,7 +196,9 @@ function addStudioViews(man, sv) {
     M.views = out; }
   // 11-04 (Benjamin t2289u "Make me a coastal view for studio that is a little bigger and wider, centered over the ocean, land in the right
   // third. Call it 'coast view'"): Studio-only "Coast view" (studio_views.py STUDIO_VIEW=coast), right after the wide Washington view
-  for (const [m, M] of Object.entries(man.models || {})) { const V = M.views || {}, own = (SVM[m] || {}).coast;
+  // 11-04 t2300u ("a little tighter, a bit less Oregon, make sure Westport gets in there"): the tighter build is "coast_t" (its own
+  // base / towns / LUT files), shown under the same view id "coast"
+  for (const [m, M] of Object.entries(man.models || {})) { const V = M.views || {}, sv = SVM[m] || {}, own = sv.coast_t ? Object.assign({}, sv.coast_t, { base_png: "static/base_coast_t.png", towns_png: sv.coast_t.towns_png || "static/towns_coast_t.png" }) : sv.coast;
     if (!own || V.coast) continue; const out = {}; let put = false;
     for (const [k, v] of Object.entries(V)) { out[k] = v; if (k === "wawide") { out.coast = Object.assign({}, own); put = true; } }
     if (!put) out.coast = Object.assign({}, own); M.views = out; }
@@ -505,7 +507,7 @@ async function viewStatic(vid) {
   const V = VIEWS()[vid];
   const p = (async () => {
     const [lut, base] = await Promise.all([fetch(DATA + V.lut + SV()).then(r => r.arrayBuffer()).then(b => new Float32Array(b)),
-                                           img(DATA + `static/base_${vid}.png` + SV())]);
+                                           img(DATA + (V.base_png || `static/base_${vid}.png`) + SV())]);
     // towns layer is not needed for the first paint: draw without it, redraw when it lands (10-29 first-map speedup)
     const tP = V.towns_png || `static/towns_${vid}.png`, tU = (tP[0] === "@" ? tP.slice(1) : DATA + tP) + SV();
     const townsP = img(tU).then(im => { obj.towns = im; if (VSRC(S.view) === vid && window.__drawn) draw(); return im; }, () => null);
@@ -527,7 +529,7 @@ async function viewStatic(vid) {
         idx[k] = r0 * gnx + c0; wy[k] = fi - r0; wx[k] = fj - c0;
       }
     }
-    const obj = { lut, base, towns: null, townsP, x0, y0, W, H, idx, wx, wy, gnx, baseU: DATA + `static/base_${vid}.png` + SV(), townsU: tU }; return obj;
+    const obj = { lut, base, towns: null, townsP, x0, y0, W, H, idx, wx, wy, gnx, baseU: DATA + (V.base_png || `static/base_${vid}.png`) + SV(), townsU: tU }; return obj;
   })();
   S.statics[sk] = p; return p;
 }
@@ -1005,8 +1007,8 @@ function drawBuoys(ctx, st, D, P, V, LW, LH, taken0) {
   // West Coast view (t1999u): Benjamin's buoy list first (offshore + California coast), then the rest; 40 pt spacing
   const LIST = wcv ? WC_BUOYS.map(id => BUOYS.find(b => b[0] === id)).filter(Boolean).concat(BUOYS.filter(b => !WC_BUOYS.includes(b[0]))) : BUOYS;
   for (const [id, , la, lo, tag] of LIST) {
-    // Coast view: only buoys both Studio frames show in full (9:16 box: east of 129.2 W, north of the 9:16 key at 42.9 N)
-    if (VSRC(S.view) === "coast" && (lo < -129.2 || la < 42.9)) continue;
+    // Coast view: only buoys both Studio frames show in full (t2300u tighter boxes: 9:16 west edge 127.35 W, south edge / keys ~46 N)
+    if (VSRC(S.view) === "coast" && (lo < -126.9 || la < 46.0)) continue;
     if (wide && !/wide/.test(tag || "")) continue;
     // 11-01 9:31 AM (Benjamin t1998u "See if there are any buoys in the puget sound and strait of Juan de Fuca ... Include a marker in the strait of
     // Georgia"): "inner" = Salish Sea buoys, Washington / Puget views only ("any": also elsewhere as before); "sog" = Halibut Bank, not in the local views
@@ -1066,7 +1068,8 @@ const COAST_VIEWS = {   // order = priority; buoys: "first" = WA buoys placed be
         "Coos Bay", "Cannon Beach", "Long Beach", "Ocean Shores", "La Push"], buoys: "after", side: "r" },
   pnw: { style: "region", re: [], add: ["Ocean Shores", "Long Beach", "La Push", "Westport", "Tatoosh Island"], buoys: "after", side: "r" },
   // Studio Coast view (t2289u / t2290u): like Pacific NW tight, coast towns + WA buoys first, water names last
-  coast: { style: "region", own: true, re: [], add: ["Ocean Shores", "Westport", "La Push", "Long Beach", "Tatoosh Island", "Astoria", "Cannon Beach", "Newport"], buoys: "first", big: ["Vancouver"], plainLast: true } };   // no other city labels here: town names go on the (empty) land side, buoy labels keep the ocean
+  coast: { style: "region", own: true, re: [], add: ["Ocean Shores", "Westport", "La Push", "Long Beach", "Tatoosh Island", "Astoria"], buoys: "first", big: ["Vancouver"], plainLast: true,
+    dotGap: 4, sides: { "Ocean Shores": "a", "Westport": "r" } } };   // t2300u: Westport always in (its dot sits ~5 pt below Ocean Shores': Ocean Shores above, Westport to the right);   // no other city labels here: town names go on the (empty) land side, buoy labels keep the ocean
 const coastPx = (st, V) => (la, lo) => { const cr = MD().crop || [0, 0, 0, 0], k = `${la},${lo}`; if (!st.coastPx) st.coastPx = {};
   if (!(k in st.coastPx)) { const q = gridInv(V, st, (90 - la) / 0.25 - cr[0], ((lo + 360) % 360) / 0.25 - cr[2], null);
     st.coastPx[k] = q && q[0] >= 0 && q[1] >= 0 && q[0] <= st.W && q[1] <= st.H ? [st.x0 + q[0], st.y0 + q[1]] : null; } return st.coastPx[k]; };
@@ -1086,7 +1089,8 @@ const WAVE_RENAME = { "Oak Harbor": "Smith Island", "Neah Bay": "Tatoosh Island"
 // 11-01 10:34 AM (Benjamin t2011u "Remove irrelevant town names from the western Washington and puget sound views in waves too"): sheltered
 // bay-head / inlet towns that don't help read waves are dropped on those two views (all wave products, viewer + Studio)
 const WAVE_DROP = { wwa: new Set(["Bremerton", "Poulsbo", "Coupeville", "Friday Harbor"]),
-  puget: new Set(["Bremerton", "Poulsbo", "Port Orchard", "Port Ludlow"]) };
+  puget: new Set(["Bremerton", "Poulsbo", "Port Orchard", "Port Ludlow"]),
+  coast: new Set(["Possession Sound", "Commencement Bay", "Elliott Bay"]) };   // t2300u: cut off at the 9:16 frame's right edge
 const OWN_DEFAULT = { style: "wa", own: true, re: [], add: [], buoys: "after" };   // other views with a town layer (puget, wwa, ewa, passes, newa, lm, bc)
 function coastPlan(ctx, st, V, LW, LH) {
   const vid = VSRC(S.view), C = COAST_VIEWS[vid] || ((V.towns || []).length ? OWN_DEFAULT : null), cr = MD().crop || [0, 0, 0, 0];
@@ -1168,13 +1172,13 @@ function drawCoast(ctx, st, D, P, V, LW, LH, WT) {
     const T = COAST_TOWNS[name] || (WT.xt && WT.xt[name]), d = T && WT.px(T[0], T[1]); if (!d) { WT.log.push(`${name}: off map`); return; }
     const [x, y] = d, dot = [x - pt(2.5), y - pt(2.5), x + pt(2.5), y + pt(2.5)], big = (C.big || []).includes(name);
     if (must) { const k = resv.findIndex(b => Math.abs(b[0] + pt(2.5) - x) < 0.01 && Math.abs(b[1] + pt(2.5) - y) < 0.01); if (k >= 0) resv.splice(k, 1); }   // its own dot reserve
-    if (!must && (hit(dot, pt(1)) || dots.some(([a, b]) => (a - x) ** 2 + (b - y) ** 2 < pt(wa ? 9 : 11) ** 2))) { WT.log.push(`${name}: dot blocked`); return; }
+    if (!must && ((C.sides && C.sides[name] ? resv.some(a => dot[0] < a[2] && dot[2] > a[0] && dot[1] < a[3] && dot[3] > a[1]) : hit(dot, pt(1))) || dots.some(([a, b]) => (a - x) ** 2 + (b - y) ** 2 < pt(C.dotGap || (wa ? 9 : 11)) ** 2))) { WT.log.push(`${name}: dot blocked`); return; }
     const t0 = must && (V.towns || []).find(t => t.name === name);   // a re-placed city keeps its usual number (read at its pin, as before)
     const fN = big ? `700 ${pt(9.5)}px Montserrat` : fName;
     const v = t0 && t0.fi >= 0 && t0.fj >= 0 && t0.fi < D.h - 1 && t0.fj < D.w - 1 ? sampleRC(D.fill, D.w, t0.fi, t0.fj) : offVal(D, name, T, WT), s_ = isFinite(v) && !(WT.own && WAVE_KEEP[name] === "p") ? fmtVal(P, v) : "";
     ctx.font = fN; const nw = ctx.measureText(name).width; ctx.font = fNum; const vw = s_ ? ctx.measureText(s_).width : 0, W_ = nw + (s_ ? gap + vw : 0);
     const c = { r: [pt(5), 0], l: [-pt(5) - W_, 0], a: [-W_ / 2, -pt(9.5)], b: [-W_ / 2, pt(9.5)] };
-    const sd = C.side || T[2], cands = [c[sd], ...["r", "l", "a", "b"].filter(k => k !== sd).map(k => c[k]), [pt(5), -pt(6)], [pt(5), pt(6)], [-pt(5) - W_, -pt(6)], [-pt(5) - W_, pt(6)]];
+    const sd = C.side || (C.sides && C.sides[name]) || T[2], cands = [c[sd], ...["r", "l", "a", "b"].filter(k => k !== sd).map(k => c[k]), [pt(5), -pt(6)], [pt(5), pt(6)], [-pt(5) - W_, -pt(6)], [-pt(5) - W_, pt(6)]];
     let at = null; for (const [gx, gy] of cands) { const b = [x + gx, y + gy - hh, x + gx + W_, y + gy + hh]; if (!hit(b)) { at = [gx, gy, b]; break; } }
     if (!at && must && C._old && C._old[name]) { const [ox, oy] = C._old[name]; at = [ox - x, oy - y, [ox, oy - hh, ox + W_, oy + hh]]; }   // never drop an existing city
     if (!at) { WT.log.push(`${name}: no room for the label`); return; }
