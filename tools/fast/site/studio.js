@@ -314,7 +314,9 @@ function renderObs(k, frO) {
   if (k === "v") dl.forEach((l, i) => c.fillText(l, f.pad + (cB && BR.cpos === "bl" ? cB.s + 18 : 0), f.H - 70 - (dl.length - 1 - i) * dlh));
   else { c.textAlign = "right"; dl.forEach((l, i) => c.fillText(l, f.W - f.pad - (cB && BR.cpos === "br" ? cB.s + 20 : 0), f.H - 24 - (dl.length - 1 - i) * dlh)); c.textAlign = "left"; }
   let lx = f.pad + (k === "h" && cB && BR.cpos === "bl" ? cB.s + 20 : 0); let ly = k === "v" ? f.H - 70 - (dl.length - 1) * dlh - dfs - 30 - lgS * 1.55 : f.H - 24 - lgS * 1.55 + lgS * 0.35;
-  for (const [id, lab, col] of I.on) {
+  // 11-04 (Benjamin t2301u "remove the satellite time ticker off of the bottom of studio ... I like the radar time in the bottom left"):
+  // the bottom legend skips the satellite pills (their frame time ticked with the loop); radar pill + time stay. Top title / time unchanged.
+  for (const [id, lab, col] of I.on.filter((q) => !String(q[0]).startsWith("img_") || q[0] === "img_radar")) {
     c.font = `800 ${lgS}px Montserrat`; const t = { plot: "Station plot: \u00b0F, gust mph, wind kt", hi: "High \u00b0F", lo: "Low \u00b0F", pk: "Peak gust mph", feel: "Feels like \u00b0F", mslp: "MSLP hPa" }[id] || lab, w = c.measureText(t).width + lgS * 1.2, h = lgS * 1.55;
     const img_ = String(id).startsWith("img_");
     if (lx + w > (k === "v" ? f.W - f.pad : f.W * 0.46) && lx > f.pad + 1) { if (img_) { lx = f.pad + (k === "h" && cB && BR.cpos === "bl" ? cB.s + 20 : 0); ly -= h + 10; } else if (k === "v") break; }   // 11-03: radar / satellite pills wrap to a row above
