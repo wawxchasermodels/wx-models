@@ -20,7 +20,12 @@ if (CLEAN) {
 // its finished chart image is drawn into both frames with the same drag / zoom / keys as the maps (framing saved under "mg").
 // 11-03 (Benjamin t2192u "the Observations map viewable in Studio mode"): MG.kind "obs" = the live obs module's canvas as the image source
 // 11-04 (t2292u): MG.kind "pass" = the Pass Forecaster table, drawn straight into each frame with its own 16:9 / 9:16 layout (PF below)
-const MG = { on: !CLEAN && ["mg", "obs", "pass"].includes(localStorage.getItem("studio:mode")), kind: ["obs", "pass"].includes(localStorage.getItem("studio:mode")) ? localStorage.getItem("studio:mode") : "mg", img: null, src: "" };
+// 11-04 (Benjamin t2319u: refresh on a model map reopened the SeaTac gust meteogram): the Studio mode lives per tab (sessionStorage,
+// kept across a refresh); localStorage is shared by every Studio tab / window (OBS setups), so another tab's Meteogram mode won the refresh.
+// localStorage is only the fallback for a brand-new tab.
+const MODE0 = (() => { try { return sessionStorage.getItem("studio:mode") || localStorage.getItem("studio:mode"); } catch (e) { return localStorage.getItem("studio:mode"); } })();
+const saveMode = (m) => { localStorage.setItem("studio:mode", m); try { sessionStorage.setItem("studio:mode", m); } catch (e) { /* private mode */ } };
+const MG = { on: !CLEAN && ["mg", "obs", "pass"].includes(MODE0), kind: ["obs", "pass"].includes(MODE0) ? MODE0 : "mg", img: null, src: "" };
 const PASSM = () => MG.on && MG.kind === "pass";
 const PF = { run: "", rows: null, msg: "" };
 const OBSM = () => MG.on && MG.kind === "obs";
@@ -1244,7 +1249,7 @@ if (!CLEAN) {   // Studio: Map | Meteogram switch (first in the menu bar) + the 
   const bar = document.getElementById("bar"), sw = document.createElement("label"); sw.id = "smodel";
   sw.innerHTML = `Studio <select id="smode"><option value="map">Map</option><option value="mg">Meteogram</option><option value="obs">Observations</option><option value="pass">Pass Forecaster</option></select>`; bar.insertBefore(sw, bar.firstChild);
   const pnl = document.createElement("div"); pnl.id = "mgp"; bar.after(pnl);
-  const sel = document.getElementById("smode"); sel.value = MG.on ? MG.kind : "map";
+  const sel = document.getElementById("smode"); sel.value = MG.on ? MG.kind : "map"; try { sessionStorage.setItem("studio:mode", sel.value); } catch (e) { /* private mode */ }
   let fr_ = null, poll = 0;
   const grab = () => { try {
     const d = fr_.contentDocument, im = d && d.getElementById("meteo-img"), w = fr_.contentWindow;
@@ -1272,12 +1277,12 @@ if (!CLEAN) {   // Studio: Map | Meteogram switch (first in the menu bar) + the 
     const box = document.createElement("div"), ok = await window.studioPassBuild(run, box).catch(() => false); if (PF.run !== run || !PASSM()) return;
     PF.rows = ok ? pfParse(box) : null; if (!PF.rows) PF.msg = (box.textContent || "").trim() || "This run has no pass forecast."; renderAll(); };
   const setMode = (mode) => {
-    const wasPass = PASSM(); if (mode === "pass") { MG.on = true; MG.kind = "pass"; MG.img = null; localStorage.setItem("studio:mode", "pass"); clearInterval(poll);
+    const wasPass = PASSM(); if (mode === "pass") { MG.on = true; MG.kind = "pass"; MG.img = null; saveMode("pass"); clearInterval(poll);
       document.body.classList.remove("mgmode", "obsmode"); document.body.classList.add("passmode"); if (typeof Obs !== "undefined" && Obs.hide) Obs.hide();
       pfLoad(); renderAll(); fitFrames(); return; }
     document.body.classList.remove("passmode"); if (wasPass) { MG.img = null; MG.kind = "mg"; }
     const on = mode === "mg" || mode === "obs", wasObs = OBSM(); if (on && MG.kind !== mode) { MG.img = null; MG.src = ""; MG.msg = ""; }
-    MG.on = on; if (on) MG.kind = mode; localStorage.setItem("studio:mode", on ? mode : "map"); clearInterval(poll);
+    MG.on = on; if (on) MG.kind = mode; saveMode(on ? mode : "map"); clearInterval(poll);
     document.body.classList.toggle("mgmode", on && mode === "mg"); document.body.classList.toggle("obsmode", on && mode === "obs");
     if (wasObs && !OBSM() && typeof Obs !== "undefined") { Obs.hide(); PIN.show = false; PIN.mode = null; }
     if (on && mode === "obs") {
