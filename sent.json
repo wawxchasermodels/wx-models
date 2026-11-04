@@ -13,49 +13,49 @@
    }
   },
   "pass_snapshot": {
-   "at": "2026-11-02T04:31:43.523567+00:00",
+   "at": "2026-11-04T12:17:54.842501+00:00",
    "passes": {
     "Blewett Pass US 97": {
      "avalanche_closure": false,
-     "displayDate": "2026-11-01T18:21:07.707Z",
+     "displayDate": "2026-11-04T11:13:46.6Z",
      "endMP": 168.87,
      "restrictions": {
       "Northbound": "No restrictions",
       "Southbound": "No restrictions"
      },
-     "roadCondition": "Bare and dry",
+     "roadCondition": "Bare and dry.",
      "route": "097",
      "snow_on_road": false,
      "startMP": 158.87,
      "status": "open",
-     "temperature": null,
-     "weather": "Clear skies"
+     "temperature": 29.0,
+     "weather": "Clear skies."
     },
     "Cayuse Pass SR 123": {
      "avalanche_closure": false,
-     "displayDate": "2026-11-01T07:02:40.57Z",
+     "displayDate": "2026-11-04T11:37:59.183Z",
      "endMP": 16.34,
      "restrictions": {
       "Northbound": "Traction Tires Advised, Oversize Vehicles Prohibited.",
       "Southbound": "Traction Tires Advised, Oversize Vehicles Prohibited."
      },
-     "roadCondition": "Bare and wet with frost.",
+     "roadCondition": "Bare and dry.",
      "route": "123",
      "snow_on_road": false,
      "startMP": 2.0,
      "status": "open",
      "temperature": 35.0,
-     "weather": "Clear skies."
+     "weather": "Clear skies with fog in areas."
     },
     "Chinook Pass SR 410": {
      "avalanche_closure": false,
-     "displayDate": "2026-11-02T03:48:30.57Z",
+     "displayDate": "2026-11-04T11:43:18.43Z",
      "endMP": 74.5,
      "restrictions": {
-      "Eastbound": "No restrictions",
-      "Westbound": "No restrictions"
+      "Eastbound": "Traction Tires Advised, Oversize Vehicles Prohibited.",
+      "Westbound": "Traction Tires Advised, Oversize Vehicles Prohibited."
      },
-     "roadCondition": "Bare and dry, wet in places.",
+     "roadCondition": "Bare and dry, wet in places",
      "route": "410",
      "snow_on_road": false,
      "startMP": 57.0,
@@ -65,18 +65,18 @@
     },
     "Crystal to Greenwater SR 410": {
      "avalanche_closure": false,
-     "displayDate": "2026-11-01T07:02:34.397Z",
+     "displayDate": "2026-11-02T11:32:22.967Z",
      "endMP": 57.49,
      "restrictions": {
       "Eastbound": "Traction Tires Advised, Oversize Vehicles Prohibited.",
       "Westbound": "Traction Tires Advised, Oversize Vehicles Prohibited."
      },
-     "roadCondition": "Bare and wet with frost.",
+     "roadCondition": "Bare and dry.",
      "route": "410",
      "snow_on_road": false,
      "startMP": 43.3,
      "status": "open",
-     "temperature": 35.0,
+     "temperature": 32.0,
      "weather": "Clear."
     },
     "Disautel Pass SR 155": {
@@ -113,13 +113,13 @@
     },
     "Manastash Ridge I-82": {
      "avalanche_closure": false,
-     "displayDate": "2026-11-02T03:21:16.23Z",
+     "displayDate": "2026-11-04T09:57:10.287Z",
      "endMP": 27.0,
      "restrictions": {
       "Eastbound": "No restrictions",
       "Westbound": "No restrictions"
      },
-     "roadCondition": "Bare and dry, wet in places",
+     "roadCondition": "Bare and dry",
      "route": "082",
      "snow_on_road": false,
      "startMP": 1.0,
@@ -145,19 +145,19 @@
     },
     "North Cascade Hwy SR 20": {
      "avalanche_closure": false,
-     "displayDate": "2026-11-01T07:43:11.693Z",
+     "displayDate": "2026-11-04T09:32:15.493Z",
      "endMP": 170.6,
      "restrictions": {
       "Eastbound": "No restrictions",
       "Westbound": "No restrictions"
      },
-     "roadCondition": "No current information available.",
+     "roadCondition": "Bare and wet, with frost in places.",
      "route": "020",
      "snow_on_road": false,
      "startMP": 134.0,
      "status": "open",
-     "temperature": null,
-     "weather": ""
+     "temperature": 32.0,
+     "weather": "Clear."
     },
     "Satus Pass US 97": {
      "avalanche_closure": false,
@@ -193,7 +193,7 @@
     },
     "Snoqualmie Pass I-90": {
      "avalanche_closure": false,
-     "displayDate": "2026-11-02T02:07:57.14Z",
+     "displayDate": "2026-11-04T11:16:36.057Z",
      "endMP": 136.0,
      "restrictions": {
       "Eastbound": "No restrictions",
@@ -205,23 +205,23 @@
      "startMP": 34.0,
      "status": "open",
      "temperature": null,
-     "weather": "Clear skies"
+     "weather": "Scattered clouds"
     },
     "Stevens Pass US 2": {
      "avalanche_closure": false,
-     "displayDate": "2026-11-02T02:57:39.113Z",
+     "displayDate": "2026-11-04T11:16:36.7Z",
      "endMP": 69.57,
      "restrictions": {
       "Eastbound": "No restrictions",
       "Westbound": "No restrictions"
      },
-     "roadCondition": "bare and dry, frost and ice in places",
+     "roadCondition": "Bare and dry, with frost and ice in places.",
      "route": "002",
      "snow_on_road": false,
      "startMP": 59.57,
      "status": "open",
-     "temperature": null,
-     "weather": "clear skies"
+     "temperature": 38.0,
+     "weather": "Clear."
     },
     "Tiger Mountain SR18": {
      "avalanche_closure": false,
@@ -241,35 +241,35 @@
     },
     "Wauconda Pass SR 20": {
      "avalanche_closure": false,
-     "displayDate": "2026-11-01T07:43:11.77Z",
+     "displayDate": "2026-11-03T17:52:15.877Z",
      "endMP": 293.89,
      "restrictions": {
       "Eastbound": "No restrictions",
       "Westbound": "No restrictions"
      },
-     "roadCondition": "No current information available.",
+     "roadCondition": "",
      "route": "020",
      "snow_on_road": false,
      "startMP": 283.89,
      "status": "open",
-     "temperature": null,
-     "weather": ""
+     "temperature": 31.0,
+     "weather": "Cloudy"
     },
     "White Pass US 12": {
      "avalanche_closure": false,
-     "displayDate": "2026-11-02T04:03:49.57Z",
+     "displayDate": "2026-11-04T12:04:12.66Z",
      "endMP": 166.0,
      "restrictions": {
       "Eastbound": "No restrictions",
       "Westbound": "No restrictions"
      },
-     "roadCondition": "Bare and dry, wet in places",
+     "roadCondition": "Bare and wet",
      "route": "012",
      "snow_on_road": false,
      "startMP": 138.0,
      "status": "open",
      "temperature": null,
-     "weather": "Clear skies"
+     "weather": "Partly cloudy"
     }
    }
   },
@@ -322,13 +322,11 @@
    "q-50cc02fbe9531abe",
    "q-046707a57af15e7b",
    "q-9745c3f77cdf9556",
-   "q-f020e657631a2148"
+   "q-f020e657631a2148",
+   "q-212da8bda56d39cd"
   ],
   "quakes": {},
   "seen": {
-   "urn:oid:2.49.0.1.840.0.0028eed3d853ea43e28d0d3c68fbf150476c09e3.001.1|WA": "2026-10-27T22:54:22.405817+00:00",
-   "urn:oid:2.49.0.1.840.0.0028eed3d853ea43e28d0d3c68fbf150476c09e3.002.1|WA": "2026-10-27T22:54:22.405817+00:00",
-   "urn:oid:2.49.0.1.840.0.0028eed3d853ea43e28d0d3c68fbf150476c09e3.003.1|WA": "2026-10-27T22:54:22.405817+00:00",
    "urn:oid:2.49.0.1.840.0.020e71cb44aa70616ea7207259b0d678370ca7be.001.1|USA": "2026-11-02T19:39:50.203574+00:00",
    "urn:oid:2.49.0.1.840.0.098b505a6749a13e82ac9424e6d3f7aa6a974da9.003.1|USA": "2026-10-29T10:12:13.273461+00:00",
    "urn:oid:2.49.0.1.840.0.14c0b3154de6d84fa49dbadae98712c6d728ded0.001.2|WA": "2026-10-31T12:28:08.994553+00:00",
@@ -337,7 +335,6 @@
    "urn:oid:2.49.0.1.840.0.225d0ef751101fdc47377e1bce235d24b4a04b25.001.1|USA": "2026-10-28T17:55:00.710068+00:00",
    "urn:oid:2.49.0.1.840.0.2811dc83f22db2307a8d5938a86631485bc028f9.001.1|USA": "2026-11-01T10:47:46.716172+00:00",
    "urn:oid:2.49.0.1.840.0.29f3dba14c07a782b287aa4150fc5b5536ae488a.001.1|USA": "2026-10-28T21:50:03.700323+00:00",
-   "urn:oid:2.49.0.1.840.0.2b2e611718869e667a976020741ea2346a086d95.001.1|USA": "2026-10-27T17:52:20.076518+00:00",
    "urn:oid:2.49.0.1.840.0.2b37cf823d40515a1f6ac4d446bb541d765afada.001.1|WA": "2026-10-29T12:55:04.831325+00:00",
    "urn:oid:2.49.0.1.840.0.3c057f7fd48d8018be9ee8e20ccdd8546555c985.001.1|WA": "2026-10-29T12:55:04.831325+00:00",
    "urn:oid:2.49.0.1.840.0.46adfb49ae646297a879b78e97fc34839409584b.001.1|USA": "2026-10-28T21:50:03.700323+00:00",
@@ -347,7 +344,6 @@
    "urn:oid:2.49.0.1.840.0.58a1f63bbd69cad303efa7f8f38e7c5fb7958276.001.1|USA": "2026-10-30T21:10:27.808524+00:00",
    "urn:oid:2.49.0.1.840.0.5a489f8dcb824745242b5cc5259d11b59eb27e23.001.1|USA": "2026-10-29T20:04:35.152153+00:00",
    "urn:oid:2.49.0.1.840.0.629e1c2678121744f7b5395be4a7b505b575f7ea.001.1|USA": "2026-11-01T10:47:46.716172+00:00",
-   "urn:oid:2.49.0.1.840.0.7e7721325c972e03a2786afd53c27511546db7ea.001.1|WA": "2026-10-27T15:47:06.193825+00:00",
    "urn:oid:2.49.0.1.840.0.83cbf996a8a054bf68ea387e2ebf7e3592b5e9b6.001.1|USA": "2026-10-30T22:15:11.239149+00:00",
    "urn:oid:2.49.0.1.840.0.8780e75dbe2636643d0fb31bb80854cdd12b087d.001.1|USA": "2026-10-30T21:10:27.808524+00:00",
    "urn:oid:2.49.0.1.840.0.8f18d03a8f33c4047ad9deba7776e342072d7011.001.1|USA": "2026-11-02T23:58:38.413250+00:00",
@@ -360,12 +356,9 @@
    "urn:oid:2.49.0.1.840.0.a77efc64fc2ab12116731dea3eb3c0a94810bb76.001.1|USA": "2026-11-02T19:39:50.203574+00:00",
    "urn:oid:2.49.0.1.840.0.b3852ac49f3ccf256fbc0a9e49fa34a4eca0437b.001.1|USA": "2026-10-29T14:35:27.192147+00:00",
    "urn:oid:2.49.0.1.840.0.bccb31da7cbddad9dd41db90c0dd558e4b17fae2.001.1|USA": "2026-11-02T19:39:50.203574+00:00",
-   "urn:oid:2.49.0.1.840.0.bfb86c857a207454b4e4e055edaae7b840f25216.001.1|WA": "2026-10-27T22:54:22.405817+00:00",
    "urn:oid:2.49.0.1.840.0.c56dc076bf59ed3aa9e46a156e5d0f4c3eb145e2.001.1|WA": "2026-10-31T12:28:08.994553+00:00",
    "urn:oid:2.49.0.1.840.0.cc7d6ed41f19187ae98f114da75aa786571c0ce8.002.2|USA": "2026-10-29T13:45:12.334511+00:00",
    "urn:oid:2.49.0.1.840.0.d9a9a1bea824d2788afcfdd7c4080a87f9197d63.001.1|USA": "2026-10-28T21:50:03.700323+00:00",
-   "urn:oid:2.49.0.1.840.0.dcf89ab75879440c0bad39689676acf44c528022.001.1|USA": "2026-10-27T12:04:13.580641+00:00",
-   "urn:oid:2.49.0.1.840.0.e1260830cc430af309a909646650cfd04366ed09.001.1|WA": "2026-10-27T15:47:06.193825+00:00",
    "urn:oid:2.49.0.1.840.0.e28a7beacf0d23c29b492575ceef0ca347b3ac8f.002.1|USA": "2026-10-30T18:35:35.659798+00:00",
    "urn:oid:2.49.0.1.840.0.f47d67845667299bbd9deebb4e22e7c5c394e52a.003.1|USA": "2026-10-30T09:16:07.021672+00:00",
    "urn:oid:2.49.0.1.840.0.f5789af71065628d1193864d001bb664389ded1a.001.1|WA": "2026-11-02T13:11:56.852223+00:00",
@@ -517,7 +510,7 @@
    }
   }
  },
- "updated": "2026-11-02T23:58:38.414686+00:00",
+ "updated": "2026-11-04T12:17:54.844688+00:00",
  "urgent": {
   "keys": {
    "urn:oid:2.49.0.1.840.0.2a3a4ae58685bf6f5472a3416741f8a7a8256967.001.1": "2026-11-02T10:32:35.563769+00:00",
