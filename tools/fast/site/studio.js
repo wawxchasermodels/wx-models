@@ -1196,6 +1196,14 @@ function fitFrames() {
   if (CLEAN || innerWidth <= 820) { clear(); return; }
   const cs = getComputedStyle(st), padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight), padB = parseFloat(cs.paddingBottom) + 2;
   const gap = parseFloat(cs.columnGap) || 18, hint = fh.querySelector(".shint"), MINV = 300;   // below ~300 px tall the page scrolls instead
+  // 11-04 (Benjamin t2316u-t2318u "satellite viewers ... same exact size as the model views", "same exact size and placement in the
+  // window browser", "pass forecaster view too"): Observations / Meteogram / Pass Forecaster frames take the Map mode's size AND spot.
+  // The Map layout is measured with the mode class off (same sync pass, never painted), then the mode's panel is padded or capped
+  // (scrolls) so the frames start at the same y.
+  const bd = document.body, MODES = ["mgmode", "obsmode", "passmode"].filter((c) => bd.classList.contains(c)), pnl = document.getElementById("mgp");
+  if (pnl) { pnl.style.maxHeight = ""; pnl.style.overflowY = ""; } st.style.marginTop = "";
+  const SHD = [fv, fh].map((f) => f.querySelector(".shd")); for (const e of SHD) e.style.minHeight = "";
+  for (const c of MODES) bd.classList.remove(c);
   let wv = 0, wh = 0;
   for (let it = 0; it < 5; it++) {
     const availW = st.clientWidth - padX - gap, sy = scrollY;
@@ -1209,6 +1217,18 @@ function fitFrames() {
     cvv.style.width = wv + "px"; cvv.style.height = wv * 16 / 9 + "px"; cvh.style.width = wh + "px"; cvh.style.height = wh * 9 / 16 + "px";
     if (same) break;
   }
+  const topMap = cvh.getBoundingClientRect().top + scrollY;
+  const shdH = SHD.map((e) => e.getBoundingClientRect().height);
+  for (const c of MODES) bd.classList.add(c);
+  if (pnl && window.__fitRO) for (const e of pnl.children) if (!e.__fitObs) { e.__fitObs = 1; window.__fitRO.observe(e); }   // panel content (obs chips) settles later
+  if (MODES.length) {
+    SHD.forEach((e, i) => { e.style.minHeight = shdH[i] + "px"; });   // a mode that hides header buttons keeps the header height
+    let d = topMap - (cvh.getBoundingClientRect().top + scrollY);
+    if (d > 0.25) st.style.marginTop = d + "px";
+    else if (d < -0.25 && pnl) { pnl.style.maxHeight = Math.max(24, pnl.getBoundingClientRect().height + d) + "px"; pnl.style.overflowY = "auto";
+      d = topMap - (cvh.getBoundingClientRect().top + scrollY); if (Math.abs(d) > 0.25) st.style.marginTop = d + "px"; }
+  }
+  window.__fitTop = MODES.length ? topMap : null;
   window.__studioFit = { v: [wv, wv * 16 / 9], h: [wh, wh * 9 / 16] };
 }
 // ---- 11-01 2 PM (Benjamin t2041u/t2042u): hour scrubber under the 16:9 frame (every forecast hour the model data has: the viewer's
@@ -1347,8 +1367,9 @@ if (!CLEAN) {   // Studio: Map | Meteogram switch (first in the menu bar) + the 
 if (!CLEAN) {
   let fq = 0; const fitSoon = () => { cancelAnimationFrame(fq); fq = requestAnimationFrame(fitFrames); };
   addEventListener("resize", fitSoon); addEventListener("orientationchange", fitSoon);
-  if ("ResizeObserver" in window) new ResizeObserver(fitSoon).observe(document.getElementById("bar"));
+  if ("ResizeObserver" in window) { new ResizeObserver(fitSoon).observe(document.getElementById("bar")); window.__fitRO = new ResizeObserver(fitSoon); }
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitSoon);
+  setInterval(() => { if (window.__fitTop != null && innerWidth > 820 && Math.abs(F.h.cv.getBoundingClientRect().top + scrollY - window.__fitTop) > 0.5) fitSoon(); }, 400);   // panel content that settles late
   fitFrames();
 }
 })();
