@@ -392,7 +392,8 @@ function renderPass(k) {
         if (cell.t[1]) { g.font = `600 ${L.hs}px Montserrat`; g.fillStyle = "#b9bec7"; g.fillText(cell.t[1], tx, ry + L.pad * 0.55 + L.fs * 1.2); } });
       cx_ += w; });
     g.strokeStyle = "#323743"; g.lineWidth = 1.5; for (let i = 1; i <= D.body.length - 1; i++) { const yy = Math.round(ty + L.hh + i * L.rh) + 0.5; g.beginPath(); g.moveTo(x + 8, yy); g.lineTo(x + avW - 8, yy); g.stroke(); }
-    g.restore(); f.pfL = { fs: L.fs, cols: L.cols.length, of: D.head.length, top: ty, bot: ty + L.H, key: bot };
+    g.restore(); f.pfL = { fs: L.fs, cols: L.cols.length, of: D.head.length, top: ty, bot: ty + L.H, key: bot,
+      x: x - 2, w: avW + 4, y0: ty + L.hh, rh: L.rh, names: D.body.map((r) => (r[0] && r[0].t[0]) || "") };   // row hit boxes (frame px) for click-to-meteogram
   } else f.pfL = null;
   window.__pfL = Object.assign(window.__pfL || {}, { [k]: f.pfL });
   // key + notes + credit (overlay layer, same shadow as the maps)
@@ -1296,8 +1297,36 @@ if (!CLEAN) {   // Studio: Map | Meteogram switch (first in the menu bar) + the 
     if (on) poll = setInterval(grab, 300);
     renderAll(); if (!on && last && window.onStudioDraw) window.onStudioDraw(last.cv, last.cur, last.step); fitFrames();
   };
+  // 11-04 (Benjamin t2296u "if I click one of the passes in studio mode, it goes to that pass meteogram"): a click / tap on a pass row
+  // opens Studio > Meteogram on that pass, same model (the meteogram page's newest run = the Pass Forecaster's run). Hover = a DOM
+  // outline over the canvas (never drawn into the frame, so Save PNG and recordings stay clean). A "Back to Pass Forecaster" button sits
+  // in the menu panel; studio:mgfrom keeps it across a refresh.
+  const PFSEC = { ifs9: "ifs" }, pfProd = (m) => (m === "eps" || m === "aens") ? `${m}_snow_plume` : `${m}_winter_summary`;
+  const pfRow = (k, e) => { const f = F[k], L = f.pfL; if (!PASSM() || !PF.rows || !L || !L.names) return -1; const b = f.cv.getBoundingClientRect();
+    const X = (e.clientX - b.left) * f.W / b.width, Y = (e.clientY - b.top) * f.H / b.height, i = Math.floor((Y - L.y0) / L.rh);
+    return X >= L.x && X <= L.x + L.w && i >= 0 && i < L.names.length && L.names[i] ? i : -1; };
+  const hov = document.createElement("div"); hov.id = "pfhov"; hov.hidden = true; document.body.appendChild(hov);
+  const hovAt = (k, i) => { const f = F[k], L = f.pfL, b = f.cv.getBoundingClientRect(), s = b.width / f.W;
+    Object.assign(hov.style, { left: b.left + L.x * s + "px", top: b.top + (L.y0 + i * L.rh) * s + "px", width: L.w * s + "px", height: L.rh * s + "px" }); hov.hidden = false; };
+  const backBtn = document.createElement("button"); backBtn.type = "button"; backBtn.id = "pfback"; backBtn.textContent = "\u2190 Back to Pass Forecaster";
+  const backSync = () => { const on = MG.on && MG.kind === "mg" && localStorage.getItem("studio:mgfrom") === "pass"; backBtn.hidden = !on; if (on && backBtn.parentNode !== pnl) pnl.insertBefore(backBtn, pnl.firstChild); };
+  backBtn.onclick = () => { localStorage.removeItem("studio:mgfrom"); sel.value = "pass"; setMode("pass"); backSync(); };
+  const pfOpen = (name) => { const m = PF.run.split("/")[0], h = "#" + new URLSearchParams({ s: PFSEC[m] || m, w: name, p: pfProd(PFSEC[m] || m) }).toString();
+    localStorage.setItem("studio:mghash", h); localStorage.setItem("studio:mgfrom", "pass"); hov.hidden = true;
+    if (fr_) { MG.img = null; MG.src = ""; try { fr_.contentWindow.location.hash = h; } catch (e) { fr_.src = "meteograms.html" + h; } }
+    MG.kind = "mg"; sel.value = "mg"; setMode("mg"); backSync(); window.__pfOpened = { name, hash: h }; };
+  for (const k of ["v", "h"]) { const cv = F[k].cv; let dn = null;
+    cv.addEventListener("pointermove", (e) => { if (!PASSM()) return; const i = REC.on ? -1 : pfRow(k, e); cv.style.cursor = i >= 0 ? "pointer" : (PASSM() ? "default" : ""); if (i >= 0 && e.pointerType === "mouse") hovAt(k, i); else hov.hidden = true; });
+    cv.addEventListener("pointerleave", () => { hov.hidden = true; if (PASSM()) cv.style.cursor = ""; });
+    cv.addEventListener("pointerdown", (e) => { dn = PASSM() && !REC.on ? { x: e.clientX, y: e.clientY, i: pfRow(k, e) } : null; });
+    cv.addEventListener("pointerup", (e) => { const d0 = dn; dn = null; if (!d0 || d0.i < 0 || !PASSM() || REC.on) return; if (Math.hypot(e.clientX - d0.x, e.clientY - d0.y) > 12) return;
+      const i = pfRow(k, e); if (i === d0.i) pfOpen(F[k].pfL.names[i]); }); }
+  addEventListener("scroll", () => { hov.hidden = true; }, true); addEventListener("resize", () => { hov.hidden = true; });
+  sel.addEventListener("change", () => { localStorage.removeItem("studio:mgfrom"); backSync(); });
+  window.__pfOpen = pfOpen;
   sel.onchange = () => setMode(sel.value);
   if (MG.on) setMode(MG.kind);
+  backSync();
 }
 if (!CLEAN) {
   let fq = 0; const fitSoon = () => { cancelAnimationFrame(fq); fq = requestAnimationFrame(fitFrames); };

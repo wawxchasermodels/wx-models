@@ -31,7 +31,7 @@ body.phone #dock #step{min-width:90px}
 /* 10-30 7:50 PM (Benjamin's iPhone screenshots: whole map blurry, buttons sharp): no will-change:transform on the map. Safari/WebKit
    rasterizes a will-change:transform layer once at 1x and stretches it (3x on an iPhone), so the canvas showed at a third of its res. */
 canvas{display:block;width:auto;height:auto;max-width:100%;max-height:100%;touch-action:none}
-canvas.pindrag{cursor:grabbing!important}
+canvas.pindrag{cursor:grabbing!important}#pfhov{position:fixed;z-index:5;pointer-events:none;border:2px solid #5aa9ff;border-radius:6px;background:rgba(90,169,255,.10);box-shadow:0 0 0 1px rgba(0,0,0,.35)}#pfhov[hidden]{display:none}#pfback{background:#2f8cff;color:#fff;border:0;border-radius:6px;padding:5px 12px;font:inherit;font-size:13px;font-weight:700;cursor:pointer;margin:4px 8px 4px 0}#pfback[hidden]{display:none}
 #zreset{position:absolute;right:10px;top:10px;z-index:2;background:#262931ee;color:#f4f2ee;border:1px solid #7d828c;border-radius:6px;padding:5px 10px;font:inherit;font-size:13px;cursor:pointer}
 #tip{position:absolute;pointer-events:none;background:#1d2027ee;color:#fff;border:1px solid #7d828c;border-radius:6px;padding:3px 8px;font-weight:700;font-size:14px;white-space:nowrap}
 @media (max-width:1500px){#stat{display:none}}
