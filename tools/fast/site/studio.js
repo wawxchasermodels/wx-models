@@ -77,6 +77,25 @@ function base(k) {   // camera at dx = dy = 0, zoom 1: centre (figure px) and sc
   const y0 = f.top + 80, y1 = f.H - f.bot + 40, k0 = Math.min(0.84 * f.W / t.w, (y1 - y0) / t.h);
   return { cx: t.x + t.w / 2 - 0.04 * f.W / k0, cy: t.y + t.h / 2 - ((y0 + y1) / 2 - f.H / 2) / k0, k0 };
 }
+// 11-04 (Benjamin t2264u "zoom the view out as much as I want, and move it around out over the ocean"): in Observations / satellite
+// mode the frames crop the obs module's map bitmap, so zoom stopped at 1x and drags stopped at the bitmap's edge. Below 1x the obs map
+// itself zooms out (about the frame's centre), and a drag past the edge pans the obs map; the frame zoom (1-2.5x) works as before.
+const OZ = { ref: 0, sub: 1 };
+function ozSync() { const S_ = Obs._state; if (!OZ.ref || Math.abs(S_.k - OZ.ref * OZ.sub) > 1e-6 * S_.k) { OZ.ref = S_.k; OZ.sub = 1; } return S_; }
+function obsZoom(k, fr, z) {   // z = wanted total zoom (frame zoom x obs map zoom-out)
+  if (typeof Obs === "undefined" || !MG.img) { fr.zoom = Math.max(1, z); return fr; }
+  const S_ = ozSync(), r = crop(k, fr), X = S_.cx + (r.cx / S_.dpr - S_.w / 2) / S_.k, Y = S_.cy + (r.cy / S_.dpr - S_.h / 2) / S_.k;
+  if (z < 1 || OZ.sub < 1) { OZ.sub = Math.min(1, Math.max(0.035 / OZ.ref, z)); S_.k = OZ.ref * OZ.sub; S_.cx = X; S_.cy = Y; S_.view = ""; fr.dx = fr.dy = 0; fr.zoom = Math.max(1, z); Obs.redraw(); }
+  else fr.zoom = Math.min(2.5, z);
+  return fr;
+}
+function obsPan(k, fr) {   // pan past the bitmap edge: move the obs map by the overflow, keep the frame offset at the edge
+  const r = crop(k, fr); if (typeof Obs === "undefined" || !MG.img) { fr.dx = (r.bx - r.cx) * r.kk; fr.dy = (r.by - r.cy) * r.kk; return fr; }
+  const S_ = ozSync(), ox = (r.bx - (fr.dx || 0) / r.kk) - r.cx, oy = (r.by - (fr.dy || 0) / r.kk) - r.cy;
+  if (Math.abs(ox) > 0.01 || Math.abs(oy) > 0.01) { S_.cx += ox / S_.dpr / S_.k; S_.cy += oy / S_.dpr / S_.k; S_.view = ""; Obs.redraw(); }
+  fr.dx = (r.bx - r.cx) * r.kk; fr.dy = (r.by - r.cy) * r.kk; return fr;
+}
+const obsZv = (fr) => Math.round((fr.zoom || 1) * (OBSM() && typeof Obs !== "undefined" && Obs._state ? (ozSync(), OZ.sub) : 1) * 100);
 function crop(k, fr) {   // source rect (map bitmap px) for frame k: base camera, then zoom / pan; the panel stays covering the frame when it
   // can, and when it is smaller than the frame (wide view) it stays wholly in the frame (the rest is background)
   if (OBSM() && MG.img) {   // obs map: zoom in / pan, the map always covers the frame
@@ -235,7 +254,10 @@ function lowKey(c, f, k, cbY, cbS) {
 }
 // ---- Observations in Studio (11-03, t2192u): same header / badge / credit style as the maps; the obs module's own map is the picture
 const OBS_LAYERS = [["plot", "Station plot", "#ffffff"], ["hi", "High", "#ff8a6e"], ["lo", "Low", "#7f97ff"], ["pk", "Peak gust", "#ffd23f"], ["feel", "Wind chill / heat index", "#c9a2ff"], ["mslp", "MSLP", "#7fe0b5"]];
-const OBS_CREDIT = ["Data: NOAA/NWS ASOS/AWOS via Iowa Environmental Mesonet; Environment and Climate Change Canada (OGL-Canada).", "Places: GeoNames (geonames.org), CC BY 4.0.", "Basemap: Natural Earth."];
+// 11-04 (Benjamin "make the credit line smaller, and remove ones we don't legally need"): only the credits a licence asks for stay on
+// the frames: ECCC (OGL-Canada attribution) when station layers show, GeoNames (CC BY 4.0), Natural Earth (standing rule). NOAA/NWS
+// ASOS/AWOS, MRMS radar and NOAA/NESDIS STAR water vapor are public domain (credited on the site's Observations page instead).
+const OBS_CREDIT_ST = "Contains information licensed under the Open Government Licence \u2013 Canada (ECCC).", OBS_CREDIT = ["Places: GeoNames, CC BY 4.0.  Basemap: Natural Earth."];
 const OBS_TF = new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", weekday: "short", month: "2-digit", day: "2-digit", hour: "numeric", minute: "2-digit" });
 function obsInfo() {
   const S_ = typeof Obs !== "undefined" && Obs._state; if (!S_) return null;
@@ -249,16 +271,19 @@ function obsInfo() {
   return { on: [...on, ...imPills], t, title, when, view: S_.view, img: IM };
 }
 function renderObs(k, frO) {
-  const f = F[k], c0 = f.cv.getContext("2d"), fr = frO || getFr(k); if (!frO) f.zoom.value = Math.round((fr.zoom || 1) * 100);
+  const f = F[k], c0 = f.cv.getContext("2d"), fr = frO || getFr(k); if (!frO) { f.zoom.min = "5"; f.zoom.value = obsZv(fr); }
   c0.setTransform(1, 0, 0, 1, 0, 0); c0.clearRect(0, 0, f.W, f.H); c0.fillStyle = BG === "transparent" ? "#111316" : BG; c0.fillRect(0, 0, f.W, f.H);
   const I = obsInfo();
   if (!MG.img || !I || !I.t) { c0.font = `700 ${k === "v" ? 40 : 34}px Montserrat`; c0.fillStyle = "#c9ced8"; c0.textAlign = "center"; c0.fillText(MG.msg || "Loading observations\u2026", f.W / 2, f.H / 2); c0.textAlign = "left"; return; }
   const r = crop(k, fr); c0.imageSmoothingEnabled = true; c0.imageSmoothingQuality = "high";
   c0.drawImage(MG.img, f.W / 2 - r.cx * r.kk, f.H / 2 - r.cy * r.kk, IW(MG.img) * r.kk, IH(MG.img) * r.kk);
   const c = ovLayer(f), x = f.pad; let y = k === "v" ? 120 : 34;
-  c.save(); sharpShadow(c, k); const pw = pill(c, x, y, "OBSERVED", Math.round(f.run * 0.95), "#16a34a", "#fff");
-  c.font = `600 ${f.run}px Montserrat`; c.fillStyle = "#c9ced8"; c.fillText("station reports", x + pw + 14, y + f.run * 1.08);
-  y += f.run * 1.55 + f.title * 1.02; c.font = `800 ${f.title}px Montserrat`; c.fillStyle = "#fff"; c.fillText(I.title, x, y);
+  // 11-04 (Benjamin): satellite / radar with no station layer on: no "OBSERVED station reports" line, the title and time move up
+  const stOn0 = I.on.some((q) => !String(q[0]).startsWith("img_"));
+  c.save(); sharpShadow(c, k);
+  if (stOn0) { const pw = pill(c, x, y, "OBSERVED", Math.round(f.run * 0.95), "#16a34a", "#fff");
+    c.font = `600 ${f.run}px Montserrat`; c.fillStyle = "#c9ced8"; c.fillText("station reports", x + pw + 14, y + f.run * 1.08);
+    y += f.run * 1.55 + f.title * 1.02; } else y += f.title * 0.92; c.font = `800 ${f.title}px Montserrat`; c.fillStyle = "#fff"; c.fillText(I.title, x, y);
   y += f.day * 1.3; c.font = `800 ${f.day}px Montserrat`; c.fillStyle = "#ffc24d"; c.fillText(I.when, x, y);
   const headBot = y + f.day * 0.45;
   c.font = `800 ${Math.round(f.valid * 1.1)}px Montserrat`; const bt = "LIVE", bw = c.measureText(bt).width + 40, bx = f.W - f.pad - bw, by = k === "v" ? 120 : 34;
@@ -267,11 +292,12 @@ function renderObs(k, frO) {
   const cnr = BR.corner && LOGOS[BR.logo] ? cornerBox(k, by + f.valid * 1.9, headBot, f.H - f.bot + (k === "v" ? 110 : 62)) : null;
   // bottom: a legend of the layers shown (number colours, like the obs page's chips) in place of the color bar, then the locked credit lines
   c.save(); sharpShadow(c, k);
-  const dl = [...(I.img && I.img.length && typeof ObsImg !== "undefined" ? ObsImg.credits() : []), ...OBS_CREDIT], cB = cnr && (BR.cpos === "br" || BR.cpos === "bl") ? cnr : null;
-  let dfs = k === "v" ? 19 : 17; c.font = `600 ${dfs}px Montserrat`;
+  const stOn = I.on.some((x) => !String(x[0]).startsWith("img_"));
+  const dl = [...(I.img && I.img.length && typeof ObsImg !== "undefined" ? ObsImg.credits() : []), ...(stOn ? [OBS_CREDIT_ST] : []), ...OBS_CREDIT], cB = cnr && (BR.cpos === "br" || BR.cpos === "bl") ? cnr : null;
+  let dfs = k === "v" ? 15 : 14; c.font = `600 ${dfs}px Montserrat`;   // 11-04: smaller (was 19 / 17)
   const dMax = k === "v" ? f.W - 2 * f.pad : Math.round(f.W * 0.52);
-  while (dfs > 13 && Math.max(...dl.map((l) => c.measureText(l).width)) > dMax) { dfs -= 1; c.font = `600 ${dfs}px Montserrat`; }
-  const dlh = dfs + 9, lgS = k === "v" ? 30 : 26;
+  while (dfs > 11 && Math.max(...dl.map((l) => c.measureText(l).width)) > dMax) { dfs -= 1; c.font = `600 ${dfs}px Montserrat`; }
+  const dlh = dfs + 7, lgS = k === "v" ? 30 : 26;
   c.fillStyle = "rgba(236,239,244,0.95)";
   if (k === "v") dl.forEach((l, i) => c.fillText(l, f.pad + (cB && BR.cpos === "bl" ? cB.s + 18 : 0), f.H - 70 - (dl.length - 1 - i) * dlh));
   else { c.textAlign = "right"; dl.forEach((l, i) => c.fillText(l, f.W - f.pad - (cB && BR.cpos === "br" ? cB.s + 20 : 0), f.H - 24 - (dl.length - 1 - i) * dlh)); c.textAlign = "left"; }
@@ -290,7 +316,7 @@ function renderObs(k, frO) {
 }
 function renderMg(k, frO) {
   if (OBSM()) return renderObs(k, frO);
-  const f = F[k], c = f.cv.getContext("2d"), fr = frO || getFr(k); f.zoom.value = Math.round((fr.zoom || 1) * 100);
+  const f = F[k], c = f.cv.getContext("2d"), fr = frO || getFr(k); f.zoom.min = "100"; f.zoom.value = Math.round((fr.zoom || 1) * 100);
   c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, f.W, f.H); c.fillStyle = BG === "transparent" ? "#111316" : BG; c.fillRect(0, 0, f.W, f.H);
   if (!MG.img) { c.font = `700 ${k === "v" ? 40 : 34}px Montserrat`; c.fillStyle = "#c9ced8"; c.textAlign = "center"; c.fillText(MG.msg || "Loading the meteogram\u2026", f.W / 2, f.H / 2); c.textAlign = "left"; return; }
   const r = crop(k, fr); c.imageSmoothingEnabled = true; c.imageSmoothingQuality = "high";
@@ -340,7 +366,7 @@ async function render(k, frO) {   // frO: camera override (MP4 storm-track pan)
   // 11-02 (Benjamin t2115u "move the scale further down"): 9:16: the bar sits just above the credit line (tick numbers ~14 px clear of it;
   // the credit moves up for 3+ data lines and the bar with it); 16:9: 10 px lower (it was already at the bottom, credits are bottom right)
   const nDl = window.creditLines ? [].concat(...window.creditLines(cur.pid, cur.P, (cur.P.towns || "numbers") !== "none").map(l => (NE_KEEP.has(cur.pid) ? l : l.replace("  Basemap: Natural Earth.", "")).split("  "))).length : 0;
-  const crY = f.H - 70 - Math.max(0, nDl - 2) * ((k === "v" ? 19 : 17) + 9);
+  const crY = f.H - 70 - Math.max(0, nDl - 2) * ((k === "v" ? 15 : 14) + 7);
   const cbW = k === "v" ? f.W - 2 * f.pad : Math.min(1100, f.W * 0.58), cbS = k === "v" ? 28 : 24, cbY = k === "v" ? Math.round(crY - 22 - 14 - 34 - cbS * 1.35) : f.H - f.bot + 72;
   if (!colorbar(c, P, f.pad, cbY, cbW, k === "v" ? 34 : 26, cbS)) {
     try { const im = await getKey(cur.pid, cur.V === VIEWS()[S.view] ? S.view : S.view); const s_ = cbW / im.naturalWidth; c.drawImage(im, f.pad, cbY - 30, cbW, im.naturalHeight * s_); } catch (e) { /* no key */ }
@@ -366,10 +392,10 @@ async function render(k, frO) {   // frO: camera override (MP4 storm-track pan)
   // 11-02 (t2112u, legibility): the locked credit sentences unchanged, but each "  "-joined sentence gets its own line (it used to shrink to
   // ~12-14 px to fit one line in 16:9), 600 weight, brighter, 17 / 16 px minimum 13, more line spacing
   const dl = window.creditLines ? [].concat(...window.creditLines(cur.pid, cur.P, (cur.P.towns || "numbers") !== "none").map(l => (NE_KEEP.has(cur.pid) ? l : l.replace("  Basemap: Natural Earth.", "")).split("  "))) : [];
-  let dfs = k === "v" ? 19 : 17; c.font = `600 ${dfs}px Montserrat`; c.fillStyle = "rgba(236,239,244,0.95)";
+  let dfs = k === "v" ? 15 : 14; c.font = `600 ${dfs}px Montserrat`; c.fillStyle = "rgba(236,239,244,0.95)";   // 11-04: smaller (was 19 / 17)
   const dMax = k === "v" ? f.W - 2 * f.pad : f.W - 2 * f.pad - cbW - 40;
-  while (dfs > 13 && Math.max(0, ...dl.map(l => c.measureText(l).width)) > dMax) { dfs -= 1; c.font = `600 ${dfs}px Montserrat`; }
-  const dlh = dfs + 9;
+  while (dfs > 11 && Math.max(0, ...dl.map(l => c.measureText(l).width)) > dMax) { dfs -= 1; c.font = `600 ${dfs}px Montserrat`; }
+  const dlh = dfs + 7;
   if (k === "v") dl.forEach((l, i) => c.fillText(l, f.pad, f.H - 70 + dlh * (i + 1) - Math.max(0, dl.length - 2) * dlh));
   else { c.textAlign = "right"; dl.forEach((l, i) => c.fillText(l, f.W - f.pad, f.H - 24 - 30 - (dl.length - 1 - i) * dlh)); c.textAlign = "left"; }
   const dUp = k === "v" ? 0 : dl.length * dlh + 4;
@@ -436,7 +462,9 @@ for (const k of ["v", "h"]) {
   cv.addEventListener("pointermove", (e) => { if (PD && PD.k === k && PD.id === e.pointerId) { pinMove(k, cv, e); return; }
     if (!d && !PD && PIN.show && !PIN.mode && e.pointerType === "mouse") cv.style.cursor = pinHit(k, cv, e) ? "grab" : "";
     if (!d || pz || (d.id !== undefined && e.pointerId !== d.id)) return; const s = f.W / cv.clientWidth, fr = getFr(k);
-    fr.dx = d.fr.dx + (e.clientX - d.x) * s; fr.dy = d.fr.dy + (e.clientY - d.y) * s; const r = crop(k, fr);   // keep the stored offset inside the panel
+    fr.dx = d.fr.dx + (e.clientX - d.x) * s; fr.dy = d.fr.dy + (e.clientY - d.y) * s;
+    if (OBSM()) { obsPan(k, fr); d.x = e.clientX; d.y = e.clientY; d.fr = Object.assign({}, fr); setFr(k, fr); render(k); return; }   // 11-04: free pan
+    const r = crop(k, fr);   // keep the stored offset inside the panel
     fr.dx = (r.bx - r.cx) * r.kk; fr.dy = (r.by - r.cy) * r.kk; setFr(k, fr); render(k); });
   const up = (e) => { if (PD && PD.k === k) { PD = null; cv.classList.remove("pindrag"); mpInfo(); renderAll(); } d = null; cv.classList.remove("drag"); }; cv.addEventListener("pointerup", up); cv.addEventListener("pointercancel", up); cv.addEventListener("lostpointercapture", (e) => { if (d && e.pointerId === d.id) up(e); });
   // 10-31 1:39 PM (Benjamin, iPhone): two-finger pinch zooms the frame (1-2.5x) about the fingers' midpoint; moving both fingers pans
@@ -451,12 +479,13 @@ for (const k of ["v", "h"]) {
     if (CLEAN || !last || REC.on || PIN.mode || e.targetTouches.length !== 2 || e.touches.length !== 2) { if (pz && e.targetTouches.length !== 2) pz = null; return; }
     e.preventDefault(); d = null;
     const [a, b] = [oxy(e.targetTouches[0]), oxy(e.targetTouches[1])], fr0 = getFr(k), r0 = crop(k, fr0), ox = (a[0] + b[0]) / 2, oy = (a[1] + b[1]) / 2;
-    pz = { d: Math.max(10, Math.hypot(a[0] - b[0], a[1] - b[1])), z: Math.max(1, fr0.zoom || 1), mx: r0.cx + (ox - f.W / 2) / r0.kk, my: r0.cy + (oy - f.H / 2) / r0.kk };
+    pz = { d: Math.max(10, Math.hypot(a[0] - b[0], a[1] - b[1])), z: OBSM() ? obsZv(fr0) / 100 : Math.max(1, fr0.zoom || 1), mx: r0.cx + (ox - f.W / 2) / r0.kk, my: r0.cy + (oy - f.H / 2) / r0.kk };
   }, { passive: false });
   cv.addEventListener("touchmove", (e) => {
     if (PD) { e.preventDefault(); return; }
     if (!pz) return; e.preventDefault(); if (e.targetTouches.length !== 2 || e.touches.length !== 2) return;   // a finger elsewhere (scrubber, other frame, a third one): hold the zoom
     const [a, b] = [oxy(e.targetTouches[0]), oxy(e.targetTouches[1])], ox = (a[0] + b[0]) / 2, oy = (a[1] + b[1]) / 2;
+    if (OBSM()) { const zo = Math.min(2.5, Math.max(0.05, pz.z * Math.max(10, Math.hypot(a[0] - b[0], a[1] - b[1])) / pz.d)), fo = obsZoom(k, getFr(k), zo); setFr(k, fo); render(k); window.__spinch = { k, zoom: zo }; return; }   // 11-04: zoom out past 1x
     const z = Math.min(2.5, Math.max(1, pz.z * Math.max(10, Math.hypot(a[0] - b[0], a[1] - b[1])) / pz.d)), kk = base(k).k0 * z;
     const fr = frAt(k, pz.mx - (ox - f.W / 2) / kk, pz.my - (oy - f.H / 2) / kk, z), r = crop(k, fr);   // map point under the fingers stays under them
     fr.dx = (r.bx - r.cx) * r.kk; fr.dy = (r.by - r.cy) * r.kk; setFr(k, fr); render(k); window.__spinch = { k, zoom: z };
@@ -465,15 +494,17 @@ for (const k of ["v", "h"]) {
   cv.addEventListener("touchend", pend); cv.addEventListener("touchcancel", pend);
   cv.addEventListener("keydown", (e) => {
     const fr = getFr(k), st = e.shiftKey ? 10 : 1; let hit = true;
+    if (OBSM() && ["+", "=", "-"].includes(e.key)) { obsZoom(k, fr, obsZv(fr) / 100 + (e.key === "-" ? -0.01 : 0.01)); e.preventDefault(); e.stopPropagation(); setFr(k, fr); render(k); return; }
     if (e.key === "ArrowLeft") fr.dx -= st; else if (e.key === "ArrowRight") fr.dx += st; else if (e.key === "ArrowUp") fr.dy -= st; else if (e.key === "ArrowDown") fr.dy += st;
     else if (e.key === "+" || e.key === "=") fr.zoom = Math.min(2.5, (fr.zoom || 1) + 0.01); else if (e.key === "-") fr.zoom = Math.max(1, (fr.zoom || 1) - 0.01);
     else if (e.key === "0") { fr.dx = fr.dy = 0; fr.zoom = 1; } else hit = false;
+    if (hit && OBSM() && e.key.startsWith("Arrow")) obsPan(k, fr);
     if (hit) { e.preventDefault(); e.stopPropagation(); setFr(k, fr); render(k); }
   }, true);
-  f.zoom.oninput = () => { const fr = getFr(k); fr.zoom = f.zoom.value / 100; setFr(k, fr); render(k); };
+  f.zoom.oninput = () => { const fr = getFr(k); if (OBSM()) obsZoom(k, fr, f.zoom.value / 100); else fr.zoom = Math.max(1, f.zoom.value / 100); setFr(k, fr); render(k); };
   cv.parentNode.querySelector(".shd").addEventListener("click", async (e) => {
     const a = e.target.closest("button[data-a]"); if (!a || !last) return;
-    if (a.dataset.a === "reset") { setFr(k, { dx: 0, dy: 0, zoom: 1 }); render(k); }
+    if (a.dataset.a === "reset") { if (OBSM() && typeof Obs !== "undefined" && Obs._state && OZ.sub < 1) { ozSync(); Obs._state.k = OZ.ref; OZ.sub = 1; Obs.redraw(); } setFr(k, { dx: 0, dy: 0, zoom: 1 }); render(k); }
     if (a.dataset.a === "mp4" && (!MG.on || OBSM())) openMp4(k);
     if (a.dataset.a === "png" && OBSM()) { if (!MG.img) return; const I = obsInfo(), st = I && I.t ? new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(I.t).replace(/[^0-9]/g, "") : "now";
       const nm = `obs_${I ? I.view : "pnw"}_${I ? I.on.map((l) => l[0]).join("-") : "plot"}_${st}_${k === "v" ? "1080x1920" : "1920x1080"}.png`;
@@ -1139,7 +1170,7 @@ if (!CLEAN) {   // Studio: Map | Meteogram switch (first in the menu bar) + the 
         const l = document.createElement("link"); l.rel = "stylesheet"; l.href = "obs/obs.css"; document.head.appendChild(l);
         const sc = document.createElement("script"); sc.src = "obs/obs.js"; sc.onerror = bad; document.body.appendChild(sc);
         // 11-03: radar + GOES-West layers (obs/obsimg.js, off by default); the obs map still opens if it fails to load
-        sc.onload = () => { const s2 = document.createElement("script"); s2.src = "obs/obsimg.js?v=20261104a"; s2.onload = ok; s2.onerror = ok; document.body.appendChild(s2); }; });
+        sc.onload = () => { const s2 = document.createElement("script"); s2.src = "obs/obsimg.js?v=20261104b"; s2.onload = ok; s2.onerror = ok; document.body.appendChild(s2); }; });
       MG.msg = "Loading observations\u2026"; osig = "";
       obsLoad.then(() => { if (OBSM()) { Obs.show(); fitFrames(); } }, () => { obsLoad = null; MG.msg = "Observations could not load."; renderAll(); });
       poll = setInterval(ograb, 400);

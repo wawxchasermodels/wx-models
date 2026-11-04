@@ -34,10 +34,10 @@ const ObsImg = (() => {
       tiles: { detail: { box: [-130, 39, -104, 53], px: [2080, 1120] }, wide: { box: [-130, 30, -100, 55], px: [1200, 1250] } },
       credit: "Radar: NOAA/NWS MRMS base reflectivity (public domain)" },
     ir: { label: "Clean IR", kind: "gibs", layer: "GOES-West_ABI_Band13_Clean_Infrared", fmt: "image/jpeg", alpha: 1, n: 12, stepMin: 10, refreshMin: 10,
-      tiles: { detail: { box: [-140, 37, -100, 57], px: [2000, 1000] }, wide: { box: [-180, 15, -55, 78], px: [3125, 1575] } },
+      tiles: { detail: { box: [-140, 37, -100, 57], px: [2000, 1000] }, wide: { box: [-180, -10, -55, 78], px: [3125, 2200] } },   // 11-04: south to 10S for zoomed-out Studio / ocean views
       credit: "Satellite: NOAA GOES-West Clean IR (band 13) via NASA GIBS/ESDIS" },
     gc: { label: "GeoColor", kind: "gibs", layer: "GOES-West_ABI_GeoColor", fmt: "image/jpeg", alpha: 1, n: 12, stepMin: 10, refreshMin: 10,
-      tiles: { detail: { box: [-140, 37, -100, 57], px: [2000, 1000] }, wide: { box: [-180, 15, -55, 78], px: [3125, 1575] } },
+      tiles: { detail: { box: [-140, 37, -100, 57], px: [2000, 1000] }, wide: { box: [-180, -10, -55, 78], px: [3125, 2200] } },
       credit: "Satellite: NOAA GOES-West GeoColor, NOAA/NESDIS/STAR, CIRA/NOAA via NASA GIBS/ESDIS" },
     // detail = PNW sector over the West US sector; wide = West US sector (the box is only used to pick the tile)
     wv: { label: "Water vapor", kind: "star", alpha: 1, n: 12, stepMin: 5, refreshMin: 4,
@@ -241,6 +241,8 @@ const ObsImg = (() => {
   const tAt = (id, i) => { const fr = ST.frames[id], L = len(); if (!fr.length) return null; const j = fr.length - (L - i); return fr[Math.max(0, Math.min(fr.length - 1, j))]; };
 
   /* ---- loop ---- */
+  // 11-04 loop speed (0.25x - 4x, 1x = the old 380 ms per frame / 1.6 s on the newest); remembered for the session
+  const spd = () => { let v = 1; try { v = +sessionStorage.getItem("oiSpeed") || 1; } catch (e) { /* private mode */ } return Math.max(0.25, Math.min(4, v)); };
   function tick() {
     clearTimeout(ST.timer); ST.timer = 0; if (!on().length || ST.hold) return;
     if (!ST.playing || !ST.obs || !ST.obs.shown || document.hidden) { ST.timer = setTimeout(tick, 600); return; }
@@ -248,7 +250,7 @@ const ObsImg = (() => {
       const ready = (i) => on().every((id) => { const r = ST.img.get(id + "|" + listTile(id) + "|" + tAt(id, i)); return r && r.ok; });
       for (let s = 1; s <= L; s++) { const nxt = (ST.idx + s) % L; if (ready(nxt)) { if (nxt !== ST.idx) { ST.idx = nxt; bump(); Obs.redraw(); uiTime(); } break; } }
     }
-    ST.timer = setTimeout(tick, ST.idx === L - 1 ? 1600 : 380);   // dwell on the newest frame
+    ST.timer = setTimeout(tick, Math.round((ST.idx === L - 1 ? 1600 : 380) / spd()));   // 11-04 (t2266u) loop speed slider   // dwell on the newest frame
   }
 
   /* ---- WebGL reprojection (lat/lon image -> obs map Lambert conformal at the current zoom / pan) ---- */
@@ -340,7 +342,7 @@ const ObsImg = (() => {
     .obs-root .obs-img .oi-t{font:12.5px "IBM Plex Mono",ui-monospace,monospace;color:var(--o-muted);white-space:nowrap}
     .obs-root .obs-img input[type=range]{width:min(180px,32vw);accent-color:var(--o-verm)}
     #obsov .obs-img button[aria-pressed="true"],#obsp .obs-img button[aria-pressed="true"],.obs-root .obs-img button[aria-pressed="true"]{background:#f4f2ee;color:#15171c;border-color:#f4f2ee;font-weight:600}
-    .obs-root .obs-img button.oi-play{min-width:38px;padding:5px 10px}.obs-root .obs-img .oi-loop{display:contents}.obs-root .obs-img .oi-loop[hidden]{display:none!important}
+    .obs-root .obs-img button.oi-play{min-width:38px;padding:5px 10px}.obs-root .obs-img .oi-loop{display:contents}.obs-root .obs-img .oi-loop[hidden]{display:none!important}.obs-root .obs-img .oi-spd{display:inline-flex;align-items:center;gap:5px;font-size:12px;opacity:.9;white-space:nowrap}.obs-root .obs-img .oi-spd input{width:80px}.obs-root .obs-img .oi-spd b{min-width:30px;font-weight:700}
     .obs-root .obs-img .oi-lab{font-size:13px;color:var(--o-muted)}
     .obs-root.obs-min #oviews,.obs-root.obs-min #olayers,.obs-root.obs-min .obs-img>:not(.oi-loop),.obs-root.obs-min .obs-img .oi-loop>.oi-sep:first-child{display:none!important}
     .obs-root.obs-min .obs-img{margin-top:0}
@@ -357,7 +359,7 @@ const ObsImg = (() => {
       <button type="button" id="oi-gc" aria-pressed="false" title="GOES-West GeoColor (true color by day, IR at night), last 2 hours, about 40-60 min behind">GeoColor</button>
       <button type="button" id="oi-wv" aria-pressed="false" title="GOES-West mid-level water vapor (band 9, 6.9 um) from NOAA/NESDIS/STAR: moisture around 500 mb (white / green moist, blue drier, yellow dry). Every 5 min (10 min on the wide view), about 5-10 min behind. Last hour (2 hours wide)">Water vapor</button>
       <span class="oi-loop" id="oi-loop" hidden><span class="oi-sep"></span><button type="button" class="oi-play" id="oi-play" aria-label="Pause loop">&#10074;&#10074;</button>
-      <input type="range" id="oi-slide" min="0" max="0" value="0" aria-label="Loop frame"><span class="oi-t" id="oi-t"></span></span>`;
+      <input type="range" id="oi-slide" min="0" max="0" value="0" aria-label="Loop frame"><span class="oi-t" id="oi-t"></span><label class="oi-spd" title="Loop speed">Speed <input type="range" id="oi-speed" min="0.25" max="4" step="0.25" value="1" aria-label="Loop speed"><b id="oi-spdv">1x</b></label></span>`;
     const ly = root.querySelector("#olayers"); ly.after(bar);
     $("oi-radar").onclick = () => set({ radar: !ST.radar });
     $("oi-ir").onclick = () => set({ sat: ST.sat === "ir" ? "" : "ir" });
@@ -369,6 +371,8 @@ const ObsImg = (() => {
       p.innerHTML = `Radar: NOAA/NWS NCEP MRMS base reflectivity (public domain). Satellite: NOAA GOES-West (GOES-18) ABI. Clean IR (band 13) and GeoColor via <a href="https://nasa-gibs.github.io/gibs-api-docs/">NASA GIBS</a>/ESDIS; GeoColor imagery: NOAA/NESDIS/STAR, CIRA/NOAA. ${GIBS_ACK} Mid-level water vapor (band 9): <a href="https://www.star.nesdis.noaa.gov/GOES/">NOAA/NESDIS/STAR</a>; NOAA's map lines, logo and time bar are removed so the image sits under this map's own lines. Not an official NOAA or NASA product.`;
       pc.after(p); }
     $("oi-play").onclick = () => { ST.playing = !ST.playing; ui(); tick(); };
+    { const sp = $("oi-speed"), sv = $("oi-spdv"); sp.value = String(spd()); sv.textContent = spd() + "x";
+      sp.oninput = () => { try { sessionStorage.setItem("oiSpeed", sp.value); } catch (e) { /* private mode */ } sv.textContent = +sp.value + "x"; tick(); }; }
     $("oi-slide").oninput = (e) => { ST.playing = false; ST.idx = +e.target.value; bump(); ui(); Obs.drawNow(); };
     ui();
   }
@@ -427,11 +431,13 @@ const ObsImg = (() => {
   Obs.hook("credit", () => [...on().map((id) => SRC[id].credit), ...(on().some((id) => SRC[id].kind === "gibs") ? [GIBS_ACK] : [])].join(" · "));
 
   // Studio: credit lines, the shown frame times, and a hold + seek for the MP4 export (loop frames follow the video's progress)
-  function credits() { return [...on().map((id) => SRC[id].credit), ...(on().some((id) => SRC[id].kind === "gibs") ? GIBS_ACK2 : [])]; }
+  // 11-04: Studio frames carry only a short GIBS line (NASA asks for acknowledgement); radar (MRMS) and water vapor (STAR) are public
+  // domain, so their credit stays on the Observations page / downloads and the site credits, not on the Studio frames
+  function credits() { return on().filter((id) => SRC[id].kind === "gibs").map((id) => (id === "gc" ? "Satellite: GOES-West GeoColor (CIRA/NOAA) via NASA GIBS." : "Satellite: NOAA GOES-West via NASA GIBS.")); }
   function info() { return on().map((id) => ({ id, label: PILL[id], t: (ST.shown && ST.shown[id]) || tAt(id, Math.max(0, ST.idx)) })); }
   function hold(h) { ST.hold = !!h; if (!h) tick(); }
   function seek(p) { const L = len(); if (!L) return; ST.idx = Math.max(0, Math.min(L - 1, Math.floor(p * L * 0.999))); bump(); Obs.drawNow(); uiTime(); }
-  return { set, state: () => ({ radar: ST.radar, sat: ST.sat, idx: ST.idx, n: len(), playing: ST.playing, frames: ST.frames, shown: ST.shown, msg: ST.msg, wvMoved: !!ST.wvMoved, drawErr: ST.drawErr || 0, glLost: ST.glLost || 0, glFail: ST.glFail, imgs: ST.img.size, loaded: [...ST.img.values()].filter((r) => r.ok).length }),
+  return { set, state: () => ({ speed: spd(), radar: ST.radar, sat: ST.sat, idx: ST.idx, n: len(), playing: ST.playing, frames: ST.frames, shown: ST.shown, msg: ST.msg, wvMoved: !!ST.wvMoved, drawErr: ST.drawErr || 0, glLost: ST.glLost || 0, glFail: ST.glFail, imgs: ST.img.size, loaded: [...ST.img.values()].filter((r) => r.ok).length }),
     _imgs: () => [...ST.img.entries()].map(([k, r]) => [k, !!r.ok, !!r.bad]), _tile: (id) => tileFor(id),   // test hooks (QA)
     active: () => on().length > 0, credits, info, hold, seek, refresh, ready: () => loading || Promise.resolve() };
 })();
