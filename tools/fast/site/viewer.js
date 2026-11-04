@@ -271,6 +271,12 @@ async function boot() {
     if (nw && nw !== qr) { S.run = nw;
       if (/^\d{10}$/.test(cyc) && isFinite(f0q)) vKeep = Date.UTC(+cyc.slice(0, 4), +cyc.slice(4, 6) - 1, +cyc.slice(6, 8), +cyc.slice(8, 10)) + f0q * 3600e3; } }
   await loadRun(S.run);
+  // 11-04 (Benjamin t2319u/t2336u "It refreshes into a different product"): a refresh moves to the model's newest run, but a run that is
+  // still coming in (or lacks this product) used to drop the product back to the tab's first one. Now the newest run is used only when it
+  // carries the product; otherwise the refresh stays on the run in the address (same product, same hour).
+  if (qr && S.run !== qr && Q.get("prod")) { const P0 = PRODS()[Q.get("prod")], carries = r => P0 && P0.fields.every(f => new Set((S.runs[r] || {}).fields || []).has(f));
+    if (P0 && !carries(S.run)) { const m0 = qr.split("/")[0], cand = [qr, ...all.filter(r => r.startsWith(m0 + "/") && r !== S.run && r !== qr)].filter(r => all.includes(r)).slice(0, 3);
+      for (const r of cand) { try { await loadRun(r); } catch (e) { continue; } if (carries(r)) { if (r !== qr) { /* keep the valid time */ } else vKeep = null; S.run = r; break; } } } }
   // "Runs" menu (Benjamin 10-29 7:10 PM): every available run, grouped by model, newest first; picking one keeps the valid time
   const runLabel = r => { const [m, c] = r.split("/"), p = ((S.man.progress || {})[m] || {})[c];
     if (m === "oisst") { const st = (S.runs[r] || {}).steps, d = x => { const v = new Date(x.valid); return `${v.getUTCMonth() + 1}-${v.getUTCDate()}`; };   // 11-03: daily analyses, not a run time
@@ -767,7 +773,17 @@ function sampleRC(F, w, fi, fj) {
 // H/L geometry is cached per frame (GEO), isobars sample only the contour grid (same lines, ~16x fewer samples), the
 // freezing line uses a 4 px grid while dragging.
 let rafOn = false; S.waiters = [];
+// 11-04 (Benjamin t2336u "It refreshes into a different product"): the address used to change only ~0.4 s after a map finished
+// drawing, so a refresh while a new product / view / run was still loading (or one that failed to draw) reopened the previous one.
+// A product, view or run change now goes into the address right away (hour moves stay on the settled update: iOS replaceState limit).
+function urlNow() {
+  if (Q.get("clean") || !S.run) return; try { const u = new URL(location), q = u.searchParams;
+    if (q.get("prod") === S.prod && q.get("view") === S.view && q.get("run") === S.run) return;
+    q.set("prod", S.prod); q.set("view", S.view); q.set("run", S.run); q.delete("model"); const st = (S.runs[S.run] || {}).steps; if (st && st[S.i]) q.set("f", st[S.i].f);
+    history.replaceState(null, "", u);
+    if (!Q.get("embed") && !Q.get("id") && !Q.get("slim") && !Q.get("make")) localStorage.setItem(Q.get("studio") ? "studio:last" : "viewer:last", u.search); } catch (e) { /* replaceState limit / private mode */ } }
 function draw() {
+  urlNow();
   return new Promise(res => { S.waiters.push(res); if (!rafOn) { rafOn = true; requestAnimationFrame(pump); } });
 }
 async function pump() {

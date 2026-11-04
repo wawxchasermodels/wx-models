@@ -1372,4 +1372,7 @@ if (!CLEAN) {
   setInterval(() => { if (window.__fitTop != null && innerWidth > 820 && Math.abs(F.h.cv.getBoundingClientRect().top + scrollY - window.__fitTop) > 0.5) fitSoon(); }, 400);   // panel content that settles late
   fitFrames();
 }
+// 11-04 (t2335u guard): read-only state for the refresh regression test (refresh_test.py): what each frame shows right now
+window.__studioQA = () => ({ mode: PASSM() ? "pass" : MG.on ? MG.kind : "map", mg: MG.kind === "mg" ? (MG.src.split("#")[1] || "") : "", pass: PF.run, passRows: PF.rows ? PF.rows.length : 0,
+  pfL: F.h.pfL ? { x: F.h.pfL.x, y0: F.h.pfL.y0, w: F.h.pfL.w, rh: F.h.pfL.rh, names: F.h.pfL.names } : null, W: F.h.W, fr: { v: getFr("v"), h: getFr("h") } });
 })();
