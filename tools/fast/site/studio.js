@@ -343,7 +343,7 @@ function renderPass(k) {
   y += f.run * 1.55 + f.title * 1.02; c.font = `800 ${f.title}px Montserrat`; c.fillStyle = "#fff";
   const ttl = k === "v" ? ["Washington", "Pass Forecast"] : ["Washington Pass Forecast"]; ttl.forEach((t, i) => c.fillText(t, x, y + i * f.title * 1.08)); y += (ttl.length - 1) * f.title * 1.08 + f.day * 1.3;
   const rs = (D.note.match(/Run start ([^.]*PT)/) || [])[1] || ""; c.font = `800 ${f.day}px Montserrat`; c.fillStyle = "#ffc24d"; c.fillText(rs ? `Run start ${rs}` : "", x, y);
-  let top = y + f.day * 0.9;
+  let top = y + f.day * 0.9; c.restore(); ovPut(c0, f, k);   // header onto the frame now (the key below reuses the overlay layer)
   // bottom: shading key + notes + credit, measured first so the table gets the rest
   const ec = window.studioIsEc && window.studioIsEc(PF.run), cr = ec ? [`Data: \u00a9 ${new Date().getFullYear()} ECMWF (www.ecmwf.int), CC BY 4.0. Modified.`] : [];
   const kfs = k === "v" ? 26 : 22, nfs = k === "v" ? 21 : 18, crfs = k === "v" ? 15 : 14, est = /estimated 10:1/.test(D.note);
@@ -354,7 +354,7 @@ function renderPass(k) {
   // table: pick columns + font so it fits the frame width and the space between header and key
   const mc = document.createElement("canvas").getContext("2d"), avW = f.W - 2 * f.pad, avH = bot - top - 10;
   const fitT = (cols, fs) => { const hs = Math.round(fs * 0.62), pad = Math.round(fs * 0.55), cw = cols.map(() => 0);
-    const sub = (s) => s.replace(/\u2013/g, "\u2013 ").split(/(?<=\u2013 )|(?<=,) /);   // header detail lines may wrap after a dash or comma
+    const sub = (s) => s.replace(/\u2013/g, "\u2013 ").split(/(?<=\u2013 |, )/);   // header detail lines may wrap after a dash or comma
     cols.forEach((j, q) => { mc.font = `800 ${fs}px Montserrat`; for (const r of D.body) { const cell = r[j]; if (!cell) continue; cw[q] = Math.max(cw[q], mc.measureText(cell.t[0] || "").width + 2 * pad);
         if (cell.t[1]) { mc.font = `600 ${hs}px Montserrat`; cw[q] = Math.max(cw[q], mc.measureText(cell.t[1]).width + 2 * pad); mc.font = `800 ${fs}px Montserrat`; } }
       const h = D.head[j]; mc.font = `800 ${hs * 1.12}px Montserrat`; cw[q] = Math.max(cw[q], mc.measureText(h.t[0]).width + 2 * pad);
@@ -366,10 +366,9 @@ function renderPass(k) {
     const hh = Math.round(hs * 1.12 * 1.35 + Math.max(...hl.map((a) => a.length)) * hs * 1.25 + pad), sub2 = D.body.some((r) => r[0] && r[0].t[1]);
     const rh = Math.round(fs * 1.25 + (sub2 ? hs * 1.2 : 0) + pad * 1.1), H = hh + rh * D.body.length; if (H > avH) return null;
     return { cols, fs, hs, pad, cw, hl, hh, rh, H }; };
-  let L = null; const opts = pfCols(D.head, k), f0 = k === "v" ? 34 : 30, fmin = k === "v" ? 24 : 18;
+  let L = null; const opts = pfCols(D.head, k), f0 = k === "v" ? 34 : 30, fmin = k === "v" ? 22 : 18;
   for (const cols of opts) { for (let fs = f0; fs >= fmin && !L; fs -= 1) L = fitT(cols, fs); if (L) break; }
   if (!L) { const cols = opts[opts.length - 1]; for (let fs = fmin; fs >= 12 && !L; fs -= 1) L = fitT(cols, fs); }
-  noShadow(c); c.restore();
   if (L) {
     const g = c0, ty = Math.round(top + Math.max(0, (avH - L.H) * (k === "v" ? 0.35 : 0.2)));
     g.save(); g.fillStyle = "rgba(29,32,39,0.96)"; g.beginPath(); g.roundRect ? g.roundRect(x - 2, ty, avW + 4, L.H, 14) : g.rect(x - 2, ty, avW + 4, L.H); g.fill();
@@ -385,7 +384,8 @@ function renderPass(k) {
       cx_ += w; });
     g.strokeStyle = "#323743"; g.lineWidth = 1.5; for (let i = 1; i <= D.body.length - 1; i++) { const yy = Math.round(ty + L.hh + i * L.rh) + 0.5; g.beginPath(); g.moveTo(x + 8, yy); g.lineTo(x + avW - 8, yy); g.stroke(); }
     g.restore(); f.pfL = { fs: L.fs, cols: L.cols.length, of: D.head.length, top: ty, bot: ty + L.H, key: bot };
-  }
+  } else f.pfL = null;
+  window.__pfL = Object.assign(window.__pfL || {}, { [k]: f.pfL });
   // key + notes + credit (overlay layer, same shadow as the maps)
   const o = ovLayer(f); o.save(); sharpShadow(o, k); let by = bot + 10, bx = x; o.textBaseline = "middle";
   for (const [cls, lab] of [["s1", "1\u20136\u2033 snow"], ["s2", "6\u201312\u2033"], ["s3", "12\u2033+"], ["fzb", "Freezing level below the pass"]]) {
