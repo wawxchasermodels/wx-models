@@ -30,17 +30,17 @@ const ObsImg = (() => {
   const GIBS_DOM = (layer) => `https://gibs.earthdata.nasa.gov/wmts/epsg4326/best/1.0.0/${layer}/default/2km/all/`;
   // box = [west, south, east, north] degrees; px = image width x height (radar detail 0.0125 deg ~1 km, satellite detail 0.02 deg ~1.5-2 km)
   const SRC = {
-    radar: { label: "Radar", kind: "rad", layer: "conus_bref_qcd", fmt: "image/png", alpha: 0.88, n: 12, stepMin: 5, refreshMin: 4,
+    radar: { label: "Radar", kind: "rad", layer: "conus_bref_qcd", fmt: "image/png", alpha: 0.88, n: 24, stepMin: 5, refreshMin: 4,
       tiles: { detail: { box: [-130, 39, -104, 53], px: [2080, 1120] }, wide: { box: [-130, 30, -100, 55], px: [1200, 1250] } },
       credit: "Radar: NOAA/NWS MRMS base reflectivity (public domain)" },
-    ir: { label: "Clean IR", kind: "gibs", layer: "GOES-West_ABI_Band13_Clean_Infrared", fmt: "image/jpeg", alpha: 1, n: 12, stepMin: 10, refreshMin: 10,
+    ir: { label: "Clean IR", kind: "gibs", layer: "GOES-West_ABI_Band13_Clean_Infrared", fmt: "image/jpeg", alpha: 1, n: 24, stepMin: 10, refreshMin: 10,
       tiles: { detail: { box: [-140, 37, -100, 57], px: [2000, 1000] }, wide: { box: [-180, -10, -55, 78], px: [3125, 2200] } },   // 11-04: south to 10S for zoomed-out Studio / ocean views
       credit: "Satellite: NOAA GOES-West Clean IR (band 13) via NASA GIBS/ESDIS" },
-    gc: { label: "GeoColor", kind: "gibs", layer: "GOES-West_ABI_GeoColor", fmt: "image/jpeg", alpha: 1, n: 12, stepMin: 10, refreshMin: 10,
+    gc: { label: "GeoColor", kind: "gibs", layer: "GOES-West_ABI_GeoColor", fmt: "image/jpeg", alpha: 1, n: 24, stepMin: 10, refreshMin: 10,
       tiles: { detail: { box: [-140, 37, -100, 57], px: [2000, 1000] }, wide: { box: [-180, -10, -55, 78], px: [3125, 2200] } },
       credit: "Satellite: NOAA GOES-West GeoColor, NOAA/NESDIS/STAR, CIRA/NOAA via NASA GIBS/ESDIS" },
     // detail = PNW sector over the West US sector; wide = West US sector (the box is only used to pick the tile)
-    wv: { label: "Water vapor", kind: "star", alpha: 1, n: 12, stepMin: 5, refreshMin: 4,
+    wv: { label: "Water vapor", kind: "star", alpha: 1, n: 24, stepMin: 5, refreshMin: 4,
       tiles: { detail: { box: [-126, 32, -108, 50] }, wide: { box: [-160, 20, -100, 62] } },
       credit: "Satellite: NOAA GOES-West Mid-Level Water Vapor (band 9), NOAA/NESDIS/STAR" },
   };
@@ -75,7 +75,7 @@ const ObsImg = (() => {
       }
       all.sort();
     }
-    // newest n frames at least stepMin apart (radar comes every ~2 min; a 5-min step gives a 1-hour loop)
+    // newest n frames at least stepMin apart (radar comes every ~2 min; a 5-min step gives a 2-hour loop, about all the radar server keeps)
     const pick = [], gap = s.stepMin * 60e3 - 30e3;
     for (let i = all.length - 1; i >= 0 && pick.length < s.n + (s.kind === "gibs" ? 4 : 0); i--) { const t = Date.parse(all[i]); if (!pick.length || Date.parse(pick[0]) - t >= gap) pick.unshift(all[i]); }
     ST.all[id] = pick; ST.timesAt[id] = now; return pickFrames(id);
@@ -96,7 +96,9 @@ const ObsImg = (() => {
       r = { im, ok: false, p: new Promise((res) => { im.onload = () => {
         // GIBS lists the newest times before every tile of them is filled in: such a frame comes back all black. Drop it (the loop uses the rest)
         if (SRC[id].kind === "gibs" && blank(im)) { r.bad = true; ST.blank.add(id + "|" + t); pickFrames(id); res(null); bump(); return; }
-        r.ok = true; res(im); bump(); if (ST.obs) Obs.redraw(); }; im.onerror = () => { r.bad = true; res(null); }; }) };
+        r.ok = true; res(im); bump(); if (ST.obs) Obs.redraw(); };
+        // 11-04 (t2299u) a failed request (GIBS is uncached and slow, ~3 s detail / ~6-10 s wide) gets one retry before the frame is dropped
+        im.onerror = () => { if (!r.retried) { r.retried = true; setTimeout(() => { if (ST.img.get(key) === r) im.src = url(id, tile, t) + "&r=1"; else res(null); }, 1500); return; } r.bad = true; res(null); }; }) };
       im.src = url(id, tile, t); ST.img.set(key, r);
     }
     return r;
@@ -143,7 +145,7 @@ const ObsImg = (() => {
   async function starTimes(id) {
     const s = SRC[id], tile = tileFor(id), now = Date.now();
     if (ST.timesAt[id] && ST.wvTile === tile && now - ST.timesAt[id] < s.refreshMin * 60e3 && ST.frames[id].length) return ST.frames[id];
-    const [wus, fd] = await Promise.all([starList("wus"), starList("fd")]); ST.wusT = wus.slice(-16); ST.fdT = fd.slice(-16);
+    const [wus, fd] = await Promise.all([starList("wus"), starList("fd")]); ST.wusT = wus.slice(-30); ST.fdT = fd.slice(-30);
     const all = tile === "detail" ? await starList("pnw") : wus;
     const pick = [], gap = (tile === "detail" ? 5 : 10) * 60e3 - 30e3;
     for (let i = all.length - 1; i >= 0 && pick.length < s.n + 2; i--) { const t = Date.parse(all[i]); if (!pick.length || Date.parse(pick[0]) - t >= gap) pick.unshift(all[i]); }
@@ -212,6 +214,9 @@ const ObsImg = (() => {
   }
 
   /* ---- loading: newest frame first (shows at once), then the rest in the background ---- */
+  // 11-04 (t2299u) under frame not loaded (yet) or failed: use the nearest loaded one in time, so the map edges never blink empty
+  function underOk(id, tl, tu) { const r = ST.img.get(id + "|" + tl + "|" + tu); if (r && r.ok) return r; const T = Date.parse(tu); let best = null, bd = 1e15;
+    for (const [k, q] of ST.img) if (q.ok && k.startsWith(id + "|" + tl + "|")) { const d = Math.abs(Date.parse(k.slice(id.length + tl.length + 2)) - T); if (d < bd) { bd = d; best = q; } } return best; }
   let loading = null;
   async function refresh() {
     if (loading) return loading;
@@ -229,7 +234,9 @@ const ObsImg = (() => {
       prune(); if (ST.idx < 0 || ST.idx >= len()) ST.idx = len() - 1;
       ui(); bump(); Obs.redraw(); if (!ST.timer) tick();
       for (let pass = 0; pass < 2; pass++) {   // pass 2: frames that slid in after black ones dropped out
-        const todo = []; for (const id of on()) { const tile = listTile(id); for (const t of [...ST.frames[id]].reverse()) { todo.push([id, tile, t]); for (const [tl, u] of undersOf(id, tile, t)) todo.push([id, tl, u, tile]); } }
+        // 11-04 (t2299u) every loop frame first (newest back), then the bigger frames drawn under them, so the loop fills in quickly
+        const todo = [], und = []; for (const id of on()) { const tile = listTile(id); for (const t of [...ST.frames[id]].reverse()) { todo.push([id, tile, t]); for (const [tl, u] of undersOf(id, tile, t)) und.push([id, tl, u, tile]); } }
+        todo.push(...und);
         await Promise.all([0, 1, 2].map(async () => { while (todo.length) { const [id, tile, t, under_] = todo.shift(); if (on().includes(id) && (listTile(id) === (under_ || tile))) { const r = getImg(id, tile, t); await r.p; if (id === "wv" && !under_ && r.bad) { ST.blank.add(id + "|" + t); pickFrames(id); } } } }));
       }
       ui(); bump(); Obs.redraw();
@@ -329,7 +336,7 @@ const ObsImg = (() => {
           if (rw) draw1(tl === "fd" ? 3 : 2, rw.im, geoBox(secOf(tl))); }
         draw1(u, f.im, geoBox(secOf(f.tile))); ST.shown[id] = f.t; continue;
       }
-      for (const [tl, tu] of undersOf(id, f.tile, f.t)) { const ru = ST.img.get(id + "|" + tl + "|" + tu); if (ru && ru.ok) draw1(2, ru.im, () => { const b = SRC[id].tiles[tl].box; gl.uniform1f(U.geo, 0); gl.uniform1f(U.lim, SRC[id].kind === "gibs" ? 0.165 : -2); gl.uniform4f(U.box, b[0], b[1], b[2], b[3]); gl.uniform1f(U.alpha, SRC[id].alpha); }); }
+      for (const [tl, tu] of undersOf(id, f.tile, f.t)) { const ru = underOk(id, tl, tu); if (ru) draw1(2, ru.im, () => { const b = SRC[id].tiles[tl].box; gl.uniform1f(U.geo, 0); gl.uniform1f(U.lim, SRC[id].kind === "gibs" ? 0.165 : -2); gl.uniform4f(U.box, b[0], b[1], b[2], b[3]); gl.uniform1f(U.alpha, SRC[id].alpha); }); }
       draw1(u, f.im, () => { const b = SRC[id].tiles[f.tile].box; gl.uniform1f(U.geo, 0); gl.uniform1f(U.lim, SRC[id].kind === "gibs" ? 0.165 : -2); gl.uniform4f(U.box, b[0], b[1], b[2], b[3]); gl.uniform1f(U.alpha, SRC[id].alpha); });
       ST.shown[id] = f.t;
     }
@@ -352,12 +359,12 @@ const ObsImg = (() => {
     if ($("oimg")) return;
     const st = document.createElement("style"); st.textContent = CSS; document.head.appendChild(st);
     const bar = document.createElement("div"); bar.className = "obs-bar obs-img"; bar.id = "oimg"; bar.setAttribute("role", "group"); bar.setAttribute("aria-label", "Radar and satellite (off by default)");
-    bar.innerHTML = `<button type="button" id="oi-radar" aria-pressed="false" title="NWS radar mosaic (MRMS base reflectivity), last hour">Radar</button>
+    bar.innerHTML = `<button type="button" id="oi-radar" aria-pressed="false" title="NWS radar mosaic (MRMS base reflectivity), last 2 hours">Radar</button>
       <span class="oi-sep"></span>
       <span class="oi-lab">Satellite:</span>
-      <button type="button" id="oi-ir" aria-pressed="false" title="GOES-West Clean IR (band 13, 10.3 um): cloud-top temperature, day and night. Last 2 hours, about 40-60 min behind">Clean IR</button>
-      <button type="button" id="oi-gc" aria-pressed="false" title="GOES-West GeoColor (true color by day, IR at night), last 2 hours, about 40-60 min behind">GeoColor</button>
-      <button type="button" id="oi-wv" aria-pressed="false" title="GOES-West mid-level water vapor (band 9, 6.9 um) from NOAA/NESDIS/STAR: moisture around 500 mb (white / green moist, blue drier, yellow dry). Every 5 min (10 min on the wide view), about 5-10 min behind. Last hour (2 hours wide)">Water vapor</button>
+      <button type="button" id="oi-ir" aria-pressed="false" title="GOES-West Clean IR (band 13, 10.3 um): cloud-top temperature, day and night. Last 4 hours, about 40-60 min behind">Clean IR</button>
+      <button type="button" id="oi-gc" aria-pressed="false" title="GOES-West GeoColor (true color by day, IR at night), last 4 hours, about 40-60 min behind">GeoColor</button>
+      <button type="button" id="oi-wv" aria-pressed="false" title="GOES-West mid-level water vapor (band 9, 6.9 um) from NOAA/NESDIS/STAR: moisture around 500 mb (white / green moist, blue drier, yellow dry). Every 5 min (10 min on the wide view), about 5-10 min behind. Last 2 hours (4 hours wide)">Water vapor</button>
       <span class="oi-loop" id="oi-loop" hidden><span class="oi-sep"></span><button type="button" class="oi-play" id="oi-play" aria-label="Pause loop">&#10074;&#10074;</button>
       <input type="range" id="oi-slide" min="0" max="0" value="0" aria-label="Loop frame"><span class="oi-t" id="oi-t"></span><label class="oi-spd" title="Loop speed">Speed <input type="range" id="oi-speed" min="0.25" max="4" step="0.25" value="1" aria-label="Loop speed"><b id="oi-spdv">1x</b></label></span>`;
     const ly = root.querySelector("#olayers"); ly.after(bar);
