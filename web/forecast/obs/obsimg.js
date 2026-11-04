@@ -19,7 +19,7 @@
      NOAA draws on the image (99% of them within 1 px, stable over the 10 days kept) and are re-checked on every frame (alignment test
      below: a frame that no longer lines up is not shown). Before use the burned-in red lines are masked and filled from the pixels
      around them, and the NOAA logo + time bar are cut off (our own coastlines / borders draw on top). PNW sector (1200 px, every 5 min)
-     over the West US sector (1000 px = 2 km, every 10 min). The CDN lists ~10 days of frames, so the full loop is there on first open.
+     over the West US sector (1000 px = 2 km, every 10 min) over the full disk (1808 px = 6 km, every 10 min, fills the rest). The CDN lists ~10 days of frames, so the full loop is there on first open.
    11-03 (t2226u) "Hide menu" button: collapses the view / layer / satellite chips (choice kept in localStorage obsMenuMin). */
 "use strict";
 const ObsImg = (() => {
@@ -107,7 +107,7 @@ const ObsImg = (() => {
   }
   function prune() {   // keep only images of the current frame lists
     const keep = new Set(); for (const id of Object.keys(SRC)) for (const t of ST.all[id]) for (const tile of ["detail", "wide"]) keep.add(id + "|" + tile + "|" + t);
-    if (ST.sat === "wv" && ST.wvTile === "detail") for (const t of ST.all.wv) { const u = underT(t); if (u) keep.add("wv|wide|" + u); }   // West US frames under the PNW ones
+    if (ST.sat === "wv") for (const t of ST.all.wv) for (const [tl, u] of unders(ST.wvTile, t)) keep.add("wv|" + tl + "|" + u);   // frames drawn under the loop frames
     for (const k of [...ST.img.keys()]) if (!keep.has(k) || !on().includes(k.split("|")[0])) { const r = ST.img.get(k); r.im.src = ""; if (r.u) URL.revokeObjectURL(r.u); ST.img.delete(k); }
   }
   const tileFor = (id) => { const S = ST.obs; if (!S) return "detail";
@@ -125,8 +125,10 @@ const ObsImg = (() => {
       ref: [1177,578,1178,581,965,556,977,585,979,588,989,613,994,624,1001,642,1012,667,1024,696,1030,711,1040,736,1043,744,1053,770,1057,781,1072,819,1075,826,1079,838,1081,842,1088,861,1091,868,1093,876,1098,888,1141,916,1183,918,1190,919,619,4,623,5,625,6,653,27,656,31,615,4,676,63,683,64,685,65,707,82,708,85,682,64,677,64,725,91,716,86,927,39,933,47,935,50,956,81,250,269,248,267,213,243,602,269,563,267,530,266,524,265,511,265,494,267,469,268,451,272,393,280,390,280,387,282,365,283,341,276,324,276,302,281,375,282,532,528,524,528,503,527,495,527,481,526,466,526,444,525,401,524,313,521,298,521,290,521,246,519,644,268,641,260,638,257,603,198,589,169,586,163,569,129,567,123,564,117,553,94,669,366,671,365,672,363,683,310,685,305,665,282,698,392,696,393,741,516,730,488,717,454,714,448,708,434,706,428,700,414,698,411,700,410,700,407,765,233,764,232,723,205,685,187,680,185,678,175,667,166,642,150,639,144,624,115,622,112,618,103,774,235,772,232,815,299,808,292,811,279,806,277,804,271,803,266,799,261,799,258,798,250,796,243,796,242,795,238,794,237,792,236,844,307,833,312,821,306,918,357,897,337,937,364,1079,387,1049,370,1045,372,995,380,1049,382,1025,380,1005,379,1018,380,1083,394,1093,414,1109,444,1111,447,1144,512,1153,529,1160,543,1165,553,1073,376,1064,360,1065,355,1068,355,1074,355,1097,356,1138,359,1172,361,1188,362,742,536,724,535,720,535,706,535,692,534,688,534,684,534,670,533,634,532,612,531,583,530,576,530,568,529,539,528,841,540,870,542,905,543,953,546,1119,1076,1122,991,1128,981,1125,965,1124,961,1100,1026,1091,1010,1086,980,1116,989,1101,982,993,547,1077,552,1071,551,1058,551,1032,549,1006,548,1154,556,1135,555,1103,553,1090,552,1160,556,1117,1071,1107,1065,1083,1049,1074,1042,1059,1033,1045,1023,1040,1020,988,986,974,976,969,973,950,961,945,957,912,936,907,933,903,930,884,918,870,909,851,897,837,888,827,882,813,873,808,870,780,852,771,846,762,841,692,799,660,780,655,778,613,753,600,745,598,738,589,709,587,702,582,688,574,659,563,624,543,562,541,555,206,245,190,237,176,238,167,238,163,239,156,237,151,234,193,75,209,75,313,79,326,79,329,80,361,81,384,82,396,82,409,83,454,85,466,85,479,86,485,86,530,88,533,88,548,89,552,89,605,91,608,92,617,92,648,93,651,94,694,96,704,96,716,97,722,97,728,98,783,101,813,102,822,103,831,103,849,104,867,105,879,106,888,107,897,107,906,108,920,109,926,109,938,110,956,111,967,112,979,112,1002,114,1031,116,1040,116,1057,118,1077,119,1095,120,1151,124,1157,125,1160,125,1188,127] },
     wus: { sz: "1000x1000", W: 1000, H: 1000, g: [-0.0031457580672190942, 0.13670993915230234, 5.6004591692701455e-05, 5.60198112612544e-05], cut: [974 / 1000, 86 / 1000, 920 / 1000],
       ref: [930,457,931,459,945,491,952,507,952,509,959,525,962,533,967,546,972,559,978,574,984,589,989,604,992,610,518,5,522,11,530,24,531,25,534,31,535,32,537,36,539,40,542,45,544,48,546,52,559,75,569,86,567,86,570,89,580,92,589,96,607,101,594,98,609,101,610,102,621,108,624,110,627,112,631,117,632,118,648,122,647,123,650,125,638,118,662,127,663,127,660,127,657,127,693,141,711,152,716,153,730,161,733,162,734,163,738,166,743,168,757,173,762,176,767,179,777,190,777,192,781,196,781,197,787,202,789,207,791,208,808,217,811,218,802,213,756,5,762,12,767,16,771,20,777,27,804,57,830,88,834,92,836,95,838,97,839,99,846,107,876,146,888,162,894,170,898,176,900,178,902,181,922,210,923,212,929,220,916,4,924,11,928,14,933,18,948,31,975,55,977,56,576,310,569,305,563,296,556,293,745,304,742,304,732,304,729,304,712,303,709,303,694,304,683,304,663,307,657,309,627,312,626,311,609,308,592,311,653,310,635,311,695,434,692,433,688,433,659,432,648,432,630,431,622,431,611,431,600,431,593,430,585,430,763,299,759,295,755,290,750,278,746,269,744,266,741,260,740,258,729,234,722,220,780,359,781,346,784,339,788,319,787,317,793,366,793,364,808,411,794,377,794,375,823,284,815,278,810,275,799,268,796,268,789,264,786,261,785,261,781,256,774,250,831,287,852,322,851,321,849,317,851,314,852,313,850,310,843,301,844,298,843,293,838,288,835,289,872,322,866,323,861,326,857,324,853,323,904,350,903,349,927,364,916,355,913,352,911,351,906,349,982,363,969,355,967,355,967,358,943,360,966,360,928,364,940,362,996,387,975,347,991,348,994,348,811,438,806,438,790,437,786,437,772,436,757,436,754,436,728,435,719,434,836,439,844,439,868,440,889,441,893,441,910,442,914,442,917,443,994,685,991,677,990,675,984,662,941,444,934,443,979,446,957,445,992,446,986,694,962,678,960,677,948,669,940,664,936,661,929,656,919,650,917,649,905,641,893,633,888,630,881,626,879,624,874,621,862,614,860,612,841,600,827,592,825,590,813,583,809,581,767,556,753,548,741,532,736,517,733,507,729,493,724,479,722,472,720,465,714,448,712,441,541,290,532,289,523,289,535,207,597,209,615,210,642,211,645,211,674,212,684,213,688,213,696,213,710,214,731,215,734,215,759,216,762,217,763,217,770,217,780,217,784,218,799,218,808,219,811,219,832,220,860,222,872,222,878,223,887,223,888,223,895,224,915,225,919,225,928,226,929,226,938,227,942,227,948,227,958,228,973,229,984,230,990,230,994,230,199,3,199,4,208,7,253,19,249,19] },
+    fd: { sz: "1808x1808", W: 1808, H: 1808, g: [-0.151872, 0.151872, 0.000168, 0.000168], cut: [1776 / 1808, 180 / 1808, 1652 / 1808],   // full disk (6 km): fills past the West US sector
+      ref: [1001,24,1006,25,1196,245,1207,270,1207,271,1212,283,1236,300,1254,301,1282,309,1290,328,1297,346,1290,255,1275,293,1278,300,1341,306,1295,303,1287,303,1357,327,1359,330,1371,356,1372,359,1378,373,1360,373,1356,373,1274,199,1281,210,1338,206,1325,257,1309,234,1304,233,1334,236,1355,240,1348,288,1402,275,1397,275,1376,273,1340,270,1349,308,1363,314,1378,315,1389,327,1388,326,1400,343,1404,343,1455,357,1449,353,1433,352,1427,352,1421,313,1377,309,1375,309,1384,257,1384,257,1010,70,1000,70,972,69,938,69,934,69,925,69,913,69,902,69,909,31,928,37,934,40,935,39,936,42,941,44,949,46,952,47,954,48,954,48,956,50,961,54,961,54,961,54,963,55,968,57,973,58,977,60,986,65,1003,64,992,65,990,65,987,65,1012,70,1038,25,1033,19,1019,24,1031,25,1029,36,1026,35,1016,33,1015,33,1014,32,999,27,1164,80,1058,91,1064,102,1064,102,1070,112,1088,124,1095,129,1112,136,1106,132,1117,137,1127,143,1134,147,1144,154,1145,156,1154,161,1051,72,1106,75,1111,75,1125,79,1170,129,1178,140,1189,156,1288,114,1289,119,1290,123,1290,124,1290,125,1291,128,1294,145,1199,83,1203,84,1216,85,1179,83,1182,85,1188,89,1189,91,1216,113,1220,117,1224,121,1232,128,1242,137,1400,451,1397,446,1434,439,1433,448,1431,457,1445,473,1444,476,1369,449,1368,452,1390,456,1411,476,1429,477,1424,476,1434,482,1444,485,1422,479,1418,486,1444,445,1462,464,1458,485,1071,188,1129,191,1107,192,1098,193,1099,234,1139,191,1144,208,1149,212,1148,178,1146,176,1135,163,1169,197,1167,192,1166,191,1166,191,1173,198,1194,211,1189,207,1203,210,1228,207,1235,207,1267,209,1276,210,1157,236,1230,354,1215,310,1216,317,1215,313,1215,239,1458,298,1468,307,1465,306,1496,373,1502,390,1503,395,1527,409,1486,346,1485,337,1208,318,1153,283,1130,262,1125,244,1408,280,1410,283,1420,293,1429,307,1433,315,1405,269,1408,270,1440,325,1444,321,1461,323,1464,323,1467,323,1470,324,1486,326,1486,326,1490,407,1480,368,1489,344,1497,345,1501,346,1514,364,1525,387,1531,397,1535,405,1536,406,1324,188,1321,186,1357,225,1357,225,1349,215,1404,238,1411,243,1416,248,1417,248,1370,203,1373,211,1374,210,1407,238,1397,231,1380,219,1423,252,1431,272,1429,262,1485,318,1432,252,1435,252,1529,411,1068,187,1067,188,1059,186,1065,159,1104,161,1114,161,1142,162,1144,162,1146,162,1154,163,1180,164,1213,166,1237,168,1259,170,1265,171,1304,174,1323,176,1331,179,1332,180,1334,180,1336,181,1345,182,1347,183,1351,185,1382,190,1282,378,1254,368,1237,363,1236,362,1216,357,1330,374,1333,374,1338,375,1336,375,1348,381,1345,380,1343,378,1438,436,1430,426,1395,412,1394,417,1455,457,1457,459,1478,467,1478,467,880,24,878,30,872,59,897,73,880,67,933,78,933,78,941,83,942,84,905,74] },
   };
-  const secOf = (tile) => (tile === "detail" ? "pnw" : "wus");
+  const secOf = (tile) => (tile === "detail" ? "pnw" : tile === "fd" ? "fd" : "wus");
   try { indexedDB.deleteDatabase("obsimg-wv"); } catch (e) { /* frames saved by the 11-03 browser-built loop are no longer used */ }
   const doy2iso = (s) => new Date(Date.UTC(+s.slice(0, 4), 0, +s.slice(4, 7), +s.slice(7, 9), +s.slice(9, 11))).toISOString().replace(".000Z", "Z");
   async function starList(sec) {
@@ -139,17 +141,18 @@ const ObsImg = (() => {
   async function starTimes(id) {
     const s = SRC[id], tile = tileFor(id), now = Date.now();
     if (ST.timesAt[id] && ST.wvTile === tile && now - ST.timesAt[id] < s.refreshMin * 60e3 && ST.frames[id].length) return ST.frames[id];
-    const wus = await starList("wus"); ST.wusT = wus.slice(-16);
+    const [wus, fd] = await Promise.all([starList("wus"), starList("fd")]); ST.wusT = wus.slice(-16); ST.fdT = fd.slice(-16);
     const all = tile === "detail" ? await starList("pnw") : wus;
     const pick = [], gap = (tile === "detail" ? 5 : 10) * 60e3 - 30e3;
     for (let i = all.length - 1; i >= 0 && pick.length < s.n + 2; i--) { const t = Date.parse(all[i]); if (!pick.length || Date.parse(pick[0]) - t >= gap) pick.unshift(all[i]); }
     // frames that failed (not on the CDN yet, or did not line up) get another try with each new list
-    for (const k of [...ST.blank]) if (k.startsWith(id + "|")) { ST.blank.delete(k); const t = k.slice(id.length + 1); for (const tl of ["detail", "wide"]) { const r = ST.img.get(id + "|" + tl + "|" + t); if (r && r.bad) ST.img.delete(id + "|" + tl + "|" + t); } }
+    for (const k of [...ST.blank]) if (k.startsWith(id + "|")) { ST.blank.delete(k); const t = k.slice(id.length + 1); for (const tl of ["detail", "wide", "fd"]) { const r = ST.img.get(id + "|" + tl + "|" + t); if (r && r.bad) ST.img.delete(id + "|" + tl + "|" + t); } }
     ST.wvMoved = false;
     ST.all[id] = pick; ST.timesAt[id] = now; ST.wvTile = tile; return pickFrames(id);
   }
-  // West US frame drawn under a PNW frame: the newest at or before it (else the oldest kept)
-  function underT(t) { const L = ST.wusT || []; for (let i = L.length - 1; i >= 0; i--) if (Date.parse(L[i]) <= Date.parse(t) + 60e3) return L[i]; return L[0] || null; }
+  // frames drawn under a main frame (bottom first): full disk, then West US under a PNW frame; each the newest at or before it
+  function underT(L, t) { L = L || []; for (let i = L.length - 1; i >= 0; i--) if (Date.parse(L[i]) <= Date.parse(t) + 60e3) return L[i]; return L[0] || null; }
+  const unders = (tile, t) => [["fd", underT(ST.fdT, t)], ...(tile === "detail" ? [["wide", underT(ST.wusT, t)]] : [])].filter((x) => x[1]);
   // red / pink map-line pixels (STAR draws them pure red; JPEG blurs them into the background). Yellow / orange (dry air) is not a line.
   const lineAt = (d, i) => { const r = d[i], g = d[i + 1], b = d[i + 2]; return (r - g > 60 && g - b < 60) || (r - g > 22 && Math.abs(g - b) < 31); };
   let procQ = Promise.resolve();
@@ -207,15 +210,15 @@ const ObsImg = (() => {
         const fr = ST.frames[id]; if (!fr.length) { ST.msg = SRC[id].label + ": no recent frames"; continue; }
         const tile = tileFor(id);
         for (let tries = 0; tries < 5 && ST.frames[id].length; tries++) { const f = ST.frames[id], t = f[f.length - 1];
-          if (id === "wv" && tile === "detail" && underT(t)) getImg(id, "wide", underT(t));
-          if (await getImg(id, tile, t).p) break; if (id === "wv") { ST.blank.add(id + "|" + t); pickFrames(id); } }   // newest real frame first
+          const rm = getImg(id, tile, t); if (id === "wv") for (const [tl, u] of unders(tile, t)) getImg(id, tl, u);   // main frame first in the cleaning queue
+          if (await rm.p) break; if (id === "wv") { ST.blank.add(id + "|" + t); pickFrames(id); } }   // newest real frame first
         if (id === "wv" && ST.wvMoved && !ST.frames.wv.some((t) => { const r = ST.img.get("wv|" + tile + "|" + t); return r && r.ok; })) ST.msg = "Water vapor paused: NOAA moved its image sector, so it would not line up with this map";
       }
       prune(); if (ST.idx < 0 || ST.idx >= len()) ST.idx = len() - 1;
       ui(); bump(); Obs.redraw(); if (!ST.timer) tick();
       for (let pass = 0; pass < 2; pass++) {   // pass 2: frames that slid in after black ones dropped out
-        const todo = []; for (const id of on()) { const tile = tileFor(id); for (const t of [...ST.frames[id]].reverse()) { todo.push([id, tile, t]); if (id === "wv" && tile === "detail" && underT(t)) todo.push([id, "wide", underT(t), 1]); } }
-        await Promise.all([0, 1, 2].map(async () => { while (todo.length) { const [id, tile, t, under_] = todo.shift(); if (on().includes(id) && (under_ ? tileFor(id) === "detail" : tileFor(id) === tile)) { const r = getImg(id, tile, t); await r.p; if (id === "wv" && !under_ && r.bad) { ST.blank.add(id + "|" + t); pickFrames(id); } } } }));
+        const todo = []; for (const id of on()) { const tile = tileFor(id); for (const t of [...ST.frames[id]].reverse()) { todo.push([id, tile, t]); if (id === "wv") for (const [tl, u] of unders(tile, t)) todo.push([id, tl, u, tile]); } }
+        await Promise.all([0, 1, 2].map(async () => { while (todo.length) { const [id, tile, t, under_] = todo.shift(); if (on().includes(id) && (under_ ? tileFor(id) === under_ : tileFor(id) === tile)) { const r = getImg(id, tile, t); await r.p; if (id === "wv" && !under_ && r.bad) { ST.blank.add(id + "|" + t); pickFrames(id); } } } }));
       }
       ui(); bump(); Obs.redraw();
     })().finally(() => { loading = null; });
@@ -262,12 +265,12 @@ const ObsImg = (() => {
       const pr = gl.createProgram(); gl.attachShader(pr, sh(gl.VERTEX_SHADER, VS)); gl.attachShader(pr, sh(gl.FRAGMENT_SHADER, FS)); gl.linkProgram(pr); gl.useProgram(pr);
       const b = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, b); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
       const loc = gl.getAttribLocation(pr, "p"); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
-      const tex = [0, 1, 2].map((u) => { const t = gl.createTexture(); gl.activeTexture(gl.TEXTURE0 + u); gl.bindTexture(gl.TEXTURE_2D, t);
+      const tex = [0, 1, 2, 3].map((u) => { const t = gl.createTexture(); gl.activeTexture(gl.TEXTURE0 + u); gl.bindTexture(gl.TEXTURE_2D, t);
         for (const [a, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR], [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]]) gl.texParameteri(gl.TEXTURE_2D, a, v);
-        return t; });   // unit 0 = satellite, unit 1 = radar, unit 2 = water vapor West US under the PNW frame (each keeps its last frame)
+        return t; });   // unit 0 = satellite, unit 1 = radar, unit 2 / 3 = water vapor West US / full disk under the main frame (each keeps its last frame)
       gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
       const U = {}; for (const u of ["tex", "sz", "dpr", "k", "cx", "cy", "n", "F", "rho0", "L0", "alpha", "box", "geo", "gg", "cut"]) U[u] = gl.getUniformLocation(pr, u);
-      ST.gl = { cv, gl, U, tex, cur: [null, null, null] };
+      ST.gl = { cv, gl, U, tex, cur: [null, null, null, null] };
     } catch (e) { ST.glFail = "Radar / satellite could not start (" + (e.message || e) + ")"; return null; }
     return ST.gl;
   }
@@ -303,8 +306,8 @@ const ObsImg = (() => {
       const f = frameImg(id, ST.idx < 0 ? len() - 1 : ST.idx); if (!f) continue;
       const u = id === "radar" ? 1 : 0;
       if (SRC[id].kind === "star") {
-        if (f.tile === "detail") { const tu = underT(f.t), ru = tu && ST.img.get("wv|wide|" + tu), rw = ru && ru.ok ? ru : [...ST.img.entries()].filter(([k, r]) => k.startsWith("wv|wide|") && r.ok).map(([, r]) => r).pop();
-          if (rw) draw1(2, rw.im, geoBox("wus")); }
+        for (const [tl, tu] of unders(f.tile, f.t)) { const ru = ST.img.get("wv|" + tl + "|" + tu), rw = ru && ru.ok ? ru : [...ST.img.entries()].filter(([k, r]) => k.startsWith("wv|" + tl + "|") && r.ok).map(([, r]) => r).pop();
+          if (rw) draw1(tl === "fd" ? 3 : 2, rw.im, geoBox(secOf(tl))); }
         draw1(u, f.im, geoBox(secOf(f.tile))); ST.shown[id] = f.t; continue;
       }
       draw1(u, f.im, () => { const b = SRC[id].tiles[f.tile].box; gl.uniform1f(U.geo, 0); gl.uniform4f(U.box, b[0], b[1], b[2], b[3]); gl.uniform1f(U.alpha, SRC[id].alpha); });
