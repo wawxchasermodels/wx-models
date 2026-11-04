@@ -166,9 +166,9 @@ const ObsImg = (() => {
       let hit = 0; const R = S.ref, n = R.length / 2;
       for (let k = 0; k < R.length; k += 2) { const x = R[k], y = R[k + 1]; let h = 0; for (let dy = -1; dy <= 1 && !h; dy++) for (let dx = -1; dx <= 1; dx++) if (bad[(y + dy) * W + x + dx]) { h = 1; break; } hit += h; }
       if (hit / n < 0.8) return "moved";
-      // grow the mask 2 px (JPEG halo), then fill it from the edges inward with the mean of the known neighbours
-      const m = new Uint8Array(N);
-      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (bad[y * W + x]) for (let yy = Math.max(0, y - 2); yy <= Math.min(H - 1, y + 2); yy++) for (let xx = Math.max(0, x - 2); xx <= Math.min(W - 1, x + 2); xx++) m[yy * W + xx] = 1;
+      // grow the mask 2 px (3 on the 6 km full disk: JPEG halo), then fill it from the edges inward with the mean of the known neighbours
+      const m = new Uint8Array(N), gr = sec === "fd" ? 3 : 2;
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (bad[y * W + x]) for (let yy = Math.max(0, y - gr); yy <= Math.min(H - 1, y + gr); yy++) for (let xx = Math.max(0, x - gr); xx <= Math.min(W - 1, x + gr); xx++) m[yy * W + xx] = 1;
       let todo = []; for (let p = 0; p < N; p++) if (m[p]) todo.push(p);
       for (let it = 0; it < 40 && todo.length; it++) {
         const fill = [], rest = [];
@@ -255,7 +255,7 @@ const ObsImg = (() => {
         if(uv.y>cut.x||(uv.x<cut.y&&uv.y>cut.z)){discard;}
       }
       if(uv.x<0.||uv.x>1.||uv.y<0.||uv.y>1.){discard;}
-      vec4 c=texture2D(tex,uv);if(geo>.5&&c.r+c.g+c.b<.06){discard;}   // space / no-data black on the NOAA images
+      vec4 c=texture2D(tex,uv);if(geo>.5&&c.r+c.g+c.b<.13){discard;}   // space / no-data black on the NOAA images
       gl_FragColor=vec4(c.rgb*c.a*alpha,c.a*alpha);}`;
   function glInit() {
     if (ST.gl || ST.glFail) return ST.gl;
