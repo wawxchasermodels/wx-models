@@ -117,7 +117,7 @@ const ObsImg = (() => {
     const ll = inv(S.cx, S.cy); return ll && ll[0] > T[0] && ll[0] < T[2] && ll[1] > T[1] && ll[1] < T[3] ? "detail" : "wide"; };
 
   /* ---- water vapor: NOAA/NESDIS/STAR band 9 sector JPGs (ABI fixed grid), map lines / logo / time bar removed ---- */
-  const STAR = (sec) => `https://cdn.star.nesdis.noaa.gov/GOES18/ABI/SECTOR/${sec}/09/`;
+  const STAR = (sec) => `https://cdn.star.nesdis.noaa.gov/GOES18/ABI/${sec === "fd" ? "FD" : "SECTOR/" + sec}/09/`, TAG = (sec) => (sec === "fd" ? "FD" : sec);
   // g = [x0, y0, dx, dy]: scan angle (rad) of the image's left / top edge and the size of one pixel; cut = [time bar top, logo right, logo top]
   // (fractions of the image); ref = pixels (x, y pairs) that sit on NOAA's state / border lines when the sector has not moved
   const SEC = {
@@ -132,12 +132,12 @@ const ObsImg = (() => {
   try { indexedDB.deleteDatabase("obsimg-wv"); } catch (e) { /* frames saved by the 11-03 browser-built loop are no longer used */ }
   const doy2iso = (s) => new Date(Date.UTC(+s.slice(0, 4), 0, +s.slice(4, 7), +s.slice(7, 9), +s.slice(9, 11))).toISOString().replace(".000Z", "Z");
   async function starList(sec) {
-    const x = await (await fetch(STAR(sec), { cache: "no-store" })).text(), re = new RegExp(`(\\d{11})_GOES18-ABI-${sec}-09-${SEC[sec].sz}\\.jpg`, "g");
+    const x = await (await fetch(STAR(sec), { cache: "no-store" })).text(), re = new RegExp(`(\\d{11})_GOES18-ABI-${TAG(sec)}-09-${SEC[sec].sz}\\.jpg`, "g");
     const set = new Set(); let m; while ((m = re.exec(x))) set.add(m[1]);
     return [...set].sort().slice(-40).map(doy2iso);
   }
   const fname = (sec, t) => { const d = new Date(t), y = d.getUTCFullYear(), j = Math.round((Date.UTC(y, d.getUTCMonth(), d.getUTCDate()) - Date.UTC(y, 0, 1)) / 864e5) + 1, p = (v, n) => String(v).padStart(n, "0");
-    return `${STAR(sec)}${y}${p(j, 3)}${p(d.getUTCHours(), 2)}${p(d.getUTCMinutes(), 2)}_GOES18-ABI-${sec}-09-${SEC[sec].sz}.jpg`; };
+    return `${STAR(sec)}${y}${p(j, 3)}${p(d.getUTCHours(), 2)}${p(d.getUTCMinutes(), 2)}_GOES18-ABI-${TAG(sec)}-09-${SEC[sec].sz}.jpg`; };
   async function starTimes(id) {
     const s = SRC[id], tile = tileFor(id), now = Date.now();
     if (ST.timesAt[id] && ST.wvTile === tile && now - ST.timesAt[id] < s.refreshMin * 60e3 && ST.frames[id].length) return ST.frames[id];
