@@ -371,7 +371,7 @@ function renderPass(k) {
   let dfs = k === "v" ? 15 : 14; { const mc0 = document.createElement("canvas").getContext("2d"), dMax = k === "v" ? f.W - 2 * f.pad : Math.round(f.W * 0.52);
     mc0.font = `600 ${dfs}px Montserrat`; while (dfs > 11 && Math.max(...dl.map((l) => mc0.measureText(l).width)) > dMax) { dfs -= 1; mc0.font = `600 ${dfs}px Montserrat`; } }
   const dlh = dfs + 7, KEY = [["s1", "1\u20136\u2033 snow"], ["s2", "6\u201312\u2033"], ["s3", "12\u2033+"], ["fzb", "Freezing level below the pass"]];
-  const kh = kfs * 1.55, kmx = k === "v" ? f.W - f.pad : f.W * 0.46;
+  const kh = kfs * 1.55, kmx = k === "v" ? f.W - f.pad : (() => { const m_ = document.createElement("canvas").getContext("2d"); m_.font = `600 ${dfs}px Montserrat`; return f.W - f.pad - Math.max(...dl.map((l) => m_.measureText(l).width)) - 40; })();   // 16:9: key runs up to the credit block
   const krows = (() => { const mk = document.createElement("canvas").getContext("2d"); mk.font = `800 ${kfs}px Montserrat`; const rows = [[]]; let bx_ = x;
     for (const it of KEY) { const w = mk.measureText(it[1]).width + kfs * 1.2; if (bx_ + w > kmx && bx_ > x + 1) { rows.push([]); bx_ = x; } rows[rows.length - 1].push([...it, w]); bx_ += w + 12; } return rows; })();
   const ky0 = k === "v" ? f.H - 70 - (dl.length - 1) * dlh - dfs - 30 - kh : f.H - 24 - kh + kfs * 0.35;   // same y as the obs legend row
@@ -395,7 +395,7 @@ function renderPass(k) {
   for (const cols of opts) { for (let fs = f0; fs >= fmin && !L; fs -= 1) L = fitT(cols, fs); if (L) break; }
   if (!L) { const cols = opts[opts.length - 1]; for (let fs = fmin; fs >= 12 && !L; fs -= 1) L = fitT(cols, fs); }
   if (L) {
-    { const rh2 = Math.min(L.rh * 1.6, (avH - L.hh) / D.body.length); if (rh2 > L.rh) { L.ro = (rh2 - L.rh) / 2; L.rh = rh2; L.H = L.hh + rh2 * D.body.length; } else L.ro = 0; }   // 11-04 (t2313u): rows grow to fill the frame (no empty band)
+    { const rh2 = Math.min(L.rh * (k === "v" ? 2 : 1.6), (avH - L.hh) / D.body.length); if (rh2 > L.rh) { L.ro = (rh2 - L.rh) / 2; L.rh = rh2; L.H = L.hh + rh2 * D.body.length; } else L.ro = 0; }   // 11-04 (t2313u): rows grow to fill the frame (no empty band)
     const g = c0, ty = Math.round(top + Math.max(0, (avH - L.H) / 2));
     g.save(); g.fillStyle = "rgba(29,32,39,0.96)"; g.beginPath(); g.roundRect ? g.roundRect(x - 2, ty, avW + 4, L.H, 14) : g.rect(x - 2, ty, avW + 4, L.H); g.fill();
     g.fillStyle = "#262a33"; g.beginPath(); g.roundRect ? g.roundRect(x - 2, ty, avW + 4, L.hh, [14, 14, 0, 0]) : g.rect(x - 2, ty, avW + 4, L.hh); g.fill();
