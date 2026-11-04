@@ -1,0 +1,557 @@
+{
+ "quiet": {
+  "gov_feeds": {
+   "feed:3bbc0a9ed5be": "2026-10-23T16:13:05.978669+00:00"
+  },
+  "hurricanes": {
+   "CP032026": {
+    "basin": "CP",
+    "first_woken_at": "2026-10-26T03:39:10.603305+00:00",
+    "name": "CP032026 Olana",
+    "seeded": false,
+    "woken": 1
+   }
+  },
+  "pass_snapshot": {
+   "at": "2026-11-02T04:31:43.523567+00:00",
+   "passes": {
+    "Blewett Pass US 97": {
+     "avalanche_closure": false,
+     "displayDate": "2026-11-01T18:21:07.707Z",
+     "endMP": 168.87,
+     "restrictions": {
+      "Northbound": "No restrictions",
+      "Southbound": "No restrictions"
+     },
+     "roadCondition": "Bare and dry",
+     "route": "097",
+     "snow_on_road": false,
+     "startMP": 158.87,
+     "status": "open",
+     "temperature": null,
+     "weather": "Clear skies"
+    },
+    "Cayuse Pass SR 123": {
+     "avalanche_closure": false,
+     "displayDate": "2026-11-01T07:02:40.57Z",
+     "endMP": 16.34,
+     "restrictions": {
+      "Northbound": "Traction Tires Advised, Oversize Vehicles Prohibited.",
+      "Southbound": "Traction Tires Advised, Oversize Vehicles Prohibited."
+     },
+     "roadCondition": "Bare and wet with frost.",
+     "route": "123",
+     "snow_on_road": false,
+     "startMP": 2.0,
+     "status": "open",
+     "temperature": 35.0,
+     "weather": "Clear skies."
+    },
+    "Chinook Pass SR 410": {
+     "avalanche_closure": false,
+     "displayDate": "2026-11-02T03:48:30.57Z",
+     "endMP": 74.5,
+     "restrictions": {
+      "Eastbound": "No restrictions",
+      "Westbound": "No restrictions"
+     },
+     "roadCondition": "Bare and dry, wet in places.",
+     "route": "410",
+     "snow_on_road": false,
+     "startMP": 57.0,
+     "status": "open",
+     "temperature": null,
+     "weather": "Clear skies"
+    },
+    "Crystal to Greenwater SR 410": {
+     "avalanche_closure": false,
+     "displayDate": "2026-11-01T07:02:34.397Z",
+     "endMP": 57.49,
+     "restrictions": {
+      "Eastbound": "Traction Tires Advised, Oversize Vehicles Prohibited.",
+      "Westbound": "Traction Tires Advised, Oversize Vehicles Prohibited."
+     },
+     "roadCondition": "Bare and wet with frost.",
+     "route": "410",
+     "snow_on_road": false,
+     "startMP": 43.3,
+     "status": "open",
+     "temperature": 35.0,
+     "weather": "Clear."
+    },
+    "Disautel Pass SR 155": {
+     "avalanche_closure": false,
+     "displayDate": "2026-11-01T07:43:11.757Z",
+     "endMP": 62.6,
+     "restrictions": {
+      "Northbound": "No restrictions",
+      "Southbound": "No restrictions"
+     },
+     "roadCondition": "No current information available.",
+     "route": "155",
+     "snow_on_road": false,
+     "startMP": 52.6,
+     "status": "open",
+     "temperature": null,
+     "weather": ""
+    },
+    "Loup Loup Pass SR 20": {
+     "avalanche_closure": false,
+     "displayDate": "2026-11-01T07:43:11.757Z",
+     "endMP": 219.47,
+     "restrictions": {
+      "Eastbound": "No restrictions",
+      "Westbound": "No restrictions"
+     },
+     "roadCondition": "No current information available.",
+     "route": "020",
+     "snow_on_road": false,
+     "startMP": 209.47,
+     "status": "open",
+     "temperature": null,
+     "weather": ""
+    },
+    "Manastash Ridge I-82": {
+     "avalanche_closure": false,
+     "displayDate": "2026-11-02T03:21:16.23Z",
+     "endMP": 27.0,
+     "restrictions": {
+      "Eastbound": "No restrictions",
+      "Westbound": "No restrictions"
+     },
+     "roadCondition": "Bare and dry, wet in places",
+     "route": "082",
+     "snow_on_road": false,
+     "startMP": 1.0,
+     "status": "open",
+     "temperature": null,
+     "weather": "Clear skies"
+    },
+    "Mt. Baker Hwy SR 542": {
+     "avalanche_closure": false,
+     "displayDate": "2026-10-27T17:48:41.227Z",
+     "endMP": 62.26,
+     "restrictions": {
+      "Eastbound": "Pass Closed",
+      "Westbound": "Pass Closed"
+     },
+     "roadCondition": "Effective October 25, SR 542/Mount Baker Highway is closed at milepost 54 for the season.",
+     "route": "542",
+     "snow_on_road": false,
+     "startMP": 52.26,
+     "status": "closed",
+     "temperature": null,
+     "weather": ""
+    },
+    "North Cascade Hwy SR 20": {
+     "avalanche_closure": false,
+     "displayDate": "2026-11-01T07:43:11.693Z",
+     "endMP": 170.6,
+     "restrictions": {
+      "Eastbound": "No restrictions",
+      "Westbound": "No restrictions"
+     },
+     "roadCondition": "No current information available.",
+     "route": "020",
+     "snow_on_road": false,
+     "startMP": 134.0,
+     "status": "open",
+     "temperature": null,
+     "weather": ""
+    },
+    "Satus Pass US 97": {
+     "avalanche_closure": false,
+     "displayDate": "2026-10-19T06:52:27.723Z",
+     "endMP": 32.15,
+     "restrictions": {
+      "Northbound": "No restrictions",
+      "Southbound": "No restrictions"
+     },
+     "roadCondition": "Bare and dry",
+     "route": "097",
+     "snow_on_road": false,
+     "startMP": 22.15,
+     "status": "open",
+     "temperature": 31.0,
+     "weather": "Clear skies"
+    },
+    "Sherman Pass SR 20": {
+     "avalanche_closure": false,
+     "displayDate": "2026-10-29T22:17:13.053Z",
+     "endMP": 324.45,
+     "restrictions": {
+      "Eastbound": "No restrictions",
+      "Westbound": "No restrictions"
+     },
+     "roadCondition": "Bare and wet",
+     "route": "020",
+     "snow_on_road": false,
+     "startMP": 314.45,
+     "status": "open",
+     "temperature": 33.0,
+     "weather": "Overcast"
+    },
+    "Snoqualmie Pass I-90": {
+     "avalanche_closure": false,
+     "displayDate": "2026-11-02T02:07:57.14Z",
+     "endMP": 136.0,
+     "restrictions": {
+      "Eastbound": "No restrictions",
+      "Westbound": "No restrictions"
+     },
+     "roadCondition": "Bare and dry",
+     "route": "090",
+     "snow_on_road": false,
+     "startMP": 34.0,
+     "status": "open",
+     "temperature": null,
+     "weather": "Clear skies"
+    },
+    "Stevens Pass US 2": {
+     "avalanche_closure": false,
+     "displayDate": "2026-11-02T02:57:39.113Z",
+     "endMP": 69.57,
+     "restrictions": {
+      "Eastbound": "No restrictions",
+      "Westbound": "No restrictions"
+     },
+     "roadCondition": "bare and dry, frost and ice in places",
+     "route": "002",
+     "snow_on_road": false,
+     "startMP": 59.57,
+     "status": "open",
+     "temperature": null,
+     "weather": "clear skies"
+    },
+    "Tiger Mountain SR18": {
+     "avalanche_closure": false,
+     "displayDate": "2026-10-19T06:54:41.737Z",
+     "endMP": 27.04,
+     "restrictions": {
+      "Eastbound": "No restrictions",
+      "Westbound": "No restrictions"
+     },
+     "roadCondition": "Reports have ended for this season. Traditionally weather and road conditions are reported from November 1 to April 1. Should adverse weather occur that will impact travel, updates will be provided as information is available",
+     "route": "018",
+     "snow_on_road": false,
+     "startMP": 20.96,
+     "status": "open",
+     "temperature": null,
+     "weather": ""
+    },
+    "Wauconda Pass SR 20": {
+     "avalanche_closure": false,
+     "displayDate": "2026-11-01T07:43:11.77Z",
+     "endMP": 293.89,
+     "restrictions": {
+      "Eastbound": "No restrictions",
+      "Westbound": "No restrictions"
+     },
+     "roadCondition": "No current information available.",
+     "route": "020",
+     "snow_on_road": false,
+     "startMP": 283.89,
+     "status": "open",
+     "temperature": null,
+     "weather": ""
+    },
+    "White Pass US 12": {
+     "avalanche_closure": false,
+     "displayDate": "2026-11-02T04:03:49.57Z",
+     "endMP": 166.0,
+     "restrictions": {
+      "Eastbound": "No restrictions",
+      "Westbound": "No restrictions"
+     },
+     "roadCondition": "Bare and dry, wet in places",
+     "route": "012",
+     "snow_on_road": false,
+     "startMP": 138.0,
+     "status": "open",
+     "temperature": null,
+     "weather": "Clear skies"
+    }
+   }
+  },
+  "payload_ids": [
+   "q-7f2362b48ace23f4",
+   "q-8a06473e471246cd",
+   "q-0fde7bf0f483dcf0",
+   "q-62da88cd248b5c6b",
+   "q-5d4658e36090170d",
+   "q-45fc84ad22df03f2",
+   "q-8a6757260eee8c82",
+   "q-a365e1c8d73079e8",
+   "q-bb344fc8b641fc0e",
+   "q-00ca8b5f5877f269",
+   "q-5615fc33575ea509",
+   "q-d3a1a0401d9c6824",
+   "q-4b64c46e4b4ad8cd",
+   "q-31afda9f595247f9",
+   "q-e39bc8edfbf628ae",
+   "q-6fb5fdc56836834d",
+   "q-9ebf276ca2f14048",
+   "q-1be2c5cca984026f",
+   "q-af6464b470994742",
+   "q-f57c7b9e3fafefbc",
+   "q-70a606faa9efaecd",
+   "q-c3b1be948d2ad029",
+   "q-9da32f57443451e0",
+   "q-d4d43f1c9e4f1447",
+   "q-51051888ac15473d",
+   "q-b4812868463e289b",
+   "q-e512d5b73a7827d5",
+   "q-97cf9c2d309e75e9",
+   "q-fe5f60e7f571de65",
+   "q-1210a8626b99db36",
+   "q-0d7352a0ccf19003",
+   "q-1e0e388cf7019c90",
+   "q-76105c3a1a864df5",
+   "q-2457e2fa9ce198bd",
+   "q-25474237f613f97a",
+   "q-6d923a5faac49f04",
+   "q-c7b9fb9640d66b18",
+   "q-f7e73a1fd5d97287",
+   "q-ec3db9c62f4b9bb8",
+   "q-0817053b2fbbe20f",
+   "q-fc6f0d325d13769e",
+   "q-69882b99b21cc6e2",
+   "q-e4ccb49a4f4f95cb",
+   "q-44ff3c1b6adba422",
+   "q-c8638ad5e4b268ef",
+   "q-50cc02fbe9531abe",
+   "q-046707a57af15e7b",
+   "q-9745c3f77cdf9556",
+   "q-f020e657631a2148"
+  ],
+  "quakes": {},
+  "seen": {
+   "urn:oid:2.49.0.1.840.0.0028eed3d853ea43e28d0d3c68fbf150476c09e3.001.1|WA": "2026-10-27T22:54:22.405817+00:00",
+   "urn:oid:2.49.0.1.840.0.0028eed3d853ea43e28d0d3c68fbf150476c09e3.002.1|WA": "2026-10-27T22:54:22.405817+00:00",
+   "urn:oid:2.49.0.1.840.0.0028eed3d853ea43e28d0d3c68fbf150476c09e3.003.1|WA": "2026-10-27T22:54:22.405817+00:00",
+   "urn:oid:2.49.0.1.840.0.020e71cb44aa70616ea7207259b0d678370ca7be.001.1|USA": "2026-11-02T19:39:50.203574+00:00",
+   "urn:oid:2.49.0.1.840.0.098b505a6749a13e82ac9424e6d3f7aa6a974da9.003.1|USA": "2026-10-29T10:12:13.273461+00:00",
+   "urn:oid:2.49.0.1.840.0.14c0b3154de6d84fa49dbadae98712c6d728ded0.001.2|WA": "2026-10-31T12:28:08.994553+00:00",
+   "urn:oid:2.49.0.1.840.0.14c0b3154de6d84fa49dbadae98712c6d728ded0.002.1|WA": "2026-10-31T12:28:08.994553+00:00",
+   "urn:oid:2.49.0.1.840.0.1e19ce9106e6824a727425fbe02d4010f3a6215f.001.1|USA": "2026-10-29T21:59:30.021636+00:00",
+   "urn:oid:2.49.0.1.840.0.225d0ef751101fdc47377e1bce235d24b4a04b25.001.1|USA": "2026-10-28T17:55:00.710068+00:00",
+   "urn:oid:2.49.0.1.840.0.2811dc83f22db2307a8d5938a86631485bc028f9.001.1|USA": "2026-11-01T10:47:46.716172+00:00",
+   "urn:oid:2.49.0.1.840.0.29f3dba14c07a782b287aa4150fc5b5536ae488a.001.1|USA": "2026-10-28T21:50:03.700323+00:00",
+   "urn:oid:2.49.0.1.840.0.2b2e611718869e667a976020741ea2346a086d95.001.1|USA": "2026-10-27T17:52:20.076518+00:00",
+   "urn:oid:2.49.0.1.840.0.2b37cf823d40515a1f6ac4d446bb541d765afada.001.1|WA": "2026-10-29T12:55:04.831325+00:00",
+   "urn:oid:2.49.0.1.840.0.3c057f7fd48d8018be9ee8e20ccdd8546555c985.001.1|WA": "2026-10-29T12:55:04.831325+00:00",
+   "urn:oid:2.49.0.1.840.0.46adfb49ae646297a879b78e97fc34839409584b.001.1|USA": "2026-10-28T21:50:03.700323+00:00",
+   "urn:oid:2.49.0.1.840.0.505e2b4891628e193887948a985863177e6fc483.001.1|WA": "2026-10-28T20:33:43.698471+00:00",
+   "urn:oid:2.49.0.1.840.0.5175aa4931aacec66267e1258346e7874b5d00d4.001.1|USA": "2026-11-02T23:58:38.413250+00:00",
+   "urn:oid:2.49.0.1.840.0.56d261bd058e733d47ed4b1dc94593ce81c8cde0.001.1|USA": "2026-10-31T11:24:50.108468+00:00",
+   "urn:oid:2.49.0.1.840.0.58a1f63bbd69cad303efa7f8f38e7c5fb7958276.001.1|USA": "2026-10-30T21:10:27.808524+00:00",
+   "urn:oid:2.49.0.1.840.0.5a489f8dcb824745242b5cc5259d11b59eb27e23.001.1|USA": "2026-10-29T20:04:35.152153+00:00",
+   "urn:oid:2.49.0.1.840.0.629e1c2678121744f7b5395be4a7b505b575f7ea.001.1|USA": "2026-11-01T10:47:46.716172+00:00",
+   "urn:oid:2.49.0.1.840.0.7e7721325c972e03a2786afd53c27511546db7ea.001.1|WA": "2026-10-27T15:47:06.193825+00:00",
+   "urn:oid:2.49.0.1.840.0.83cbf996a8a054bf68ea387e2ebf7e3592b5e9b6.001.1|USA": "2026-10-30T22:15:11.239149+00:00",
+   "urn:oid:2.49.0.1.840.0.8780e75dbe2636643d0fb31bb80854cdd12b087d.001.1|USA": "2026-10-30T21:10:27.808524+00:00",
+   "urn:oid:2.49.0.1.840.0.8f18d03a8f33c4047ad9deba7776e342072d7011.001.1|USA": "2026-11-02T23:58:38.413250+00:00",
+   "urn:oid:2.49.0.1.840.0.960b65f13bfb17746b566f639313b4bec3f961ce.001.2|WA": "2026-10-31T14:24:40.841390+00:00",
+   "urn:oid:2.49.0.1.840.0.960b65f13bfb17746b566f639313b4bec3f961ce.003.1|WA": "2026-10-31T14:24:40.841390+00:00",
+   "urn:oid:2.49.0.1.840.0.96a35b009892cdeb8edd00c5c6b7d9df22390294.001.1|WA": "2026-10-28T14:03:12.993003+00:00",
+   "urn:oid:2.49.0.1.840.0.96a35b009892cdeb8edd00c5c6b7d9df22390294.002.1|WA": "2026-10-28T14:03:12.993003+00:00",
+   "urn:oid:2.49.0.1.840.0.96a35b009892cdeb8edd00c5c6b7d9df22390294.003.1|WA": "2026-10-28T14:03:12.993003+00:00",
+   "urn:oid:2.49.0.1.840.0.a5d85e626ef1c3fdd1f7698962ada47def49f4a1.001.1|USA": "2026-11-01T14:56:54.654136+00:00",
+   "urn:oid:2.49.0.1.840.0.a77efc64fc2ab12116731dea3eb3c0a94810bb76.001.1|USA": "2026-11-02T19:39:50.203574+00:00",
+   "urn:oid:2.49.0.1.840.0.b3852ac49f3ccf256fbc0a9e49fa34a4eca0437b.001.1|USA": "2026-10-29T14:35:27.192147+00:00",
+   "urn:oid:2.49.0.1.840.0.bccb31da7cbddad9dd41db90c0dd558e4b17fae2.001.1|USA": "2026-11-02T19:39:50.203574+00:00",
+   "urn:oid:2.49.0.1.840.0.bfb86c857a207454b4e4e055edaae7b840f25216.001.1|WA": "2026-10-27T22:54:22.405817+00:00",
+   "urn:oid:2.49.0.1.840.0.c56dc076bf59ed3aa9e46a156e5d0f4c3eb145e2.001.1|WA": "2026-10-31T12:28:08.994553+00:00",
+   "urn:oid:2.49.0.1.840.0.cc7d6ed41f19187ae98f114da75aa786571c0ce8.002.2|USA": "2026-10-29T13:45:12.334511+00:00",
+   "urn:oid:2.49.0.1.840.0.d9a9a1bea824d2788afcfdd7c4080a87f9197d63.001.1|USA": "2026-10-28T21:50:03.700323+00:00",
+   "urn:oid:2.49.0.1.840.0.dcf89ab75879440c0bad39689676acf44c528022.001.1|USA": "2026-10-27T12:04:13.580641+00:00",
+   "urn:oid:2.49.0.1.840.0.e1260830cc430af309a909646650cfd04366ed09.001.1|WA": "2026-10-27T15:47:06.193825+00:00",
+   "urn:oid:2.49.0.1.840.0.e28a7beacf0d23c29b492575ceef0ca347b3ac8f.002.1|USA": "2026-10-30T18:35:35.659798+00:00",
+   "urn:oid:2.49.0.1.840.0.f47d67845667299bbd9deebb4e22e7c5c394e52a.003.1|USA": "2026-10-30T09:16:07.021672+00:00",
+   "urn:oid:2.49.0.1.840.0.f5789af71065628d1193864d001bb664389ded1a.001.1|WA": "2026-11-02T13:11:56.852223+00:00",
+   "urn:oid:2.49.0.1.840.0.fbc3e0cb14522aec5093d8f8ed00666819ada2f7.001.1|USA": "2026-11-01T14:56:54.654136+00:00"
+  },
+  "spc_posted": {
+   "USA:d1:2026-10-23": {
+    "at": "2026-10-23T16:13:05.978669+00:00",
+    "ids": [
+     "spc:d1:2026-10-23T12:45:00+00:00:USA:SLGT"
+    ],
+    "max_rank": 2,
+    "ranks": {
+     "NM": 2,
+     "TX": 2
+    }
+   },
+   "USA:d1:2026-10-24": {
+    "at": "2026-10-24T09:25:12.582076+00:00",
+    "ids": [
+     "spc:d1:2026-10-24T05:59:00+00:00:USA:SLGT"
+    ],
+    "max_rank": 2,
+    "ranks": {
+     "NM": 2,
+     "TX": 2
+    }
+   },
+   "USA:d1:2026-10-28": {
+    "at": "2026-10-28T14:03:12.993003+00:00",
+    "ids": [
+     "spc:d1:2026-10-28T12:13:00+00:00:USA:SLGT"
+    ],
+    "max_rank": 2,
+    "ranks": {
+     "MN": 2,
+     "WI": 2
+    }
+   },
+   "USA:d1:2026-11-01": {
+    "at": "2026-11-01T10:47:46.716172+00:00",
+    "ids": [
+     "spc:d1:2026-11-01T07:07:00+00:00:USA:SLGT"
+    ],
+    "max_rank": 2,
+    "ranks": {
+     "NM": 2,
+     "TX": 2
+    }
+   },
+   "USA:d1:2026-11-02": {
+    "at": "2026-11-02T13:11:56.852223+00:00",
+    "ids": [
+     "spc:d1:2026-11-02T05:59:00+00:00:USA:SLGT",
+     "spc:d1:2026-11-02T12:58:00+00:00:USA:ENH"
+    ],
+    "max_rank": 3,
+    "ranks": {
+     "AR": 2,
+     "KS": 3,
+     "MO": 2,
+     "OK": 3,
+     "TX": 2
+    }
+   },
+   "USA:d2:2026-10-24": {
+    "at": "2026-10-23T16:13:05.978669+00:00",
+    "ids": [
+     "spc:d2:2026-10-23T05:33:00+00:00:USA:SLGT"
+    ],
+    "max_rank": 2,
+    "ranks": {
+     "NM": 2,
+     "TX": 2
+    }
+   },
+   "USA:d2:2026-11-02": {
+    "at": "2026-11-01T10:47:46.716172+00:00",
+    "ids": [
+     "spc:d2:2026-11-01T07:02:00+00:00:USA:SLGT"
+    ],
+    "max_rank": 2,
+    "ranks": {
+     "KS": 2,
+     "MO": 2,
+     "OK": 2,
+     "TX": 2
+    }
+   },
+   "WA:d1:2026-10-25": {
+    "at": "2026-10-25T12:08:21.016065+00:00",
+    "ids": [
+     "spc:d1:2026-10-25T05:55:00+00:00:WA:TSTM"
+    ],
+    "max_rank": 0,
+    "ranks": {
+     "WA": 0
+    }
+   },
+   "WA:d1:2026-10-26": {
+    "at": "2026-10-26T16:54:10.299799+00:00",
+    "ids": [
+     "spc:d1:2026-10-26T16:25:00+00:00:WA:TSTM"
+    ],
+    "max_rank": 0,
+    "ranks": {
+     "WA": 0
+    }
+   },
+   "WA:d1:2026-10-28": {
+    "at": "2026-10-29T01:25:51.095181+00:00",
+    "ids": [
+     "spc:d1:2026-10-29T00:58:00+00:00:WA:TSTM"
+    ],
+    "max_rank": 0,
+    "ranks": {
+     "WA": 0
+    }
+   },
+   "WA:d1:2026-10-30": {
+    "at": "2026-10-30T12:31:18.006413+00:00",
+    "ids": [
+     "spc:d1:2026-10-30T05:39:00+00:00:WA:TSTM"
+    ],
+    "max_rank": 0,
+    "ranks": {
+     "WA": 0
+    }
+   },
+   "WA:d2:2026-10-25": {
+    "at": "2026-10-24T18:15:36.301559+00:00",
+    "ids": [
+     "spc:d2:2026-10-24T17:23:00+00:00:WA:TSTM"
+    ],
+    "max_rank": 0,
+    "ranks": {
+     "WA": 0
+    }
+   },
+   "WA:d2:2026-10-26": {
+    "at": "2026-10-25T12:08:21.016065+00:00",
+    "ids": [
+     "spc:d2:2026-10-25T05:02:00+00:00:WA:TSTM"
+    ],
+    "max_rank": 0,
+    "ranks": {
+     "WA": 0
+    }
+   }
+  }
+ },
+ "updated": "2026-11-02T23:58:38.414686+00:00",
+ "urgent": {
+  "keys": {
+   "urn:oid:2.49.0.1.840.0.2a3a4ae58685bf6f5472a3416741f8a7a8256967.001.1": "2026-11-02T10:32:35.563769+00:00",
+   "urn:oid:2.49.0.1.840.0.397f69de2d6c89b7d84b4026f48ae9bdcca74eaa.001.1|L1": "2026-11-02T10:32:35.563769+00:00",
+   "urn:oid:2.49.0.1.840.0.42681225c943079697bc245ef30aeb2f9806e8b2.001.1": "2026-11-02T05:29:14.970050+00:00",
+   "urn:oid:2.49.0.1.840.0.42681225c943079697bc245ef30aeb2f9806e8b2.001.1|L1": "2026-11-02T05:29:14.970050+00:00",
+   "urn:oid:2.49.0.1.840.0.539099f80baea5919b4fec368e02443e2370b616.001.1": "2026-11-02T00:08:59.407611+00:00",
+   "urn:oid:2.49.0.1.840.0.5e8f0c9c6229550548d793597d2181a2fe6a9634.001.1|L1": "2026-11-02T05:29:14.970050+00:00",
+   "urn:oid:2.49.0.1.840.0.616c4025c42723c2fe6d8b10282486a4525dd113.001.1": "2026-11-01T23:12:35.274040+00:00",
+   "urn:oid:2.49.0.1.840.0.616c4025c42723c2fe6d8b10282486a4525dd113.001.1|L1": "2026-11-01T23:12:35.274040+00:00",
+   "urn:oid:2.49.0.1.840.0.7e10a26e45f9891046f9e37d480c03b18226209c.001.1|L1": "2026-11-02T00:08:59.407611+00:00",
+   "urn:oid:2.49.0.1.840.0.89bcf371cc80d4686ebf034dfb617f23d925a01b.001.1|L1": "2026-11-02T15:16:17.596742+00:00",
+   "urn:oid:2.49.0.1.840.0.9bc71fd7e92dcaebc56fd1243526b0e3dc4ee022.001.1": "2026-11-02T13:11:55.433004+00:00",
+   "urn:oid:2.49.0.1.840.0.9bc71fd7e92dcaebc56fd1243526b0e3dc4ee022.001.1|L3": "2026-11-02T13:11:55.433004+00:00",
+   "urn:oid:2.49.0.1.840.0.a845a2d258aab537261348f1ace22f83c7749823.001.1": "2026-11-02T13:11:55.433004+00:00",
+   "urn:oid:2.49.0.1.840.0.a845a2d258aab537261348f1ace22f83c7749823.001.1|L1": "2026-11-02T13:11:55.433004+00:00",
+   "urn:oid:2.49.0.1.840.0.ac4edcc622571ad723ac7506845dfae2776c3025.001.1": "2026-11-02T05:29:14.970050+00:00",
+   "urn:oid:2.49.0.1.840.0.ec317b9486e571e57082f1a859faa28220b37152.001.1": "2026-11-02T15:16:17.596742+00:00",
+   "vtec:KABQ.FL.W.0019|L1": "2026-11-02T10:32:35.563769+00:00",
+   "vtec:KABQ.FL.W.0021|L1": "2026-11-02T05:29:14.970050+00:00",
+   "vtec:KFGZ.FA.W.0025|L1": "2026-11-02T13:11:55.433004+00:00",
+   "vtec:KFGZ.FA.W.0028|L1": "2026-11-02T00:08:59.407611+00:00",
+   "vtec:KFGZ.FA.W.0038|L1": "2026-11-02T05:29:14.970050+00:00",
+   "vtec:KGJT.FA.W.0029|L1": "2026-11-01T23:12:35.274040+00:00",
+   "vtec:KMLB.FL.W.0003|L1": "2026-11-02T15:16:17.596742+00:00"
+  },
+  "payload_ids": [
+   "u-648e7fdae69d1172",
+   "u-488397482a6888c8",
+   "u-240615986d30f898",
+   "u-feb54adca53e5047",
+   "u-8faef120852bac0a",
+   "u-6099977d19cdd32f"
+  ]
+ },
+ "version": 1
+}
