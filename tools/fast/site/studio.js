@@ -1201,11 +1201,13 @@ function fitFrames() {
   if (CLEAN || innerWidth <= 820) { clear(); return; }
   const cs = getComputedStyle(st), padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight), padB = parseFloat(cs.paddingBottom) + 2;
   const gap = parseFloat(cs.columnGap) || 18, hint = fh.querySelector(".shint"), MINV = 300;   // below ~300 px tall the page scrolls instead
+  // STUDIO_NEW_MODE.md: every Studio mode draws into the same two canvases (#cv 9:16, #ch 16:9) and is sized ONLY here. A mode is a
+  // body class "<name>mode"; any such class is taken off while the Map layout is measured, so a new mode gets Map's exact frames.
   // 11-04 (Benjamin t2316u-t2318u "satellite viewers ... same exact size as the model views", "same exact size and placement in the
   // window browser", "pass forecaster view too"): Observations / Meteogram / Pass Forecaster frames take the Map mode's size AND spot.
   // The Map layout is measured with the mode class off (same sync pass, never painted), then the mode's panel is padded or capped
   // (scrolls) so the frames start at the same y.
-  const bd = document.body, MODES = ["mgmode", "obsmode", "passmode"].filter((c) => bd.classList.contains(c)), pnl = document.getElementById("mgp");
+  const bd = document.body, MODES = [...bd.classList].filter((c) => /^[a-z0-9]+mode$/.test(c)), pnl = document.getElementById("mgp");
   if (pnl) { pnl.style.maxHeight = ""; pnl.style.overflowY = ""; } st.style.marginTop = "";
   const SHD = [fv, fh].map((f) => f.querySelector(".shd")); for (const e of SHD) e.style.minHeight = "";
   for (const c of MODES) bd.classList.remove(c);
