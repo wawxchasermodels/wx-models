@@ -184,6 +184,9 @@ function mergeRunsX(man) {
 // 11-02 (Benjamin t2105u "Passes need to be added to maps on Washington wide for loops"): the global models' wide view uses a town
 // layer with the Washington view's 9 passes (plum triangle + italic name; studio_views.py --passes), shipped with the site ("@").
 const WAWIDE_PASSES_PNG = "@slayers/static/towns_wawide_p1.png";
+// 11-04 (Benjamin t2308u "Make the town names little smaller on Washington wide for loops"): town / pass labels ~17 % smaller on the
+// wide view (studio_views wawide_small_towns.py: towns_wawide_s2.png + its number slots, shipped with the site); wave maps' coast labels too
+let WAWIDE_S2 = null; const WAWIDE_FS = 0.83;
 function addStudioViews(man, sv) {
   if (!Q.get("studio")) return man;
   // 10-31 7:55 PM (Benjamin: "city labels on the new washington wide are way too big"): the global models now get a real view
@@ -192,7 +195,7 @@ function addStudioViews(man, sv) {
   const SVM = (sv && sv.models) || {};
   for (const [m, M] of Object.entries(man.models || {})) { const V = M.views || {}, own = (SVM[m] || {}).wawide, src = V.pnwt ? "pnwt" : V.pnwhr ? "pnwhr" : null;
     if ((!own && !src) || !V.wa || V.wawide) continue; const out = {};
-    for (const [k, v] of Object.entries(V)) { out[k] = v; if (k === "wa") out.wawide = own ? Object.assign({}, own, { studioWide: "wa", towns_png: WAWIDE_PASSES_PNG }) : Object.assign({}, V[src], { label: "Washington (wide, for loops)", src, studioWide: "wa" }); }
+    for (const [k, v] of Object.entries(V)) { out[k] = v; if (k === "wa") out.wawide = own ? Object.assign({}, own, { studioWide: "wa", towns_png: WAWIDE_PASSES_PNG }, WAWIDE_S2 && WAWIDE_S2.models && WAWIDE_S2.models[m] ? { towns: WAWIDE_S2.models[m], towns_png: "@slayers/" + WAWIDE_S2.png } : {}) : Object.assign({}, V[src], { label: "Washington (wide, for loops)", src, studioWide: "wa" }); }
     M.views = out; }
   // 11-04 (Benjamin t2289u "Make me a coastal view for studio that is a little bigger and wider, centered over the ocean, land in the right
   // third. Call it 'coast view'"): Studio-only "Coast view" (studio_views.py STUDIO_VIEW=coast), right after the wide Washington view
@@ -246,7 +249,8 @@ async function boot() {
                                    Q.get("studio") ? fetch(DATA + "static/studio_views.json", { cache: "no-cache" }).then(r => r.ok ? r.json() : null, () => null) : null,
                                    fetch(DATA + "static/view_fixes.json", { cache: "no-cache" }).then(r => r.ok ? r.json() : null, () => null),
                                    fetch(DATA + "static/wave_views.json", { cache: "no-cache" }).then(r => r.ok ? r.json() : null, () => null),
-                                   document.fonts.load("800 20px Montserrat"), document.fonts.load("500 12px Montserrat")]);
+                                   document.fonts.load("800 20px Montserrat"), document.fonts.load("500 12px Montserrat"),
+                                   Q.get("studio") ? fetch("slayers/static/wawide_s2.json", { cache: "no-cache" }).then(r => r.ok ? r.json() : null, () => null).then(j => { WAWIDE_S2 = j; }) : null]);
   if (PV && PV.studio && sv) Object.assign(sv.models || (sv.models = {}), PV.studio);   // 11-03 preview supplement: Studio wide view
   S.man = addStudioViews(waveViews(viewFixes(mergeRunsX(man), vf), wv), sv);
   // runs: "model/cycle", newest first per model; models in a fixed order
@@ -1160,7 +1164,7 @@ function seaVal(D, la, lo) {   // model value at a coast town: bilinear when the
 }
 function drawCoast(ctx, st, D, P, V, LW, LH, WT) {
   const C = WT.C; if (!C) { WT.taken = WT.boxes = WT.boxes || []; drawBuoys(ctx, st, D, P, V, LW, LH, WT.taken); return; }
-  const wa = C.style === "wa", fName = `600 ${pt(wa ? 9.5 : 8.5)}px Montserrat`, fNum = `800 ${pt(wa ? 10.5 : 9.5)}px Montserrat`, gap = pt(wa ? 3.5 : 3.0), hh = pt(6.5);
+  const wa = C.style === "wa", fs = WT.vid === "wawide" ? WAWIDE_FS : 1, fName = `600 ${pt((wa ? 9.5 : 8.5) * fs)}px Montserrat`, fNum = `800 ${pt((wa ? 10.5 : 9.5) * fs)}px Montserrat`, gap = pt(wa ? 3.5 : 3.0), hh = pt(6.5);
   const X0 = st.x0, Y0 = st.y0, X1 = st.x0 + st.W, Y1 = st.y0 + st.H, taken = WT.boxes.slice(), dots = [], resv = []; WT.taken = taken;
   const hit = (b, g = pt(2.5)) => b[0] < X0 + 2 || b[1] < Y0 + 2 || b[2] > X1 - 2 || b[3] > Y1 - 2 || taken.concat(resv).some(a => b[0] < a[2] + g && b[2] > a[0] - g && b[1] < a[3] + g && b[3] > a[1] - g);
   // the WA buoys' dots are kept free of town labels (Benjamin: those buoys matter most); the buoys themselves don't see this reserve
@@ -1174,7 +1178,7 @@ function drawCoast(ctx, st, D, P, V, LW, LH, WT) {
     if (must) { const k = resv.findIndex(b => Math.abs(b[0] + pt(2.5) - x) < 0.01 && Math.abs(b[1] + pt(2.5) - y) < 0.01); if (k >= 0) resv.splice(k, 1); }   // its own dot reserve
     if (!must && ((C.sides && C.sides[name] ? resv.some(a => dot[0] < a[2] && dot[2] > a[0] && dot[1] < a[3] && dot[3] > a[1]) : hit(dot, pt(1))) || dots.some(([a, b]) => (a - x) ** 2 + (b - y) ** 2 < pt(C.dotGap || (wa ? 9 : 11)) ** 2))) { WT.log.push(`${name}: dot blocked`); return; }
     const t0 = must && (V.towns || []).find(t => t.name === name);   // a re-placed city keeps its usual number (read at its pin, as before)
-    const fN = big ? `700 ${pt(9.5)}px Montserrat` : fName;
+    const fN = big ? `700 ${pt(9.5 * fs)}px Montserrat` : fName;
     const v = t0 && t0.fi >= 0 && t0.fj >= 0 && t0.fi < D.h - 1 && t0.fj < D.w - 1 ? sampleRC(D.fill, D.w, t0.fi, t0.fj) : offVal(D, name, T, WT), s_ = isFinite(v) && !(WT.own && WAVE_KEEP[name] === "p") ? fmtVal(P, v) : "";
     ctx.font = fN; const nw = ctx.measureText(name).width; ctx.font = fNum; const vw = s_ ? ctx.measureText(s_).width : 0, W_ = nw + (s_ ? gap + vw : 0);
     const c = { r: [pt(5), 0], l: [-pt(5) - W_, 0], a: [-W_ / 2, -pt(9.5)], b: [-W_ / 2, pt(9.5)] };
