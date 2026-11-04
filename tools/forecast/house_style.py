@@ -362,6 +362,29 @@ RAIN_TICKS = [0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 5, 6, 7, 8, 9, 10, 11, 12]   # key
 def rain_cmap():
     return cmap(RAIN_COLORS, (0, 0, 0, 0), RAIN_OVER)
 
+
+# 11-03-26 (Benjamin t2245u: "increase the precipitation total key to 18 inches, adjust the color scale accordingly"): run-total precip
+# (Precipitation Total, its 90th percentile, NBM total) goes to 18 in. 0.01-7 in unchanged (same bins and colors); a bin every 0.5 in from
+# 4 to 18; above 7 the old lavender-to-white end is replaced by deep violet > indigo > royal blue > azure > cyan > ice, 18+ white.
+QPF18_LEVELS = _np.array([0.01] + [round(0.1 * k, 2) for k in range(1, 41)] + [round(4 + 0.5 * k, 2) for k in range(1, 29)])
+_QPF18_ANCH = [a for a in _RAIN_ANCH if a[0] <= 7.0] + [(8.5, (75, 45, 175)), (10.0, (45, 80, 200)), (11.5, (35, 125, 215)), (13.0, (40, 170, 225)),
+                                                     (14.5, (80, 205, 230)), (16.0, (150, 228, 240)), (17.5, (215, 244, 250)), (18.0, (255, 255, 255))]
+
+
+def qpf18_color(v):
+    a = [x for x, _ in _QPF18_ANCH]; c = _np.array([col for _, col in _QPF18_ANCH], float)
+    rgb = [int(round(_np.interp(min(max(v, a[0]), a[-1]), a, c[:, k]))) for k in range(3)]
+    return "#%02x%02x%02x" % tuple(rgb)
+
+
+QPF18_COLORS = [qpf18_color(v) for v in QPF18_LEVELS[:-1]]
+QPF18_OVER = "#ffffff"
+QPF18_TICKS = [0.1, 0.5, 1, 2, 3, 4, 6, 8, 10, 12, 15, 18]
+
+
+def qpf18_cmap():
+    return cmap(QPF18_COLORS, (0, 0, 0, 0), QPF18_OVER)
+
 # ---- MSLP + precipitation (period QPF by precipitation type, inches liquid equivalent). Rain uses the RAIN scale above
 # (same colors at the same depth). Snow and mix get their own short original ramps on the same bin edges up to 2 in:
 # snow = pale ice blue > sky blue > royal blue > deep indigo; mix = pale lilac-pink > orchid > plum. Freezing rain /

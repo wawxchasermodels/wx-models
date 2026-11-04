@@ -1056,8 +1056,8 @@ def static(m, out, views_only=None, x2_only=False):
                      **table(HS.T850_LEVELS, CM["t700"], "both"), freeze=0, extra="0\u00b0C line dashed  \u00b7  {lo} to {hi}\u00b0C in view", pct=[0.5, 99.5], towns="none"),
         "refc": dict(title="Composite Reflectivity", fields=["refc"], key="Reflectivity (dBZ)", ticks=[5, 15, 25, 35, 45, 55, 65, 75], tickfmt=True,
                      **table(REFC_L, CM["refc"], "max"), extra="simulated radar, strongest echo in the column  \u00b7  up to {hi} dBZ in view", pct=[0, 99.9], towns="names"),
-        "qpf": dict(title="Precipitation Total", fields=["apcp"], key="Precip (in)", ticks=[0.1, 0.5, 1, 2, 3, 4, 6, 8, 10, 12], tickfmt=True,
-                    **table(HS.RAIN_LEVELS, CM["qpf"], "max"), extra="since the run started  \u00b7  liquid equivalent  \u00b7  max {hi} in in view",
+        "qpf": dict(title="Precipitation Total", fields=["apcp"], key="Precip (in)", ticks=HS.QPF18_TICKS, tickfmt=True, keyver="_q18", _cm=HS.qpf18_cmap(),
+                    **table(HS.QPF18_LEVELS, HS.qpf18_cmap(), "max"), extra="since the run started  \u00b7  liquid equivalent  \u00b7  max {hi} in in view",
                     pct=[0, 100], dec=2, fmt="in2", accum=True),
         "snow": dict(title="Snowfall Total", fields=["asnow"], key="Snow (in)", ticks=[0.1, 1, 3, 6, 10, 15, 24, 36, 48], tickfmt=True,
                      **table(M.SNOW_LEVELS, CM["snow"], "max"), extra="HRRR snowfall since the run started (model snow density)  \u00b7  max {hi} in in view",
@@ -1348,7 +1348,8 @@ def static(m, out, views_only=None, x2_only=False):
         for h in (12, 24, 48, 9999):   # overnight 10-30: NBM 12 / 24 / 48 h and run-total precip + snow = sums of the 6 h fields
             lab = "since the run started" if h == 9999 else f"in the {h} h ending at the valid time"
             prods["nqpf" + ("tot" if h == 9999 else str(h))] = dict(prods["nqpf6"], cmap_of="qpf", title="Precipitation Total" if h == 9999 else f"{h} h Precipitation",
-                fields=["nq6"], window=h, wstep=6, wsum=True, wfield="nq6", fill="window", sofar=h == 9999, ticks=[0.1, 0.5, 1, 2, 3, 4, 6, 8, 10],
+                fields=["nq6"], window=h, wstep=6, wsum=True, wfield="nq6", fill="window", sofar=h == 9999, **({} if h == 9999 else dict(ticks=[0.1, 0.5, 1, 2, 3, 4, 6, 8, 10])),
+                **(dict(ticks=HS.QPF18_TICKS, keyver="_q18", _cm=HS.qpf18_cmap(), **table(HS.QPF18_LEVELS, HS.qpf18_cmap(), "max")) if h == 9999 else {}),
                 extra=f"NBM liquid equivalent {lab} (sum of the 6 h amounts)  \u00b7  max {{hi}} in in view")
             prods["nsnow" + ("tot" if h == 9999 else str(h))] = dict(prods["nsnow6"], cmap_of="snow", title="Snowfall Total" if h == 9999 else f"{h} h Snowfall",
                 fields=["ns6"], window=h, wstep=6, wsum=True, wfield="ns6", fill="window", sofar=h == 9999, ticks=SNOW_T[48],
@@ -1367,8 +1368,8 @@ def static(m, out, views_only=None, x2_only=False):
         if m == "eps": prods["gust10"]["extra"] = "mean of 50 members' max gust in the 3 h (to F+144) or 6 h (after) ending at the valid time  \u00b7  up to {hi} mph in view"
         if m == "eps": prods["mucape"]["extra"] = "mean of 50 members  \u00b7  blank under 100 J/kg  \u00b7  up to {hi} J/kg in view"
         CM.update(eqpf90=CM["qpf"], esnow=CM["snow"], esnow90=CM["snow"], egust90=CM["gust10"], epcape=None, elows=None, spag=None)
-        prods["eqpf90"] = dict(title="Precipitation Total, 90th Percentile", fields=["apcp90"], key="Precip (in)", ticks=[0.1, 0.5, 1, 2, 3, 4, 6, 8, 10, 12], tickfmt=True,
-                               **table(HS.RAIN_LEVELS, CM["qpf"], "max"), extra="reasonable high end: 5 of 50 members are wetter  \u00b7  since the run started  \u00b7  max {hi} in in view",
+        prods["eqpf90"] = dict(title="Precipitation Total, 90th Percentile", fields=["apcp90"], key="Precip (in)", ticks=HS.QPF18_TICKS, tickfmt=True, keyver="_q18", _cm=HS.qpf18_cmap(),
+                               **table(HS.QPF18_LEVELS, HS.qpf18_cmap(), "max"), extra="reasonable high end: 5 of 50 members are wetter  \u00b7  since the run started  \u00b7  max {hi} in in view",
                                pct=[0, 100], dec=2, fmt="in2", accum=True)
         prods["esnow"] = dict(title="Snowfall Total (ens. mean, 10:1)", fields=["asnow"], key="Snow (in)", ticks=[0.1, 1, 3, 6, 10, 15, 24, 36, 48], tickfmt=True,
                               **table(M.SNOW_LEVELS, CM["snow"], "max"), extra="mean of 50 members' snowfall water x 10  \u00b7  since the run started  \u00b7  max {hi} in in view",
@@ -1467,7 +1468,7 @@ def static(m, out, views_only=None, x2_only=False):
         for vid in vids:
             fn = f"static/key_{m}_{pid}{kv}_{vid}.png"; P["keys"][vid] = fn
             fig, ax, ky = layer_fig(vid); x0, x1, y0, y1 = ax.get_extent(TM.VIEWS[vid]["proj"])
-            X, Y = np.meshgrid([x0, x1], [y0, y1]); L = np.asarray(P["levels"]); cm = CM[pid] if pid in CM else CM[P["cmap_of"]]
+            X, Y = np.meshgrid([x0, x1], [y0, y1]); L = np.asarray(P["levels"]); cm = P["_cm"] if "_cm" in P else CM[pid] if pid in CM else CM[P["cmap_of"]]
             kw = P.get("kw"); tkd = P["ticks"]
             if kw:   # 11-01: per-bin cell widths: draw on display positions (cumulative widths, proportional spacing), ticks mapped onto them
                 Ld = np.concatenate([[0.0], np.cumsum(kw)]); tkd = [float(np.interp(t, L, Ld)) for t in P["ticks"]]; L = Ld
@@ -1487,6 +1488,7 @@ def static(m, out, views_only=None, x2_only=False):
             HS.credit(fig, TM.CREDIT_NOAA if (pid == "t2m" and m in NOAA) else (M.credit(m) if m in M.MODELS else M.credit("gfs") if minfo(m).get("noaa") else TM.CREDIT.format(name=minfo(m)["name"])))
             sizes[f"key_{m}_{pid}_{vid}"] = save(fig, f"{out}/{fn}")
         P["ticks"] = [float(t) for t in tk0]
+    for P in prods.values(): P.pop("_cm", None)   # 11-03 q18: colormap objects are for the key pictures only (not JSON)
     prods_x = {k: prods.pop(k) for k in [k for k, v in prods.items() if v.pop("xprod", False)]}   # Severe tab 10-31: manifest products_x
     if x2_only:
         json.dump(prods, open(f"{out}/products_{m}.json", "w"), indent=1)
