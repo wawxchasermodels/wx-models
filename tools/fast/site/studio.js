@@ -1260,8 +1260,10 @@ if (!CLEAN) {
   // one the viewer reads; this one drives it. Phones keep it under the 16:9 frame (bottom dock unchanged).
   // 11-04 (t2343u): its own row under the menu items, starting under the View menu and running ~480 px toward Share (not on the menu line)
   if (innerWidth > 820) { const bar_ = document.getElementById("bar"); box.classList.add("inbar"); document.body.classList.add("longscrub"); bar_.appendChild(box);
-    const vx = () => { const v = document.getElementById("view"), lb = v && v.closest("label"); if (!lb) return; const x = lb.getBoundingClientRect().left - bar_.getBoundingClientRect().left - parseFloat(getComputedStyle(bar_).paddingLeft);
-      box.style.setProperty("--scrx", Math.max(0, Math.min(x, bar_.clientWidth - 500)) + "px"); };
+    // t2343u: overlay row under the View menu (absolute, so the bar height and the frames stay exactly as in Map); the short #step keeps its space, invisible
+    const vx = () => { const v = document.getElementById("view"), lb = v && v.closest("label"); if (!lb) return; const br = bar_.getBoundingClientRect(), r = lb.getBoundingClientRect();
+      const w = Math.min(480, Math.max(240, br.width - 24 - 230)); const x = Math.max(12, Math.min(r.left - br.left, br.width - 12 - w - 230));
+      box.style.setProperty("--scrw", w + "px"); box.style.setProperty("--scrx", x + "px"); box.style.setProperty("--scry", (r.bottom - br.top + 4) + "px"); };
     vx(); addEventListener("resize", vx); if ("ResizeObserver" in window) new ResizeObserver(vx).observe(bar_);
     const ln = document.getElementById("loadnote"); if (ln) box.querySelector(".sw").appendChild(ln); }
   else fh.insertBefore(box, hint);
