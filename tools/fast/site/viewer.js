@@ -2199,7 +2199,7 @@ function obsOpen() {
     const l = document.createElement("link"); l.rel = "stylesheet"; l.href = "obs/obs.css"; document.head.appendChild(l);
     const sc = document.createElement("script"); sc.src = "obs/obs.js"; sc.onerror = bad; document.body.appendChild(sc);
     // 11-03: radar + GOES-West layers (obs/obsimg.js, off by default); the obs map still opens if it fails to load
-    sc.onload = () => { const s2 = document.createElement("script"); s2.src = "obs/obsimg.js?v=20261104b"; s2.onload = ok; s2.onerror = ok; document.body.appendChild(s2); };
+    sc.onload = () => { const s2 = document.createElement("script"); s2.src = "obs/obsimg.js?v=20261104c"; s2.onload = ok; s2.onerror = ok; document.body.appendChild(s2); };
   });
   obsLoad.then(() => Obs.show(), () => { $("obs-root").textContent = "Observations could not load."; obsLoad = null; });
 }
