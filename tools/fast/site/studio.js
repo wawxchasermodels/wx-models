@@ -29,7 +29,7 @@ const getFr = (k) => {
 };
 const setFr = (k, fr) => { if (!CLEAN) localStorage.setItem(key(k), JSON.stringify(fr)); };
 let last = null;   // {cv, cur, step}
-const fmtTick = (v, P) => { if (P.levels && P.levels[0] === 0.01 && P.levels[P.levels.length - 1] === 18) return Math.abs(v - Math.round(v)) < 1e-6 ? String(Math.round(v)) : String(+(+v).toFixed(2));   // 11-03 t2254u: 18 in precip key, "4 6 8 10 12" not "4.0 6.0 ..." (crowded on 16:9)
+const fmtTick = (v, P) => { if (P.levels && P.levels[0] === 0.01 && [12, 18].includes(P.levels[P.levels.length - 1])) return Math.abs(v - Math.round(v)) < 1e-6 ? String(Math.round(v)) : String(+(+v).toFixed(2));   // 11-03 t2254u: 18 in precip key, "4 6 8 10 12" not "4.0 6.0 ..." (crowded on 16:9)
    const a = P.ticks || []; const dec = a.some((t) => Math.abs(t - Math.round(t)) > 1e-6) ? (a.some((t) => Math.abs(t * 10 - Math.round(t * 10)) > 1e-6) ? 2 : 1) : 0; return Number(v).toFixed(dec); };
 
 // 10-31 7:30 PM Studio wide Washington view (viewer.js addStudioViews): WT[model] = the normal Washington view's area, in the wide

@@ -405,6 +405,10 @@ const allProds = md => md._allP || (md._allP = (() => {
     { keys: Object.fromEntries(Object.entries(A.mslpa.keys || {}).map(([v, k]) => [v, "@mkeys/" + k.replace("_mslpa_", "_mslpa_a80_")])) });
   for (const pid of ["qpf", "eqpf90", "nqpftot"]) { const P = A[pid]; if (P && P.levels && P.levels[P.levels.length - 1] < 18)
     A[pid] = Object.assign({}, P, QPF_Q18, { keys: Object.fromEntries(Object.entries(P.keys || {}).map(([v, k]) => [v, "@mkeys/" + k.replace(`_${pid}_`, `_${pid}_q18_`)])) }); }
+  // 11-04 (Benjamin t2279u "added to the high end of shorter interval like 24 hour precipitation key"): interval precip keys (1 / 3 / 6 / 12 /
+  // 24 / 48 h, MSLP + precip; 0.01-12 in) get numbers up to 12 (4 6 8 10 12 after their own top tick); a label that would touch is skipped
+  for (const [k, P] of Object.entries(A)) if (P && Array.isArray(P.levels) && Array.isArray(P.ticks) && P.levels[0] === 0.01 && P.levels[P.levels.length - 1] === 12 && /precip \(in\)/i.test(P.key || "")) {
+    const mx = Math.max(...P.ticks); if (mx < 12) A[k] = Object.assign({}, P, { ticks: [...P.ticks, ...[4, 6, 8, 10, 12].filter((t) => t > mx)] }); }
   // 11-03 (Benjamin: "thin isobar lines WITH every 2 mb spacing", mock /workspace/isobar_mock 2_denser + 3_thinner): every MSLP isobar
   // layer (all models, viewer + Studio + compare) draws every 2 mb at 0.75 pt with a 1.6 pt halo; smoothing (sigma) unchanged.
   // Copies only: the manifest's own product objects are not touched (an R2 manifest edit is not needed for this).
