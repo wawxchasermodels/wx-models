@@ -34,10 +34,10 @@ const ObsImg = (() => {
       tiles: { detail: { box: [-130, 39, -104, 53], px: [2080, 1120] }, wide: { box: [-130, 30, -100, 55], px: [1200, 1250] } },
       credit: "Radar: NOAA/NWS MRMS base reflectivity (public domain)" },
     ir: { label: "Clean IR", kind: "gibs", layer: "GOES-West_ABI_Band13_Clean_Infrared", fmt: "image/jpeg", alpha: 1, n: 12, stepMin: 10, refreshMin: 10,
-      tiles: { detail: { box: [-140, 37, -100, 57], px: [2000, 1000] }, wide: { box: [-180, 15, -85, 72], px: [2375, 1425] } },
+      tiles: { detail: { box: [-140, 37, -100, 57], px: [2000, 1000] }, wide: { box: [-180, 15, -55, 78], px: [3125, 1575] } },
       credit: "Satellite: NOAA GOES-West Clean IR (band 13) via NASA GIBS/ESDIS" },
     gc: { label: "GeoColor", kind: "gibs", layer: "GOES-West_ABI_GeoColor", fmt: "image/jpeg", alpha: 1, n: 12, stepMin: 10, refreshMin: 10,
-      tiles: { detail: { box: [-140, 37, -100, 57], px: [2000, 1000] }, wide: { box: [-180, 15, -85, 72], px: [2375, 1425] } },
+      tiles: { detail: { box: [-140, 37, -100, 57], px: [2000, 1000] }, wide: { box: [-180, 15, -55, 78], px: [3125, 1575] } },
       credit: "Satellite: NOAA GOES-West GeoColor, NOAA/NESDIS/STAR, CIRA/NOAA via NASA GIBS/ESDIS" },
     // detail = PNW sector over the West US sector; wide = West US sector (the box is only used to pick the tile)
     wv: { label: "Water vapor", kind: "star", alpha: 1, n: 12, stepMin: 5, refreshMin: 4,
@@ -167,6 +167,13 @@ const ObsImg = (() => {
       const c = document.createElement("canvas"); c.width = W; c.height = H; const g = c.getContext("2d", { willReadFrequently: true }); g.drawImage(im, 0, 0);
       const id = g.getImageData(0, 0, W, H), d = id.data, N = W * H, bad = new Uint8Array(N);
       for (let p = 0, i = 0; p < N; p++, i += 4) if (lineAt(d, i)) bad[p] = 1;
+      // 11-03 (t2254u) faint pink JPEG traces of the lines (e.g. over the Prairies / Dakotas on blue or yellow): red-minus-green clearly above its 9x9 neighbourhood mean
+      { const I = new Float64Array((W + 1) * (H + 1)), e = (p) => d[p * 4] - d[p * 4 + 1];
+        for (let y = 0; y < H; y++) { let row = 0; for (let x = 0; x < W; x++) { row += e(y * W + x); I[(y + 1) * (W + 1) + x + 1] = I[y * (W + 1) + x + 1] + row; } }
+        for (let y = 0; y < H; y++) { const y0 = Math.max(0, y - 4), y1 = Math.min(H, y + 5);
+          for (let x = 0; x < W; x++) { const p = y * W + x; if (bad[p]) continue; const x0 = Math.max(0, x - 4), x1 = Math.min(W, x + 5);
+            const m = (I[y1 * (W + 1) + x1] - I[y0 * (W + 1) + x1] - I[y1 * (W + 1) + x0] + I[y0 * (W + 1) + x0]) / ((y1 - y0) * (x1 - x0));
+            if (e(p) - m > 16) bad[p] = 1; } } }
       // alignment test: NOAA's own state / border lines must still be where the fitted geometry puts them
       let hit = 0; const R = S.ref, n = R.length / 2;
       for (let k = 0; k < R.length; k += 2) { const x = R[k], y = R[k + 1]; let h = 0; for (let dy = -1; dy <= 1 && !h; dy++) for (let dx = -1; dx <= 1; dx++) if (bad[(y + dy) * W + x + dx]) { h = 1; break; } hit += h; }
@@ -246,7 +253,7 @@ const ObsImg = (() => {
 
   /* ---- WebGL reprojection (lat/lon image -> obs map Lambert conformal at the current zoom / pan) ---- */
   const VS = "attribute vec2 p;void main(){gl_Position=vec4(p,0.,1.);}";
-  const FS = `precision highp float;uniform sampler2D tex;uniform vec2 sz;uniform float dpr,k,cx,cy,n,F,rho0,L0,alpha,geo;uniform vec4 box,gg;uniform vec3 cut;
+  const FS = `precision highp float;uniform sampler2D tex;uniform vec2 sz;uniform float dpr,k,cx,cy,n,F,rho0,L0,alpha,geo,lim;uniform vec4 box,gg;uniform vec3 cut;
     const float R=6371.,D=0.017453292519943295;
     void main(){vec2 css=vec2(gl_FragCoord.x,sz.y-gl_FragCoord.y)/dpr;vec2 vp=sz/dpr;
       float x=(css.x-vp.x*.5)/k+cx, y=(css.y-vp.y*.5)/k+cy, yr=rho0+y, s=sign(n);
@@ -260,6 +267,7 @@ const ObsImg = (() => {
         if(uv.y>cut.x||(uv.x<cut.y&&uv.y>cut.z)){discard;}
       }
       if(uv.x<0.||uv.x>1.||uv.y<0.||uv.y>1.){discard;}
+      if(cos(lat*D)*cos((lon+137.)*D)<lim){discard;}   // GIBS GOES-West: past ~81 deg from the sub-point is no-data black
       vec4 c=texture2D(tex,uv);if(geo>.5&&c.r+c.g+c.b<.13){discard;}   // space / no-data black on the NOAA images
       gl_FragColor=vec4(c.rgb*c.a*alpha,c.a*alpha);}`;
   function glInit() {
@@ -275,7 +283,7 @@ const ObsImg = (() => {
         for (const [a, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR], [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]]) gl.texParameteri(gl.TEXTURE_2D, a, v);
         return t; });   // unit 0 = satellite, unit 1 = radar, unit 2 / 3 = water vapor West US / full disk under the main frame (each keeps its last frame)
       gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-      const U = {}; for (const u of ["tex", "sz", "dpr", "k", "cx", "cy", "n", "F", "rho0", "L0", "alpha", "box", "geo", "gg", "cut"]) U[u] = gl.getUniformLocation(pr, u);
+      const U = {}; for (const u of ["tex", "sz", "dpr", "k", "cx", "cy", "n", "F", "rho0", "L0", "alpha", "box", "geo", "gg", "cut", "lim"]) U[u] = gl.getUniformLocation(pr, u);
       ST.gl = { cv, gl, U, tex, cur: [null, null, null, null] };
     } catch (e) { ST.glFail = "Radar / satellite could not start (" + (e.message || e) + ")"; return null; }
     return ST.gl;
@@ -310,7 +318,7 @@ const ObsImg = (() => {
     const draw1 = (u, im, setBox) => { try { gl.activeTexture(gl.TEXTURE0 + u); gl.bindTexture(gl.TEXTURE_2D, G.tex[u]); gl.uniform1i(U.tex, u);
       if (G.cur[u] !== im) { gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, im); G.cur[u] = im; }
       setBox(); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4); drew++; } catch (e) { ST.drawErr = (ST.drawErr || 0) + 1; G.cur[u] = null; } };
-    const geoBox = (sec) => () => { const S_ = SEC[sec], q = S_.g; gl.uniform1f(U.geo, 1); gl.uniform4f(U.gg, q[0], q[1], q[2] * S_.W, q[3] * S_.H); gl.uniform3f(U.cut, S_.cut[0], S_.cut[1], S_.cut[2]); gl.uniform4f(U.box, 0, 0, 1, 1); gl.uniform1f(U.alpha, 1); };
+    const geoBox = (sec) => () => { const S_ = SEC[sec], q = S_.g; gl.uniform1f(U.geo, 1); gl.uniform1f(U.lim, -2); gl.uniform4f(U.gg, q[0], q[1], q[2] * S_.W, q[3] * S_.H); gl.uniform3f(U.cut, S_.cut[0], S_.cut[1], S_.cut[2]); gl.uniform4f(U.box, 0, 0, 1, 1); gl.uniform1f(U.alpha, 1); };
     for (const id of [ST.sat, ST.radar ? "radar" : ""].filter(Boolean)) {   // satellite first, radar on top
       const f = frameImg(id, ST.idx < 0 ? len() - 1 : ST.idx); if (!f) continue;
       const u = id === "radar" ? 1 : 0;
@@ -319,8 +327,8 @@ const ObsImg = (() => {
           if (rw) draw1(tl === "fd" ? 3 : 2, rw.im, geoBox(secOf(tl))); }
         draw1(u, f.im, geoBox(secOf(f.tile))); ST.shown[id] = f.t; continue;
       }
-      for (const [tl, tu] of undersOf(id, f.tile, f.t)) { const ru = ST.img.get(id + "|" + tl + "|" + tu); if (ru && ru.ok) draw1(2, ru.im, () => { const b = SRC[id].tiles[tl].box; gl.uniform1f(U.geo, 0); gl.uniform4f(U.box, b[0], b[1], b[2], b[3]); gl.uniform1f(U.alpha, SRC[id].alpha); }); }
-      draw1(u, f.im, () => { const b = SRC[id].tiles[f.tile].box; gl.uniform1f(U.geo, 0); gl.uniform4f(U.box, b[0], b[1], b[2], b[3]); gl.uniform1f(U.alpha, SRC[id].alpha); });
+      for (const [tl, tu] of undersOf(id, f.tile, f.t)) { const ru = ST.img.get(id + "|" + tl + "|" + tu); if (ru && ru.ok) draw1(2, ru.im, () => { const b = SRC[id].tiles[tl].box; gl.uniform1f(U.geo, 0); gl.uniform1f(U.lim, SRC[id].kind === "gibs" ? 0.165 : -2); gl.uniform4f(U.box, b[0], b[1], b[2], b[3]); gl.uniform1f(U.alpha, SRC[id].alpha); }); }
+      draw1(u, f.im, () => { const b = SRC[id].tiles[f.tile].box; gl.uniform1f(U.geo, 0); gl.uniform1f(U.lim, SRC[id].kind === "gibs" ? 0.165 : -2); gl.uniform4f(U.box, b[0], b[1], b[2], b[3]); gl.uniform1f(U.alpha, SRC[id].alpha); });
       ST.shown[id] = f.t;
     }
     if (drew) { g.setTransform(1, 0, 0, 1, 0, 0); g.imageSmoothingEnabled = true; g.drawImage(cv, 0, 0); }
