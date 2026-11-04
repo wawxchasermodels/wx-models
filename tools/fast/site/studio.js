@@ -357,16 +357,25 @@ function renderPass(k) {
   c.save(); sharpShadow(c, k); const pw = pill(c, x, y, site.toUpperCase(), Math.round(f.run * 0.95), "#2f8cff", "#fff");
   c.font = `600 ${f.run}px Montserrat`; c.fillStyle = "#c9ced8"; c.fillText(`${cyc.slice(8)}Z run`, x + pw + 14, y + f.run * 1.08);
   y += f.run * 1.55 + f.title * 1.02; c.font = `800 ${f.title}px Montserrat`; c.fillStyle = "#fff";
-  const ttl = k === "v" ? ["Washington", "Pass Forecast"] : ["Washington Pass Forecast"]; ttl.forEach((t, i) => c.fillText(t, x, y + i * f.title * 1.08)); y += (ttl.length - 1) * f.title * 1.08 + f.day * 1.3;
+  // 11-04 (t2313u): one-line title like the obs title when it fits the frame
+  const ttl = k === "h" || c.measureText("Washington Pass Forecast").width <= f.W - 2 * f.pad ? ["Washington Pass Forecast"] : ["Washington", "Pass Forecast"]; ttl.forEach((t, i) => c.fillText(t, x, y + i * f.title * 1.08)); y += (ttl.length - 1) * f.title * 1.08 + f.day * 1.3;
   const rs = (D.note.match(/Run start ([^.]*PT)/) || [])[1] || ""; c.font = `800 ${f.day}px Montserrat`; c.fillStyle = "#ffc24d"; c.fillText(rs ? `Run start ${rs}` : "", x, y);
-  let top = y + f.day * 0.9; c.restore(); ovPut(c0, f, k);   // header onto the frame now (the key below reuses the overlay layer)
+  let top = y + f.day * 0.9; const headBot = y + f.day * 0.45; c.restore(); ovPut(c0, f, k);   // header onto the frame now (the key below reuses the overlay layer)
   // bottom: shading key + notes + credit, measured first so the table gets the rest
   const ec = window.studioIsEc && window.studioIsEc(PF.run), cr = ec ? [`Data: \u00a9 ${new Date().getFullYear()} ECMWF (www.ecmwf.int), CC BY 4.0. Modified.`] : [];
-  const kfs = k === "v" ? 26 : 22, nfs = k === "v" ? 21 : 18, crfs = k === "v" ? 15 : 14, est = /estimated 10:1/.test(D.note);
-  const notes = ["Elevation = highway summit (WSDOT). Temps corrected to summit height.", est ? "Snow estimated 10:1 where 2 m temp \u2264 33\u00b0F." : ""].filter(Boolean);
-  const nl = k === "v" ? notes : [notes.join("  ")];
-  const botH = kfs * 1.7 + 14 + nl.length * (nfs + 9) + (cr.length ? crfs + 14 : 0) + (k === "v" ? 70 : 24);
-  const bot = f.H - botH - 16;
+  // 11-04 (t2313u "framed similar to the other products, for my obs setup"): bottom laid out like Observations: shading key where the
+  // obs layer legend sits (16:9 bottom-left on the credit line, 9:16 just above the credits), notes + credit in the obs credit block
+  // (16:9 bottom-right, 9:16 bottom-left at H-70), same 15 / 14 px credit size. The table then fills the space between header and key.
+  const kfs = k === "v" ? 30 : 26, est = /estimated 10:1/.test(D.note);
+  const dl = ["Elevation = highway summit (WSDOT). Temps corrected to summit height.", est ? "Snow estimated 10:1 where 2 m temp \u2264 33\u00b0F." : "", ...cr].filter(Boolean);
+  let dfs = k === "v" ? 15 : 14; { const mc0 = document.createElement("canvas").getContext("2d"), dMax = k === "v" ? f.W - 2 * f.pad : Math.round(f.W * 0.52);
+    mc0.font = `600 ${dfs}px Montserrat`; while (dfs > 11 && Math.max(...dl.map((l) => mc0.measureText(l).width)) > dMax) { dfs -= 1; mc0.font = `600 ${dfs}px Montserrat`; } }
+  const dlh = dfs + 7, KEY = [["s1", "1\u20136\u2033 snow"], ["s2", "6\u201312\u2033"], ["s3", "12\u2033+"], ["fzb", "Freezing level below the pass"]];
+  const kh = kfs * 1.55, kmx = k === "v" ? f.W - f.pad : f.W * 0.46;
+  const krows = (() => { const mk = document.createElement("canvas").getContext("2d"); mk.font = `800 ${kfs}px Montserrat`; const rows = [[]]; let bx_ = x;
+    for (const it of KEY) { const w = mk.measureText(it[1]).width + kfs * 1.2; if (bx_ + w > kmx && bx_ > x + 1) { rows.push([]); bx_ = x; } rows[rows.length - 1].push([...it, w]); bx_ += w + 12; } return rows; })();
+  const ky0 = k === "v" ? f.H - 70 - (dl.length - 1) * dlh - dfs - 30 - kh : f.H - 24 - kh + kfs * 0.35;   // same y as the obs legend row
+  const bot = ky0 - (krows.length - 1) * (kh + 10) - 24;
   // table: pick columns + font so it fits the frame width and the space between header and key
   const mc = document.createElement("canvas").getContext("2d"), avW = f.W - 2 * f.pad, avH = bot - top - 10;
   const fitT = (cols, fs) => { const hs = Math.round(fs * 0.62), pad = Math.round(fs * 0.55), cw = cols.map(() => 0);
@@ -386,7 +395,8 @@ function renderPass(k) {
   for (const cols of opts) { for (let fs = f0; fs >= fmin && !L; fs -= 1) L = fitT(cols, fs); if (L) break; }
   if (!L) { const cols = opts[opts.length - 1]; for (let fs = fmin; fs >= 12 && !L; fs -= 1) L = fitT(cols, fs); }
   if (L) {
-    const g = c0, ty = Math.round(top + Math.max(0, (avH - L.H) * (k === "v" ? 0.35 : 0.2)));
+    { const rh2 = Math.min(L.rh * 1.6, (avH - L.hh) / D.body.length); if (rh2 > L.rh) { L.ro = (rh2 - L.rh) / 2; L.rh = rh2; L.H = L.hh + rh2 * D.body.length; } else L.ro = 0; }   // 11-04 (t2313u): rows grow to fill the frame (no empty band)
+    const g = c0, ty = Math.round(top + Math.max(0, (avH - L.H) / 2));
     g.save(); g.fillStyle = "rgba(29,32,39,0.96)"; g.beginPath(); g.roundRect ? g.roundRect(x - 2, ty, avW + 4, L.H, 14) : g.rect(x - 2, ty, avW + 4, L.H); g.fill();
     g.fillStyle = "#262a33"; g.beginPath(); g.roundRect ? g.roundRect(x - 2, ty, avW + 4, L.hh, [14, 14, 0, 0]) : g.rect(x - 2, ty, avW + 4, L.hh); g.fill();
     let cx_ = x; g.textBaseline = "top";
@@ -395,8 +405,8 @@ function renderPass(k) {
       g.font = `600 ${L.hs}px Montserrat`; g.fillStyle = "#a7abb3"; L.hl[q].forEach((ln, i) => g.fillText(ln, tx, ty + L.pad * 0.6 + L.hs * 1.12 * 1.35 + i * L.hs * 1.25));
       D.body.forEach((r, i) => { const cell = r[j]; if (!cell) return; const ry = ty + L.hh + i * L.rh, bg = cell.cls.split(" ").map((s_) => PFCOL[s_]).find(Boolean);
         if (bg) { g.fillStyle = bg; g.fillRect(cx_ + 3, ry + 3, w - 6, L.rh - 6); }
-        g.font = `${q === 0 || /s3|fzb/.test(cell.cls) ? 800 : 700} ${L.fs}px Montserrat`; g.fillStyle = "#fff"; g.textAlign = al; g.fillText(cell.t[0] || "", tx, ry + L.pad * 0.55);
-        if (cell.t[1]) { g.font = `600 ${L.hs}px Montserrat`; g.fillStyle = "#b9bec7"; g.fillText(cell.t[1], tx, ry + L.pad * 0.55 + L.fs * 1.2); } });
+        g.font = `${q === 0 || /s3|fzb/.test(cell.cls) ? 800 : 700} ${L.fs}px Montserrat`; g.fillStyle = "#fff"; g.textAlign = al; g.fillText(cell.t[0] || "", tx, ry + L.ro + L.pad * 0.55);
+        if (cell.t[1]) { g.font = `600 ${L.hs}px Montserrat`; g.fillStyle = "#b9bec7"; g.fillText(cell.t[1], tx, ry + L.ro + L.pad * 0.55 + L.fs * 1.2); } });
       cx_ += w; });
     g.strokeStyle = "#323743"; g.lineWidth = 1.5; for (let i = 1; i <= D.body.length - 1; i++) { const yy = Math.round(ty + L.hh + i * L.rh) + 0.5; g.beginPath(); g.moveTo(x + 8, yy); g.lineTo(x + avW - 8, yy); g.stroke(); }
     g.restore(); f.pfL = { fs: L.fs, cols: L.cols.length, of: D.head.length, top: ty, bot: ty + L.H, key: bot,
@@ -404,16 +414,15 @@ function renderPass(k) {
   } else f.pfL = null;
   window.__pfL = Object.assign(window.__pfL || {}, { [k]: f.pfL });
   // key + notes + credit (overlay layer, same shadow as the maps)
-  const o = ovLayer(f); o.save(); sharpShadow(o, k); let by = bot + 10, bx = x; o.textBaseline = "middle";
-  for (const [cls, lab] of [["s1", "1\u20136\u2033 snow"], ["s2", "6\u201312\u2033"], ["s3", "12\u2033+"], ["fzb", "Freezing level below the pass"]]) {
-    o.font = `800 ${kfs}px Montserrat`; const w = o.measureText(lab).width + kfs * 1.2, h = kfs * 1.55; if (bx + w > f.W - f.pad) { bx = x; by += h + 10; }
-    noShadow(o); o.fillStyle = PFCOL[cls]; o.beginPath(); o.roundRect ? o.roundRect(bx, by, w, h, h / 2) : o.rect(bx, by, w, h); o.fill(); sharpShadow(o, k);
-    o.fillStyle = "#fff"; o.fillText(lab, bx + kfs * 0.6, by + h / 2 + 1); bx += w + 12; }
-  o.textBaseline = "alphabetic"; let ny = by + kfs * 1.55 + 14 + nfs; o.font = `600 ${nfs}px Montserrat`; o.fillStyle = "#c9ced8";
-  for (const t of nl) { o.fillText(t, x, ny); ny += nfs + 9; }
-  if (cr.length) { o.font = `600 ${crfs}px Montserrat`; o.fillStyle = "rgba(236,239,244,0.95)"; if (k === "v") o.fillText(cr[0], x, f.H - 70); else { o.textAlign = "right"; o.fillText(cr[0], f.W - f.pad, f.H - 24); o.textAlign = "left"; } }
-  o.restore(); ovPut(c0, f, k);
-  const cnr = BR.corner && LOGOS[BR.logo] ? cornerBox(k, k === "v" ? 120 : 40, k === "v" ? 120 : 40, f.H - (k === "v" ? 140 : 80)) : null; if (cnr) cornerLogo(c0, cnr);
+  const cnr = BR.corner && LOGOS[BR.logo] ? cornerBox(k, k === "v" ? 120 : 34, headBot, f.H - f.bot + (k === "v" ? 110 : 62)) : null, cB = cnr && (BR.cpos === "br" || BR.cpos === "bl") ? cnr : null;
+  const o = ovLayer(f); o.save(); sharpShadow(o, k); const kx0 = x + (k === "h" && cB && BR.cpos === "bl" ? cB.s + 20 : 0); o.textBaseline = "middle";
+  krows.forEach((row, ri) => { let bx = kx0; const by = ky0 - (krows.length - 1 - ri) * (kh + 10);
+    for (const [cls, lab, w] of row) { o.font = `800 ${kfs}px Montserrat`; noShadow(o); o.fillStyle = PFCOL[cls]; o.beginPath(); o.roundRect ? o.roundRect(bx, by, w, kh, kh / 2) : o.rect(bx, by, w, kh); o.fill(); sharpShadow(o, k);
+      o.fillStyle = "#fff"; o.fillText(lab, bx + kfs * 0.6, by + kh / 2 + 1); bx += w + 12; } });
+  o.textBaseline = "alphabetic"; o.font = `600 ${dfs}px Montserrat`; o.fillStyle = "rgba(236,239,244,0.95)";
+  if (k === "v") dl.forEach((l, i) => o.fillText(l, f.pad + (cB && BR.cpos === "bl" ? cB.s + 18 : 0), f.H - 70 - (dl.length - 1 - i) * dlh));
+  else { o.textAlign = "right"; dl.forEach((l, i) => o.fillText(l, f.W - f.pad - (cB && BR.cpos === "br" ? cB.s + 20 : 0), f.H - 24 - (dl.length - 1 - i) * dlh)); o.textAlign = "left"; }
+  o.restore(); ovPut(c0, f, k); if (cnr) cornerLogo(c0, cnr);
   window.__studio = (window.__studio || 0) + 1; window.__studioPass = (window.__studioPass || 0) + 1;
 }
 function renderMg(k, frO) {
