@@ -1540,7 +1540,8 @@ function isoGeom(ctx, st, D, I, avoid) {
 }
 function paintIsobars(ctx, I, all, labels) {
   // 11-03: Studio hides line labels that would sit under its color bar / credit rows (window.studioLabelHidden, studio.js); lines stay
-  if (window.studioLabelHidden && Q.get("studio")) labels = labels.filter(b => { try { return !window.studioLabelHidden(b.x, b.y); } catch (e) { return true; } });
+  if (window.studioLabelHidden && Q.get("studio")) labels = labels.filter(b => { try { const c = Math.abs(Math.cos(b.ang || 0)), s_ = Math.abs(Math.sin(b.ang || 0)), hh = pt(I.lab_pt ? I.lab_pt * 0.6 : 6);   // 11-03 t2254u: the label's rotated half-size too (a vertical "12 s" reached into the bar)
+    return !window.studioLabelHidden(b.x, b.y, c * b.w / 2 + s_ * hh, s_ * b.w / 2 + c * hh); } catch (e) { return true; } });
   ctx.save();   // clip out label boxes so lines break under the numbers (matplotlib clabel inline)
   ctx.beginPath(); ctx.rect(0, 0, ctx.canvas.width, ctx.canvas.height);
   for (const b of labels) {

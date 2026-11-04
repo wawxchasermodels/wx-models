@@ -29,7 +29,8 @@ const getFr = (k) => {
 };
 const setFr = (k, fr) => { if (!CLEAN) localStorage.setItem(key(k), JSON.stringify(fr)); };
 let last = null;   // {cv, cur, step}
-const fmtTick = (v, P) => { const a = P.ticks || []; const dec = a.some((t) => Math.abs(t - Math.round(t)) > 1e-6) ? (a.some((t) => Math.abs(t * 10 - Math.round(t * 10)) > 1e-6) ? 2 : 1) : 0; return Number(v).toFixed(dec); };
+const fmtTick = (v, P) => { if (P.levels && P.levels[0] === 0.01 && P.levels[P.levels.length - 1] === 18) return Math.abs(v - Math.round(v)) < 1e-6 ? String(Math.round(v)) : String(+(+v).toFixed(2));   // 11-03 t2254u: 18 in precip key, "4 6 8 10 12" not "4.0 6.0 ..." (crowded on 16:9)
+   const a = P.ticks || []; const dec = a.some((t) => Math.abs(t - Math.round(t)) > 1e-6) ? (a.some((t) => Math.abs(t * 10 - Math.round(t * 10)) > 1e-6) ? 2 : 1) : 0; return Number(v).toFixed(dec); };
 
 // 10-31 7:30 PM Studio wide Washington view (viewer.js addStudioViews): WT[model] = the normal Washington view's area, in the wide
 // view's figure px (found by matching the two views' grid look-up tables, so it follows any model / projection); "pending" while loading
@@ -844,15 +845,15 @@ const BX = { on: false, cancel: false };
 const MORDER = ["hrrr", "rrfs", "nbm", "gfs", "ifs", "ifs9", "aifs", "eps", "aens", "aensm", "epsm", "gfsw", "oisst"];
 // 11-03 (WW3 swell-period labels under the 16:9 color bar): map line labels whose spot lands in the bottom color bar / credit band of
 // either frame are not drawn (the viewer asks while painting; the lines themselves stay)
-window.studioLabelHidden = (x, y) => {
+window.studioLabelHidden = (x, y, ex = 0, ey = 0) => {   // ex / ey: the label's half width / height in map px (11-03 t2254u)
   if (!last || MG.on) return false;
-  return ["v", "h"].some((k) => { const f = F[k]; if (!f) return false; const r = crop(k, getFr(k)), X = (x - r.sx / r.rs) * r.kk, Y = (y - r.sy / r.rs) * r.kk;
-    if (X > -60 && X < f.W + 60 && Y > f.H - (k === "v" ? 250 : 135) && Y < f.H + 30) return true;
+  return ["v", "h"].some((k) => { const f = F[k]; if (!f) return false; const r = crop(k, getFr(k)), X = (x - r.sx / r.rs) * r.kk, Y = (y - r.sy / r.rs) * r.kk, EX = ex * r.kk, EY = ey * r.kk;
+    if (X + EX > -60 && X - EX < f.W + 60 && Y + EY > f.H - (k === "v" ? 250 : 135) && Y - EY < f.H + 30) return true;
     // 11-03 small fixes (a swell-period "10 s" sat under the 16:9 title): also the header block and the F+ badge (boxes from the last
     // frame paint; before the first paint an estimate from the frame's font sizes), with ~half a label of margin
     const top = k === "v" ? 120 : 34, hd = f.hdr || [0, 0, f.pad + (k === "v" ? f.W : f.W * 0.42), top + f.run * 1.55 + f.title * 1.02 + f.day * 1.75 + 14],
       bg = f.badge || [f.W - f.pad - 220, top - 12, f.W, top + f.valid * 1.9 + 12], m_ = 30;
-    return [hd, bg].some((b) => X > b[0] - m_ && X < b[2] + m_ && Y > b[1] - m_ && Y < b[3] + m_); });
+    return [hd, bg].some((b) => X + EX > b[0] - m_ && X - EX < b[2] + m_ && Y + EY > b[1] - m_ && Y - EY < b[3] + m_); });
 };
 function bxFill() {
   const ck = (id, v, t, on) => `<label><input type="checkbox" data-g="${id}" value="${v}"${on ? " checked" : ""}> ${t}</label>`, [m0] = S.run.split("/"), R_ = S.runs[S.run];
