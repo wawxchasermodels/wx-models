@@ -213,9 +213,14 @@ function runText() { const [m, c] = last.cur.run.split("/"), site = (S.man.model
 // bottom a touch smaller (96 / 120 px). br: right-aligned on the credit-line row (16:9: the credit text moves left of it);
 // bl: 9:16 left on the credit row (credit moves right of it), 16:9 just above the colour key's label (the key fills the bottom left);
 // tr: under the F+ badge; tl: under the header text.
+// 11-04 (Benjamin t2353u "move the F+number a bit to the left, my face will be covering it"): one shared setting for the top-right
+// badge (F+ hour / LIVE) and the tr corner logo under it, so every Studio mode (and any new one) inherits it. Fraction of frame width
+// kept clear at the right edge for his face camera (~right 10 %): 13 % of width = 250 px at 1920 (16:9), 140 px at 1080 (9:16).
+const BADGE_FACE_CLEAR = 0.13;
+const badgeRight = (k) => F[k].W - F[k].pad - Math.round(F[k].W * BADGE_FACE_CLEAR);
 function cornerBox(k, badgeBot, headBot, cbY) {
   const f = F[k], p = BR.cpos;
-  if (p === "tr" || p === "tl") { const s = Math.round(f.W * (k === "v" ? 0.10 : 0.08)), gap = k === "v" ? 18 : 14; return { s, x: p === "tl" ? f.pad : f.W - f.pad - s, y: Math.round((p === "tl" ? headBot : badgeBot) + gap) }; }
+  if (p === "tr" || p === "tl") { const s = Math.round(f.W * (k === "v" ? 0.10 : 0.08)), gap = k === "v" ? 18 : 14; return { s, x: p === "tl" ? f.pad : badgeRight(k) - s, y: Math.round((p === "tl" ? headBot : badgeBot) + gap) }; }
   const s = k === "v" ? 96 : 120;
   if (k === "v") return { s, x: p === "bl" ? f.pad : f.W - f.pad - s, y: Math.round(f.H - 70 - 8 - s / 2) };   // centred on the credit text (baseline H-70)
   if (p === "br") return { s, x: f.W - f.pad - s, y: f.H - 14 - s };
@@ -308,7 +313,7 @@ function renderObs(k, frO) {
     y += f.run * 1.55 + f.title * 1.02; } else y += f.title * 0.92; c.font = `800 ${f.title}px Montserrat`; c.fillStyle = "#fff"; c.fillText(I.title, x, y);
   y += f.day * 1.3; c.font = `800 ${f.day}px Montserrat`; c.fillStyle = "#ffc24d"; c.fillText(I.when, x, y);
   const headBot = y + f.day * 0.45;
-  c.font = `800 ${Math.round(f.valid * 1.1)}px Montserrat`; const bt = "LIVE", bw = c.measureText(bt).width + 40, bx = f.W - f.pad - bw, by = k === "v" ? 120 : 34;
+  c.font = `800 ${Math.round(f.valid * 1.1)}px Montserrat`; const bt = "LIVE", bw = c.measureText(bt).width + 40, bx = badgeRight(k) - bw, by = k === "v" ? 120 : 34;
   c.fillStyle = "rgba(17,19,22,0.85)"; c.strokeStyle = "rgba(255,255,255,0.35)"; c.lineWidth = 2; c.beginPath(); c.roundRect ? c.roundRect(bx, by, bw, f.valid * 1.9, 14) : c.rect(bx, by, bw, f.valid * 1.9); c.fill(); noShadow(c); c.stroke(); sharpShadow(c, k);
   c.fillStyle = "#fff"; c.textAlign = "center"; c.fillText(bt, bx + bw / 2, by + f.valid * 1.32); c.textAlign = "left"; c.restore();
   const cnr = BR.corner && LOGOS[BR.logo] ? cornerBox(k, by + f.valid * 1.9, headBot, f.H - f.bot + (k === "v" ? 110 : 62)) : null;
@@ -474,7 +479,7 @@ async function render(k, frO) {   // frO: camera override (MP4 storm-track pan)
     c.font = `600 ${f.run}px Montserrat`; hw = Math.max(hw, pw + 14 + c.measureText("daily analysis").width);
     f.hdr = [x - 12, (k === "v" ? 120 : 34) - 12, x + hw + 16, headBot + 14]; }
   // F+ badge (top right)
-  c.font = `800 ${Math.round(f.valid * 1.1)}px Montserrat`; const bt = m === "oisst" && step.badge ? step.badge[0] : `F+${step.f}`, bw = c.measureText(bt).width + 40, bx = f.W - f.pad - bw, by = k === "v" ? 120 : 34;
+  c.font = `800 ${Math.round(f.valid * 1.1)}px Montserrat`; const bt = m === "oisst" && step.badge ? step.badge[0] : `F+${step.f}`, bw = c.measureText(bt).width + 40, bx = badgeRight(k) - bw, by = k === "v" ? 120 : 34;
   c.fillStyle = "rgba(17,19,22,0.85)"; c.strokeStyle = "rgba(255,255,255,0.35)"; c.lineWidth = 2; c.beginPath(); c.roundRect ? c.roundRect(bx, by, bw, f.valid * 1.9, 14) : c.rect(bx, by, bw, f.valid * 1.9); c.fill(); noShadow(c); c.stroke(); sharpShadow(c, k);
   c.fillStyle = "#fff"; c.textAlign = "center"; c.fillText(bt, bx + bw / 2, by + f.valid * 1.32); c.textAlign = "left"; c.restore();
   f.badge = [bx - 12, by - 12, bx + bw + 12, by + f.valid * 1.9 + 12];
@@ -1004,7 +1009,7 @@ window.studioLabelHidden = (x, y, ex = 0, ey = 0) => {   // ex / ey: the label's
     // 11-03 small fixes (a swell-period "10 s" sat under the 16:9 title): also the header block and the F+ badge (boxes from the last
     // frame paint; before the first paint an estimate from the frame's font sizes), with ~half a label of margin
     const top = k === "v" ? 120 : 34, hd = f.hdr || [0, 0, f.pad + (k === "v" ? f.W : f.W * 0.42), top + f.run * 1.55 + f.title * 1.02 + f.day * 1.75 + 14],
-      bg = f.badge || [f.W - f.pad - 220, top - 12, f.W, top + f.valid * 1.9 + 12], m_ = 30;
+      bg = f.badge || [badgeRight(k) - 220, top - 12, badgeRight(k) + 12, top + f.valid * 1.9 + 12], m_ = 30;
     return [hd, bg].some((b) => X + EX > b[0] - m_ && X - EX < b[2] + m_ && Y + EY > b[1] - m_ && Y - EY < b[3] + m_); });
 };
 function bxFill() {
