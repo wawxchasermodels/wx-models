@@ -1265,10 +1265,10 @@ if (!CLEAN) {
     // so the scrubber never covers a button and the frames never move.
     const vx = () => { const v = document.getElementById("view"), lb = v && v.closest("label"); if (!lb) return; const br = bar_.getBoundingClientRect(), r = lb.getBoundingClientRect();
       const w = Math.min(480, Math.max(240, br.width - 24 - 230)); box.style.setProperty("--scrw", w + "px");
-      const obs = []; document.querySelectorAll("button,select,input,label,canvas,span,b,small,a,div,p").forEach(e => { if (box.contains(e) || e === stp || e.contains(box)) return; if (e.closest && e.closest("footer")) return;
+      const obs = []; document.querySelectorAll("button,select,input,canvas,span,b,small,a,p").forEach(e => { if (box.contains(e) || e === stp || e.contains(box)) return; if (e.closest && e.closest("footer")) return;
         if (!e.offsetParent && getComputedStyle(e).position !== "fixed") return; const q = e.getBoundingClientRect(); if (q.width < 2 || q.height < 2 || q.bottom < 0 || q.top > 400 || q.left < -50) return;
         if (getComputedStyle(e).visibility === "hidden") return; if (/^(SPAN|B|SMALL|A|DIV|P)$/.test(e.tagName) && ![...e.childNodes].some(n => n.nodeType === 3 && n.textContent.trim())) return; obs.push(q); });
-      box.style.setProperty("--scry", "-999px"); const bw = box.getBoundingClientRect().width || (w + 230), bh = 30;
+      box.style.setProperty("--scry", "-999px"); const bb = box.getBoundingClientRect(), bw = bb.width || (w + 230), bh = Math.max(24, Math.min(40, bb.height || 34));
       const hit = (x, y) => obs.some(q => x < q.right + 4 && x + bw > q.left - 4 && y < q.bottom + 2 && y + bh > q.top - 2);
       let best = null; for (let y = r.bottom + 2; y < 300 && !best; y += 2) { for (let x = Math.min(r.left, innerWidth - 12 - bw); x >= Math.max(12, r.left - bw + 120); x -= 8) if (!hit(x, y)) { best = [x, y]; break; } }
       if (!best) best = [Math.max(12, Math.min(r.left, innerWidth - 12 - bw)), r.bottom + 4];
