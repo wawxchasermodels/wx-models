@@ -166,6 +166,10 @@ body.mgmode #bar>:not(#smodel){display:none!important}body.mgmode #scrub,body.mg
 body.obsmode #mgp{display:block;flex:0 0 auto;background:#1d2027;border-bottom:1px solid #2c3039;padding:6px 10px}#obsp{display:none}body.obsmode #obsp{display:block}body.obsmode #mgf{display:none}
 body.obsmode #bar>:not(#smodel){display:none!important}body.obsmode #scrub,body.obsmode #dock,body.obsmode .shd button[data-a="obs"]{display:none!important}body.phone.obsmode{padding-bottom:0}
 body.obsmode #mp4p .mp-row:has(#mpa),body.obsmode #mp4p .mp-row:has(#mpb),body.obsmode #mp4p label:has(#mpe),body.obsmode #mp4p .mp-row:has(#mps),body.obsmode #mpsfr,body.obsmode #mp4p .mp-row:has(#mppre){display:none!important}
+/* 11-04 (t2292u): Studio > Pass Forecaster: model picker in the panel; map controls, hour slider and MP4 / OBS hidden */
+body.passmode #mgp{display:block;flex:0 0 auto;background:#1d2027;border-bottom:1px solid #2c3039;padding:6px 10px}body.passmode #mgf,body.passmode #obsp{display:none}#pfp{display:none}body.passmode #pfp{display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+#pfp select{background:#262931;color:#f4f2ee;border:1px solid #7d828c;border-radius:6px;padding:4px 8px;font:inherit}#pfp .mp-note{color:#a7abb3;font-size:12px}
+body.passmode #bar>:not(#smodel){display:none!important}body.passmode #scrub,body.passmode #pinhint,body.passmode #dock,body.passmode .shd button[data-a="mp4"],body.passmode .shd button[data-a="obs"],body.passmode .shd input,body.passmode .shint{display:none!important}
 #obsp .obs-root{display:flex;flex-wrap:wrap;align-items:center;gap:4px 14px;min-height:0;height:auto;background:none;position:static}
 #obsp #ostage{position:fixed!important;left:-20000px!important;top:0!important;width:1600px!important;height:1600px!important;flex:none!important;visibility:visible}
 #obsp .obs-zoom,#obsp #dl-obs,#obsp .obs-hint,#obsp #obs-tip,#obsp .obs-credit{display:none!important}
@@ -237,9 +241,9 @@ body.obsmode #mp4p .mp-row:has(#mpa),body.obsmode #mp4p .mp-row:has(#mpb),body.o
   if (q.get("from") && !q.get("f")) q.set("f", q.get("from"));
   history.replaceState(null, "", location.pathname + "?" + q.toString()); })();
 </script>
-<script src="viewer.js?v=20261104d"></script>
+<script src="viewer.js?v=20261104e"></script>
 <script src="stormfind.js?v=20261031c"></script>
-<script src="studio.js?v=20261104c"></script>
+<script src="studio.js?v=20261104e"></script>
 <script src="reqbox.js?v=20261103m"></script>
 <footer class="lic"><details><summary>Data: &copy; <span class="yr">2026</span> ECMWF (www.ecmwf.int), CC BY 4.0 &middot; Places: GeoNames, CC BY 4.0 &middot; NOAA (public domain) &middot; Natural Earth &middot; <u>Credits</u></summary>
 <p>Based on data and products of the European Centre for Medium-Range Weather Forecasts (ECMWF). Copyright &copy; <span class="yr">2026</span> ECMWF, <a href="https://www.ecmwf.int">www.ecmwf.int</a>. Licensed under CC BY 4.0 (<a href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a>). Maps are modified from the original data. ECMWF does not accept any liability whatsoever for any error or omission in the data, their availability, or for any loss or damage arising from their use.</p>

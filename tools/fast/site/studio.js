@@ -19,7 +19,10 @@ if (CLEAN) {
 // 11-02 (Benjamin t2095u): Meteogram mode. The meteograms page runs in a small iframe (its own Model / Town / Product pickers);
 // its finished chart image is drawn into both frames with the same drag / zoom / keys as the maps (framing saved under "mg").
 // 11-03 (Benjamin t2192u "the Observations map viewable in Studio mode"): MG.kind "obs" = the live obs module's canvas as the image source
-const MG = { on: !CLEAN && ["mg", "obs"].includes(localStorage.getItem("studio:mode")), kind: localStorage.getItem("studio:mode") === "obs" ? "obs" : "mg", img: null, src: "" };
+// 11-04 (t2292u): MG.kind "pass" = the Pass Forecaster table, drawn straight into each frame with its own 16:9 / 9:16 layout (PF below)
+const MG = { on: !CLEAN && ["mg", "obs", "pass"].includes(localStorage.getItem("studio:mode")), kind: ["obs", "pass"].includes(localStorage.getItem("studio:mode")) ? localStorage.getItem("studio:mode") : "mg", img: null, src: "" };
+const PASSM = () => MG.on && MG.kind === "pass";
+const PF = { run: "", rows: null, msg: "" };
 const OBSM = () => MG.on && MG.kind === "obs";
 const IW = (im) => im.naturalWidth || im.width, IH = (im) => im.naturalHeight || im.height;
 const key = (k) => `studio:${k}:${MG.on ? MG.kind : S.view}`;
@@ -314,8 +317,91 @@ function renderObs(k, frO) {
   if (PIN.show && !REC.on) drawPins(k, c0, r);
   window.__studio = (window.__studio || 0) + 1; window.__studioObs = (window.__studioObs || 0) + 1;
 }
+// ---- Pass Forecaster in Studio (11-04, t2292u). Same table as the map page's Pass Forecaster (viewer.js passTable), laid out per frame:
+// 16:9 every column; 9:16 drops Kuchera, then precip, then gust only if the pass names would get too small. Header like the maps
+// (model pill + run, title, run start in amber), shading key at the bottom, and only the credit a licence needs (ECMWF runs).
+const PFCOL = { s1: "#1f3b5c", s2: "#2a5d96", s3: "#4a3a9a", fzb: "#1e4f7a" };
+function pfParse(body) {
+  const tb = body.querySelector("table.pf"); if (!tb) return null; const tx = document.createElement("div");
+  const lines = (el) => el.innerHTML.split(/<br\s*\/?>/i).map((h) => { tx.innerHTML = h; return tx.textContent.trim(); }).filter(Boolean);
+  const rows = [...tb.rows].map((r) => [...r.cells].map((td) => ({ t: lines(td), cls: td.className || "", th: td.tagName === "TH" })));
+  const note = body.querySelector(".mg-note"); return { head: rows[0], body: rows.slice(1), note: note ? note.textContent : "" };
+}
+function pfCols(head, k) {   // column indexes kept for this frame, most important last to drop
+  const all = head.map((_, j) => j), isK = (j) => /Kuchera/.test(head[j].t[0]), isP = (j) => /^Precip/.test(head[j].t[0]), isG = (j) => /gust/i.test(head[j].t[0]);
+  if (k === "h") return [all];
+  const a = all.filter((j) => !isK(j)); return [a, a.filter((j) => !isP(j)), a.filter((j) => !isP(j) && !isG(j))];
+}
+function renderPass(k) {
+  const f = F[k], c0 = f.cv.getContext("2d"); f.zoom.min = "100"; f.zoom.value = "100";
+  c0.setTransform(1, 0, 0, 1, 0, 0); c0.clearRect(0, 0, f.W, f.H); c0.fillStyle = BG === "transparent" ? "#111316" : BG; c0.fillRect(0, 0, f.W, f.H);
+  const D = PF.rows;
+  if (!D) { c0.font = `700 ${k === "v" ? 40 : 34}px Montserrat`; c0.fillStyle = "#c9ced8"; c0.textAlign = "center"; c0.fillText(PF.msg || "Loading the Pass Forecaster\u2026", f.W / 2, f.H / 2); c0.textAlign = "left"; return; }
+  const c = ovLayer(f), x = f.pad, [m, cyc] = PF.run.split("/"), site = (S.man.models[m] || {}).site || m; let y = k === "v" ? 120 : 34;
+  c.save(); sharpShadow(c, k); const pw = pill(c, x, y, site.toUpperCase(), Math.round(f.run * 0.95), "#2f8cff", "#fff");
+  c.font = `600 ${f.run}px Montserrat`; c.fillStyle = "#c9ced8"; c.fillText(`${cyc.slice(8)}Z run`, x + pw + 14, y + f.run * 1.08);
+  y += f.run * 1.55 + f.title * 1.02; c.font = `800 ${f.title}px Montserrat`; c.fillStyle = "#fff";
+  const ttl = k === "v" ? ["Washington", "Pass Forecast"] : ["Washington Pass Forecast"]; ttl.forEach((t, i) => c.fillText(t, x, y + i * f.title * 1.08)); y += (ttl.length - 1) * f.title * 1.08 + f.day * 1.3;
+  const rs = (D.note.match(/Run start ([^.]*PT)/) || [])[1] || ""; c.font = `800 ${f.day}px Montserrat`; c.fillStyle = "#ffc24d"; c.fillText(rs ? `Run start ${rs}` : "", x, y);
+  let top = y + f.day * 0.9;
+  // bottom: shading key + notes + credit, measured first so the table gets the rest
+  const ec = window.studioIsEc && window.studioIsEc(PF.run), cr = ec ? [`Data: \u00a9 ${new Date().getFullYear()} ECMWF (www.ecmwf.int), CC BY 4.0. Modified.`] : [];
+  const kfs = k === "v" ? 26 : 22, nfs = k === "v" ? 21 : 18, crfs = k === "v" ? 15 : 14, est = /estimated 10:1/.test(D.note);
+  const notes = ["Elevation = highway summit (WSDOT). Temps corrected to summit height.", est ? "Snow estimated 10:1 where 2 m temp \u2264 33\u00b0F." : ""].filter(Boolean);
+  const nl = k === "v" ? notes : [notes.join("  ")];
+  const botH = kfs * 1.7 + 14 + nl.length * (nfs + 9) + (cr.length ? crfs + 14 : 0) + (k === "v" ? 70 : 24);
+  const bot = f.H - botH - 16;
+  // table: pick columns + font so it fits the frame width and the space between header and key
+  const mc = document.createElement("canvas").getContext("2d"), avW = f.W - 2 * f.pad, avH = bot - top - 10;
+  const fitT = (cols, fs) => { const hs = Math.round(fs * 0.62), pad = Math.round(fs * 0.55), cw = cols.map(() => 0);
+    const sub = (s) => s.replace(/\u2013/g, "\u2013 ").split(/(?<=\u2013 )|(?<=,) /);   // header detail lines may wrap after a dash or comma
+    cols.forEach((j, q) => { mc.font = `800 ${fs}px Montserrat`; for (const r of D.body) { const cell = r[j]; if (!cell) continue; cw[q] = Math.max(cw[q], mc.measureText(cell.t[0] || "").width + 2 * pad);
+        if (cell.t[1]) { mc.font = `600 ${hs}px Montserrat`; cw[q] = Math.max(cw[q], mc.measureText(cell.t[1]).width + 2 * pad); mc.font = `800 ${fs}px Montserrat`; } }
+      const h = D.head[j]; mc.font = `800 ${hs * 1.12}px Montserrat`; cw[q] = Math.max(cw[q], mc.measureText(h.t[0]).width + 2 * pad);
+      mc.font = `600 ${hs}px Montserrat`; for (const ln of h.t.slice(1)) for (const tk of sub(ln)) cw[q] = Math.max(cw[q], mc.measureText(tk.trim()).width + 2 * pad); });
+    const extra = avW - cw.reduce((a, b) => a + b, 0); if (extra < 0) return null; cw.forEach((_, q) => cw[q] += q ? extra / cols.length * 0.9 : extra / cols.length * 1.9 - extra * 0.0);
+    const tot = cw.reduce((a, b) => a + b, 0); if (tot > avW) { const sc = avW / tot; cw.forEach((_, q) => cw[q] *= sc); }
+    // header height: wrap detail lines to the column width
+    const hl = cols.map((j, q) => { mc.font = `600 ${hs}px Montserrat`; const out = []; for (const ln of D.head[j].t.slice(1)) { let cur = ""; for (const tk of sub(ln)) { const tt = cur + tk; if (cur && mc.measureText(tt.trim()).width > cw[q] - 2 * pad) { out.push(cur.trim()); cur = tk; } else cur = tt; } if (cur.trim()) out.push(cur.trim()); } return out; });
+    const hh = Math.round(hs * 1.12 * 1.35 + Math.max(...hl.map((a) => a.length)) * hs * 1.25 + pad), sub2 = D.body.some((r) => r[0] && r[0].t[1]);
+    const rh = Math.round(fs * 1.25 + (sub2 ? hs * 1.2 : 0) + pad * 1.1), H = hh + rh * D.body.length; if (H > avH) return null;
+    return { cols, fs, hs, pad, cw, hl, hh, rh, H }; };
+  let L = null; const opts = pfCols(D.head, k), f0 = k === "v" ? 34 : 30, fmin = k === "v" ? 24 : 18;
+  for (const cols of opts) { for (let fs = f0; fs >= fmin && !L; fs -= 1) L = fitT(cols, fs); if (L) break; }
+  if (!L) { const cols = opts[opts.length - 1]; for (let fs = fmin; fs >= 12 && !L; fs -= 1) L = fitT(cols, fs); }
+  noShadow(c); c.restore();
+  if (L) {
+    const g = c0, ty = Math.round(top + Math.max(0, (avH - L.H) * (k === "v" ? 0.35 : 0.2)));
+    g.save(); g.fillStyle = "rgba(29,32,39,0.96)"; g.beginPath(); g.roundRect ? g.roundRect(x - 2, ty, avW + 4, L.H, 14) : g.rect(x - 2, ty, avW + 4, L.H); g.fill();
+    g.fillStyle = "#262a33"; g.beginPath(); g.roundRect ? g.roundRect(x - 2, ty, avW + 4, L.hh, [14, 14, 0, 0]) : g.rect(x - 2, ty, avW + 4, L.hh); g.fill();
+    let cx_ = x; g.textBaseline = "top";
+    L.cols.forEach((j, q) => { const w = L.cw[q], al = q === 0 ? "left" : "right", tx = q === 0 ? cx_ + L.pad : cx_ + w - L.pad; g.textAlign = al;
+      g.font = `800 ${Math.round(L.hs * 1.12)}px Montserrat`; g.fillStyle = "#f4f2ee"; g.fillText(D.head[j].t[0], tx, ty + L.pad * 0.6);
+      g.font = `600 ${L.hs}px Montserrat`; g.fillStyle = "#a7abb3"; L.hl[q].forEach((ln, i) => g.fillText(ln, tx, ty + L.pad * 0.6 + L.hs * 1.12 * 1.35 + i * L.hs * 1.25));
+      D.body.forEach((r, i) => { const cell = r[j]; if (!cell) return; const ry = ty + L.hh + i * L.rh, bg = cell.cls.split(" ").map((s_) => PFCOL[s_]).find(Boolean);
+        if (bg) { g.fillStyle = bg; g.fillRect(cx_ + 3, ry + 3, w - 6, L.rh - 6); }
+        g.font = `${q === 0 || /s3|fzb/.test(cell.cls) ? 800 : 700} ${L.fs}px Montserrat`; g.fillStyle = "#fff"; g.textAlign = al; g.fillText(cell.t[0] || "", tx, ry + L.pad * 0.55);
+        if (cell.t[1]) { g.font = `600 ${L.hs}px Montserrat`; g.fillStyle = "#b9bec7"; g.fillText(cell.t[1], tx, ry + L.pad * 0.55 + L.fs * 1.2); } });
+      cx_ += w; });
+    g.strokeStyle = "#323743"; g.lineWidth = 1.5; for (let i = 1; i <= D.body.length - 1; i++) { const yy = Math.round(ty + L.hh + i * L.rh) + 0.5; g.beginPath(); g.moveTo(x + 8, yy); g.lineTo(x + avW - 8, yy); g.stroke(); }
+    g.restore(); f.pfL = { fs: L.fs, cols: L.cols.length, of: D.head.length, top: ty, bot: ty + L.H, key: bot };
+  }
+  // key + notes + credit (overlay layer, same shadow as the maps)
+  const o = ovLayer(f); o.save(); sharpShadow(o, k); let by = bot + 10, bx = x; o.textBaseline = "middle";
+  for (const [cls, lab] of [["s1", "1\u20136\u2033 snow"], ["s2", "6\u201312\u2033"], ["s3", "12\u2033+"], ["fzb", "Freezing level below the pass"]]) {
+    o.font = `800 ${kfs}px Montserrat`; const w = o.measureText(lab).width + kfs * 1.2, h = kfs * 1.55; if (bx + w > f.W - f.pad) { bx = x; by += h + 10; }
+    noShadow(o); o.fillStyle = PFCOL[cls]; o.beginPath(); o.roundRect ? o.roundRect(bx, by, w, h, h / 2) : o.rect(bx, by, w, h); o.fill(); sharpShadow(o, k);
+    o.fillStyle = "#fff"; o.fillText(lab, bx + kfs * 0.6, by + h / 2 + 1); bx += w + 12; }
+  o.textBaseline = "alphabetic"; let ny = by + kfs * 1.55 + 14 + nfs; o.font = `600 ${nfs}px Montserrat`; o.fillStyle = "#c9ced8";
+  for (const t of nl) { o.fillText(t, x, ny); ny += nfs + 9; }
+  if (cr.length) { o.font = `600 ${crfs}px Montserrat`; o.fillStyle = "rgba(236,239,244,0.95)"; if (k === "v") o.fillText(cr[0], x, f.H - 70); else { o.textAlign = "right"; o.fillText(cr[0], f.W - f.pad, f.H - 24); o.textAlign = "left"; } }
+  o.restore(); ovPut(c0, f, k);
+  const cnr = BR.corner && LOGOS[BR.logo] ? cornerBox(k, k === "v" ? 120 : 40, k === "v" ? 120 : 40, f.H - (k === "v" ? 140 : 80)) : null; if (cnr) cornerLogo(c0, cnr);
+  window.__studio = (window.__studio || 0) + 1; window.__studioPass = (window.__studioPass || 0) + 1;
+}
 function renderMg(k, frO) {
   if (OBSM()) return renderObs(k, frO);
+  if (PASSM()) return renderPass(k);
   const f = F[k], c = f.cv.getContext("2d"), fr = frO || getFr(k); f.zoom.min = "100"; f.zoom.value = Math.round((fr.zoom || 1) * 100);
   c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, f.W, f.H); c.fillStyle = BG === "transparent" ? "#111316" : BG; c.fillRect(0, 0, f.W, f.H);
   if (!MG.img) { c.font = `700 ${k === "v" ? 40 : 34}px Montserrat`; c.fillStyle = "#c9ced8"; c.textAlign = "center"; c.fillText(MG.msg || "Loading the meteogram\u2026", f.W / 2, f.H / 2); c.textAlign = "left"; return; }
@@ -508,6 +594,8 @@ for (const k of ["v", "h"]) {
     if (a.dataset.a === "mp4" && (!MG.on || OBSM())) openMp4(k);
     if (a.dataset.a === "png" && OBSM()) { if (!MG.img) return; const I = obsInfo(), st = I && I.t ? new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(I.t).replace(/[^0-9]/g, "") : "now";
       const nm = `obs_${I ? I.view : "pnw"}_${I ? I.on.map((l) => l[0]).join("-") : "plot"}_${st}_${k === "v" ? "1080x1920" : "1920x1080"}.png`;
+      cv.toBlob((b) => { const u = URL.createObjectURL(b), l = document.createElement("a"); l.href = u; l.download = nm; l.click(); setTimeout(() => URL.revokeObjectURL(u), 4000); }, "image/png"); return; }
+    if (a.dataset.a === "png" && PASSM()) { if (!PF.rows) return; const nm = `pass-forecast_${PF.run.replace("/", "_")}Z_${k === "v" ? "1080x1920" : "1920x1080"}.png`;
       cv.toBlob((b) => { const u = URL.createObjectURL(b), l = document.createElement("a"); l.href = u; l.download = nm; l.click(); setTimeout(() => URL.revokeObjectURL(u), 4000); }, "image/png"); return; }
     if (a.dataset.a === "png" && MG.on) { if (!MG.img) return; const nm = `meteogram_${(MG.src.split("#")[1] || "").replace(/[^a-z0-9=&_-]/gi, "").replace(/[=&]/g, "_")}_${k === "v" ? "1080x1920" : "1920x1080"}.png`;
       cv.toBlob((b) => { const u = URL.createObjectURL(b), l = document.createElement("a"); l.href = u; l.download = nm; l.click(); setTimeout(() => URL.revokeObjectURL(u), 4000); }, "image/png"); return; }
@@ -1141,7 +1229,7 @@ if (!CLEAN) {
 }
 if (!CLEAN) {   // Studio: Map | Meteogram switch (first in the menu bar) + the meteograms page's pickers in a small iframe
   const bar = document.getElementById("bar"), sw = document.createElement("label"); sw.id = "smodel";
-  sw.innerHTML = `Studio <select id="smode"><option value="map">Map</option><option value="mg">Meteogram</option><option value="obs">Observations</option></select>`; bar.insertBefore(sw, bar.firstChild);
+  sw.innerHTML = `Studio <select id="smode"><option value="map">Map</option><option value="mg">Meteogram</option><option value="obs">Observations</option><option value="pass">Pass Forecaster</option></select>`; bar.insertBefore(sw, bar.firstChild);
   const pnl = document.createElement("div"); pnl.id = "mgp"; bar.after(pnl);
   const sel = document.getElementById("smode"); sel.value = MG.on ? MG.kind : "map";
   let fr_ = null, poll = 0;
@@ -1159,7 +1247,22 @@ if (!CLEAN) {   // Studio: Map | Meteogram switch (first in the menu bar) + the 
   const ograb = () => { const S_ = typeof Obs !== "undefined" && Obs._state, cv_ = document.getElementById("obs-canvas"); if (!S_ || !cv_ || !cv_.width) return;
     const sig = [S_.loaded, S_.view, S_.cx, S_.cy, S_.k, [...S_.on].join(), cv_.width, cv_.height, S_.dayCAloaded, S_.st.length, S_.raf ? 1 : 0, S_.imgSig || ""].join("|");
     if (sig !== osig || MG.img !== cv_) { osig = sig; MG.img = S_.loaded ? cv_ : null; MG.msg = S_.loaded ? "" : "Loading observations\u2026"; if (!REC.on && !PV.on) renderAll(); } };
+  let pp_ = null; const pfLoad = async () => {   // Pass Forecaster: model picker in the panel, table rebuilt from viewer.js passTable
+    if (!window.studioPassRuns || !S.man) { setTimeout(pfLoad, 300); return; }
+    const runs = window.studioPassRuns(); if (!pp_) { pp_ = document.createElement("div"); pp_.id = "pfp"; pnl.appendChild(pp_); }
+    let want = localStorage.getItem("studio:passrun") || ""; const wm = want.split("/")[0];
+    if (!runs.some((r) => r[0] === want)) want = (runs.find((r) => r[0].split("/")[0] === wm) || runs[0] || [""])[0];   // same model, newest run
+    pp_.innerHTML = `<label>Model <select id="pfrun">${runs.map(([r, l]) => `<option value="${r}"${r === want ? " selected" : ""}>${l}</option>`).join("")}</select></label><span class="mp-note">Same table as the map page's Pass Forecaster. Save PNG on each frame.</span>`;
+    document.getElementById("pfrun").onchange = (e) => pfGo(e.target.value); pfGo(want); };
+  const pfGo = async (run) => { if (!run) { PF.rows = null; PF.msg = "No model run with pass forecasts yet."; renderAll(); return; }
+    PF.run = run; PF.rows = null; PF.msg = ""; localStorage.setItem("studio:passrun", run); renderAll();
+    const box = document.createElement("div"), ok = await window.studioPassBuild(run, box).catch(() => false); if (PF.run !== run || !PASSM()) return;
+    PF.rows = ok ? pfParse(box) : null; if (!PF.rows) PF.msg = (box.textContent || "").trim() || "This run has no pass forecast."; renderAll(); };
   const setMode = (mode) => {
+    const wasPass = PASSM(); if (mode === "pass") { MG.on = true; MG.kind = "pass"; MG.img = null; localStorage.setItem("studio:mode", "pass"); clearInterval(poll);
+      document.body.classList.remove("mgmode", "obsmode"); document.body.classList.add("passmode"); if (typeof Obs !== "undefined" && Obs.hide) Obs.hide();
+      pfLoad(); renderAll(); fitFrames(); return; }
+    document.body.classList.remove("passmode"); if (wasPass) { MG.img = null; MG.kind = "mg"; }
     const on = mode === "mg" || mode === "obs", wasObs = OBSM(); if (on && MG.kind !== mode) { MG.img = null; MG.src = ""; MG.msg = ""; }
     MG.on = on; if (on) MG.kind = mode; localStorage.setItem("studio:mode", on ? mode : "map"); clearInterval(poll);
     document.body.classList.toggle("mgmode", on && mode === "mg"); document.body.classList.toggle("obsmode", on && mode === "obs");

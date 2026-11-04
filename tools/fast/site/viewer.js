@@ -2131,6 +2131,13 @@ async function passTable(body, D) {
   body.innerHTML = h + "</tbody></table></div>";
   body.querySelectorAll("tr[data-n]").forEach(tr => tr.onclick = () => { MG.town = tr.dataset.n; const r = MG.run; mgOpen("town"); MG.run = r; $("mgrun").value = r; mgDraw(); });
 }
+// 11-04 (Benjamin t2292u "Pass forecaster mode needs to have a studio tab usable for both views"): Studio > Pass Forecaster builds the same
+// table (same data, same freezing-level borrowing) into a detached box and draws it in both frames. These hooks only read data.
+window.studioPassRuns = () => mgRuns().map(r => { const [m, c] = r.split("/"); return [r, `${S.man.models[m].site} ${c.slice(8)}Z ${c.slice(4, 6)}-${c.slice(6, 8)}`]; });
+window.studioPassBuild = async (run, body) => { MG.open = "pass"; MG.run = run; const D = await mgSeries(run).catch(() => null); if (MG.run !== run) return false;
+  if (!D) { body.innerHTML = ""; return false; } await passTable(body, D); MG.open = null; return true; };
+window.studioRunText = r => mgRunText(r);
+window.studioIsEc = r => /^(ifs|ifs9|aifs|eps|aens|aensm|epsm)$/.test(r.split("/")[0]);
 async function bench() {
   const out = { first: S.last };
   await new Promise(r => setTimeout(r, 4000));   // let the preloader fill the cache
