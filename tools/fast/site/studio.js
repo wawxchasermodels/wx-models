@@ -127,14 +127,20 @@ function band(c, y0, y1, down) {
 // 11-02 (Benjamin t2107u "a sharper drop shadow behind the text and bars"): one tight, dark, slightly offset shadow for the overlaid
 // text, badges and color bar on every Studio mode (was a soft 6-8 px blur, no offset). Frames are fixed-size output px, so it is
 // the same in the on-screen frames, Save PNG and Save MP4.
-function sharpShadow(c, k) { c.shadowColor = "rgba(0,0,0,0.92)"; c.shadowBlur = 1.5; c.shadowOffsetX = k === "v" ? 3 : 2.5; c.shadowOffsetY = k === "v" ? 3 : 2.5; }
+// 11-04 (t2295u "pass forecaster ... looks a little soft in studio"): the Pass Forecaster frame is drawn at PSS x the frame size (canvas backing
+// 2160x3840 / 3840x2160, same CSS size and same layout in frame px via the transform), so text stays crisp on hi-dpi screens and Save PNG.
+// Canvas shadows ignore the transform, so shadow px are scaled by the context's own scale (1 on every other mode: unchanged).
+const PSS = 2;
+const ctxS = (c) => (c.getTransform ? c.getTransform().a : 1) || 1;
+function ssFit(f, s) { if (f.cv.width !== f.W * s || f.cv.height !== f.H * s) { f.cv.width = f.W * s; f.cv.height = f.H * s; } f.ss = s; }
+function sharpShadow(c, k) { const z = ctxS(c); c.shadowColor = "rgba(0,0,0,0.92)"; c.shadowBlur = 1.5 * z; c.shadowOffsetX = (k === "v" ? 3 : 2.5) * z; c.shadowOffsetY = (k === "v" ? 3 : 2.5) * z; }
 // 11-02 6:20 PM (Benjamin t2111u "drop shadow ... a little more pronounced with a bit of a fade so it doesn't look messy"): overlay text,
 // badges and bars are drawn (with the tight sharp core shadow above) into an off-screen layer, then that layer goes onto the frame once
 // with a soft short falloff shadow: sharp core + gentle fade, one pass, so overlapping glyph shadows never stack up into smudges.
-function ovLayer(f) { const o = f.ov || (f.ov = document.createElement("canvas")); if (o.width !== f.W || o.height !== f.H) { o.width = f.W; o.height = f.H; }
-  const oc = o.getContext("2d"); oc.setTransform(1, 0, 0, 1, 0, 0); oc.clearRect(0, 0, f.W, f.H); return oc; }
-function ovPut(c, f, k) { c.save(); c.shadowColor = "rgba(0,0,0,0.55)"; c.shadowBlur = k === "v" ? 14 : 12; c.shadowOffsetX = 0; c.shadowOffsetY = k === "v" ? 2 : 1.5;
-  c.drawImage(f.ov, 0, 0); c.restore(); }
+function ovLayer(f) { const o = f.ov || (f.ov = document.createElement("canvas")), z = f.ss || 1; if (o.width !== f.W * z || o.height !== f.H * z) { o.width = f.W * z; o.height = f.H * z; }
+  const oc = o.getContext("2d"); oc.setTransform(z, 0, 0, z, 0, 0); oc.clearRect(0, 0, f.W, f.H); return oc; }
+function ovPut(c, f, k) { const z = ctxS(c); c.save(); c.shadowColor = "rgba(0,0,0,0.55)"; c.shadowBlur = (k === "v" ? 14 : 12) * z; c.shadowOffsetX = 0; c.shadowOffsetY = (k === "v" ? 2 : 1.5) * z;
+  c.drawImage(f.ov, 0, 0, f.W, f.H); c.restore(); }
 function noShadow(c) { c.shadowColor = "rgba(0,0,0,0)"; c.shadowBlur = 0; c.shadowOffsetX = 0; c.shadowOffsetY = 0; }
 function pill(c, x, y, txt, size, bg, fg) {
   c.font = `800 ${size}px Montserrat`; const w = c.measureText(txt).width + size * 0.9, h = size * 1.55;
@@ -207,7 +213,7 @@ function cornerBox(k, badgeBot, headBot, cbY) {
 }
 function cornerLogo(c, b) {
   const lg = getLogo(); if (!lg || !b) return;
-  c.save(); c.globalAlpha = 0.5; c.shadowColor = "rgba(0,0,0,0.45)"; c.shadowBlur = Math.round(b.s * 0.06); c.drawImage(lg, b.x, b.y, b.s, b.s); c.restore();
+  c.save(); c.globalAlpha = 0.5; c.shadowColor = "rgba(0,0,0,0.45)"; c.shadowBlur = Math.round(b.s * 0.06) * ctxS(c); c.drawImage(lg, b.x, b.y, b.s, b.s); c.restore();
 }
 function lowerThird(k, c) {
   const f = F[k], step = last.step, lg = getLogo(), h = k === "v" ? 150 : 118, w = k === "v" ? f.W - 2 * f.pad : 860, x = f.pad, y = f.H - f.bot - h - (k === "v" ? 40 : 26);
@@ -336,8 +342,8 @@ function pfCols(head, k) {   // column indexes kept for this frame, most importa
   const a = all.filter((j) => !isK(j)); return [a, a.filter((j) => !isP(j)), a.filter((j) => !isP(j) && !isG(j))];
 }
 function renderPass(k) {
-  const f = F[k], c0 = f.cv.getContext("2d"); f.zoom.min = "100"; f.zoom.value = "100";
-  c0.setTransform(1, 0, 0, 1, 0, 0); c0.clearRect(0, 0, f.W, f.H); c0.fillStyle = BG === "transparent" ? "#111316" : BG; c0.fillRect(0, 0, f.W, f.H);
+  const f = F[k]; ssFit(f, PSS); const c0 = f.cv.getContext("2d"); f.zoom.min = "100"; f.zoom.value = "100";
+  c0.setTransform(PSS, 0, 0, PSS, 0, 0); c0.clearRect(0, 0, f.W, f.H); c0.fillStyle = BG === "transparent" ? "#111316" : BG; c0.fillRect(0, 0, f.W, f.H);
   const D = PF.rows;
   if (!D) { c0.font = `700 ${k === "v" ? 40 : 34}px Montserrat`; c0.fillStyle = "#c9ced8"; c0.textAlign = "center"; c0.fillText(PF.msg || "Loading the Pass Forecaster\u2026", f.W / 2, f.H / 2); c0.textAlign = "left"; return; }
   const c = ovLayer(f), x = f.pad, [m, cyc] = PF.run.split("/"), site = (S.man.models[m] || {}).site || m; let y = k === "v" ? 120 : 34;
@@ -417,6 +423,7 @@ function renderMg(k, frO) {
   window.__studio = (window.__studio || 0) + 1; window.__studioMg = (window.__studioMg || 0) + 1;
 }
 async function render(k, frO) {   // frO: camera override (MP4 storm-track pan)
+  ssFit(F[k], PASSM() ? PSS : 1);   // 11-04 (t2295u): Pass Forecaster draws at 2x; every other mode stays at native frame px
   if (MG.on) return renderMg(k, frO);
   if (!last) return; const f = F[k], c0 = f.cv.getContext("2d"), fr = frO || getFr(k), { cv, cur, step } = last, P = cur.P, [m] = cur.run.split("/"); let c = c0;
   if (!frO) f.zoom.value = Math.round((fr.zoom || 1) * 100);
@@ -598,7 +605,7 @@ for (const k of ["v", "h"]) {
     if (a.dataset.a === "png" && OBSM()) { if (!MG.img) return; const I = obsInfo(), st = I && I.t ? new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(I.t).replace(/[^0-9]/g, "") : "now";
       const nm = `obs_${I ? I.view : "pnw"}_${I ? I.on.map((l) => l[0]).join("-") : "plot"}_${st}_${k === "v" ? "1080x1920" : "1920x1080"}.png`;
       cv.toBlob((b) => { const u = URL.createObjectURL(b), l = document.createElement("a"); l.href = u; l.download = nm; l.click(); setTimeout(() => URL.revokeObjectURL(u), 4000); }, "image/png"); return; }
-    if (a.dataset.a === "png" && PASSM()) { if (!PF.rows) return; const nm = `pass-forecast_${PF.run.replace("/", "_")}Z_${k === "v" ? "1080x1920" : "1920x1080"}.png`;
+    if (a.dataset.a === "png" && PASSM()) { if (!PF.rows) return; const nm = `pass-forecast_${PF.run.replace("/", "_")}Z_${k === "v" ? "2160x3840" : "3840x2160"}.png`;
       cv.toBlob((b) => { const u = URL.createObjectURL(b), l = document.createElement("a"); l.href = u; l.download = nm; l.click(); setTimeout(() => URL.revokeObjectURL(u), 4000); }, "image/png"); return; }
     if (a.dataset.a === "png" && MG.on) { if (!MG.img) return; const nm = `meteogram_${(MG.src.split("#")[1] || "").replace(/[^a-z0-9=&_-]/gi, "").replace(/[=&]/g, "_")}_${k === "v" ? "1080x1920" : "1920x1080"}.png`;
       cv.toBlob((b) => { const u = URL.createObjectURL(b), l = document.createElement("a"); l.href = u; l.download = nm; l.click(); setTimeout(() => URL.revokeObjectURL(u), 4000); }, "image/png"); return; }
