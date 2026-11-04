@@ -395,5 +395,6 @@ const ObsImg = (() => {
   function hold(h) { ST.hold = !!h; if (!h) tick(); }
   function seek(p) { const L = len(); if (!L) return; ST.idx = Math.max(0, Math.min(L - 1, Math.floor(p * L * 0.999))); bump(); Obs.drawNow(); uiTime(); }
   return { set, state: () => ({ radar: ST.radar, sat: ST.sat, idx: ST.idx, n: len(), playing: ST.playing, frames: ST.frames, shown: ST.shown, msg: ST.msg, wvMoved: !!ST.wvMoved, glFail: ST.glFail, imgs: ST.img.size, loaded: [...ST.img.values()].filter((r) => r.ok).length }),
+    _imgs: () => [...ST.img.entries()].map(([k, r]) => [k, !!r.ok, !!r.bad]), _tile: (id) => tileFor(id),   // test hooks (QA)
     active: () => on().length > 0, credits, info, hold, seek, refresh, ready: () => loading || Promise.resolve() };
 })();
