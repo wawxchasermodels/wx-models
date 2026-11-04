@@ -1012,7 +1012,7 @@ function drawBuoys(ctx, st, D, P, V, LW, LH, taken0) {
   const LIST = wcv ? WC_BUOYS.map(id => BUOYS.find(b => b[0] === id)).filter(Boolean).concat(BUOYS.filter(b => !WC_BUOYS.includes(b[0]))) : BUOYS;
   for (const [id, , la, lo, tag] of LIST) {
     // Coast view: only buoys both Studio frames show in full (t2300u tighter boxes: 9:16 west edge 127.35 W, south edge / keys ~46 N)
-    if (VSRC(S.view) === "coast" && (lo < -126.9 || la < 45.57)) continue;   // t2311u: south edge / keys ~0.43 deg further south
+    if (VSRC(S.view) === "coast" && (lo < -126.9 || la < 45.57 || la > 49.2)) continue;   // t2311u: south edge / keys ~0.43 deg further south; 46146 (49.34 N) would touch the 16:9 top edge
     if (wide && !/wide/.test(tag || "")) continue;
     // 11-01 9:31 AM (Benjamin t1998u "See if there are any buoys in the puget sound and strait of Juan de Fuca ... Include a marker in the strait of
     // Georgia"): "inner" = Salish Sea buoys, Washington / Puget views only ("any": also elsewhere as before); "sog" = Halibut Bank, not in the local views
