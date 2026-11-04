@@ -34,10 +34,10 @@ const ObsImg = (() => {
       tiles: { detail: { box: [-130, 39, -104, 53], px: [2080, 1120] }, wide: { box: [-130, 30, -100, 55], px: [1200, 1250] } },
       credit: "Radar: NOAA/NWS MRMS base reflectivity (public domain)" },
     ir: { label: "Clean IR", kind: "gibs", layer: "GOES-West_ABI_Band13_Clean_Infrared", fmt: "image/jpeg", alpha: 1, n: 12, stepMin: 10, refreshMin: 10,
-      tiles: { detail: { box: [-140, 37, -100, 57], px: [2000, 1000] }, wide: { box: [-170, 26, -94, 72], px: [1900, 1150] } },
+      tiles: { detail: { box: [-140, 37, -100, 57], px: [2000, 1000] }, wide: { box: [-180, 15, -85, 72], px: [2375, 1425] } },
       credit: "Satellite: NOAA GOES-West Clean IR (band 13) via NASA GIBS/ESDIS" },
     gc: { label: "GeoColor", kind: "gibs", layer: "GOES-West_ABI_GeoColor", fmt: "image/jpeg", alpha: 1, n: 12, stepMin: 10, refreshMin: 10,
-      tiles: { detail: { box: [-140, 37, -100, 57], px: [2000, 1000] }, wide: { box: [-170, 26, -94, 72], px: [1900, 1150] } },
+      tiles: { detail: { box: [-140, 37, -100, 57], px: [2000, 1000] }, wide: { box: [-180, 15, -85, 72], px: [2375, 1425] } },
       credit: "Satellite: NOAA GOES-West GeoColor, NOAA/NESDIS/STAR, CIRA/NOAA via NASA GIBS/ESDIS" },
     // detail = PNW sector over the West US sector; wide = West US sector (the box is only used to pick the tile)
     wv: { label: "Water vapor", kind: "star", alpha: 1, n: 12, stepMin: 5, refreshMin: 4,
@@ -107,7 +107,7 @@ const ObsImg = (() => {
   }
   function prune() {   // keep only images of the current frame lists
     const keep = new Set(); for (const id of Object.keys(SRC)) for (const t of ST.all[id]) for (const tile of ["detail", "wide"]) keep.add(id + "|" + tile + "|" + t);
-    if (ST.sat === "wv") for (const t of ST.all.wv) for (const [tl, u] of unders(ST.wvTile, t)) keep.add("wv|" + tl + "|" + u);   // frames drawn under the loop frames
+    if (ST.sat) for (const t of ST.all[ST.sat]) for (const [tl, u] of undersOf(ST.sat, listTile(ST.sat), t)) keep.add(ST.sat + "|" + tl + "|" + u);   // frames drawn under the loop frames
     for (const k of [...ST.img.keys()]) if (!keep.has(k) || !on().includes(k.split("|")[0])) { const r = ST.img.get(k); r.im.src = ""; if (r.u) URL.revokeObjectURL(r.u); ST.img.delete(k); }
   }
   const tileFor = (id) => { const S = ST.obs; if (!S) return "detail";
@@ -155,6 +155,9 @@ const ObsImg = (() => {
   // frames drawn under a main frame (bottom first): full disk, then West US under a PNW frame; each the newest at or before it
   function underT(L, t) { L = L || []; for (let i = L.length - 1; i >= 0; i--) if (Date.parse(L[i]) <= Date.parse(t) + 60e3) return L[i]; return L[0] || null; }
   const unders = (tile, t) => [["fd", underT(ST.fdT, t)], ...(tile === "detail" ? [["wide", underT(ST.wusT, t)]] : [])].filter((x) => x[1]);
+  // 11-03 (t2248u) what is drawn under a frame so the whole map stays covered at every zoom / pan: water vapor = full disk (+ West US
+  // under PNW); GIBS Clean IR / GeoColor zoomed in = the wide box (same time) under the sharper detail box
+  const undersOf = (id, tile, t) => (SRC[id].kind === "star" ? unders(tile, t) : SRC[id].kind === "gibs" && tile === "detail" ? [["wide", t]] : []);
   // red / pink map-line pixels (STAR draws them pure red; JPEG blurs them into the background). Yellow / orange (dry air) is not a line.
   const lineAt = (d, i) => { const r = d[i], g = d[i + 1], b = d[i + 2]; return (r - g > 60 && g - b < 60) || (r - g > 12 && Math.abs(g - b) < 31); };
   let procQ = Promise.resolve();
@@ -212,14 +215,14 @@ const ObsImg = (() => {
         const fr = ST.frames[id]; if (!fr.length) { ST.msg = SRC[id].label + ": no recent frames"; continue; }
         const tile = listTile(id);
         for (let tries = 0; tries < 5 && ST.frames[id].length; tries++) { const f = ST.frames[id], t = f[f.length - 1];
-          const rm = getImg(id, tile, t); if (id === "wv") for (const [tl, u] of unders(tile, t)) getImg(id, tl, u);   // main frame first in the cleaning queue
+          const rm = getImg(id, tile, t); for (const [tl, u] of undersOf(id, tile, t)) getImg(id, tl, u);   // main frame first in the cleaning queue
           if (await rm.p) break; if (id === "wv") { ST.blank.add(id + "|" + t); pickFrames(id); } }   // newest real frame first
         if (id === "wv" && ST.wvMoved && !ST.frames.wv.some((t) => { const r = ST.img.get("wv|" + tile + "|" + t); return r && r.ok; })) ST.msg = "Water vapor paused: NOAA moved its image sector, so it would not line up with this map";
       }
       prune(); if (ST.idx < 0 || ST.idx >= len()) ST.idx = len() - 1;
       ui(); bump(); Obs.redraw(); if (!ST.timer) tick();
       for (let pass = 0; pass < 2; pass++) {   // pass 2: frames that slid in after black ones dropped out
-        const todo = []; for (const id of on()) { const tile = listTile(id); for (const t of [...ST.frames[id]].reverse()) { todo.push([id, tile, t]); if (id === "wv") for (const [tl, u] of unders(tile, t)) todo.push([id, tl, u, tile]); } }
+        const todo = []; for (const id of on()) { const tile = listTile(id); for (const t of [...ST.frames[id]].reverse()) { todo.push([id, tile, t]); for (const [tl, u] of undersOf(id, tile, t)) todo.push([id, tl, u, tile]); } }
         await Promise.all([0, 1, 2].map(async () => { while (todo.length) { const [id, tile, t, under_] = todo.shift(); if (on().includes(id) && (listTile(id) === (under_ || tile))) { const r = getImg(id, tile, t); await r.p; if (id === "wv" && !under_ && r.bad) { ST.blank.add(id + "|" + t); pickFrames(id); } } } }));
       }
       ui(); bump(); Obs.redraw();
@@ -290,10 +293,13 @@ const ObsImg = (() => {
   function frameImg(id, i) {
     const tile = listTile(id), other = tile === "detail" ? "wide" : "detail";
     for (let j = i; j >= 0; j--) { const t = tAt(id, j); for (const tl of [tile, other]) { const r = ST.img.get(id + "|" + tl + "|" + t); if (r && r.ok) return { im: r.im, tile: tl, t }; } }
-    return null;
+    // still loading after a zoom / view change: keep showing the newest frame already here (any box) rather than nothing
+    let best = null; for (const [k, r] of ST.img) { const [kid, tl, t] = k.split("|"); if (kid === id && r.ok && (tl === "detail" || tl === "wide") && (!best || t > best.t)) best = { im: r.im, tile: tl, t }; }
+    return best;
   }
   function under(g, S) {
     ST.obs = S; if (!on().length) return;
+    if (ST.gl && ST.gl.gl.isContextLost()) { ST.gl = null; ST.glLost = (ST.glLost || 0) + 1; }   // GPU dropped the context: start a fresh one
     const G = glInit(); if (!G) return;
     const J = projOf(S); if (!J) return;
     const W = Math.round(S.w * S.dpr), H = Math.round(S.h * S.dpr), { gl, U, cv } = G;
@@ -301,9 +307,9 @@ const ObsImg = (() => {
     gl.viewport(0, 0, W, H); gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
     gl.uniform2f(U.sz, W, H); gl.uniform1f(U.dpr, S.dpr); gl.uniform1f(U.k, S.k); gl.uniform1f(U.cx, S.cx); gl.uniform1f(U.cy, S.cy);
     gl.uniform1f(U.n, J.n); gl.uniform1f(U.F, J.F); gl.uniform1f(U.rho0, J.rho0); gl.uniform1f(U.L0, J.L0);     let drew = 0; ST.shown = {};
-    const draw1 = (u, im, setBox) => { gl.activeTexture(gl.TEXTURE0 + u); gl.bindTexture(gl.TEXTURE_2D, G.tex[u]); gl.uniform1i(U.tex, u);
+    const draw1 = (u, im, setBox) => { try { gl.activeTexture(gl.TEXTURE0 + u); gl.bindTexture(gl.TEXTURE_2D, G.tex[u]); gl.uniform1i(U.tex, u);
       if (G.cur[u] !== im) { gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, im); G.cur[u] = im; }
-      setBox(); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4); drew++; };
+      setBox(); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4); drew++; } catch (e) { ST.drawErr = (ST.drawErr || 0) + 1; G.cur[u] = null; } };
     const geoBox = (sec) => () => { const S_ = SEC[sec], q = S_.g; gl.uniform1f(U.geo, 1); gl.uniform4f(U.gg, q[0], q[1], q[2] * S_.W, q[3] * S_.H); gl.uniform3f(U.cut, S_.cut[0], S_.cut[1], S_.cut[2]); gl.uniform4f(U.box, 0, 0, 1, 1); gl.uniform1f(U.alpha, 1); };
     for (const id of [ST.sat, ST.radar ? "radar" : ""].filter(Boolean)) {   // satellite first, radar on top
       const f = frameImg(id, ST.idx < 0 ? len() - 1 : ST.idx); if (!f) continue;
@@ -313,6 +319,7 @@ const ObsImg = (() => {
           if (rw) draw1(tl === "fd" ? 3 : 2, rw.im, geoBox(secOf(tl))); }
         draw1(u, f.im, geoBox(secOf(f.tile))); ST.shown[id] = f.t; continue;
       }
+      for (const [tl, tu] of undersOf(id, f.tile, f.t)) { const ru = ST.img.get(id + "|" + tl + "|" + tu); if (ru && ru.ok) draw1(2, ru.im, () => { const b = SRC[id].tiles[tl].box; gl.uniform1f(U.geo, 0); gl.uniform4f(U.box, b[0], b[1], b[2], b[3]); gl.uniform1f(U.alpha, SRC[id].alpha); }); }
       draw1(u, f.im, () => { const b = SRC[id].tiles[f.tile].box; gl.uniform1f(U.geo, 0); gl.uniform4f(U.box, b[0], b[1], b[2], b[3]); gl.uniform1f(U.alpha, SRC[id].alpha); });
       ST.shown[id] = f.t;
     }
@@ -400,7 +407,7 @@ const ObsImg = (() => {
   function info() { return on().map((id) => ({ id, label: PILL[id], t: (ST.shown && ST.shown[id]) || tAt(id, Math.max(0, ST.idx)) })); }
   function hold(h) { ST.hold = !!h; if (!h) tick(); }
   function seek(p) { const L = len(); if (!L) return; ST.idx = Math.max(0, Math.min(L - 1, Math.floor(p * L * 0.999))); bump(); Obs.drawNow(); uiTime(); }
-  return { set, state: () => ({ radar: ST.radar, sat: ST.sat, idx: ST.idx, n: len(), playing: ST.playing, frames: ST.frames, shown: ST.shown, msg: ST.msg, wvMoved: !!ST.wvMoved, glFail: ST.glFail, imgs: ST.img.size, loaded: [...ST.img.values()].filter((r) => r.ok).length }),
+  return { set, state: () => ({ radar: ST.radar, sat: ST.sat, idx: ST.idx, n: len(), playing: ST.playing, frames: ST.frames, shown: ST.shown, msg: ST.msg, wvMoved: !!ST.wvMoved, drawErr: ST.drawErr || 0, glLost: ST.glLost || 0, glFail: ST.glFail, imgs: ST.img.size, loaded: [...ST.img.values()].filter((r) => r.ok).length }),
     _imgs: () => [...ST.img.entries()].map(([k, r]) => [k, !!r.ok, !!r.bad]), _tile: (id) => tileFor(id),   // test hooks (QA)
     active: () => on().length > 0, credits, info, hold, seek, refresh, ready: () => loading || Promise.resolve() };
 })();
