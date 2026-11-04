@@ -1,6 +1,7 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>WX Models: Studio</title>
+<script>/* 11-04 (t2269u/t2283u): Studio opened with no map in the URL (bookmark, home-screen app, typed address) comes back on the last model / product / view / hour */try{var q0=new URLSearchParams(location.search),sv0=localStorage.getItem("studio:last");if(sv0&&!["run","model","prod","view","f","valid","make","clean","product"].some(function(k){return q0.has(k)}))history.replaceState(null,"",location.pathname+sv0+location.hash)}catch(e){}</script>
 <script>if(!new URLSearchParams(location.search).has("studio"))history.replaceState(null,"",location.pathname+(location.search?location.search+"&":"?")+"studio=1"+location.hash)</script>
 <link rel="preload" href="fonts/Montserrat-sub.woff2" as="font" type="font/woff2" crossorigin>
 <style>
@@ -236,9 +237,9 @@ body.obsmode #mp4p .mp-row:has(#mpa),body.obsmode #mp4p .mp-row:has(#mpb),body.o
   if (q.get("from") && !q.get("f")) q.set("f", q.get("from"));
   history.replaceState(null, "", location.pathname + "?" + q.toString()); })();
 </script>
-<script src="viewer.js?v=20261103sm2"></script>
+<script src="viewer.js?v=20261104c"></script>
 <script src="stormfind.js?v=20261031c"></script>
-<script src="studio.js?v=20261103sm2"></script>
+<script src="studio.js?v=20261104c"></script>
 <script src="reqbox.js?v=20261103m"></script>
 <footer class="lic"><details><summary>Data: &copy; <span class="yr">2026</span> ECMWF (www.ecmwf.int), CC BY 4.0 &middot; Places: GeoNames, CC BY 4.0 &middot; NOAA (public domain) &middot; Natural Earth &middot; <u>Credits</u></summary>
 <p>Based on data and products of the European Centre for Medium-Range Weather Forecasts (ECMWF). Copyright &copy; <span class="yr">2026</span> ECMWF, <a href="https://www.ecmwf.int">www.ecmwf.int</a>. Licensed under CC BY 4.0 (<a href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a>). Maps are modified from the original data. ECMWF does not accept any liability whatsoever for any error or omission in the data, their availability, or for any loss or damage arising from their use.</p>

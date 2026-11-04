@@ -31,6 +31,9 @@ const $ = id => document.getElementById(id);
   const v = h.get("v"); if (v) q.set("view", V[v] || v); q.set("valid", h.get("e") || new Date().toISOString());   // old default: the first frame that is current
   history.replaceState(null, "", "?" + q);
 })();
+// 11-04 (t2283u): index.html opened with no map in the URL (bookmark, home-screen app) comes back on the last model / product / view / hour
+try { const q0 = new URLSearchParams(location.search), sv0 = localStorage.getItem("viewer:last");
+  if (sv0 && !/studio\.html$/.test(location.pathname) && !location.hash && !["run", "model", "prod", "view", "f", "valid", "obs", "mg", "embed", "id", "slim", "studio"].some(k => q0.has(k))) history.replaceState(null, "", location.pathname + sv0); } catch (e) { /* private mode */ }
 const Q = new URLSearchParams(location.search);
 const DATA = window.WX_DATA || "data/";   // "/d/" on the hosted fast page (Pages Function -> R2)
 const S = { man: null, runs: {}, view: Q.get("view") || "wa", prod: Q.get("prod") || "t2m", run: null, i: 0,
@@ -915,7 +918,9 @@ async function render(lite) {
   if (!Q.get("clean")) clearTimeout(urlTimer), urlTimer = setTimeout(() => { const u = new URL(location); u.searchParams.set("prod", pid); u.searchParams.set("view", vid);
     u.searchParams.set("f", f); u.searchParams.set("run", run); u.searchParams.delete("model");
     if (isMemRun(run)) u.searchParams.set("mem", S.mem); else u.searchParams.delete("mem");
-    u.searchParams.delete("mg"); u.searchParams.delete("obs"); try { history.replaceState(null, "", u); } catch (e) {} }, 400);
+    u.searchParams.delete("mg"); u.searchParams.delete("obs"); try { history.replaceState(null, "", u); } catch (e) {}
+    // 11-04 (t2283u): last map kept so a bare studio.html / index.html open (bookmark, home-screen app) comes back on it (not compare / embeds)
+    if (!Q.get("embed") && !Q.get("id") && !Q.get("slim") && !Q.get("make")) try { localStorage.setItem(Q.get("studio") ? "studio:last" : "viewer:last", u.search); } catch (e) { /* private mode */ } }, 400);
   preload(run, pid, S.i);
   if (window.onStudioDraw) window.onStudioDraw(cv_(), S.cur, step);
 }
