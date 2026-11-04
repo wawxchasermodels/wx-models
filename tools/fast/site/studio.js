@@ -23,8 +23,13 @@ if (CLEAN) {
 // 11-04 (Benjamin t2319u: refresh on a model map reopened the SeaTac gust meteogram): the Studio mode lives per tab (sessionStorage,
 // kept across a refresh); localStorage is shared by every Studio tab / window (OBS setups), so another tab's Meteogram mode won the refresh.
 // localStorage is only the fallback for a brand-new tab.
-const MODE0 = (() => { try { return sessionStorage.getItem("studio:mode") || localStorage.getItem("studio:mode"); } catch (e) { return localStorage.getItem("studio:mode"); } })();
-const saveMode = (m) => { localStorage.setItem("studio:mode", m); try { sessionStorage.setItem("studio:mode", m); } catch (e) { /* private mode */ } };
+// 11-04 (t2337u "refreshed ... and it loaded into a SNOW METEOGRAM"): the mode is per tab only: the address (?smode=, survives any
+// refresh / restore, OBS included) and this tab's sessionStorage. The shared localStorage value is no longer read, so a Studio opened or
+// re-opened without them starts on Map, never on another window's Meteogram / Observations / Pass Forecaster.
+const MODES_OK = ["map", "mg", "obs", "pass"];
+const MODE0 = (() => { const u = SQ.get("smode"); if (MODES_OK.includes(u)) return u; try { const v = sessionStorage.getItem("studio:mode"); return MODES_OK.includes(v) ? v : "map"; } catch (e) { return "map"; } })();
+const saveMode = (m) => { try { sessionStorage.setItem("studio:mode", m); } catch (e) { /* private mode */ }
+  if (CLEAN) return; try { const u = new URL(location); if (m === "map") u.searchParams.delete("smode"); else u.searchParams.set("smode", m); history.replaceState(null, "", u); } catch (e) { /* replaceState limit */ } };
 const MG = { on: !CLEAN && ["mg", "obs", "pass"].includes(MODE0), kind: ["obs", "pass"].includes(MODE0) ? MODE0 : "mg", img: null, src: "" };
 const PASSM = () => MG.on && MG.kind === "pass";
 const PF = { run: "", rows: null, msg: "" };
@@ -1278,7 +1283,7 @@ if (!CLEAN) {   // Studio: Map | Meteogram switch (first in the menu bar) + the 
   const bar = document.getElementById("bar"), sw = document.createElement("label"); sw.id = "smodel";
   sw.innerHTML = `Studio <select id="smode"><option value="map">Map</option><option value="mg">Meteogram</option><option value="obs">Observations</option><option value="pass">Pass Forecaster</option></select>`; bar.insertBefore(sw, bar.firstChild);
   const pnl = document.createElement("div"); pnl.id = "mgp"; bar.after(pnl);
-  const sel = document.getElementById("smode"); sel.value = MG.on ? MG.kind : "map"; try { sessionStorage.setItem("studio:mode", sel.value); } catch (e) { /* private mode */ }
+  const sel = document.getElementById("smode"); sel.value = MG.on ? MG.kind : "map"; saveMode(sel.value);
   let fr_ = null, poll = 0;
   const grab = () => { try {
     const d = fr_.contentDocument, im = d && d.getElementById("meteo-img"), w = fr_.contentWindow;
