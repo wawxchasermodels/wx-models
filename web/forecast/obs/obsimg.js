@@ -116,6 +116,8 @@ const ObsImg = (() => {
     // zoomed in: detail box, unless the view centre is outside it
     const ll = inv(S.cx, S.cy); return ll && ll[0] > T[0] && ll[0] < T[2] && ll[1] > T[1] && ll[1] < T[3] ? "detail" : "wide"; };
 
+  // the tile a source's frame list was made for (water vapor PNW and West US frames have different times: never mix them while the list reloads)
+  const listTile = (id) => (SRC[id].kind === "star" && ST.wvTile ? ST.wvTile : tileFor(id));
   /* ---- water vapor: NOAA/NESDIS/STAR band 9 sector JPGs (ABI fixed grid), map lines / logo / time bar removed ---- */
   const STAR = (sec) => `https://cdn.star.nesdis.noaa.gov/GOES18/ABI/${sec === "fd" ? "FD" : "SECTOR/" + sec}/09/`, TAG = (sec) => (sec === "fd" ? "FD" : sec);
   // g = [x0, y0, dx, dy]: scan angle (rad) of the image's left / top edge and the size of one pixel; cut = [time bar top, logo right, logo top]
@@ -208,7 +210,7 @@ const ObsImg = (() => {
       for (const id of on()) {
         try { await times(id); } catch (e) { ST.msg = SRC[id].label + " times unavailable"; continue; }
         const fr = ST.frames[id]; if (!fr.length) { ST.msg = SRC[id].label + ": no recent frames"; continue; }
-        const tile = tileFor(id);
+        const tile = listTile(id);
         for (let tries = 0; tries < 5 && ST.frames[id].length; tries++) { const f = ST.frames[id], t = f[f.length - 1];
           const rm = getImg(id, tile, t); if (id === "wv") for (const [tl, u] of unders(tile, t)) getImg(id, tl, u);   // main frame first in the cleaning queue
           if (await rm.p) break; if (id === "wv") { ST.blank.add(id + "|" + t); pickFrames(id); } }   // newest real frame first
@@ -217,8 +219,8 @@ const ObsImg = (() => {
       prune(); if (ST.idx < 0 || ST.idx >= len()) ST.idx = len() - 1;
       ui(); bump(); Obs.redraw(); if (!ST.timer) tick();
       for (let pass = 0; pass < 2; pass++) {   // pass 2: frames that slid in after black ones dropped out
-        const todo = []; for (const id of on()) { const tile = tileFor(id); for (const t of [...ST.frames[id]].reverse()) { todo.push([id, tile, t]); if (id === "wv") for (const [tl, u] of unders(tile, t)) todo.push([id, tl, u, tile]); } }
-        await Promise.all([0, 1, 2].map(async () => { while (todo.length) { const [id, tile, t, under_] = todo.shift(); if (on().includes(id) && (under_ ? tileFor(id) === under_ : tileFor(id) === tile)) { const r = getImg(id, tile, t); await r.p; if (id === "wv" && !under_ && r.bad) { ST.blank.add(id + "|" + t); pickFrames(id); } } } }));
+        const todo = []; for (const id of on()) { const tile = listTile(id); for (const t of [...ST.frames[id]].reverse()) { todo.push([id, tile, t]); if (id === "wv") for (const [tl, u] of unders(tile, t)) todo.push([id, tl, u, tile]); } }
+        await Promise.all([0, 1, 2].map(async () => { while (todo.length) { const [id, tile, t, under_] = todo.shift(); if (on().includes(id) && (listTile(id) === (under_ || tile))) { const r = getImg(id, tile, t); await r.p; if (id === "wv" && !under_ && r.bad) { ST.blank.add(id + "|" + t); pickFrames(id); } } } }));
       }
       ui(); bump(); Obs.redraw();
     })().finally(() => { loading = null; });
@@ -233,7 +235,7 @@ const ObsImg = (() => {
     clearTimeout(ST.timer); ST.timer = 0; if (!on().length || ST.hold) return;
     if (!ST.playing || !ST.obs || !ST.obs.shown || document.hidden) { ST.timer = setTimeout(tick, 600); return; }
     const L = len(); if (L > 1) {
-      const ready = (i) => on().every((id) => { const r = ST.img.get(id + "|" + tileFor(id) + "|" + tAt(id, i)); return r && r.ok; });
+      const ready = (i) => on().every((id) => { const r = ST.img.get(id + "|" + listTile(id) + "|" + tAt(id, i)); return r && r.ok; });
       for (let s = 1; s <= L; s++) { const nxt = (ST.idx + s) % L; if (ready(nxt)) { if (nxt !== ST.idx) { ST.idx = nxt; bump(); Obs.redraw(); uiTime(); } break; } }
     }
     ST.timer = setTimeout(tick, ST.idx === L - 1 ? 1600 : 380);   // dwell on the newest frame
@@ -286,7 +288,7 @@ const ObsImg = (() => {
     return [(J.L0 + th / J.n) * 180 / Math.PI, (2 * Math.atan(Math.pow(6371 * J.F / rho, 1 / J.n)) - Math.PI / 2) * 180 / Math.PI]; }
   // the newest loaded frame at or before loop index i (so a frame still loading never blanks the layer)
   function frameImg(id, i) {
-    const tile = tileFor(id), other = tile === "detail" ? "wide" : "detail";
+    const tile = listTile(id), other = tile === "detail" ? "wide" : "detail";
     for (let j = i; j >= 0; j--) { const t = tAt(id, j); for (const tl of [tile, other]) { const r = ST.img.get(id + "|" + tl + "|" + t); if (r && r.ok) return { im: r.im, tile: tl, t }; } }
     return null;
   }
