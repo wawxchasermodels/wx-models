@@ -804,7 +804,15 @@ const Obs = (() => {
   const layers = () => [...S.on];
   function writeHashSafe() { renderViews(); if (S.onChange) S.onChange(S.view); }
 
+  // 11-03 (Benjamin t2242u): the saved image is the view you are looking at (any zoom / pan; S.k, S.cx, S.cy are only read), redrawn
+  // once at full resolution (up to 4x the CSS size; at most 40 MP desktop / 16 MP phones), credit strip wrapped under it; then back.
   function download() {
+    const c0 = $("obs-canvas"), d0 = S.dpr, touch = window.matchMedia && matchMedia("(pointer: coarse)").matches;
+    const hi = Math.max(d0, Math.min(4, Math.sqrt((touch ? 16e6 : 40e6) / Math.max(1, S.w * S.h))));
+    if (hi > d0 + 0.01) { S.dpr = hi; c0.width = Math.round(S.w * hi); c0.height = Math.round(S.h * hi); draw(); }
+    try { downloadNow(); } finally { if (S.dpr !== d0) { S.dpr = d0; c0.width = Math.round(S.w * d0); c0.height = Math.round(S.h * d0); draw(); } }
+  }
+  function downloadNow() {
     const c = $("obs-canvas"), stamp = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
       .format(new Date(S.loaded || Date.now())).replace(/[^0-9]/g, "");
     // flatten with a credit strip so the saved image carries its sources

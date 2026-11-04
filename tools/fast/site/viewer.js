@@ -81,6 +81,7 @@ function fitPhone() {   // phones: map as large as fits between the menus and th
 // dragged the RS in use is kept and the fill is the light half-res one; the full sharp frame comes when the finger lifts.
 function wantRS(LW, LH) {
   const cv = $("map"); if (!cv || !LW || Q.get("rs1")) return 1;
+  if (window.__saveRS) return window.__saveRS;   // 11-03 zoomed "Save image": one sharp redraw at the save resolution
   if (Q.get("studio")) return Math.max(1, Math.min(3, Math.floor(Math.sqrt(16e6 / (LW * LH)) * 4) / 4));   // Studio: always sharp (crops are scaled up to 1920 px)
   const shown = cv.offsetWidth || LW, want = shown * (window.devicePixelRatio || 1) * (Z.k || 1) / LW;
   const cap = Math.min(3, Math.sqrt(12e6 / (LW * LH)));
@@ -1273,9 +1274,46 @@ function saveName() {
   return `${clean(S.man.models[m].site)}_${c.slice(8)}Z_${clean(S.prod)}_${clean(S.view)}_valid-${P.year}-${P.month}-${P.day}_${P.hour}${P.minute}PT_F${String(st.f).padStart(3, "0")}.png`;
 }
 function closeSaveView() { const o = $("saveview"); if (o) { URL.revokeObjectURL(o.dataset.url || ""); o.remove(); } }
-function saveImage() {
-  const cv = $("map"); if (!cv.width) return;
-  saveCanvas(cv, saveName(), $("save"));
+// 11-03-26 (Benjamin t2242u: "when I zoom in on a map, whatever level I'm zoomed in, when I click the save image, it saves at the zoom
+// in full res with the credit line at the zoomed crop"). Unzoomed: exactly as before. Zoomed: the map is redrawn once at a save
+// resolution (RS up to 6; at most 48 MP desktop / 16 MP phones), the part you see is cut out, the title + color key strip is put
+// on top (scaled to the crop width) and the credit lines are rewritten under the crop, wrapping to more lines when needed.
+// The zoom (Z) is only read, never changed; afterwards the map is redrawn at the normal screen sharpness.
+let saving = false;
+async function saveImage() {
+  const cv = $("map"); if (!cv.width || saving) return;
+  if (Z.k <= 1.001) { saveCanvas(cv, saveName(), $("save")); return; }
+  const btn = $("save"), V = VIEWS()[S.view], [LW, LH] = V.fig, touch = matchMedia("(pointer: coarse)").matches;
+  const z = { k: Z.k, x: Z.x, y: Z.y }, w = cv.offsetWidth, h = cv.offsetHeight;
+  const cap = Math.sqrt((touch ? 16e6 : 48e6) / (LW * LH)), rs = Math.max(cv._rs || 1, Math.min(6, cap, Math.max(2, z.k * 1.5)));
+  saving = true; if (btn) btn.textContent = "Saving\u2026";
+  let out = null;
+  try {
+    window.__saveRS = Math.floor(rs * 4) / 4; await draw();
+    const R = cv._rs, st = await viewStatic(S.view), P = PRODS()[S.prod];
+    const fx = -z.x / z.k * LW / w, fy = -z.y / z.k * LH / h, fw = LW / z.k, fh = LH / z.k;
+    const sx = Math.max(0, Math.round(fx * R)), sy = Math.max(0, Math.round(fy * R));
+    const W = Math.min(cv.width - sx, Math.round(fw * R)), H = Math.min(cv.height - sy, Math.round(fh * R));
+    const hs = fy > st.y0 * 0.5 ? W / (LW * R) : 0, HH = Math.round(st.y0 * R * hs);   // title + key strip (skipped when it is already in view)
+    const towns = st.towns && (P.towns || "numbers") !== "none", L0 = creditLines(S.prod, P, towns);
+    const fs = Math.max(13, Math.round(Math.min(W, 2400) / 95)), font = `500 ${fs}px Montserrat`, mg = new OffscreenCanvas(8, 8).getContext("2d"); mg.font = font;
+    const lines = []; for (const t of L0) { let cur = ""; for (const wd of t.split(" ")) { const tt = cur ? cur + " " + wd : wd; if (cur && mg.measureText(tt).width > W - fs * 1.6) { lines.push(cur); cur = wd; } else cur = tt; } if (cur) lines.push(cur); }
+    const lh = Math.round(fs * 1.3), strip = Math.round(fs * 0.9) + lines.length * lh;
+    out = document.createElement("canvas"); out.width = W; out.height = HH + H + strip;
+    const g = out.getContext("2d"); g.imageSmoothingEnabled = true; g.imageSmoothingQuality = "high";
+    g.fillStyle = S.man.style.BG; g.fillRect(0, 0, out.width, out.height);
+    if (HH) g.drawImage(cv, 0, 0, cv.width, Math.round(st.y0 * R), 0, 0, W, HH);
+    g.drawImage(cv, sx, sy, W, H, 0, HH, W, H);
+    g.font = font; g.fillStyle = S.man.style.MUTED; g.textAlign = "left"; g.textBaseline = "alphabetic";
+    lines.forEach((l, i) => g.fillText(l, Math.round(fs * 0.8), HH + H + Math.round(fs * 0.45) + (i + 1) * lh - Math.round(fs * 0.3)));
+    window.__saveInfo = { w: out.width, h: out.height, rs: R, crop: [sx, sy, W, H], head: HH, lines };
+  } catch (e) { showErr(e); }
+  finally {
+    window.__saveRS = 0; saving = false;
+    if (Z.k !== z.k || Z.x !== z.x || Z.y !== z.y) { Z.k = z.k; Z.x = z.x; Z.y = z.y; applyZoom(); }   // never expected; zoom stays as you left it
+    draw(); if (btn) btn.textContent = "Save image";
+  }
+  if (out) saveCanvas(out, saveName().replace(/\.png$/, `_zoom${z.k.toFixed(1)}x.png`), btn);
 }
 // shared by the map, the meteogram and the Pass Forecaster (Benjamin 10-31 8:49 AM "push to save passes meteograms graphics")
 function saveCanvas(cv, name, btn) {
