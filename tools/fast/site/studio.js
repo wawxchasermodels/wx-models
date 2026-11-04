@@ -774,6 +774,7 @@ function mpSync() {
   if (+$s("mpa").options.length !== st.length) return;   // run changed: options rebuilt on next open
   $s("mpnow").textContent = `Map now: ${lbl(st[S.i])}`;
   const a = +$s("mpa").value, b = +$s("mpb").value; sl.style.setProperty("--ra", String(Math.min(a, b) / mx)); sl.style.setProperty("--rb", String(Math.max(a, b) / mx));
+  const hs = $("hscrub"); if (hs) { hs.style.setProperty("--ra", String(Math.min(a, b) / mx)); hs.style.setProperty("--rb", String(Math.max(a, b) / mx)); }   // 11-04 t2315u: long scrubber in the bar shows the loop range too
   document.body.classList.add("mprange");
 }
 function mpInfo() {
@@ -1253,7 +1254,17 @@ if (!CLEAN) {
   const fh = document.getElementById("fh"), hint = fh.querySelector(".shint"), stp = document.getElementById("step");
   const box = document.createElement("div"); box.id = "scrub";
   box.innerHTML = `<div class="sr"><button type="button" id="sprev" aria-label="Previous hour">&lsaquo;</button><div class="sw"><input type="range" id="hscrub" min="0" max="0" value="0" aria-label="Forecast hour"><div id="sticks"></div></div><button type="button" id="snext" aria-label="Next hour">&rsaquo;</button><b id="shour"></b></div>`;
-  fh.insertBefore(box, hint);
+  // 11-04 (Benjamin t2315u "put the longer one underneath the Waves button, underneath the right side of the View button"): on desktop
+  // the long scrubber (24 h ticks + F+ / valid readout) moves into the menu bar in place of the short slider, right after Prev / Play /
+  // Next, and stretches across the row under the tabs and the View menu. The short #step stays in the page (hidden) and is still the
+  // one the viewer reads; this one drives it. Phones keep it under the 16:9 frame (bottom dock unchanged).
+  // 11-04 (t2343u): its own row under the menu items, starting under the View menu and running ~480 px toward Share (not on the menu line)
+  if (innerWidth > 820) { const bar_ = document.getElementById("bar"); box.classList.add("inbar"); document.body.classList.add("longscrub"); bar_.appendChild(box);
+    const vx = () => { const v = document.getElementById("view"), lb = v && v.closest("label"); if (!lb) return; const x = lb.getBoundingClientRect().left - bar_.getBoundingClientRect().left - parseFloat(getComputedStyle(bar_).paddingLeft);
+      box.style.setProperty("--scrx", Math.max(0, Math.min(x, bar_.clientWidth - 500)) + "px"); };
+    vx(); addEventListener("resize", vx); if ("ResizeObserver" in window) new ResizeObserver(vx).observe(bar_);
+    const ln = document.getElementById("loadnote"); if (ln) box.querySelector(".sw").appendChild(ln); }
+  else fh.insertBefore(box, hint);
   const sl = document.getElementById("hscrub"), tk = document.getElementById("sticks"), lab = document.getElementById("shour");
   const fwd = (type) => stp.dispatchEvent(new Event(type));
   sl.addEventListener("pointerdown", () => fwd("pointerdown"));
