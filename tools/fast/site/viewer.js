@@ -252,9 +252,12 @@ async function boot() {
   // data"): a ?run= from the URL (kept there on every change) opens that model's newest run, at the same valid time when the newest run
   // has it (within 3 h), else the same forecast hour (t2270u: same model, same product, latest data). Same product, view, member and Studio framing.
   let vKeep = null;
-  if (qr && S.run === qr && !Q.get("embed") && !Q.get("id") && !Q.get("slim")) { const nw = all.find(r => r.startsWith(qr.split("/")[0] + "/")), f0q = Q.get("f");
-    if (nw && nw !== qr) { try { await loadRun(qr); const st0 = S.runs[qr].steps, s0 = st0.find(s => s.f == +f0q) || st0[0]; vKeep = Date.parse(s0.valid); } catch (e) { vKeep = null; }
-      try { await loadRun(nw); const st1 = S.runs[nw].steps; S.run = nw; if (vKeep != null && !st1.some(s => Math.abs(Date.parse(s.valid) - vKeep) <= 3 * 3600e3)) vKeep = null; } catch (e) { vKeep = null; } } }
+  // 11-04 (t2286u, "it goes to the 2m temp on the latest HRRR run"): the URL's run had rolled out of the manifest (older cycles are pruned),
+  // so the model fell back to the first one (HRRR). The model now comes from the URL's run even when that run is gone, and the valid time
+  // is worked out from its cycle + forecast hour (no need to read the old run).
+  if (qr && !Q.get("embed") && !Q.get("id") && !Q.get("slim")) { const qm2 = qr.split("/")[0], cyc = qr.split("/")[1] || "", nw = all.find(r => r.startsWith(qm2 + "/")), f0q = +Q.get("f");
+    if (nw && nw !== qr) { S.run = nw;
+      if (/^\d{10}$/.test(cyc) && isFinite(f0q)) vKeep = Date.UTC(+cyc.slice(0, 4), +cyc.slice(4, 6) - 1, +cyc.slice(6, 8), +cyc.slice(8, 10)) + f0q * 3600e3; } }
   await loadRun(S.run);
   // "Runs" menu (Benjamin 10-29 7:10 PM): every available run, grouped by model, newest first; picking one keeps the valid time
   const runLabel = r => { const [m, c] = r.split("/"), p = ((S.man.progress || {})[m] || {})[c];
@@ -278,6 +281,7 @@ async function boot() {
     runMenu(o2, a2); loadNote();
   }, 120e3);
   setLists();
+  if (vKeep != null && !S.runs[S.run].steps.some(x => Math.abs(Date.parse(x.valid) - vKeep) <= 3 * 3600e3)) vKeep = null;
   const f0 = vKeep != null ? null : Q.get("f"), steps = S.runs[S.run].steps; S.i = f0 ? Math.max(0, steps.findIndex(s => s.f == +f0)) : S.run.startsWith("oisst/") ? steps.length - 1 : 0;   // 11-03: daily analyses open on the newest day
   const vq = vKeep != null ? vKeep : Date.parse(Q.get("valid") || ""); if (!f0 && vq) { let b = 0; steps.forEach((x, k) => { if (Math.abs(Date.parse(x.valid) - vq) < Math.abs(Date.parse(steps[b].valid) - vq)) b = k; }); S.i = b; }   // old-site links
   $("step").value = S.i;
