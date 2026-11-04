@@ -1105,9 +1105,7 @@ if (!CLEAN) {
     cv.addEventListener("pointerleave", () => { tip.hidden = true; });
     cv.addEventListener("pointerdown", () => { tip.hidden = true; });
   }
-  // Request a change: reqbox.js (loaded after this file) makes #rqb; put it in a slot under the 16:9 frame
-  const slot = document.createElement("div"); slot.id = "rqslot"; fh.appendChild(slot);
-  addEventListener("DOMContentLoaded", () => { const b = document.getElementById("rqb"); if (b) { slot.appendChild(b); fitFrames(); } });
+  // Request a change: 11-03 (Benjamin t2244u) reqbox.js puts #rqb in the top menu bar (it was in a slot under the 16:9 frame)
 }
 if (!CLEAN) {   // Studio: Map | Meteogram switch (first in the menu bar) + the meteograms page's pickers in a small iframe
   const bar = document.getElementById("bar"), sw = document.createElement("label"); sw.id = "smodel";
