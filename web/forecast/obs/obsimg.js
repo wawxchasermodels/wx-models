@@ -154,7 +154,7 @@ const ObsImg = (() => {
   function underT(L, t) { L = L || []; for (let i = L.length - 1; i >= 0; i--) if (Date.parse(L[i]) <= Date.parse(t) + 60e3) return L[i]; return L[0] || null; }
   const unders = (tile, t) => [["fd", underT(ST.fdT, t)], ...(tile === "detail" ? [["wide", underT(ST.wusT, t)]] : [])].filter((x) => x[1]);
   // red / pink map-line pixels (STAR draws them pure red; JPEG blurs them into the background). Yellow / orange (dry air) is not a line.
-  const lineAt = (d, i) => { const r = d[i], g = d[i + 1], b = d[i + 2]; return (r - g > 60 && g - b < 60) || (r - g > 22 && Math.abs(g - b) < 31); };
+  const lineAt = (d, i) => { const r = d[i], g = d[i + 1], b = d[i + 2]; return (r - g > 60 && g - b < 60) || (r - g > 12 && Math.abs(g - b) < 31); };
   let procQ = Promise.resolve();
   function starClean(im, sec) {   // -> Promise<Blob | "moved" | null>, one image at a time so the page stays responsive
     const run = async () => {
@@ -255,7 +255,8 @@ const ObsImg = (() => {
         if(uv.y>cut.x||(uv.x<cut.y&&uv.y>cut.z)){discard;}
       }
       if(uv.x<0.||uv.x>1.||uv.y<0.||uv.y>1.){discard;}
-      vec4 c=texture2D(tex,uv);gl_FragColor=vec4(c.rgb*c.a*alpha,c.a*alpha);}`;
+      vec4 c=texture2D(tex,uv);if(geo>.5&&c.r+c.g+c.b<.06){discard;}   // space / no-data black on the NOAA images
+      gl_FragColor=vec4(c.rgb*c.a*alpha,c.a*alpha);}`;
   function glInit() {
     if (ST.gl || ST.glFail) return ST.gl;
     const cv = document.createElement("canvas"), gl = cv.getContext("webgl", { premultipliedAlpha: true, preserveDrawingBuffer: true, antialias: false });
