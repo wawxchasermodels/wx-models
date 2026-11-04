@@ -63,8 +63,13 @@ def _save(path, data):
     os.replace(tmp, path)
 
 
+# GITHUB_TOKEN is passed to the relay step since 11-03-26 so sent.json can be published.
+# Kept out of constants.SECRET_NAMES because setup_secrets.py uploads that list.
+_MASKED = tuple(constants.SECRET_NAMES) + ("GITHUB_TOKEN",)
+
+
 def mask_secrets():
-    for name in constants.SECRET_NAMES:
+    for name in _MASKED:
         value = os.environ.get(name) or ""
         if value:
             sys.stdout.write("::add-mask::%s\n" % value)
@@ -72,7 +77,7 @@ def mask_secrets():
 
 
 def scrub(text):
-    for name in constants.SECRET_NAMES:
+    for name in _MASKED:
         value = os.environ.get(name) or ""
         if value and value in text:
             text = text.replace(value, "***")
@@ -127,17 +132,60 @@ def publish_sent(doc):
     if not github_api.ensure_branch(repo, constants.STATE_BRANCH, "main", token):
         log.warning("sent index not published (could not open %s)", constants.STATE_BRANCH)
         return False
-    sha = github_api.get_contents_sha(repo, constants.STATE_PATH, constants.STATE_BRANCH, token)
     payload = json.dumps(doc, indent=1, sort_keys=True).encode("utf-8") + b"\n"
-    code, _body = github_api.put_contents(
-        repo, constants.STATE_PATH, constants.STATE_BRANCH,
-        "relay: record alerts the backup posted", payload, sha, token,
-    )
-    if code in (200, 201):
-        log.info("published %s on %s", constants.STATE_PATH, constants.STATE_BRANCH)
-        return True
+    code = None
+    for _attempt in range(2):   # 11-03-26: re-read the sha once if the first PUT hits a conflict
+        sha = github_api.get_contents_sha(repo, constants.STATE_PATH, constants.STATE_BRANCH, token)
+        code, _body = github_api.put_contents(
+            repo, constants.STATE_PATH, constants.STATE_BRANCH,
+            "relay: record alerts the backup posted", payload, sha, token,
+        )
+        if code in (200, 201):
+            log.info("published %s on %s", constants.STATE_PATH, constants.STATE_BRANCH)
+            return True
+        if code not in (409, 422):
+            break
     log.warning("sent index publish failed (http %s)", code)
     return False
+
+
+def _publish_fingerprint(doc):
+    """Content hash without the 'updated' stamp, so an unchanged index is not re-committed."""
+    import hashlib
+    body = dict(doc or {})
+    body.pop("updated", None)
+    return hashlib.sha1(sent_index.canonical(body).encode("utf-8")).hexdigest()
+
+
+def flush_deliveries(base, sent, remote_sent):
+    """Fold this run's deliveries into sent.json and publish it right away (11-03-26 relay dedupe).
+
+    Called after EACH channel, not only at the end of the run: the relay's webhook POST is what wakes the
+    box, and the box resyncs from sent.json 10-20 s later. A publish that failed earlier (or never
+    happened, as before 11-03-26 when GITHUB_TOKEN was not passed) is retried on every run until the
+    published fingerprint matches. Never raises; a publish failure never blocks or undoes a POST.
+    """
+    try:
+        sent, changed = fold_new_deliveries(base, sent)
+        sent_index.save(os.path.join(base, "sent.json"), sent)
+        marker = os.path.join(base, "sent_published.json")
+        fp = _publish_fingerprint(sent)
+        prev = _load(marker, {})
+        last = prev.get("fingerprint") if isinstance(prev, dict) else None
+        has_content = bool((sent.get("urgent") or {}).get("keys") or any(
+            (sent.get("quiet") or {}).get(k) for k in ("seen", "quakes", "spc_posted", "hurricanes", "gov_feeds", "pass_snapshot")))
+        if not has_content:
+            return sent, remote_sent
+        if remote_sent is not None and fp == _publish_fingerprint(remote_sent):
+            return sent, remote_sent          # branch already has exactly this
+        if remote_sent is None and fp == last and not changed:
+            return sent, remote_sent          # could not read the branch, but this exact index was published
+        if publish_sent(sent):
+            _save(marker, {"fingerprint": fp, "at": datetime.now(timezone.utc).isoformat()})
+            remote_sent = json.loads(sent_index.canonical(sent))
+    except Exception as exc:
+        log.warning("sent index flush failed (%s); POSTs are unaffected", type(exc).__name__)
+    return sent, remote_sent
 
 
 def rehydrate(sent, base):
@@ -485,6 +533,9 @@ def main():
                 if res is None and exit_code == 0:
                     log.warning("urgent fetch failed; will retry next run")
 
+    if not dry:
+        sent, remote_sent = flush_deliveries(base, sent, remote_sent)
+
     # --- quiet ---
     if quiet_plan["state"] == "fresh" and not dry:
         report["quiet"] = {"action": "skip", "reason": "heartbeat fresh", "passes": refresh_passes(base)}
@@ -515,12 +566,7 @@ def main():
                     log.warning("quiet fetch failed; will retry next run")
 
     if not dry:
-        sent, changed = fold_new_deliveries(base, sent)
-        sent_index.save(os.path.join(base, "sent.json"), sent)
-        if changed:
-            publish_sent(sent)
-        elif remote_sent and sent_index.canonical(sent) != sent_index.canonical(remote_sent):
-            publish_sent(sent)
+        sent, remote_sent = flush_deliveries(base, sent, remote_sent)
 
     report["elapsed_sec"] = round(time.time() - started, 1)
     print(json.dumps(report, indent=1, default=str))

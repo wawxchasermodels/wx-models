@@ -1,0 +1,130 @@
+{
+    "@context": [
+        "https://geojson.org/geojson-ld/geojson-context.jsonld",
+        {
+            "@version": "1.1",
+            "wx": "https://api.weather.gov/ontology#",
+            "@vocab": "https://api.weather.gov/ontology#"
+        }
+    ],
+    "id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.e65bfa5b12017eea2bb72c893d8e81b66adb92df.001.1",
+    "type": "Feature",
+    "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+            [
+                [
+                    -87.38,
+                    38.59
+                ],
+                [
+                    -87.38,
+                    38.66
+                ],
+                [
+                    -87.03,
+                    38.78
+                ],
+                [
+                    -87.01,
+                    38.58
+                ],
+                [
+                    -87.41,
+                    38.57
+                ],
+                [
+                    -87.38,
+                    38.59
+                ]
+            ]
+        ]
+    },
+    "properties": {
+        "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.e65bfa5b12017eea2bb72c893d8e81b66adb92df.001.1",
+        "@type": "wx:Alert",
+        "id": "urn:oid:2.49.0.1.840.0.e65bfa5b12017eea2bb72c893d8e81b66adb92df.001.1",
+        "areaDesc": "Daviess, IN; Knox, IN",
+        "geocode": {
+            "SAME": [
+                "018027",
+                "018083"
+            ],
+            "UGC": [
+                "INC027",
+                "INC083"
+            ]
+        },
+        "affectedZones": [
+            "https://api.weather.gov/zones/county/INC027",
+            "https://api.weather.gov/zones/county/INC083"
+        ],
+        "references": [
+            {
+                "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.09deb3571047938d34852493cfd7deef89b87bf1.001.1",
+                "identifier": "urn:oid:2.49.0.1.840.0.09deb3571047938d34852493cfd7deef89b87bf1.001.1",
+                "sender": "w-nws.webmaster@noaa.gov",
+                "sent": "2026-10-15T19:41:00-04:00"
+            }
+        ],
+        "sent": "2026-10-15T20:00:00-04:00",
+        "effective": "2026-10-15T20:00:00-04:00",
+        "onset": "2026-10-15T20:00:00-04:00",
+        "expires": "2026-10-15T20:15:17-04:00",
+        "ends": "2026-10-15T20:15:00-04:00",
+        "status": "Actual",
+        "messageType": "Cancel",
+        "category": "Met",
+        "severity": "Minor",
+        "certainty": "Observed",
+        "urgency": "Past",
+        "event": "Tornado Warning",
+        "sender": "w-nws.webmaster@noaa.gov",
+        "senderName": "NWS Indianapolis IN",
+        "headline": "The Tornado Warning has been cancelled.",
+        "description": "The Tornado Warning has been cancelled and is no longer in effect.",
+        "instruction": null,
+        "response": "AllClear",
+        "note": null,
+        "parameters": {
+            "AWIPSidentifier": [
+                "SVSIND"
+            ],
+            "WMOidentifier": [
+                "WWUS53 KIND 160000"
+            ],
+            "NWSheadline": [
+                "THE TORNADO WARNING FOR EAST CENTRAL KNOX AND CENTRAL DAVIESS COUNTIES IS CANCELLED"
+            ],
+            "eventMotionDescription": [
+                "2026-10-15T23:54:00-00:00...storm...259DEG...26KT...38.65,-87.14"
+            ],
+            "BLOCKCHANNEL": [
+                "EAS",
+                "NWEM",
+                "CMAS"
+            ],
+            "EAS-ORG": [
+                "WXR"
+            ],
+            "VTEC": [
+                "/O.CAN.KIND.TO.W.0081.000000T0000Z-261016T0015Z/"
+            ],
+            "eventEndingTime": [
+                "2026-10-15T20:15:00-04:00"
+            ]
+        },
+        "scope": "Public",
+        "code": "IPAWSv1.0",
+        "language": "en-US",
+        "web": "http://www.weather.gov",
+        "eventCode": {
+            "SAME": [
+                "SVS"
+            ],
+            "NationalWeatherService": [
+                "TOW"
+            ]
+        }
+    }
+}

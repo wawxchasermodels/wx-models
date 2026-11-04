@@ -54,9 +54,14 @@ jobs:
 
       - name: Run alert relay
         run: python3 alert_relay/relay.py
+        env:
+          # 11-03-26 relay dedupe: without this, publish_sent() logged "GITHUB_TOKEN unset" on every send,
+          # relay-state/sent.json was never written, and the box re-POSTed what the relay had just sent.
+          GITHUB_TOKEN: ${{ github.token }}
 
       - name: Save relay cache
-        if: success() && env.ALERT_RELAY_DRY_RUN != 'true'
+        # 11-03-26: also save after a failed step, so ids POSTed before a crash are not POSTed again next run.
+        if: ${{ !cancelled() && env.ALERT_RELAY_DRY_RUN != 'true' }}
         uses: actions/cache/save@v4
         with:
           path: alert_relay/.cache
