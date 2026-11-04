@@ -566,7 +566,7 @@ function placeMem() {
   ml.style.left = (tabs.offsetLeft + tabs.offsetWidth - w) + "px"; ml.style.top = (tabs.offsetTop + (tabs.offsetHeight - h) / 2) + "px";
 }
 addEventListener("resize", () => requestAnimationFrame(placeMem));
-window.onStudioDraw = (cv, cur, step, lite) => { try { pinBar(); placeMem(); } catch (e) { /* bar not ready */ } last = { cv, cur, step, lite: !!lite }; renderAll(); try { scrubSync(); } catch (e) { /* scrubber not built */ } if (lite) return; if (PLAY.on) PLAY.next(); if (!REC.on && typeof mpSync === "function") try { mpSync(); } catch (e) { /* panel not ready */ } };
+window.onStudioDraw = (cv, cur, step, lite) => { try { pinBar(); placeMem(); } catch (e) { /* bar not ready */ } const first_ = !last; last = { cv, cur, step, lite: !!lite }; if (first_ && !CLEAN) setTimeout(() => { try { fitFrames(); } catch (e) { /* layout not ready */ } }, 300); /* 11-04: remember the Map layout once the map is up */ renderAll(); try { scrubSync(); } catch (e) { /* scrubber not built */ } if (lite) return; if (PLAY.on) PLAY.next(); if (!REC.on && typeof mpSync === "function") try { mpSync(); } catch (e) { /* panel not ready */ } };
 // drag / keys / zoom / buttons
 for (const k of ["v", "h"]) {
   const f = F[k], cv = f.cv; let d = null;
@@ -1222,8 +1222,15 @@ function fitFrames() {
     cvv.style.width = wv + "px"; cvv.style.height = wv * 16 / 9 + "px"; cvh.style.width = wh + "px"; cvh.style.height = wh * 9 / 16 + "px";
     if (same) break;
   }
-  const topMap = cvh.getBoundingClientRect().top + scrollY;
-  const shdH = SHD.map((e) => e.getBoundingClientRect().height);
+  let topMap = cvh.getBoundingClientRect().top + scrollY;
+  let shdH = SHD.map((e) => e.getBoundingClientRect().height);
+  // 11-04 (t2340u, smaller windows): opened straight into a mode, the Map bar's menus measure narrower (one row instead of two), so the
+  // real Map layout (drawn map, full bar) is remembered per window size and reused by the other modes.
+  const FK = "studio:mapfit:" + innerWidth + "x" + innerHeight;
+  if (!MODES.length && last) try { localStorage.setItem(FK, JSON.stringify({ wv, wh, topMap, shdH, sy: scrollY })); } catch (e) { /* private */ }
+  else if (MODES.length) { let c = null; try { c = JSON.parse(localStorage.getItem(FK) || "null"); } catch (e) { c = null; }
+    if (c && c.wv > 0 && c.wh > 0) { wv = c.wv; wh = c.wh; topMap = c.topMap; shdH = c.shdH;
+      fv.style.width = wv + "px"; fh.style.width = wh + "px"; cvv.style.width = wv + "px"; cvv.style.height = wv * 16 / 9 + "px"; cvh.style.width = wh + "px"; cvh.style.height = wh * 9 / 16 + "px"; } }
   for (const c of MODES) bd.classList.add(c);
   if (pnl && window.__fitRO) for (const e of pnl.children) if (!e.__fitObs) { e.__fitObs = 1; window.__fitRO.observe(e); }   // panel content (obs chips) settles later
   if (MODES.length) {
