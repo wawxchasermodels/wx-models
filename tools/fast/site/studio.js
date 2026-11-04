@@ -27,7 +27,7 @@ if (CLEAN) {
 // refresh / restore, OBS included) and this tab's sessionStorage. The shared localStorage value is no longer read, so a Studio opened or
 // re-opened without them starts on Map, never on another window's Meteogram / Observations / Pass Forecaster.
 const MODES_OK = ["map", "mg", "obs", "pass"];
-const MODE0 = (() => { const u = SQ.get("smode"); if (MODES_OK.includes(u)) return u; try { const v = sessionStorage.getItem("studio:mode"); return MODES_OK.includes(v) ? v : "map"; } catch (e) { return "map"; } })();
+const MODE0 = MODES_OK.includes(SQ.get("smode")) ? SQ.get("smode") : "map";   // the address only: a bare studio.html always opens on Map
 const saveMode = (m) => { try { sessionStorage.setItem("studio:mode", m); } catch (e) { /* private mode */ }
   if (CLEAN) return; try { const u = new URL(location); if (m === "map") u.searchParams.delete("smode"); else u.searchParams.set("smode", m); history.replaceState(null, "", u); } catch (e) { /* replaceState limit */ } };
 const MG = { on: !CLEAN && ["mg", "obs", "pass"].includes(MODE0), kind: ["obs", "pass"].includes(MODE0) ? MODE0 : "mg", img: null, src: "" };
