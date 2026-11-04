@@ -26,11 +26,15 @@ if (CLEAN) {
 // 11-04 (t2337u "refreshed ... and it loaded into a SNOW METEOGRAM"): the mode is per tab only: the address (?smode=, survives any
 // refresh / restore, OBS included) and this tab's sessionStorage. The shared localStorage value is no longer read, so a Studio opened or
 // re-opened without them starts on Map, never on another window's Meteogram / Observations / Pass Forecaster.
-const MODES_OK = ["map", "mg", "obs", "pass"];
+const MODES_OK = ["map", "mg", "obs", "pass", "wafc"];
 const MODE0 = MODES_OK.includes(SQ.get("smode")) ? SQ.get("smode") : "map";   // the address only: a bare studio.html always opens on Map
 const saveMode = (m) => { try { sessionStorage.setItem("studio:mode", m); } catch (e) { /* private mode */ }
   if (CLEAN) return; try { const u = new URL(location); if (m === "map") u.searchParams.delete("smode"); else u.searchParams.set("smode", m); history.replaceState(null, "", u); } catch (e) { /* replaceState limit */ } };
-const MG = { on: !CLEAN && ["mg", "obs", "pass"].includes(MODE0), kind: ["obs", "pass"].includes(MODE0) ? MODE0 : "mg", img: null, src: "" };
+const MG = { on: !CLEAN && ["mg", "obs", "pass", "wafc"].includes(MODE0), kind: ["obs", "pass", "wafc"].includes(MODE0) ? MODE0 : "mg", img: null, src: "" };
+// 11-04 (t2310u/t2311u "my fancy Washington forecast maps ... into studio view", own tab): MG.kind "wafc" = the WA Maps page (wamaps.html: the
+// posted-style NBM lows / highs, gusts (HRRR / ECMWF / ENS / NBM), precip, snow) in a small panel iframe; its finished map canvas is fitted whole
+// into each frame at 2x (PSS). The map carries its own title, scale, logo and credits, so Studio adds nothing on top.
+const WAFCM = () => MG.on && MG.kind === "wafc";
 const PASSM = () => MG.on && MG.kind === "pass";
 const PF = { run: "", rows: null, msg: "" };
 const OBSM = () => MG.on && MG.kind === "obs";
@@ -435,7 +439,16 @@ function renderPass(k) {
   o.restore(); ovPut(c0, f, k); if (cnr) cornerLogo(c0, cnr);
   window.__studio = (window.__studio || 0) + 1; window.__studioPass = (window.__studioPass || 0) + 1;
 }
+function renderWafc(k) {
+  const f = F[k]; ssFit(f, PSS); const c = f.cv.getContext("2d"); f.zoom.min = "100"; f.zoom.value = "100";
+  c.setTransform(PSS, 0, 0, PSS, 0, 0); c.clearRect(0, 0, f.W, f.H); c.fillStyle = BG === "transparent" ? "#111316" : BG; c.fillRect(0, 0, f.W, f.H);
+  const im = MG.img; if (!im) { c.font = `700 ${k === "v" ? 40 : 34}px Montserrat`; c.fillStyle = "#c9ced8"; c.textAlign = "center"; c.fillText(MG.msg || "Loading the WA forecast map\u2026", f.W / 2, f.H / 2); c.textAlign = "left"; return; }
+  const s = Math.min(f.W / im.width, f.H / im.height), w = im.width * s, h = im.height * s;   // whole map (title to credits), centered
+  c.imageSmoothingEnabled = true; c.imageSmoothingQuality = "high"; c.drawImage(im, (f.W - w) / 2, (f.H - h) / 2, w, h);
+  window.__studio = (window.__studio || 0) + 1; window.__studioWafc = (window.__studioWafc || 0) + 1;
+}
 function renderMg(k, frO) {
+  if (WAFCM()) return renderWafc(k);
   if (OBSM()) return renderObs(k, frO);
   if (PASSM()) return renderPass(k);
   const f = F[k], c = f.cv.getContext("2d"), fr = frO || getFr(k); f.zoom.min = "100"; f.zoom.value = Math.round((fr.zoom || 1) * 100);
@@ -450,7 +463,7 @@ function renderMg(k, frO) {
   window.__studio = (window.__studio || 0) + 1; window.__studioMg = (window.__studioMg || 0) + 1;
 }
 async function render(k, frO) {   // frO: camera override (MP4 storm-track pan)
-  ssFit(F[k], PASSM() ? PSS : 1);   // 11-04 (t2295u): Pass Forecaster draws at 2x; every other mode stays at native frame px
+  ssFit(F[k], PASSM() || WAFCM() ? PSS : 1);   // 11-04 (t2295u): Pass Forecaster draws at 2x; every other mode stays at native frame px
   if (MG.on) return renderMg(k, frO);
   if (!last) return; const f = F[k], c0 = f.cv.getContext("2d"), fr = frO || getFr(k), { cv, cur, step } = last, P = cur.P, [m] = cur.run.split("/"); let c = c0;
   if (!frO) f.zoom.value = Math.round((fr.zoom || 1) * 100);
@@ -631,6 +644,8 @@ for (const k of ["v", "h"]) {
     if (a.dataset.a === "mp4" && (!MG.on || OBSM())) openMp4(k);
     if (a.dataset.a === "png" && OBSM()) { if (!MG.img) return; const I = obsInfo(), st = I && I.t ? new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(I.t).replace(/[^0-9]/g, "") : "now";
       const nm = `obs_${I ? I.view : "pnw"}_${I ? I.on.map((l) => l[0]).join("-") : "plot"}_${st}_${k === "v" ? "1080x1920" : "1920x1080"}.png`;
+      cv.toBlob((b) => { const u = URL.createObjectURL(b), l = document.createElement("a"); l.href = u; l.download = nm; l.click(); setTimeout(() => URL.revokeObjectURL(u), 4000); }, "image/png"); return; }
+    if (a.dataset.a === "png" && WAFCM()) { if (!MG.img) return; const nm = `wa-forecast_${(MG.src || "map").replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "")}_${k === "v" ? "2160x3840" : "3840x2160"}.png`;
       cv.toBlob((b) => { const u = URL.createObjectURL(b), l = document.createElement("a"); l.href = u; l.download = nm; l.click(); setTimeout(() => URL.revokeObjectURL(u), 4000); }, "image/png"); return; }
     if (a.dataset.a === "png" && PASSM()) { if (!PF.rows) return; const nm = `pass-forecast_${PF.run.replace("/", "_")}Z_${k === "v" ? "2160x3840" : "3840x2160"}.png`;
       cv.toBlob((b) => { const u = URL.createObjectURL(b), l = document.createElement("a"); l.href = u; l.download = nm; l.click(); setTimeout(() => URL.revokeObjectURL(u), 4000); }, "image/png"); return; }
@@ -1317,7 +1332,7 @@ if (!CLEAN) {
 }
 if (!CLEAN) {   // Studio: Map | Meteogram switch (first in the menu bar) + the meteograms page's pickers in a small iframe
   const bar = document.getElementById("bar"), sw = document.createElement("label"); sw.id = "smodel";
-  sw.innerHTML = `Studio <select id="smode"><option value="map">Map</option><option value="mg">Meteogram</option><option value="obs">Observations</option><option value="pass">Pass Forecaster</option></select>`; bar.insertBefore(sw, bar.firstChild);
+  sw.innerHTML = `Studio <select id="smode"><option value="map">Map</option><option value="mg">Meteogram</option><option value="obs">Observations</option><option value="pass">Pass Forecaster</option><option value="wafc">WA Forecast Maps</option></select>`; bar.insertBefore(sw, bar.firstChild);
   const pnl = document.createElement("div"); pnl.id = "mgp"; bar.after(pnl);
   const sel = document.getElementById("smode"); sel.value = MG.on ? MG.kind : "map"; saveMode(sel.value);
   let fr_ = null, poll = 0;
@@ -1346,7 +1361,22 @@ if (!CLEAN) {   // Studio: Map | Meteogram switch (first in the menu bar) + the 
     PF.run = run; PF.rows = null; PF.msg = ""; localStorage.setItem("studio:passrun", run); renderAll();
     const box = document.createElement("div"), ok = await window.studioPassBuild(run, box).catch(() => false); if (PF.run !== run || !PASSM()) return;
     PF.rows = ok ? pfParse(box) : null; if (!PF.rows) PF.msg = (box.textContent || "").trim() || "This run has no pass forecast."; renderAll(); };
+  // WA Forecast Maps: wamaps.html in a panel iframe (its own pickers; map hidden there); its URL (kind / model / day / window / view / run) is kept
+  // in studio:wafcq so a refresh comes back on the same map; the finished canvas is grabbed after each draw (window.__drawn)
+  let wf_ = null, wdrawn = -1; const wcss = `#wrap{position:absolute!important;left:-99999px!important;top:0}#save,#bar>a,#bar>b,.lic{display:none!important}body{margin:0!important;padding:6px 10px!important;background:#1d2027!important;overflow:hidden}#bar{margin:0!important;padding:0!important;position:static!important}`;
+  const wgrab = () => { try { const w = wf_.contentWindow, d = wf_.contentDocument, cv_ = d && d.getElementById("map"); if (!w || !cv_) return;
+    const q = w.location.search; if (q) { localStorage.setItem("studio:wafcq", q); try { sessionStorage.setItem("studio:wafcq", q); } catch (e) { /* private */ } }
+    const m_ = d.getElementById("msg"), dn = w.__drawn || 0;
+    if (dn !== wdrawn && cv_.width && dn > 0) { wdrawn = dn; MG.img = cv_; MG.src = q.replace(/^\?/, "").replace(/&?run=[^&]*/, ""); MG.msg = ""; renderAll(); }
+    else if (!dn && m_ && /Could not|No /.test(m_.textContent) && MG.msg !== m_.textContent) { MG.msg = m_.textContent; renderAll(); } } catch (e) { /* iframe loading */ } };
   const setMode = (mode) => {
+    if (mode === "wafc") { MG.on = true; MG.kind = "wafc"; MG.img = null; MG.msg = ""; wdrawn = -1; saveMode("wafc"); clearInterval(poll);
+      document.body.classList.remove("mgmode", "obsmode", "passmode"); document.body.classList.add("wafcmode"); if (typeof Obs !== "undefined" && Obs.hide) Obs.hide();
+      if (!wf_) { wf_ = document.createElement("iframe"); wf_.id = "wff"; wf_.title = "WA forecast map pickers"; wf_.src = "wamaps.html" + ((() => { try { return sessionStorage.getItem("studio:wafcq"); } catch (e) { return null; } })() || localStorage.getItem("studio:wafcq") || "?kind=low&view=full");   // this tab first (refresh), else the last one used
+        wf_.onload = () => { try { const st = wf_.contentDocument.createElement("style"); st.textContent = wcss; wf_.contentDocument.head.appendChild(st); } catch (e) { /* not ready */ } };
+        pnl.appendChild(wf_); }
+      poll = setInterval(wgrab, 300); renderAll(); fitFrames(); return; }
+    document.body.classList.remove("wafcmode"); if (MG.kind === "wafc") { MG.img = null; MG.kind = "mg"; MG.on = false; }
     const wasPass = PASSM(); if (mode === "pass") { MG.on = true; MG.kind = "pass"; MG.img = null; saveMode("pass"); clearInterval(poll);
       document.body.classList.remove("mgmode", "obsmode"); document.body.classList.add("passmode"); if (typeof Obs !== "undefined" && Obs.hide) Obs.hide();
       pfLoad(); renderAll(); fitFrames(); return; }

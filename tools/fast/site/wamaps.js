@@ -8,14 +8,19 @@
 const DATA = window.WX_DATA || "data/", KIT = "wamaps/kit/", $ = id => document.getElementById(id), Q = new URLSearchParams(location.search);
 const WA = { man: null, runs: {}, fields: new Map(), kits: {}, imgs: {} };
 const VIEWS = [["full", "Washington"], ["west", "Western WA"], ["east", "Eastern WA"]];
-const KINDS = [["low", "Lows"], ["high", "Highs"], ["precip", "Precip total"], ["snow", "Snow total"]];
+const KINDS = [["low", "Lows"], ["high", "Highs"], ["gust", "Wind gusts"], ["precip", "Precip total"], ["snow", "Snow total"]];
 // WA Maps quick slice (10-31-26 12:35 PM, Benjamin: "add most recent European data, and hrrr", "precipitation totals, let me choose the time
 // frame in little boxes with dates and time in UT", snow, "go out like 7 days"): totals from NBM / ECMWF 9 km / ECMWF 0.25 / HRRR, window
 // picked in two UTC boxes, capped at 168 h. Lows / highs stay NBM. Kit extras from wamaps/build_totals_kit.py (per-model LUT + label points,
 // overlay without the temp scale and tag, Impact titles rasterized there).
-const SRC = { nbm: { tag: "[NBM 2.5 km]", name: "NBM" }, ifs9: { tag: "[ECMWF 9 km]", name: "ECMWF 9 km" }, ifs: { tag: "[ECMWF 0.25°]", name: "ECMWF 0.25°" },
-              hrrr: { tag: "[HRRR 3 km]", name: "HRRR" } };
-const TOTALS = new Set(["precip", "snow"]), MAXH = 168;
+// 11-04 (t2310u/t2311u): model sources are one table so more (European) sources plug in later: lut = which kit grid (LUT + label points)
+// the model's fast crop shares (EPS uses the IFS 0.25 grid), ec = ECMWF data (licence credit), kinds = the window products it can make.
+const SRC = { nbm: { tag: "[NBM 2.5 km]", name: "NBM", res: "NBM 2.5 km", kinds: ["precip", "snow", "gust"] }, ifs9: { tag: "[ECMWF 9 km]", name: "ECMWF 9 km", ec: 1, kinds: ["precip", "snow"] },
+              ifs: { tag: "[ECMWF 0.25°]", name: "ECMWF 0.25°", res: "ECMWF IFS 0.25°", ec: 1, kinds: ["precip", "snow", "gust"] },
+              eps: { tag: "[ECMWF ENS]", name: "ECMWF ENS mean", res: "ECMWF ENS mean 0.25°", ec: 1, lut: "ifs", kinds: ["gust"] },
+              hrrr: { tag: "[HRRR 3 km]", name: "HRRR", res: "HRRR 3 km", kinds: ["precip", "snow", "gust"] } };
+const lutOf = m => (SRC[m] && SRC[m].lut) || m;
+const TOTALS = new Set(["precip", "snow", "gust"]), MAXH = 168;
 const PT = "America/Los_Angeles", DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const INK = "rgb(14,16,22)";
 // ---------------------------------------------------------------- products (Phase 2+ adds gusts / rain / snow / observed here)
@@ -58,10 +63,21 @@ const SNOW = (() => {
   const labs = [""].concat(E.slice(1, -1).map(String), ["72+"]);
   return mkTotPal(E, cols, labs, v => v < 0.05 ? "0" : v < 9.95 ? v.toFixed(1) : String(Math.round(v)), " in");
 })();
+// gust palette (mph), identical to gust_map.py: 5 mph bands to 60, then 60-70-80+; values white < 40, gold 40-57, red 58+
+const GUST = (() => {
+  const E = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 70, 80];
+  const cols = [[70, 95, 160], [55, 125, 190], [40, 160, 205], [40, 180, 160], [60, 185, 95], [130, 200, 60], [200, 215, 60], [245, 220, 55], [250, 180, 45],
+                [245, 135, 40], [230, 80, 40], [205, 35, 45], [200, 40, 150], [175, 60, 210], [225, 150, 245]];
+  const labs = E.map(e => e === 80 ? "80+" : e % 10 === 0 ? String(e) : "");
+  const P = mkTotPal(E, cols, labs, v => String(Math.round(v)), " mph"); P.edgeF = 0.55;
+  P.band = v => { const r = Math.floor(v + 0.5); if (!(r >= 0)) return r < 0 ? 0 : -1; let i = 0; while (i < cols.length - 1 && r >= E[i + 1]) i++; return i; };
+  P.valColor = t => t >= 58 ? "rgb(255,72,60)" : t >= 40 ? "rgb(255,196,64)" : "#fff"; return P;
+})();
 const PRODUCTS = {
   low: { title: d => `${d.day} Predicted Low Temps`, sub: d => `Coldest Temps 4 AM to 8 AM ${d.day} ${d.md}`, pal: TEMP, extreme: ["Coldest", true] },
   high: { title: d => `${d.day} Predicted High Temps`, sub: d => `Afternoon highs ${d.day} ${d.md}`, pal: TEMP, extreme: ["Warmest", false] },
   precip: { title: () => "Total Precipitation", pal: RAIN, key: "Precip (in)", field: { nbm: "nq6", def: "apcp" }, word: "Wettest", none: "Little or no precipitation at labeled towns" },
+  gust: { title: w => `${w.day} Predicted Max Wind Gusts`, timg: w => `gust_${w.day}`, pal: GUST, key: "Gust (mph)", field: { def: "gust" }, word: "Windiest", none: "Calm at labeled towns", max: 1 },
   snow: { title: () => "Total Snowfall", pal: SNOW, key: "Snow (in)", field: { nbm: "ns6", def: "asnow" }, word: "Snowiest", none: "Little or no snow at labeled spots" },
 };
 // ---------------------------------------------------------------- data (same R2 layout / decoding as viewer.js)
@@ -106,14 +122,24 @@ function daysFor(R_, kind) {
 // totals: the hours a window can start / end at (NBM: 6-hourly amounts, so 6 h boundaries; others: every step with the run total)
 function totalTimes(R_, m, kind) {
   const fld = PRODUCTS[kind].field[m] || PRODUCTS[kind].field.def, t0 = Date.parse(R_.init), out = [0];
-  for (const s of R_.steps) if (s.f > 0 && s.f <= MAXH && s.ranges[fld] && (m !== "nbm" || s.f % 6 === 0)) out.push(s.f);
+  for (const s of R_.steps) if (s.f > 0 && s.f <= MAXH && s.ranges[fld] && (m !== "nbm" || kind === "gust" || s.f % 6 === 0)) out.push(s.f);
   return out.map(f => ({ f, ms: t0 + f * 3600e3 }));
 }
+const ptHr = ms => { const h = +ptParts(ms).hour; return `${h % 12 || 12} ${h < 12 ? "AM" : "PM"}`; };
+const ptLbl = ms => { const p = ptParts(ms); return `${p.weekday.slice(0, 3)} ${p.month}-${p.day} ${ptHr(ms)} PT`; };
 const utcLbl = ms => { const d = new Date(ms); return `${DAYS[d.getUTCDay()].slice(0, 3)} ${d.getUTCMonth() + 1}-${d.getUTCDate()} ${String(d.getUTCHours()).padStart(2, "0")}Z`; };
 async function totalField(m, c, kind, f0, f1) {
   const key = `${m}/${c}/${kind}/${f0}-${f1}`; if (WA.fields.has(key)) return WA.fields.get(key);
   const p = (async () => {
     const rk = rkey(m, c), R_ = WA.runs[rk], fld = PRODUCTS[kind].field[m] || PRODUCTS[kind].field.def;
+    if (PRODUCTS[kind].max) {   // gusts: max over the steps whose period lies in the window (hourly: valid f0..f1; 3-hourly 3 h max: previous step >= f0), as gust_map.py
+      const st = R_.steps.filter(s => s.ranges[fld]), fs = [];
+      st.forEach((s, i) => { const prev = i ? st[i - 1].f : 0, hourly = s.f - prev <= 1; if (s.f <= f1 && (hourly ? s.f >= f0 : prev >= f0)) fs.push(s.f); });
+      if (!fs.length) { const nx = st.find(s => s.f >= f1) || st[st.length - 1]; fs.push(nx.f); }
+      const Fs = await Promise.all(fs.map(f => getField(rk, fld, f))), o = Float32Array.from(Fs[0].v);
+      for (const F of Fs.slice(1)) for (let k = 0; k < o.length; k++) if (F.v[k] > o[k]) o[k] = F.v[k];
+      return { v: o, w: Fs[0].w, h: Fs[0].h, n: fs.length, fs };
+    }
     if (m === "nbm") {   // sum of the 6 h amounts ending in (f0, f1]
       const fs = R_.steps.filter(s => s.f > f0 && s.f <= f1 && s.f % 6 === 0).map(s => s.f);
       const Fs = await Promise.all(fs.map(f => getField(rk, fld, f))), o = new Float32Array(Fs[0].v.length);
@@ -210,11 +236,11 @@ function summaryLine1(K, vals, fmt = String, unit = "") {
 }
 // 11-01-26 legal audit (Benjamin t2020u): faint credit just above the date line like nbm_map (R.subtle_credit: 22 px 600, white 38 %, 1 px dark halo).
 // ECMWF sources: (c) year ECMWF (www.ecmwf.int), CC BY 4.0, Modified. Every map: GeoNames town points (CC BY 4.0). NOAA: no Data credit (his rule).
-function wamCredit(ctx, K, m) {
+function wamCredit(ctx, K, m, up = 0) {
   const L = [];
-  if (m === "ifs9" || m === "ifs") L.push(`Data: \u00a9 ${new Date().getFullYear()} ECMWF (www.ecmwf.int), CC BY 4.0. Modified.`);
+  if (SRC[m] && SRC[m].ec) L.push(`Data: \u00a9 ${new Date().getFullYear()} ECMWF (www.ecmwf.int), CC BY 4.0. Modified.`);
   L.push("Places: GeoNames (geonames.org), CC BY 4.0");
-  const dt = K.date[0], top = dt.y - dt.font[1] - 34;
+  const dt = K.date[0], top = dt.y - dt.font[1] - 34 - up;
   ctx.save(); ctx.font = "600 22px Montserrat"; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic"; ctx.lineJoin = "round";
   L.forEach((l, i) => { const yb = top - 28 * (L.length - 1 - i) + 0.968 * 22;
     ctx.lineWidth = 2; ctx.strokeStyle = "rgba(0,0,0,0.30)"; ctx.strokeText(l, dt.x, yb); ctx.fillStyle = "rgba(255,255,255,0.38)"; ctx.fillText(l, dt.x, yb); });
@@ -243,9 +269,9 @@ async function render(cv, c, kind, view, d) {
 }
 async function renderTotals(cv, m, c, kind, view, w) {
   const P = PRODUCTS[kind], pal = P.pal;
-  const [K, VK, F, T, LB] = await Promise.all([kindKit("low", view), viewKit(view, m), totalField(m, c, kind, w.f0, w.f1),
-    fetch(KIT + view + "/totals.json").then(r => r.json()), m === "nbm" ? null : fetch(KIT + view + `/lab_${m}.json`).then(r => r.json())]);
-  const [base, over, title] = await Promise.all([loadImg(KIT + view + "/base.png"), loadImg(KIT + view + "/plain_overlay.png"), loadImg(KIT + view + `/titles/${kind}.png`)]);
+  const [K, VK, F, T, LB] = await Promise.all([kindKit("low", view), viewKit(view, lutOf(m)), totalField(m, c, kind, w.f0, w.f1),
+    fetch(KIT + view + "/totals.json").then(r => r.json()), m === "nbm" ? null : fetch(KIT + view + `/lab_${lutOf(m)}.json`).then(r => r.json())]);
+  const [base, over, title] = await Promise.all([loadImg(KIT + view + "/base.png"), loadImg(KIT + view + "/plain_overlay.png"), loadImg(KIT + view + `/titles/${P.timg ? P.timg(w) : kind}.png`)]);
   cv.width = K.W; cv.height = K.H; const ctx = cv.getContext("2d");
   ctx.drawImage(base, 0, 0); fillData(ctx, K, VK, F, pal); ctx.drawImage(over, 0, 0); ctx.drawImage(title, 0, 0);
   // scale (same box as the temp scale it replaces) + [model] tag (nbm_map: Montserrat 700 32 px, stroke 4, right-aligned at W-34, y 30)
@@ -263,23 +289,27 @@ async function renderTotals(cv, m, c, kind, view, w) {
     const [fi, fj] = LB ? LB[i] : [L.fi, L.fj], v = bil(F, fi, fj); if (v !== v) return;
     const x = Math.max(0, v); if (L.wa) vals[L.name] = x;
     if (L.wa && (kind === "snow" || !L.pass_)) tv[L.name] = +pal.fmt(x);
-    pilText(ctx, pal.fmt(x), L.x, L.y, L.anchor, L.font, L.sw, "#fff");
+    pilText(ctx, pal.fmt(x), L.x, L.y, L.anchor, L.font, L.sw, pal.valColor(+pal.fmt(x)));
   });
   const fitPx = (txt, px) => { while (px > 20) { ctx.font = `800 ${px}px Montserrat`; if (ctx.measureText(txt).width <= K.sum_maxw) break; px -= 2; } return px; };
   const mx = Math.max(...Object.values(tv));
   const l2 = !(mx > 0) ? P.none : extremeLine(Object.fromEntries(Object.entries(tv).map(([k, v]) => [k, v])), K.pops, P.word, false,
-    s => { ctx.font = `800 ${K.sum_px[1]}px Montserrat`; return ctx.measureText(s).width <= K.sum_maxw; }).replace(/ ([\d.]+)$/, (q, v) => ` ${pal.fmt(+v)} in`);
+    s => { ctx.font = `800 ${K.sum_px[1]}px Montserrat`; return ctx.measureText(s).width <= K.sum_maxw; }).replace(/ ([\d.]+)$/, (q, v) => ` ${pal.fmt(+v)}${pal.unit}`);
   const rv = {}; for (const k in vals) rv[k] = +pal.fmt(vals[k]);
-  const l1 = summaryLine1(K, rv, v => pal.fmt(v), " in"), [s2, s1] = K.summary;
+  const l1 = summaryLine1(K, rv, v => pal.fmt(v), pal.unit), [s2, s1] = K.summary;
   pilText(ctx, l2, s2.x, s2.y, "rs", ["", fitPx(l2, K.sum_px[1]), 800], 4, "#fff");
   pilText(ctx, l1, s1.x, s1.y, "rs", ["", fitPx(l1, K.sum_px[0]), 800], 4, "#fff");
-  const R_ = WA.runs[rkey(m, c)], sub = `${utcLbl(w.ms0)} to ${utcLbl(w.ms1)} UTC (${w.f1 - w.f0} h) · ${SRC[m].name} ${c.slice(8)}Z run`;
+  const R_ = WA.runs[rkey(m, c)], ri = Date.parse(R_.init), rp = ptParts(ri), sub = P.max ? `Max gusts ${ptHr(w.ms0)} to ${ptHr(w.ms1)} ${w.day} ${w.md}`
+    : `${utcLbl(w.ms0)} to ${utcLbl(w.ms1)} UTC (${w.f1 - w.f0} h) · ${SRC[m].name} ${c.slice(8)}Z run`;
   const dt = K.date[0]; pilText(ctx, sub, dt.x, dt.y, "ls", dt.font, 4, "#fff");
-  wamCredit(ctx, K, m);
-  return { title: P.title(), sub, l1, l2, vals, steps: [w.f0, w.f1], n: F.n };
+  let up = 0;
+  if (P.max) { const ml = `${SRC[m].res || SRC[m].name}, ${c.slice(8)}Z run ${rp.month}-${rp.day} (${ptHr(ri)} PT)`; up = dt.font[1] - 6 + 10;   // gust_map.py model line (MODEL_PX = date px - 6)
+    pilText(ctx, ml, dt.x, dt.y - dt.font[1] - 10, "ls", ["", dt.font[1] - 6, dt.font[2] || 800], 4, "#fff"); }
+  wamCredit(ctx, K, m, up);
+  return { title: P.title(w), sub, l1, l2, vals, steps: [w.f0, w.f1], n: F.n };
 }
 // ---------------------------------------------------------------- page
-const MODELS_T = ["nbm", "ifs9", "ifs", "hrrr"];
+const MODELS_T = ["nbm", "ifs9", "ifs", "eps", "hrrr"];
 const S = { c: null, kind: KINDS.some(k => k[0] === Q.get("kind")) ? Q.get("kind") : "low", view: VIEWS.some(v => v[0] === Q.get("view")) ? Q.get("view") : "full",
             day: Q.get("day"), m: MODELS_T.includes(Q.get("model")) ? Q.get("model") : "nbm", f0: Q.get("from"), f1: Q.get("to"), busy: 0 };
 const fillSel = (sel, opts, cur) => { sel.innerHTML = opts.map(([v, t]) => `<option value="${v}"${v === cur ? " selected" : ""}>${t}</option>`).join(""); };
@@ -293,15 +323,24 @@ function setDays() {
 const ymdh = ms => new Date(ms).toISOString().replace(/[-T:]/g, "").slice(0, 10);
 function setTimes() {
   const R_ = WA.runs[rkey(S.m, S.c)], T = totalTimes(R_, S.m, S.kind); S.times = T;
-  const byK = k => T.findIndex(t => ymdh(t.ms) === k);
-  let a = byK(S.f0), b = byK(S.f1);
+  const byK = k => { if (!k) return -1; const i = T.findIndex(t => ymdh(t.ms) === k); if (i >= 0 || S.kind !== "gust") return i;   // gusts: nearest step (3-hourly models)
+    const ms = Date.UTC(+k.slice(0, 4), +k.slice(4, 6) - 1, +k.slice(6, 8), +k.slice(8, 10)); let b = -1, bd = 3.01 * 3600e3;
+    T.forEach((t, j) => { const d_ = Math.abs(t.ms - ms); if (d_ < bd) { bd = d_; b = j; } }); return b; };
+  if (S.kind !== "gust" || !S.want) S.want = [S.f0, S.f1];   // gusts: the window asked for, so snapping to a 3-hourly model never drifts it
+  let a = byK(S.want[0]), b = byK(S.want[1]);
+  if (S.kind === "gust" && (a < 0 || b < 0)) {   // default gust window = gust_map.py's 2 PM to 11 PM PT, first day the run covers (nearest steps)
+    for (let i = 1; i < T.length; i++) { if (+ptParts(T[i].ms).hour !== 14 && !(T[i].ms - T[i - 1].ms > 3600e3 && +ptParts(T[i].ms).hour >= 13 && +ptParts(T[i].ms).hour <= 15)) continue;
+      const j = byK(ymdh(T[i].ms + 9 * 3600e3)); if (j > i) { a = i; b = j; break; } } }
   if (a < 0) a = 0; if (b < 0 || b <= a) b = T.length - 1; if (b <= a) a = Math.max(0, b - 1);
   S.f0 = ymdh(T[a].ms); S.f1 = ymdh(T[b].ms);
-  fillSel($("from"), T.slice(0, -1).map(t => [ymdh(t.ms), utcLbl(t.ms)]), S.f0);
-  fillSel($("to"), T.slice(a + 1).map(t => [ymdh(t.ms), utcLbl(t.ms)]), S.f1);
+  const lb = S.kind === "gust" ? ptLbl : utcLbl; const uz = document.querySelector("#win .utc"); if (uz) uz.textContent = S.kind === "gust" ? "" : "UTC";   // gusts: PT hours (gust_map.py windows are PT)
+  fillSel($("from"), T.slice(0, -1).map(t => [ymdh(t.ms), lb(t.ms)]), S.f0);
+  fillSel($("to"), T.slice(a + 1).map(t => [ymdh(t.ms), lb(t.ms)]), S.f1);
 }
 function runsOf(m) { return [...(WA.man.runs[m] || [])].reverse(); }
 async function setRun() {   // model / kind changed: run list for the model (lows / highs: NBM only)
+  if (isTot() && !SRC[S.m].kinds.includes(S.kind)) { S.m = MODELS_T.find(x => SRC[x].kinds.includes(S.kind) && (WA.man.runs[x] || []).length) || "nbm"; S.c = null; }
+  fillSel($("model"), MODELS_T.filter(x => (WA.man.runs[x] || []).length && (!isTot() || SRC[x].kinds.includes(S.kind))).map(x => [x, SRC[x].name]), S.m);
   const m = isTot() ? S.m : "nbm", rs = runsOf(m);
   if (!rs.includes(S.c)) S.c = rs.includes(Q.get("run")) ? Q.get("run") : rs[0];
   fillSel($("run"), rs.map(c => [c, `${SRC[m].name} ${c.slice(8)}Z ${c.slice(4, 6)}-${c.slice(6, 8)}`]), S.c);
@@ -312,14 +351,14 @@ async function setRun() {   // model / kind changed: run list for the model (low
 }
 async function draw() {
   const my = ++S.busy; const tot = isTot(); let d = null, w = null;
-  if (tot) { const T = S.times, a = T.find(t => ymdh(t.ms) === S.f0), b = T.find(t => ymdh(t.ms) === S.f1); w = { f0: a.f, f1: b.f, ms0: a.ms, ms1: b.ms }; }
+  if (tot) { const T = S.times, a = T.find(t => ymdh(t.ms) === S.f0), b = T.find(t => ymdh(t.ms) === S.f1); w = { f0: a.f, f1: b.f, ms0: a.ms, ms1: b.ms }; const p = ptParts(a.ms); w.day = p.weekday; w.md = `${p.month}-${p.day}`; }
   else { d = S.days.find(x => x.key === S.day); if (!d) { $("msg").textContent = "No data for this day in this run."; return; } }
   $("msg").textContent = "Drawing…"; const t0 = performance.now();
   const cv = document.createElement("canvas");
   try { const info = tot ? await renderTotals(cv, S.m, S.c, S.kind, S.view, w) : await render(cv, S.c, S.kind, S.view, d); if (my !== S.busy) return;
     const old = $("map"); cv.id = "map"; old.replaceWith(cv); S.info = info; fit();
     const R_ = WA.runs[rkey(tot ? S.m : "nbm", S.c)];
-    $("msg").textContent = `${R_.runline} · ${tot ? (S.m === "nbm" ? `sum of ${info.n} NBM 6 h amounts` : "run total at the end minus at the start") : S.kind === "low" ? "min of " + info.steps.length + " t2m steps" : "NBM 12 h max"} · ${Math.round(performance.now() - t0)} ms`;
+    $("msg").textContent = `${R_.runline} · ${tot ? (S.kind === "gust" ? `max of ${info.n} gust steps` : S.m === "nbm" ? `sum of ${info.n} NBM 6 h amounts` : "run total at the end minus at the start") : S.kind === "low" ? "min of " + info.steps.length + " t2m steps" : "NBM 12 h max"} · ${Math.round(performance.now() - t0)} ms`;
     const u = new URL(location); u.searchParams.set("kind", S.kind); u.searchParams.set("view", S.view); u.searchParams.set("run", S.c);
     for (const k of ["day", "model", "from", "to"]) u.searchParams.delete(k);
     if (tot) { u.searchParams.set("model", S.m); u.searchParams.set("from", S.f0); u.searchParams.set("to", S.f1); } else u.searchParams.set("day", S.day);
@@ -335,7 +374,7 @@ function fit() {   // whole map in the window (phones: full width)
 function save() {
   const cv = $("map"), v = VIEWS.find(x => x[0] === S.view)[1].replace(/ /g, "-");
   let name;
-  if (isTot()) name = `${v}_${S.kind === "precip" ? "Precip" : "Snow"}_${S.f0.slice(4, 8)}-${S.f0.slice(8)}Z_to_${S.f1.slice(4, 8)}-${S.f1.slice(8)}Z_${SRC[S.m].name.replace(/[ °.]/g, "")}_${S.c.slice(8)}Z.jpg`;
+  if (isTot()) name = `${v}_${S.kind === "precip" ? "Precip" : S.kind === "gust" ? "Gusts" : "Snow"}_${S.f0.slice(4, 8)}-${S.f0.slice(8)}Z_to_${S.f1.slice(4, 8)}-${S.f1.slice(8)}Z_${SRC[S.m].name.replace(/[ °.]/g, "")}_${S.c.slice(8)}Z.jpg`;
   else { const d = S.days.find(x => x.key === S.day); name = `${v}_${S.kind === "low" ? "Lows" : "Highs"}_${d.day}-${d.md}_NBM_${S.c.slice(8)}Z.jpg`; }
   cv.toBlob(async b => {
     const f = new File([b], name, { type: "image/jpeg" });
@@ -351,10 +390,11 @@ async function boot() {
   fillSel($("kind"), KINDS, S.kind); fillSel($("view"), VIEWS, S.view);
   await setRun();
   $("run").onchange = async e => { S.c = e.target.value; await loadRunM(isTot() ? S.m : "nbm", S.c); if (isTot()) setTimes(); else setDays(); draw(); };
-  $("kind").onchange = async e => { S.kind = e.target.value; await setRun(); draw(); };
+  $("kind").onchange = async e => { if (e.target.value === "gust" && S.kind !== "gust" && S.m === "nbm" && (WA.man.runs.hrrr || []).length) { S.m = "hrrr"; S.c = null; }   // gusts open on HRRR (gust_map.py default model for same-day)
+    S.kind = e.target.value; await setRun(); draw(); };
   $("model").onchange = async e => { S.m = e.target.value; S.c = null; await setRun(); draw(); };
-  $("from").onchange = e => { S.f0 = e.target.value; setTimes(); draw(); };
-  $("to").onchange = e => { S.f1 = e.target.value; draw(); };
+  $("from").onchange = e => { S.f0 = e.target.value; S.want = null; setTimes(); draw(); };
+  $("to").onchange = e => { S.f1 = e.target.value; S.want = null; draw(); };
   $("day").onchange = e => { S.day = e.target.value; draw(); };
   $("view").onchange = e => { S.view = e.target.value; draw(); };
   $("save").onclick = save;
