@@ -25,8 +25,10 @@ VID = os.environ.get("STUDIO_VIEW", "wawide")
 # COAST_H = the 16:9 frame (Washington's coast ~2/3 across, Seattle inside the right third), COAST_V = the 9:16 frame (coast ~2/3 across)
 # 11-04 (t2300u "a little tighter, a bit less Oregon, make sure Westport gets in there"): tighter boxes, south edge just below the
 # Columbia mouth; built as STUDIO_VIEW=coast_t (new R2 file names, the site's view id stays "coast")
-COAST_H = (-131.2, -120.1, 45.5, 49.7)
-COAST_V = (-127.35, -120.05, 44.4, 51.6)
+# 11-04 (t2311u "now just shift the whole view about 30 miles south and it's perfect"): both boxes 0.43 deg (~48 km) south, same zoom;
+# built as STUDIO_VIEW=coast_s
+COAST_H = (-131.2, -120.1, 45.07, 49.27)
+COAST_V = (-127.35, -120.05, 43.97, 51.17)
 COAST = VID.startswith("coast")
 STATE = COAST_H if COAST else (-124.85, -116.9, 45.54, 49.0)   # Washington's lon / lat box: the part the Studio camera fits in the frame ("fit")
 GLOBAL = ("gfs", "ifs", "ifs9", "aifs", "eps", "aens")
@@ -59,7 +61,7 @@ def setup():
         coast = ("Neah Bay", "Forks", "Port Angeles", "Ocean Shores", "Westport", "Aberdeen", "Hoquiam", "Raymond", "Long Beach", "Astoria", "Victoria")
         TM.REGION_REQUESTED = coast + tuple(n for n in TM.REGION_REQUESTED if n not in coast)
         # towns only where both frames can show their labels: west of 119.6 W (16:9 right edge 118.5 W) and between 42.9 N (9:16 key) and 49.3 N (F+ badge; Vancouver 49.28 N kept)
-        rp = TM.region_places; TM.region_places = lambda vid: [t for t in rp(vid) if vid != VID or (t[2] <= -121.6 and 46.0 <= t[1] <= 49.3)]
+        rp = TM.region_places; TM.region_places = lambda vid: [t for t in rp(vid) if vid != VID or (t[2] <= -121.6 and 45.57 <= t[1] <= 49.3)]
     return TM, HS, ccrs
 
 def build(models, man, out):

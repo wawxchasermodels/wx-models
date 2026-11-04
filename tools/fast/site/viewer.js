@@ -201,7 +201,7 @@ function addStudioViews(man, sv) {
   // third. Call it 'coast view'"): Studio-only "Coast view" (studio_views.py STUDIO_VIEW=coast), right after the wide Washington view
   // 11-04 t2300u ("a little tighter, a bit less Oregon, make sure Westport gets in there"): the tighter build is "coast_t" (its own
   // base / towns / LUT files), shown under the same view id "coast"
-  for (const [m, M] of Object.entries(man.models || {})) { const V = M.views || {}, sv = SVM[m] || {}, own = sv.coast_t ? Object.assign({}, sv.coast_t, { base_png: "static/base_coast_t.png", towns_png: sv.coast_t.towns_png || "static/towns_coast_t.png" }) : sv.coast;
+  for (const [m, M] of Object.entries(man.models || {})) { const V = M.views || {}, sv = SVM[m] || {}, ck = sv.coast_s ? "coast_s" : sv.coast_t ? "coast_t" : null, own = ck ? Object.assign({}, sv[ck], { base_png: `static/base_${ck}.png`, towns_png: sv[ck].towns_png || `static/towns_${ck}.png` }) : sv.coast;   // t2311u: coast_s = 30 mi south
     if (!own || V.coast) continue; const out = {}; let put = false;
     for (const [k, v] of Object.entries(V)) { out[k] = v; if (k === "wawide") { out.coast = Object.assign({}, own); put = true; } }
     if (!put) out.coast = Object.assign({}, own); M.views = out; }
@@ -1012,7 +1012,7 @@ function drawBuoys(ctx, st, D, P, V, LW, LH, taken0) {
   const LIST = wcv ? WC_BUOYS.map(id => BUOYS.find(b => b[0] === id)).filter(Boolean).concat(BUOYS.filter(b => !WC_BUOYS.includes(b[0]))) : BUOYS;
   for (const [id, , la, lo, tag] of LIST) {
     // Coast view: only buoys both Studio frames show in full (t2300u tighter boxes: 9:16 west edge 127.35 W, south edge / keys ~46 N)
-    if (VSRC(S.view) === "coast" && (lo < -126.9 || la < 46.0)) continue;
+    if (VSRC(S.view) === "coast" && (lo < -126.9 || la < 45.57)) continue;   // t2311u: south edge / keys ~0.43 deg further south
     if (wide && !/wide/.test(tag || "")) continue;
     // 11-01 9:31 AM (Benjamin t1998u "See if there are any buoys in the puget sound and strait of Juan de Fuca ... Include a marker in the strait of
     // Georgia"): "inner" = Salish Sea buoys, Washington / Puget views only ("any": also elsewhere as before); "sog" = Halibut Bank, not in the local views
