@@ -159,7 +159,10 @@ const ObsImg = (() => {
   const unders = (tile, t) => [["fd", underT(ST.fdT, t)], ...(tile === "detail" ? [["wide", underT(ST.wusT, t)]] : [])].filter((x) => x[1]);
   // 11-03 (t2248u) what is drawn under a frame so the whole map stays covered at every zoom / pan: water vapor = full disk (+ West US
   // under PNW); GIBS Clean IR / GeoColor zoomed in = the wide box (same time) under the sharper detail box
-  const undersOf = (id, tile, t) => (SRC[id].kind === "star" ? unders(tile, t) : SRC[id].kind === "gibs" && tile === "detail" ? [["wide", t]] : []);
+  const undersOf = (id, tile, t) => (SRC[id].kind === "star" ? unders(tile, t) : SRC[id].kind === "gibs" && tile === "detail" ? [["wide", wideT(id, t)]] : []);
+  // 11-04 (t2299u) the wide GIBS frame under a zoomed-in frame (only seen past the detail box edge) is ~1.1 MB and 6-10 s from GIBS:
+  // use one every 30 min (newest back), so a 4-hour loop loads 9 of them instead of 24
+  function wideT(id, t) { const f = ST.frames[id], i = f.indexOf(t); if (i < 0) return t; const L = f.length; return f[Math.max(0, L - 1 - 3 * Math.round((L - 1 - i) / 3))]; }
   // red / pink map-line pixels (STAR draws them pure red; JPEG blurs them into the background). Yellow / orange (dry air) is not a line.
   const lineAt = (d, i) => { const r = d[i], g = d[i + 1], b = d[i + 2]; return (r - g > 60 && g - b < 60) || (r - g > 12 && Math.abs(g - b) < 31); };
   let procQ = Promise.resolve();
