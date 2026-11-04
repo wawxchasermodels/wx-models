@@ -240,7 +240,8 @@ const ObsImg = (() => {
         // 11-04 (t2299u) every loop frame first (newest back), then the bigger frames drawn under them, so the loop fills in quickly
         const todo = [], und = []; for (const id of on()) { const tile = listTile(id); for (const t of [...ST.frames[id]].reverse()) { todo.push([id, tile, t]); for (const [tl, u] of undersOf(id, tile, t)) und.push([id, tl, u, tile]); } }
         todo.push(...und);
-        await Promise.all([0, 1, 2].map(async () => { while (todo.length) { const [id, tile, t, under_] = todo.shift(); if (on().includes(id) && (listTile(id) === (under_ || tile))) { const r = getImg(id, tile, t); await r.p; if (id === "wv" && !under_ && r.bad) { ST.blank.add(id + "|" + t); pickFrames(id); } } } }));
+        await Promise.all([0, 1, 2, 3, 4, 5].map(async () => {   // 11-04 (t2299u) 6 at a time: GIBS builds each image on request (~3-10 s, never cached), so waiting on 3 left the loop half empty for a minute
+        while (todo.length) { const [id, tile, t, under_] = todo.shift(); if (on().includes(id) && (listTile(id) === (under_ || tile))) { const r = getImg(id, tile, t); await r.p; if (id === "wv" && !under_ && r.bad) { ST.blank.add(id + "|" + t); pickFrames(id); } } } }));
       }
       ui(); bump(); Obs.redraw();
     })().finally(() => { loading = null; });
