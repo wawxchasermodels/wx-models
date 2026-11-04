@@ -2069,10 +2069,11 @@ function mgChart(cv, T, box) {
         const xx = X(T.t[k]), yy = y1 - 9, r = (T.wdir[k] + 180) * Math.PI / 180; c.save(); c.translate(xx, yy); c.rotate(r); c.beginPath(); c.moveTo(0, -6); c.lineTo(3.5, 4); c.lineTo(-3.5, 4); c.closePath(); c.fill(); c.restore(); } }
     } else if (kind === "pcp") {
       const pc = T.pcp6 && !T.pcp ? null : T.pcp, sn = T.snow || null, sn6 = T.snow6 || null, p6 = T.pcp6 || null;
-      const hiP = Math.max(0.1, ...(pc || []).filter(v => v != null), ...(p6 || []).filter(v => v != null)), scP = scale(0, niceStep(hiP) * Math.ceil(hiP / niceStep(hiP)));
+      const hiP = Math.max(0.1, ...(pc || []).filter(v => v != null), ...(p6 || []).filter(v => v != null));
       const runS = sn ? sn.reduce((acc, v, k) => (acc.push((acc[k - 1] || 0) + (v || 0)), acc), []) : sn6 ? (() => { let q = 0; return sn6.map((v, k) => T.f[k] % 6 === 0 ? (q += v || 0) : null); })() : [];
       const anySnow = (sn || sn6 || []).some(v => v > 0.05), hiS = Math.max(1, ...runS.filter(v => v != null)), topS = niceStep(hiS) * Math.ceil(hiS / niceStep(hiS)), scS = scale(0, topS);
-      const pTop = niceStep(hiP) * Math.ceil(hiP / niceStep(hiP)); axis(0, pTop, scP, "\u2033", false, "#6fd38a");
+      const pTop = Math.max(T.P && T.P.k === "pass" && pc && (T.f[1] - T.f[0] || 1) === 1 ? 3 : 0, niceStep(hiP) * Math.ceil(hiP / niceStep(hiP)));   /* t2305u: pass in per hour axis at least 3 in */ axis(0, pTop, scP, "\u2033", false, "#6fd38a");
+      const scP = scale(0, pTop);
       if (p6 && T.pcp) bars(p6.map((v, k) => T.f[k] % 6 === 0 && T.f[k] > 36 ? v : null), scP, "#3ea95888", 2.2);
       if (pc) bars(pc, scP, "#3ea958"); else if (p6) bars(p6.map((v, k) => T.f[k] % 6 === 0 ? v : null), scP, "#3ea958", 2.2);
       if (anySnow && !snowPan) { axis(0, topS, scS, "\u2033", true, "#d9ecff"); line(runS, scS, "#d9ecff", 2); }
@@ -2083,7 +2084,7 @@ function mgChart(cv, T, box) {
       const sn = T.snow || null, sn6 = T.snow6 || null;
       const s6 = T.f.map((f, k) => f % 6 !== 0 ? null : sn ? sumWin(T, sn, f - 6, f) : sn6[k]);
       let q = 0; const runS = sn ? sn.map(v => (q += v || 0)) : sn6.map((v, k) => T.f[k] % 6 === 0 ? (q += v || 0) : null), tot = q;
-      const hiB = Math.max(1, ...s6.filter(v => v != null)), topB = niceStep(hiB) * Math.ceil(hiB / niceStep(hiB)), scB = scale(0, topB);
+      const hiB = Math.max(12, ...s6.filter(v => v != null))   /* t2305u: pass snow per 6 h axis at least 12 in */, topB = niceStep(hiB) * Math.ceil(hiB / niceStep(hiB)), scB = scale(0, topB);
       const hiR = Math.max(1, ...runS.filter(v => v != null)), topR = niceStep(hiR) * Math.ceil(hiR / niceStep(hiR)), scR = scale(0, topR);
       axis(0, topB, scB, "\u2033", false, "#9fc8ff"); axis(0, topR, scR, "\u2033", true, "#f4f2ee");
       c.fillStyle = "#5b9dff"; const gap6 = Math.max(1, (X(T.t[n - 1]) - X(T.t[0])) / Math.max(1, (t1 - t0) / 216e5) * 0.12);
