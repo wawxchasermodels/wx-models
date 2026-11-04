@@ -1205,7 +1205,7 @@ function applyZoom() {
 }
 // 11-04 (t2269u): after a refresh the map comes back at the same zoom / pan (this tab only); before that, nothing is saved
 function restoreZoom(n = 0) {
-  const cv = $("map"); if (!cv || !cv.offsetWidth) { if (n < 100) setTimeout(() => restoreZoom(n + 1), 100); else Z.ok = true; return; }
+  const cv = $("map"); if (!cv || !cv.offsetWidth || !window.__drawn || n < 3) { if (n < 150) setTimeout(() => restoreZoom(n + 1), 100); else Z.ok = true; return; }
   let z = null; try { z = Q.get("studio") || Q.get("embed") ? null : JSON.parse(sessionStorage.getItem("vw:zoom") || "null"); } catch (e) { z = null; }
   Z.ok = true; if (z && z.k > 1) { Z.k = z.k; Z.x = z.x * cv.offsetWidth; Z.y = z.y * cv.offsetHeight; applyZoom(); }
 }
