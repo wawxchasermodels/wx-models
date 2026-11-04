@@ -170,7 +170,7 @@ const ObsImg = (() => {
       const m = new Uint8Array(N);
       for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (bad[y * W + x]) for (let yy = Math.max(0, y - 2); yy <= Math.min(H - 1, y + 2); yy++) for (let xx = Math.max(0, x - 2); xx <= Math.min(W - 1, x + 2); xx++) m[yy * W + xx] = 1;
       let todo = []; for (let p = 0; p < N; p++) if (m[p]) todo.push(p);
-      for (let it = 0; it < 15 && todo.length; it++) {
+      for (let it = 0; it < 40 && todo.length; it++) {
         const fill = [], rest = [];
         for (const p of todo) {
           const x = p % W, y = (p - x) / W; let r = 0, gg = 0, b = 0, k = 0;
