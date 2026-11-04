@@ -808,13 +808,17 @@ const Obs = (() => {
     const c = $("obs-canvas"), stamp = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
       .format(new Date(S.loaded || Date.now())).replace(/[^0-9]/g, "");
     // flatten with a credit strip so the saved image carries its sources
-    const o = document.createElement("canvas"), d = S.dpr, strip = Math.round(22 * d);
+    // 11-03: the credit text wraps onto more lines when it is longer than the image is wide (radar / satellite credits)
+    const d = S.dpr, font = `${Math.round(11 * d)}px 'IBM Plex Mono', monospace`, names = LAYERS.filter((l) => S.on.has(l.id)).map((l) => l.label).join(", ") || "none";
+    const daily = needDay() ? " (today = since local midnight)" : "";
+    const text = `Observed ${tfmt.format(new Date(S.loaded))} PT · ${names}${daily} · Data: ECCC (OGL-Canada), NOAA/NWS via IEM · Natural Earth · GeoNames (CC BY 4.0)${S.hooks.credit.map((fn) => { try { return fn() || ""; } catch (e) { return ""; } }).filter(Boolean).map((t) => " · " + t).join("")}`;
+    const mg = document.createElement("canvas").getContext("2d"); mg.font = font; const lines = [""];
+    for (const w of text.split(" ")) { const t = lines[lines.length - 1] ? lines[lines.length - 1] + " " + w : w; if (mg.measureText(t).width > c.width - 16 * d && lines[lines.length - 1]) lines.push(w); else lines[lines.length - 1] = t; }
+    const lh = Math.round(15 * d), strip = Math.round(22 * d) + (lines.length - 1) * lh, o = document.createElement("canvas");
     o.width = c.width; o.height = c.height + strip;
     const g = o.getContext("2d"); g.drawImage(c, 0, 0); g.fillStyle = "#1b2531"; g.fillRect(0, c.height, o.width, strip);
-    g.fillStyle = "#c9d3dd"; g.font = `${Math.round(11 * d)}px 'IBM Plex Mono', monospace`; g.textBaseline = "middle";
-    const names = LAYERS.filter((l) => S.on.has(l.id)).map((l) => l.label).join(", ") || "none";
-    const daily = needDay() ? " (today = since local midnight)" : "";
-    g.fillText(`Observed ${tfmt.format(new Date(S.loaded))} PT · ${names}${daily} · Data: ECCC (OGL-Canada), NOAA/NWS via IEM · Natural Earth · GeoNames (CC BY 4.0)${S.hooks.credit.map((fn) => { try { return fn() || ""; } catch (e) { return ""; } }).filter(Boolean).map((t) => " · " + t).join("")}`, 8 * d, c.height + strip / 2);
+    g.fillStyle = "#c9d3dd"; g.font = font; g.textBaseline = "middle";
+    lines.forEach((l, i) => g.fillText(l, 8 * d, c.height + Math.round(11 * d) + i * lh));
     o.toBlob((b) => { const a = document.createElement("a"); a.href = URL.createObjectURL(b);
       const lt = [...S.on].join("-"), tag = lt === "plot" ? "" : "_" + (lt || "none");
       a.download = `obs_${S.view || "custom"}${tag}_${stamp.slice(0, 8)}_${stamp.slice(8, 12)}PT.png`; document.body.append(a); a.click(); a.remove();
