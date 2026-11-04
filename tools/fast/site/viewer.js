@@ -245,6 +245,13 @@ async function boot() {
   // 11-01: a ?prod= link with no run/model (e.g. ?prod=waves) opens the first model that has that product
   const qp = !qr && !qm && Q.get("prod"), pm = qp && order.find(m => allProds(S.man.models[m])[qp]);
   S.run = all.includes(qr) ? qr : (all.find(r => qm && r.startsWith(qm + "/")) || (pm && all.find(r => r.startsWith(pm + "/"))) || all[0]);
+  // 11-04 (Benjamin t2269u "when I refresh a product, or Studio, it refreshes onto the same exact product and view with the latest model
+  // data"): a ?run= from the URL (kept there on every change) opens that model's newest run, at the same valid time when the newest run
+  // has it (within 3 h), else the same forecast hour (t2270u: same model, same product, latest data). Same product, view, member and Studio framing.
+  let vKeep = null;
+  if (qr && S.run === qr && !Q.get("embed") && !Q.get("id") && !Q.get("slim")) { const nw = all.find(r => r.startsWith(qr.split("/")[0] + "/")), f0q = Q.get("f");
+    if (nw && nw !== qr) { try { await loadRun(qr); const st0 = S.runs[qr].steps, s0 = st0.find(s => s.f == +f0q) || st0[0]; vKeep = Date.parse(s0.valid); } catch (e) { vKeep = null; }
+      try { await loadRun(nw); const st1 = S.runs[nw].steps; S.run = nw; if (vKeep != null && !st1.some(s => Math.abs(Date.parse(s.valid) - vKeep) <= 3 * 3600e3)) vKeep = null; } catch (e) { vKeep = null; } } }
   await loadRun(S.run);
   // "Runs" menu (Benjamin 10-29 7:10 PM): every available run, grouped by model, newest first; picking one keeps the valid time
   const runLabel = r => { const [m, c] = r.split("/"), p = ((S.man.progress || {})[m] || {})[c];
@@ -268,8 +275,8 @@ async function boot() {
     runMenu(o2, a2); loadNote();
   }, 120e3);
   setLists();
-  const f0 = Q.get("f"), steps = S.runs[S.run].steps; S.i = f0 ? Math.max(0, steps.findIndex(s => s.f == +f0)) : S.run.startsWith("oisst/") ? steps.length - 1 : 0;   // 11-03: daily analyses open on the newest day
-  const vq = Date.parse(Q.get("valid") || ""); if (!f0 && vq) { let b = 0; steps.forEach((x, k) => { if (Math.abs(Date.parse(x.valid) - vq) < Math.abs(Date.parse(steps[b].valid) - vq)) b = k; }); S.i = b; }   // old-site links
+  const f0 = vKeep != null ? null : Q.get("f"), steps = S.runs[S.run].steps; S.i = f0 ? Math.max(0, steps.findIndex(s => s.f == +f0)) : S.run.startsWith("oisst/") ? steps.length - 1 : 0;   // 11-03: daily analyses open on the newest day
+  const vq = vKeep != null ? vKeep : Date.parse(Q.get("valid") || ""); if (!f0 && vq) { let b = 0; steps.forEach((x, k) => { if (Math.abs(Date.parse(x.valid) - vq) < Math.abs(Date.parse(steps[b].valid) - vq)) b = k; }); S.i = b; }   // old-site links
   $("step").value = S.i;
   $("run").onchange = async e => {   // keep the same valid time when switching runs/models (nearest step)
     const vt = Date.parse(S.runs[S.run].steps[S.i].valid); S.run = e.target.value; await loadRun(S.run); setLists();
@@ -301,8 +308,10 @@ async function boot() {
   // ?mg= / ?obs= open the panel once (meteograms page "Pass Forecaster" tab links to ./?mg=pass) and are then dropped from the
   // address: they used to stay in it after Close, so every reload / iOS tab restore / shared link reopened Pass Forecaster
   // ("the website glitches into pass mode every so often", Benjamin 10-31 2:01 AM).
-  if (Q.get("obs")) obsOpen();
-  if (Q.get("mg")) mgOpen(Q.get("mg") === "pass" ? "pass" : "town");
+  // 11-04 (t2269u): an Observations / meteogram window that was open stays open after a refresh (this tab only)
+  let ssw = {}; try { ssw = { obs: sessionStorage.getItem("vw:obs"), mg: sessionStorage.getItem("vw:mg") }; } catch (e) { /* private mode */ }
+  if (Q.get("obs") || (!Q.get("studio") && !Q.get("embed") && ssw.obs)) obsOpen();
+  if (Q.get("mg")) mgOpen(Q.get("mg") === "pass" ? "pass" : "town"); else if (!Q.get("studio") && !Q.get("embed") && ssw.mg) mgOpen(ssw.mg === "pass" ? "pass" : "town");
   if (Q.has("mg") || Q.has("obs")) { const u = new URL(location); u.searchParams.delete("mg"); u.searchParams.delete("obs"); try { history.replaceState(null, "", u); } catch (e) {} }
   window.__ready = true;
   if (Q.get("bench")) bench();
@@ -1191,7 +1200,14 @@ function applyZoom() {
   Z.x = Math.min(0, Math.max(w * (1 - Z.k), Z.x)); Z.y = Math.min(0, Math.max(h * (1 - Z.k), Z.y));
   cv.style.transform = Z.k === 1 ? "" : `translate(${Z.x}px,${Z.y}px) scale(${Z.k})`;
   const b = $("zreset"); if (b) b.hidden = Z.k === 1;
+  if (Z.ok && w && !Q.get("studio") && !Q.get("embed")) try { sessionStorage.setItem("vw:zoom", JSON.stringify({ k: Z.k, x: Z.x / w, y: Z.y / h })); } catch (e) { /* private mode */ }   // 11-04 (t2269u): kept for a refresh
   schedSharp();
+}
+// 11-04 (t2269u): after a refresh the map comes back at the same zoom / pan (this tab only); before that, nothing is saved
+function restoreZoom(n = 0) {
+  const cv = $("map"); if (!cv || !cv.offsetWidth) { if (n < 100) setTimeout(() => restoreZoom(n + 1), 100); else Z.ok = true; return; }
+  let z = null; try { z = Q.get("studio") || Q.get("embed") ? null : JSON.parse(sessionStorage.getItem("vw:zoom") || "null"); } catch (e) { z = null; }
+  Z.ok = true; if (z && z.k > 1) { Z.k = z.k; Z.x = z.x * cv.offsetWidth; Z.y = z.y * cv.offsetHeight; applyZoom(); }
 }
 function resetZoom() { Z.k = 1; Z.x = 0; Z.y = 0; applyZoom(); }
 function zoomAt(cx, cy, k2) {   // keep the map point under (cx, cy) fixed
@@ -1200,6 +1216,7 @@ function zoomAt(cx, cy, k2) {   // keep the map point under (cx, cy) fixed
   Z.x = cx - l0 - px * k2; Z.y = cy - t0 - py * k2; Z.k = k2; applyZoom();
 }
 function setupPointer() {
+  restoreZoom();
   const cv = $("map"), P = new Map(); let down = null, pinch = null, lastTap = 0, moved = false;
   cv.style.transformOrigin = "0 0";
   const wr = $("wrap"); wr.style.overflow = "hidden";
@@ -1923,7 +1940,7 @@ const pcpWin = (T, f0, f1) => T.pcp6 ? sum6(T, T.pcp6, f0, f1) : sumWin(T, T.pcp
 const ext = (T, a, f0, f1, fn) => { if (!a) return null; const v = a.filter((x, k) => x != null && T.f[k] > f0 && T.f[k] <= f1); return v.length ? fn(...v) : null; };
 
 function mgOpen(kind) {
-  mgClose(); MG.open = kind; MG.run = S.runs[S.run] && S.runs[S.run].points ? S.run : (mgRuns()[0] || S.run);
+  mgClose(); MG.open = kind; try { if (!Q.get("studio") && !Q.get("embed")) sessionStorage.setItem("vw:mg", kind); } catch (e) { /* private mode */ } MG.run = S.runs[S.run] && S.runs[S.run].points ? S.run : (mgRuns()[0] || S.run);
   const o = document.createElement("div"); o.id = "mg";
   o.innerHTML = `<div class="mg-top"><b>${kind === "pass" ? "Pass Forecaster" : "Meteogram"}</b>
     <label>Model <select id="mgrun"></select></label>${kind === "pass" ? "" : `<label>Place <select id="mgtown"></select></label>`}
@@ -1936,7 +1953,7 @@ function mgOpen(kind) {
   if ($("mgtown")) $("mgtown").onchange = e => { MG.town = e.target.value; mgDraw(); };
   addEventListener("resize", mgResize); mgDraw();
 }
-function mgClose() { const o = $("mg"); if (o) o.remove(); MG.open = null; removeEventListener("resize", mgResize); }
+function mgClose() { try { sessionStorage.removeItem("vw:mg"); } catch (e) { /* private mode */ } const o = $("mg"); if (o) o.remove(); MG.open = null; removeEventListener("resize", mgResize); }
 let mgT = null; function mgResize() { clearTimeout(mgT); mgT = setTimeout(() => MG.open && mgDraw(), 150); }
 async function mgDraw() {
   const body = $("mgbody"), D = await mgSeries(MG.run); if (!MG.open) return;
@@ -2120,14 +2137,14 @@ function obsOpen() {
   if (!$("obsov")) {
     const o = document.createElement("div"); o.id = "obsov"; o.hidden = true;
     o.innerHTML = `<div class="mg-top"><b>Observations</b><button type="button" id="obsx">Close</button></div><div id="obs-root"></div>`;
-    document.body.appendChild(o); $("obsx").onclick = () => { $("obsov").hidden = true; if (window.Obs) Obs.hide(); };
+    document.body.appendChild(o); $("obsx").onclick = () => { $("obsov").hidden = true; if (window.Obs) Obs.hide(); try { sessionStorage.removeItem("vw:obs"); } catch (e) { /* private mode */ } };
   }
-  $("obsov").hidden = false;
+  $("obsov").hidden = false; try { if (!Q.get("studio") && !Q.get("embed")) sessionStorage.setItem("vw:obs", "1"); } catch (e) { /* private mode */ }
   obsLoad = obsLoad || new Promise((ok, bad) => {
     const l = document.createElement("link"); l.rel = "stylesheet"; l.href = "obs/obs.css"; document.head.appendChild(l);
     const sc = document.createElement("script"); sc.src = "obs/obs.js"; sc.onerror = bad; document.body.appendChild(sc);
     // 11-03: radar + GOES-West layers (obs/obsimg.js, off by default); the obs map still opens if it fails to load
-    sc.onload = () => { const s2 = document.createElement("script"); s2.src = "obs/obsimg.js?v=20261103sm1"; s2.onload = ok; s2.onerror = ok; document.body.appendChild(s2); };
+    sc.onload = () => { const s2 = document.createElement("script"); s2.src = "obs/obsimg.js?v=20261104a"; s2.onload = ok; s2.onerror = ok; document.body.appendChild(s2); };
   });
   obsLoad.then(() => Obs.show(), () => { $("obs-root").textContent = "Observations could not load."; obsLoad = null; });
 }
