@@ -1261,10 +1261,19 @@ if (!CLEAN) {
   // 11-04 (t2343u): its own row under the menu items, starting under the View menu and running ~480 px toward Share (not on the menu line)
   if (innerWidth > 820) { const bar_ = document.getElementById("bar"); box.classList.add("inbar"); document.body.classList.add("longscrub"); bar_.appendChild(box);
     // t2343u: overlay row under the View menu (absolute, so the bar height and the frames stay exactly as in Map); the short #step keeps its space, invisible
+    // Placement: nearest free spot under the View menu (scan down, then left toward Share) that touches no visible control or frame,
+    // so the scrubber never covers a button and the frames never move.
     const vx = () => { const v = document.getElementById("view"), lb = v && v.closest("label"); if (!lb) return; const br = bar_.getBoundingClientRect(), r = lb.getBoundingClientRect();
-      const w = Math.min(480, Math.max(240, br.width - 24 - 230)); const x = Math.max(12, Math.min(r.left - br.left, br.width - 12 - w - 230));
-      box.style.setProperty("--scrw", w + "px"); box.style.setProperty("--scrx", x + "px"); box.style.setProperty("--scry", (r.bottom - br.top + 4) + "px"); };
-    vx(); addEventListener("resize", vx); if ("ResizeObserver" in window) new ResizeObserver(vx).observe(bar_);
+      const w = Math.min(480, Math.max(240, br.width - 24 - 230)); box.style.setProperty("--scrw", w + "px");
+      const obs = []; document.querySelectorAll("button,select,input,label,canvas,span,b,small").forEach(e => { if (box.contains(e) || e === stp || e.contains(box)) return; if (e.closest && e.closest("footer")) return;
+        if (!e.offsetParent && getComputedStyle(e).position !== "fixed") return; const q = e.getBoundingClientRect(); if (q.width < 2 || q.height < 2 || q.bottom < 0 || q.top > 400 || q.left < -50) return;
+        if (getComputedStyle(e).visibility === "hidden") return; if ((e.tagName === "SPAN" || e.tagName === "B" || e.tagName === "SMALL") && !e.textContent.trim()) return; obs.push(q); });
+      box.style.setProperty("--scry", "-999px"); const bw = box.getBoundingClientRect().width || (w + 230), bh = 30;
+      const hit = (x, y) => obs.some(q => x < q.right + 4 && x + bw > q.left - 4 && y < q.bottom + 2 && y + bh > q.top - 2);
+      let best = null; for (let y = r.bottom + 2; y < 300 && !best; y += 2) { for (let x = Math.min(r.left, innerWidth - 12 - bw); x >= 12; x -= 8) if (!hit(x, y)) { best = [x, y]; break; } }
+      if (!best) best = [Math.max(12, Math.min(r.left, innerWidth - 12 - bw)), r.bottom + 4];
+      box.style.setProperty("--scrx", (best[0] - br.left) + "px"); box.style.setProperty("--scry", (best[1] - br.top) + "px"); };
+    vx(); setTimeout(vx, 1500); setTimeout(vx, 5000); addEventListener("resize", vx); if ("ResizeObserver" in window) new ResizeObserver(vx).observe(bar_);
     const ln = document.getElementById("loadnote"); if (ln) box.querySelector(".sw").appendChild(ln); }
   else fh.insertBefore(box, hint);
   const sl = document.getElementById("hscrub"), tk = document.getElementById("sticks"), lab = document.getElementById("shour");
