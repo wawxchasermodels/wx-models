@@ -13,7 +13,8 @@ const css = `#rqb{position:fixed;left:12px;bottom:12px;z-index:30;background:#26
 #rqp button.pri{background:#2f8cff;border-color:#2f8cff;font-weight:700}#rqst{margin-left:8px;color:#9fe3b0;font-weight:600}#rqst.err{color:#ff9b9b}
 #rqctx{color:#8e939c;font-size:11.5px;margin:4px 0}#rql{margin:8px 0 0;padding:0;list-style:none;max-height:180px;overflow:auto;border-top:1px solid #4a4f5a}
 #rql li{padding:5px 0;border-bottom:1px solid #2e323a;font-size:12px}#rql small{color:#8e939c}
-body.rec #rqb,body.phone.cslim #rqb{display:none}@media (max-width:820px){#rqb{left:auto;right:10px;bottom:10px;padding:6px 10px;font-size:15px;opacity:.85}#rqb .rqw{display:none}#rqp{left:12px;right:12px;bottom:54px}}`;
+#rqb.inbar{position:static;box-shadow:none;border-radius:6px;padding:4px 8px;font:inherit;opacity:1;background:#262931;color:#f4f2ee;border:1px solid #7d828c;z-index:auto}#rqb.inbar~#rqp,body:has(#rqb.inbar) #rqp{bottom:auto}
+body.rec #rqb,body.phone.cslim #rqb{display:none}@media (min-width:701px) and (max-width:820px){#rqb.inbar .rqw{display:inline}}@media (max-width:820px){#rqb:not(.inbar){left:auto;right:10px;bottom:10px;padding:6px 10px;font-size:15px;opacity:.85}#rqb .rqw{display:none}#rqp{left:12px;right:12px}body:not(:has(#rqb.inbar)) #rqp{bottom:54px}}`;
 const st = document.createElement("style"); st.textContent = css; document.head.appendChild(st);
 const b = document.createElement("button"); b.id = "rqb"; b.type = "button"; b.innerHTML = "\u270e<span class=\"rqw\"> Request a change</span>"; b.setAttribute("aria-label", "Request a change"); b.title = "Ask for a change to this website (queued for your agent)";
 const p = document.createElement("div"); p.id = "rqp"; p.hidden = true;
@@ -21,7 +22,13 @@ p.innerHTML = `<div class="rh"><b>Request a change</b><button type="button" id="
 <textarea id="rqt" maxlength="2000" placeholder="What should change on this page? e.g. &quot;make the L markers bigger on the 9:16 frame&quot;"></textarea>
 <div id="rqctx"></div><div><button type="button" class="pri" id="rqs">Send</button><span id="rqst"></span></div>
 <div style="margin-top:6px;color:#8e939c;font-size:11.5px">Saved to a queue for your agent; nothing changes by itself.</div><ul id="rql"></ul>`;
-document.body.append(b, p);
+// 11-03 (Benjamin t2244u: "make the request a change button go up in the menu area, not in the main screen"): the button sits in the
+// top menu bar (#bar) on every page that has one, as an ordinary menu button; the box opens just under the bar. No bar: old corner spot.
+const bar = document.getElementById("bar");
+if (bar) { b.classList.add("inbar"); bar.insertBefore(b, document.getElementById("stat") || document.getElementById("msg") || null); document.body.append(p);
+  const place = () => { if (!p.hidden) p.style.top = Math.round(bar.getBoundingClientRect().bottom + 6) + "px"; };
+  addEventListener("resize", place); new MutationObserver(place).observe(p, { attributes: true, attributeFilter: ["hidden"] });
+} else document.body.append(b, p);
 const $r = (id) => document.getElementById(id);
 function state() {
   const o = { page: location.pathname.split("/").pop() || "index.html", url: location.pathname + location.search };

@@ -1284,14 +1284,17 @@ async function saveImage() {
   const cv = $("map"); if (!cv.width || saving) return;
   if (Z.k <= 1.001) { saveCanvas(cv, saveName(), $("save")); return; }
   const btn = $("save"), V = VIEWS()[S.view], [LW, LH] = V.fig, touch = matchMedia("(pointer: coarse)").matches;
-  const z = { k: Z.k, x: Z.x, y: Z.y }, w = cv.offsetWidth, h = cv.offsetHeight;
+  const z = { k: Z.k, x: Z.x, y: Z.y };
   const cap = Math.sqrt((touch ? 16e6 : 48e6) / (LW * LH)), rs = Math.max(cv._rs || 1, Math.min(6, cap, Math.max(2, z.k * 1.5)));
   saving = true; if (btn) btn.textContent = "Saving\u2026";
   let out = null;
   try {
     window.__saveRS = Math.floor(rs * 4) / 4; await draw();
     const R = cv._rs, st = await viewStatic(S.view), P = PRODS()[S.prod];
-    const fx = -z.x / z.k * LW / w, fy = -z.y / z.k * LH / h, fw = LW / z.k, fh = LH / z.k;
+    // the part on screen: the map box (zoomed) clipped to the map area, in figure px
+    const r = cv.getBoundingClientRect(), wr = $("wrap").getBoundingClientRect();
+    const cl = (v, a) => Math.max(0, Math.min(a, v)), fx = cl((wr.left - r.left) / r.width * LW, LW), fy = cl((wr.top - r.top) / r.height * LH, LH);
+    const fw = cl((wr.right - r.left) / r.width * LW, LW) - fx, fh = cl((wr.bottom - r.top) / r.height * LH, LH) - fy;
     const sx = Math.max(0, Math.round(fx * R)), sy = Math.max(0, Math.round(fy * R));
     const W = Math.min(cv.width - sx, Math.round(fw * R)), H = Math.min(cv.height - sy, Math.round(fh * R));
     const hs = fy > st.y0 * 0.5 ? W / (LW * R) : 0, HH = Math.round(st.y0 * R * hs);   // title + key strip (skipped when it is already in view)
