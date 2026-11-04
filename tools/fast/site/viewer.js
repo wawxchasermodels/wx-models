@@ -186,6 +186,7 @@ function mergeRunsX(man) {
 const WAWIDE_PASSES_PNG = "@slayers/static/towns_wawide_p1.png";
 // 11-04 (Benjamin t2308u "Make the town names little smaller on Washington wide for loops"): town / pass labels ~17 % smaller on the
 // wide view (studio_views wawide_small_towns.py: towns_wawide_s2.png + its number slots, shipped with the site); wave maps' coast labels too
+// 11-04 (t2314u "yes rebuild those too"): HRRR / RRFS / NBM wide view (pnwhr) too: wawide_s2.json models.{hrrr,rrfs,nbm} = {towns, towns_png}
 let WAWIDE_S2 = null; const WAWIDE_FS = 0.83;
 function addStudioViews(man, sv) {
   if (!Q.get("studio")) return man;
@@ -195,7 +196,7 @@ function addStudioViews(man, sv) {
   const SVM = (sv && sv.models) || {};
   for (const [m, M] of Object.entries(man.models || {})) { const V = M.views || {}, own = (SVM[m] || {}).wawide, src = V.pnwt ? "pnwt" : V.pnwhr ? "pnwhr" : null;
     if ((!own && !src) || !V.wa || V.wawide) continue; const out = {};
-    for (const [k, v] of Object.entries(V)) { out[k] = v; if (k === "wa") out.wawide = own ? Object.assign({}, own, { studioWide: "wa", towns_png: WAWIDE_PASSES_PNG }, WAWIDE_S2 && WAWIDE_S2.models && WAWIDE_S2.models[m] ? { towns: WAWIDE_S2.models[m], towns_png: "@slayers/" + WAWIDE_S2.png } : {}) : Object.assign({}, V[src], { label: "Washington (wide, for loops)", src, studioWide: "wa" }); }
+    for (const [k, v] of Object.entries(V)) { out[k] = v; if (k === "wa") out.wawide = own ? Object.assign({}, own, { studioWide: "wa", towns_png: WAWIDE_PASSES_PNG }, WAWIDE_S2 && WAWIDE_S2.models && WAWIDE_S2.models[m] ? { towns: WAWIDE_S2.models[m], towns_png: "@slayers/" + WAWIDE_S2.png } : {}) : Object.assign({}, V[src], { label: "Washington (wide, for loops)", src, studioWide: "wa" }, WAWIDE_S2 && WAWIDE_S2.models && WAWIDE_S2.models[m] && WAWIDE_S2.models[m].towns_png ? { towns: WAWIDE_S2.models[m].towns, towns_png: "@slayers/" + WAWIDE_S2.models[m].towns_png, townsOwn: true } : {}); }
     M.views = out; }
   // 11-04 (Benjamin t2289u "Make me a coastal view for studio that is a little bigger and wider, centered over the ocean, land in the right
   // third. Call it 'coast view'"): Studio-only "Coast view" (studio_views.py STUDIO_VIEW=coast), right after the wide Washington view
@@ -512,14 +513,16 @@ function go(d, wrap) { const n = S.runs[S.run].steps.length; S.i = wrap ? (S.i +
 
 // ---------------------------------------------------------------- static per view
 async function viewStatic(vid) {
-  vid = VSRC(vid); const m = S.run.split("/")[0], sk = m + "/" + vid;
+  // 11-04 t2314u: HRRR / RRFS / NBM wide view = pnwhr files, but its own (smaller-label) towns layer ("townsOwn", wawide_small_towns_lcc.py)
+  const V0 = VIEWS()[vid] || {}, own = V0.townsOwn ? vid : null;
+  vid = VSRC(vid); const m = S.run.split("/")[0], sk = m + "/" + vid + (own ? "~" + own : "");
   if (S.statics[sk]) return S.statics[sk];
   const V = VIEWS()[vid];
   const p = (async () => {
     const [lut, base] = await Promise.all([fetch(DATA + V.lut + SV()).then(r => r.arrayBuffer()).then(b => new Float32Array(b)),
                                            img(DATA + (V.base_png || `static/base_${vid}.png`) + SV())]);
     // towns layer is not needed for the first paint: draw without it, redraw when it lands (10-29 first-map speedup)
-    const tP = V.towns_png || `static/towns_${vid}.png`, tU = (tP[0] === "@" ? tP.slice(1) : DATA + tP) + SV();
+    const tP = (own ? V0.towns_png : V.towns_png) || `static/towns_${vid}.png`, tU = (tP[0] === "@" ? tP.slice(1) : DATA + tP) + SV();
     const townsP = img(tU).then(im => { obj.towns = im; if (VSRC(S.view) === vid && window.__drawn) draw(); return im; }, () => null);
     // per-pixel source index + weights, made once per view from the coarse LUT (bilinear in panel px)
     const [px, py, pw, ph] = V.panel, x0 = Math.round(px), y0 = Math.round(py), W = Math.round(px + pw) - x0, H = Math.round(py + ph) - y0;
