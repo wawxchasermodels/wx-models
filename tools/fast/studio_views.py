@@ -19,8 +19,13 @@ import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
 import fast_encode as FE
 
-VID = "wawide"
-STATE = (-124.85, -116.9, 45.54, 49.0)   # Washington's lon / lat box: the part the Studio camera fits in the frame ("fit")
+VID = os.environ.get("STUDIO_VIEW", "wawide")
+# 11-04 (Benjamin t2289u "Make me a coastal view for studio that is a little bigger and wider, centered over the ocean, land in the right
+# third. Call it 'coast view'"): STUDIO_VIEW=coast builds "Coast view" (vid coast) the same way. Its camera boxes (lon0, lon1, lat0, lat1):
+# COAST_H = the 16:9 frame (Washington's coast ~2/3 across, Seattle inside the right third), COAST_V = the 9:16 frame (coast ~2/3 across)
+COAST_H = (-134.5, -118.5, 43.1, 49.6)
+COAST_V = (-129.6, -120.2, 41.3, 52.8)
+STATE = COAST_H if VID == "coast" else (-124.85, -116.9, 45.54, 49.0)   # Washington's lon / lat box: the part the Studio camera fits in the frame ("fit")
 GLOBAL = ("gfs", "ifs", "ifs9", "aifs", "eps", "aens")
 
 def setup():
@@ -39,6 +44,19 @@ def setup():
     # + four eastern Washington towns from the site's Washington list (they fill the gaps east of the Cascades; this process
     # builds only this view, so the shared requested list is extended here only)
     TM.REGION_REQUESTED = tuple(TM.REGION_REQUESTED) + tuple(n for n in ("Ellensburg", "Moses Lake", "Pullman", "Colville") if n not in TM.REGION_REQUESTED)
+    if VID == "coast":
+        # ~62 figure px per degree of longitude (wide view: ~81), Lambert centred on the ocean; the figure covers both camera boxes + room to pan
+        TM.VIEWS[VID] = dict(label="Coast view", size=(14, 12.5),
+                             proj=ccrs.LambertConformal(central_longitude=-126.0, central_latitude=46.3, standard_parallels=(44, 49)),
+                             ll=(-137.0, -116.0, 40.6, 53.0), box=(-139.0, -114.0, 39.5, 54.0))
+        TM.REGION_TOWNS[VID] = ((400000, 60000, 20000), 60)   # Victoria (~290k) after the coast towns, so Neah Bay keeps its spot
+        # t2290u: the western Washington coast towns the site already has (Washington view list + the Western Washington view's coast towns)
+        wwa = {t[0]: t for t in FE.EXTRA_TOWNS["wwa"]}; have = {t[0] for t in TM.WA_TOWNS}
+        TM.WA_TOWNS = list(TM.WA_TOWNS) + [wwa[n] for n in ("Ocean Shores", "Westport", "Hoquiam", "Raymond") if n not in have]
+        coast = ("Neah Bay", "Forks", "Port Angeles", "Ocean Shores", "Westport", "Aberdeen", "Hoquiam", "Raymond", "Long Beach", "Cannon Beach", "Victoria")
+        TM.REGION_REQUESTED = coast + tuple(n for n in TM.REGION_REQUESTED if n not in coast)
+        # towns only where both frames can show their labels: west of 119.6 W (16:9 right edge 118.5 W) and between 42.9 N (9:16 key) and 49.3 N (F+ badge; Vancouver 49.28 N kept)
+        rp = TM.region_places; TM.region_places = lambda vid: [t for t in rp(vid) if vid != VID or (t[2] <= -119.6 and 42.9 <= t[1] <= 49.3)]
     return TM, HS, ccrs
 
 def build(models, man, out):
@@ -67,6 +85,10 @@ def build(models, man, out):
          [tr.transform((lo, la)) for lo in STATE[:2] for la in np.linspace(STATE[2], STATE[3], 40)]
     xs = [p[0] for p in sp]; ys = [H - p[1] for p in sp]
     fit = [float(min(xs)), float(min(ys)), float(max(xs) - min(xs)), float(max(ys) - min(ys))]
+    fitV = None
+    if VID == "coast":
+        B = COAST_V; sp = [tr.transform((lo, la)) for lo in np.linspace(B[0], B[1], 40) for la in B[2:]] + [tr.transform((lo, la)) for lo in B[:2] for la in np.linspace(B[2], B[3], 40)]
+        xs = [p[0] for p in sp]; ys = [H - p[1] for p in sp]; fitV = [float(min(xs)), float(min(ys)), float(max(xs) - min(xs)), float(max(ys) - min(ys))]
     plt.close(fig)
     sizes = {}
     # fixed layers, shared by every model (same frame): coast / borders / frame, then towns (built with the first model's grid)
@@ -94,9 +116,12 @@ def build(models, man, out):
         entries[m] = dict(label=V["label"], fig=[int(round(W)), int(round(H))], size_in=[float(x) for x in V["size"]], panel=[px, py, pw, ph],
                           stride=FE.STRIDE, nx=nx, ny=ny, barbs_across=20, lut=f"static/lut_{m}_{VID}.bin", cut=cut, towns=slots,
                           fit=fit, studioOnly=True, studioWide="wa", keysFrom="wa")
+        if fitV: entries[m].update(fitV=fitV, studioCoast=True)
         print(f"{m} {VID}: {len(slots)} town numbers, cut {cut}", flush=True)
     sp = f"{out}/static/studio_views.json"; old = json.load(open(sp)).get("models", {}) if os.path.exists(sp) else {}   # other models kept
     for m, e in entries.items(): old.setdefault(m, {})[VID] = e
+    for m, src in (("aensm", "aens"), ("epsm", "aens"), ("oisst", "gfs")):   # same 0.25 grid / crop as their source model (as the wide view)
+        if src in entries and m in man.get("models", {}) and man["models"][m]["crop"] == man["models"][src]["crop"]: old.setdefault(m, {})[VID] = entries[src]
     doc = dict(built=time.strftime("%Y-%m-%dT%H:%M:%S%z"), v=time.strftime("%Y%m%d%H%M%S"),
                note="Studio-only views (studio_views.py); not in manifest.json", models=old)
     json.dump(doc, open(sp, "w"), indent=1)

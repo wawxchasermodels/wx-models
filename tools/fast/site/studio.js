@@ -70,6 +70,9 @@ function base(k) {   // camera at dx = dy = 0, zoom 1: centre (figure px) and sc
   if (MG.on && MG.img) return mgBase(k);
   const f = F[k], V = last.cur.V, [px, py, pw, ph] = V.panel, t = V.studioWide ? stateRect(V, last.cur.run.split("/")[0]) : null;
   if (!t) return { cx: px + pw / 2, cy: py + ph / 2, k0: Math.max(f.W / pw, f.H / ph) };   // normal views: the map panel covers the frame
+  // 11-04 Coast view (t2289u): its own camera box per frame shape (studio_views.py COAST_H / COAST_V) covers the frame: ocean in the left
+  // two thirds, Washington's coast ~2/3 across
+  if (V.studioCoast) { const r = k === "v" && V.fitV ? V.fitV : V.fit, [x, y, w, h] = r; return { cx: x + w / 2, cy: y + h / 2, k0: Math.max(f.W / w, f.H / h) }; }
   // wide view (10-31 7:55 PM, Benjamin: "a little tighter", whole state with a little margin): Washington fits a band between the
   // title and the color bar. 16:9: state from y 190 to H-120 and shifted right (its left edge at 27 % of the width) so the title,
   // top left, sits over the ocean / Vancouver Island instead of on Vancouver; 9:16: 84 % of the width, centred under the title.

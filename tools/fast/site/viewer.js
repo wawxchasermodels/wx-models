@@ -194,6 +194,12 @@ function addStudioViews(man, sv) {
     if ((!own && !src) || !V.wa || V.wawide) continue; const out = {};
     for (const [k, v] of Object.entries(V)) { out[k] = v; if (k === "wa") out.wawide = own ? Object.assign({}, own, { studioWide: "wa", towns_png: WAWIDE_PASSES_PNG }) : Object.assign({}, V[src], { label: "Washington (wide, for loops)", src, studioWide: "wa" }); }
     M.views = out; }
+  // 11-04 (Benjamin t2289u "Make me a coastal view for studio that is a little bigger and wider, centered over the ocean, land in the right
+  // third. Call it 'coast view'"): Studio-only "Coast view" (studio_views.py STUDIO_VIEW=coast), right after the wide Washington view
+  for (const [m, M] of Object.entries(man.models || {})) { const V = M.views || {}, own = (SVM[m] || {}).coast;
+    if (!own || V.coast) continue; const out = {}; let put = false;
+    for (const [k, v] of Object.entries(V)) { out[k] = v; if (k === "wawide") { out.coast = Object.assign({}, own); put = true; } }
+    if (!put) out.coast = Object.assign({}, own); M.views = out; }
   return man;
 }
 // 10-31 8:17 PM (Benjamin: "Fix the pacific nw tight view"): per-view overrides from static/view_fixes.json (studio_views.py
@@ -999,6 +1005,8 @@ function drawBuoys(ctx, st, D, P, V, LW, LH, taken0) {
   // West Coast view (t1999u): Benjamin's buoy list first (offshore + California coast), then the rest; 40 pt spacing
   const LIST = wcv ? WC_BUOYS.map(id => BUOYS.find(b => b[0] === id)).filter(Boolean).concat(BUOYS.filter(b => !WC_BUOYS.includes(b[0]))) : BUOYS;
   for (const [id, , la, lo, tag] of LIST) {
+    // Coast view: only buoys both Studio frames show in full (9:16 box: east of 129.2 W, north of the 9:16 key at 42.9 N)
+    if (VSRC(S.view) === "coast" && (lo < -129.2 || la < 42.9)) continue;
     if (wide && !/wide/.test(tag || "")) continue;
     // 11-01 9:31 AM (Benjamin t1998u "See if there are any buoys in the puget sound and strait of Juan de Fuca ... Include a marker in the strait of
     // Georgia"): "inner" = Salish Sea buoys, Washington / Puget views only ("any": also elsewhere as before); "sog" = Halibut Bank, not in the local views
@@ -1056,7 +1064,9 @@ const COAST_VIEWS = {   // order = priority; buoys: "first" = WA buoys placed be
   wc: { style: "region", re: [], add: ["Shore Acres", "San Francisco", "Los Angeles", "San Diego", "Monterey", "Eureka", "Crescent City", "Newport",
         "Santa Barbara", "Half Moon Bay", "Santa Cruz", "Morro Bay", "Fort Bragg", "Bodega Bay", "Cape Mendocino", "Malibu", "Westport", "Tatoosh Island",
         "Coos Bay", "Cannon Beach", "Long Beach", "Ocean Shores", "La Push"], buoys: "after", side: "r" },
-  pnw: { style: "region", re: [], add: ["Ocean Shores", "Long Beach", "La Push", "Westport", "Tatoosh Island"], buoys: "after", side: "r" } };   // no other city labels here: town names go on the (empty) land side, buoy labels keep the ocean
+  pnw: { style: "region", re: [], add: ["Ocean Shores", "Long Beach", "La Push", "Westport", "Tatoosh Island"], buoys: "after", side: "r" },
+  // Studio Coast view (t2289u / t2290u): like Pacific NW tight, coast towns + WA buoys first, water names last
+  coast: { style: "region", own: true, re: [], add: ["Ocean Shores", "Westport", "La Push", "Long Beach", "Tatoosh Island", "Astoria", "Cannon Beach", "Newport"], buoys: "first", big: ["Vancouver"], plainLast: true } };   // no other city labels here: town names go on the (empty) land side, buoy labels keep the ocean
 const coastPx = (st, V) => (la, lo) => { const cr = MD().crop || [0, 0, 0, 0], k = `${la},${lo}`; if (!st.coastPx) st.coastPx = {};
   if (!(k in st.coastPx)) { const q = gridInv(V, st, (90 - la) / 0.25 - cr[0], ((lo + 360) % 360) / 0.25 - cr[2], null);
     st.coastPx[k] = q && q[0] >= 0 && q[1] >= 0 && q[0] <= st.W && q[1] <= st.H ? [st.x0 + q[0], st.y0 + q[1]] : null; } return st.coastPx[k]; };
