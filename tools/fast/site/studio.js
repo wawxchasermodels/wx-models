@@ -1270,7 +1270,7 @@ if (!CLEAN) {
         if (getComputedStyle(e).visibility === "hidden") return; if (/^(SPAN|B|SMALL|A|DIV|P)$/.test(e.tagName) && ![...e.childNodes].some(n => n.nodeType === 3 && n.textContent.trim())) return; obs.push(q); });
       box.style.setProperty("--scry", "-999px"); const bb = box.getBoundingClientRect(), bw = bb.width || (w + 230), bh = Math.max(24, Math.min(40, bb.height || 34));
       const hit = (x, y) => obs.some(q => x < q.right + 4 && x + bw > q.left - 4 && y < q.bottom + 2 && y + bh > q.top - 2);
-      let best = null; for (let y = r.bottom + 2; y < 300 && !best; y += 2) { for (let x = Math.min(r.left, innerWidth - 12 - bw); x >= Math.max(12, r.left - bw + 120); x -= 8) if (!hit(x, y)) { best = [x, y]; break; } }
+      let best = null; for (let y = r.bottom + 2; y < 300 && !best; y += 2) { const x0 = Math.max(12, r.left - bw + 120), x1 = Math.min(r.right - 120, innerWidth - 12 - bw), xs = []; for (let x = x0; x <= x1; x += 8) xs.push(x); xs.sort((a, b) => Math.abs(a - r.left) - Math.abs(b - r.left)); for (const x of xs) if (!hit(x, y)) { best = [x, y]; break; } }
       if (!best) best = [Math.max(12, Math.min(r.left, innerWidth - 12 - bw)), r.bottom + 4];
       box.style.setProperty("--scrx", (best[0] - br.left) + "px"); box.style.setProperty("--scry", (best[1] - br.top) + "px"); };
     vx(); setTimeout(vx, 1500); setTimeout(vx, 5000); addEventListener("resize", vx); if ("ResizeObserver" in window) new ResizeObserver(vx).observe(bar_);
