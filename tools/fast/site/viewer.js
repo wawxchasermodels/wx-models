@@ -133,6 +133,45 @@ function schedSharp() {
 // frame is drawn once when the finger lifts.
 const STUDIO_DRAG_RS = 1;   // FINE_PTR: mouse / trackpad (a full Studio frame takes ~0.5-1 s on a phone CPU, so touch keeps the light frames)
 const FINE_PTR = !!(window.matchMedia && matchMedia("(hover: hover) and (pointer: fine)").matches);
+// Regular maps (t2511u): show the Coast view's 16:9 camera (studio_views fit = COAST_H), the same ocean-centered box Studio uses
+// for the wide frame, Westport included. fitV (the 9:16 box) stays Studio-only. The blit is 1:1 figure pixels, so the map is not stretched.
+// Header, color key and credit sit in bands outside that box. Studio never calls this; it still crops fit / fitV itself.
+function coastShown(V) {
+  if (Q.get("studio") || !V || !V.studioCoast || !V.fit) return null;
+  const x = +V.fit[0], y = +V.fit[1], w = +V.fit[2], h = +V.fit[3];
+  if (!(w > 40 && h > 40)) return null;
+  const head = Math.round(Math.min(78, Math.max(58, h * 0.07))), foot = Math.round(Math.min(120, Math.max(88, h * 0.11)));
+  return { x, y, w, h, head, foot, W: w, H: head + h + foot };
+}
+function coastKey(ctx, P, x, y, w, h) {
+  const L = P && P.levels, C = P && P.colors; if (!L || !C || L.length < 2 || !C.length) return false;
+  const n = Math.min(C.length, L.length - 1), span = (L[L.length - 1] - L[0]) || 1;
+  for (let i = 0; i < n; i++) { ctx.fillStyle = C[i]; ctx.fillRect(Math.floor(x + (i / n) * w), y, Math.ceil(w / n) + 1, h); }
+  ctx.strokeStyle = "rgba(255,255,255,0.55)"; ctx.lineWidth = 1; ctx.strokeRect(x, y, w, h);
+  ctx.fillStyle = "#e9ecf1"; ctx.font = "600 12px Montserrat"; ctx.textAlign = "center"; ctx.textBaseline = "top";
+  let last = -1e9; for (const t of (P.ticks || [])) { if (t < L[0] || t > L[L.length - 1]) continue; const tx = x + (t - L[0]) / span * w, s = String(t);
+    if (tx - 8 < last) continue; last = tx + 16; ctx.fillText(s, tx, y + h + 2); }
+  ctx.textAlign = "left"; ctx.textBaseline = "alphabetic"; ctx.font = "700 13px Montserrat"; if (P.key) ctx.fillText(P.key, x, y - 4);
+  return true;
+}
+function showCoast(cv, V, meta) {
+  const C = coastShown(V); if (!C || !cv) return false;
+  const rs = cv._rs || 1, src = document.createElement("canvas"); src.width = cv.width; src.height = cv.height;
+  src.getContext("2d").drawImage(cv, 0, 0);
+  cv.width = Math.max(1, Math.round(C.W * rs)); cv.height = Math.max(1, Math.round(C.H * rs)); cv._lw = C.W; cv._lh = C.H;
+  const ctx = cv.getContext("2d"); ctx.setTransform(rs, 0, 0, rs, 0, 0); ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
+  ctx.fillStyle = (S.man && S.man.style && S.man.style.BG) || "#111318"; ctx.fillRect(0, 0, C.W, C.H);
+  ctx.drawImage(src, C.x * rs, C.y * rs, C.w * rs, C.h * rs, 0, C.head, C.w, C.h);   // uniform scale: dest w/h equals source w/h
+  const m = meta || {}, ink = (S.man && S.man.style && S.man.style.INK) || "#f4f2ee", acc = (S.man && S.man.style && S.man.style.ACCENT) || "#ffc24d", muted = (S.man && S.man.style && S.man.style.MUTED) || "#a7abb3";
+  ctx.textAlign = "left"; ctx.textBaseline = "top"; ctx.fillStyle = ink; ctx.font = "800 22px Montserrat"; ctx.fillText(m.title || "", 14, 6);
+  ctx.fillStyle = acc; ctx.font = "700 15px Montserrat"; ctx.fillText(m.valid || "", 14, 30);
+  ctx.fillStyle = muted; ctx.font = "500 12px Montserrat"; ctx.fillText(m.sub || "", 14, 48);
+  if (m.badge) { ctx.textAlign = "right"; ctx.fillStyle = ink; ctx.font = "800 18px Montserrat"; ctx.fillText(m.badge[0] || "", C.W - 14, 8); ctx.fillStyle = muted; ctx.font = "600 11px Montserrat"; ctx.fillText(m.badge[1] || "", C.W - 14, 30); ctx.textAlign = "left"; }
+  const barY = C.head + C.h + 18, barH = 14;
+  if (m.P) coastKey(ctx, m.P, 14, barY, Math.max(80, C.W - 28), barH);
+  if (m.pid && m.P) { const lines = creditLines(m.pid, m.P, m.towns !== false); ctx.fillStyle = muted; ctx.font = "500 11px Montserrat"; ctx.textBaseline = "bottom"; lines.forEach((l, i) => ctx.fillText(l, 14, C.H - 6 - (lines.length - 1 - i) * 14)); }
+  fitPhone(); return true;
+}
 function sizeMap(cv, V, keepRS) {   // bitmap = figure px x RS; context transform = RS, so all drawing stays in figure px
   const [LW, LH] = V.fig, rs = keepRS && Q.get("studio") && S.dragging ? STUDIO_DRAG_RS : keepRS && cv._lw === LW && cv._lh === LH ? (cv._rs || 1) : wantRS(LW, LH);
   const bw = Math.round(LW * rs), bh = Math.round(LH * rs), relayout = cv._lw !== LW || cv._lh !== LH;
@@ -189,22 +228,23 @@ const WAWIDE_PASSES_PNG = "@slayers/static/towns_wawide_p1.png";
 // 11-04 (t2314u "yes rebuild those too"): HRRR / RRFS / NBM wide view (pnwhr) too: wawide_s2.json models.{hrrr,rrfs,nbm} = {towns, towns_png}
 let WAWIDE_S2 = null; const WAWIDE_FS = 0.83;
 function addStudioViews(man, sv) {
-  if (!Q.get("studio")) return man;
   // 10-31 7:55 PM (Benjamin: "city labels on the new washington wide are way too big"): the global models now get a real view
   // made for Studio (tools/fast/studio_views.py -> static/studio_views.json, not in manifest.json): its own basemap and town layer
   // drawn at the size the Studio frames show it. Models without one (HRRR / RRFS / NBM) keep the high-res Pacific NW map as before.
+  // Washington (wide, for loops) stays Studio-only. Coast view does not: the regular map page lists it too (t2511u).
   const SVM = (sv && sv.models) || {};
-  for (const [m, M] of Object.entries(man.models || {})) { const V = M.views || {}, own = (SVM[m] || {}).wawide, src = V.pnwt ? "pnwt" : V.pnwhr ? "pnwhr" : null;
+  if (Q.get("studio")) for (const [m, M] of Object.entries(man.models || {})) { const V = M.views || {}, own = (SVM[m] || {}).wawide, src = V.pnwt ? "pnwt" : V.pnwhr ? "pnwhr" : null;
     if ((!own && !src) || !V.wa || V.wawide) continue; const out = {};
     for (const [k, v] of Object.entries(V)) { out[k] = v; if (k === "wa") out.wawide = own ? Object.assign({}, own, { studioWide: "wa", towns_png: WAWIDE_PASSES_PNG }, WAWIDE_S2 && WAWIDE_S2.models && WAWIDE_S2.models[m] ? { towns: WAWIDE_S2.models[m], towns_png: "@slayers/" + WAWIDE_S2.png } : {}) : Object.assign({}, V[src], { label: "Washington (wide, for loops)", src, studioWide: "wa" }, WAWIDE_S2 && WAWIDE_S2.models && WAWIDE_S2.models[m] && WAWIDE_S2.models[m].towns_png ? { towns: WAWIDE_S2.models[m].towns, towns_png: "@slayers/" + WAWIDE_S2.models[m].towns_png, townsOwn: true } : {}); }
     M.views = out; }
   // 11-04 (Benjamin t2289u "Make me a coastal view for studio that is a little bigger and wider, centered over the ocean, land in the right
-  // third. Call it 'coast view'"): Studio-only "Coast view" (studio_views.py STUDIO_VIEW=coast), right after the wide Washington view
-  // 11-04 t2300u ("a little tighter, a bit less Oregon, make sure Westport gets in there"): the tighter build is "coast_t" (its own
-  // base / towns / LUT files), shown under the same view id "coast"
+  // third. Call it 'coast view'"): "Coast view" (studio_views.py, view id coast). Studio keeps framing it with fit / fitV.
+  // 11-04 t2300u / t2311u: coast_s (30 mi south of coast_t), its own base / towns / LUT. A model with neither entry is not offered
+  // (HRRR / RRFS / NBM have no coast LUT). This is not the wave-only West Coast view (wave_views id wc).
+  // 11-05 (t2511u): the same coast entry is in the regular View menu. The map page shows the 16:9 camera box (fit), not fitV.
   for (const [m, M] of Object.entries(man.models || {})) { const V = M.views || {}, sv = SVM[m] || {}, ck = sv.coast_s ? "coast_s" : sv.coast_t ? "coast_t" : null, own = ck ? Object.assign({}, sv[ck], { base_png: `static/base_${ck}.png`, towns_png: sv[ck].towns_png || `static/towns_${ck}.png` }) : sv.coast;   // t2311u: coast_s = 30 mi south
-    if (!own || V.coast) continue; const out = {}; let put = false;
-    for (const [k, v] of Object.entries(V)) { out[k] = v; if (k === "wawide") { out.coast = Object.assign({}, own); put = true; } }
+    if (!own || V.coast) continue; const out = {}; let put = false; const anchor = Q.get("studio") ? "wawide" : "wa";
+    for (const [k, v] of Object.entries(V)) { out[k] = v; if (k === anchor) { out.coast = Object.assign({}, own); put = true; } }
     if (!put) out.coast = Object.assign({}, own); M.views = out; }
   return man;
 }
@@ -247,7 +287,7 @@ async function boot() {
   PV = await fetch("pdata/manifest_pv.json", { cache: "no-cache" }).then(r => r.ok ? r.json() : null).catch(() => null);
   if (PV) PV.re = new RegExp(`^(runs/(${Object.keys(PV.models).join("|")})/|static/(x2/)?(lut|key)_(${Object.keys(PV.models).join("|")})_)`);
   const [man, sv, vf, wv] = await Promise.all([fetch(DATA + "manifest.json", { cache: "no-cache" }).then(r => r.json()).then(pvMerge),
-                                   Q.get("studio") ? fetch(DATA + "static/studio_views.json", { cache: "no-cache" }).then(r => r.ok ? r.json() : null, () => null) : null,
+                                   fetch(DATA + "static/studio_views.json", { cache: "no-cache" }).then(r => r.ok ? r.json() : null, () => null),
                                    fetch(DATA + "static/view_fixes.json", { cache: "no-cache" }).then(r => r.ok ? r.json() : null, () => null),
                                    fetch(DATA + "static/wave_views.json", { cache: "no-cache" }).then(r => r.ok ? r.json() : null, () => null),
                                    document.fonts.load("800 20px Montserrat"), document.fonts.load("500 12px Montserrat"),
@@ -850,7 +890,9 @@ async function render(lite) {
     }
     const V = VIEWS()[vid], cv = $("map"), st2 = await viewStatic(vid);
     const ctx = sizeMap(cv, V, lite), [LW, LH] = V.fig; ctx.fillStyle = S.man.style.BG; ctx.fillRect(0, 0, LW, LH); ctx.drawImage(layer(st2.base, st2.baseU, cv._rs), 0, 0, LW, LH);
-    header(ctx, V, PRODS()[pid].title, step.valid_line, `${S.runs[run].runline}  \u00b7  ${V.label}  \u00b7  ${window.__vjNoJump || S.dragging ? "no map at this hour" : "not in this model run"}`, step.badge);
+    const miss = `${S.runs[run].runline}  \u00b7  ${V.label}  \u00b7  ${window.__vjNoJump || S.dragging ? "no map at this hour" : "not in this model run"}`;
+    if (!coastShown(V)) header(ctx, V, PRODS()[pid].title, step.valid_line, miss, step.badge);
+    showCoast(cv, V, { title: PRODS()[pid].title, valid: step.valid_line, sub: miss, badge: step.badge, P: PRODS()[pid], pid, towns: true });
     S.cur = null; window.__drawn = `${pid}/${vid}/${f}`; if (window.onStudioSkip) window.onStudioSkip();
     postCompare(run, pid, vid, step);   // 10-31: still report to the side-by-side page (else sync never starts when a frame opens on such an hour)
     return;
@@ -928,7 +970,8 @@ async function render(lite) {
   const pc = p => fin[Math.min(fin.length - 1, Math.max(0, Math.round(p / 100 * (fin.length - 1))))];
   let extra = (P.isobars && !D.iso && P.extra_noh ? P.extra_noh : P.extra).replace("{lo}", pc(P.pct[0]).toFixed(P.dec || 0)).replace("{hi}", pc(P.pct[1]).toFixed(P.dec || 0));
   if (pid === "gust10" && run.startsWith("eps/") && f <= 144 && f % 3 === 0) extra = extra.replace("in the 6 h ending", "in the 3 h ending");   // 10-31 EPS 3-hourly to F+144
-  header(ctx, V, P.title, step.valid_line, `${S.runs[run].runline}  \u00b7  ${V.label}  \u00b7  ${extra}`, step.badge);
+  const coastNow = coastShown(V);
+  if (!coastNow) header(ctx, V, P.title, step.valid_line, `${S.runs[run].runline}  \u00b7  ${V.label}  \u00b7  ${extra}`, step.badge);
   S.peak = GUST_PIDS.test(pid) ? drawPeak(ctx, st, vals) : null;
   // 11-01 7:43 AM (Benjamin: "Add a 'max height:80ft' just underneath the bottom right of the graphic"): max wave maps show the tallest
   // value in this frame and view (true grid max over the view's rows/cols, nearest whole ft), right-aligned under the map's bottom-right corner
@@ -937,9 +980,9 @@ async function render(lite) {
     if (!D.mx) D.mx = {};
     if (D.mx[vid] === undefined) { let mx = -Infinity; for (let r = r0; r < r1; r++) for (let c = c0; c < c1; c++) { const v = D.fill[r * D.w + c]; if (v > mx) mx = v; } D.mx[vid] = mx; }
     if (isFinite(D.mx[vid]) && D.mx[vid] >= 0) {
-      maxv = D.mx[vid]; const yb = st.y0 + st.H, yc = yb + (LH - yb) * 0.5;
+      maxv = D.mx[vid]; if (!coastNow) { const yb = st.y0 + st.H, yc = yb + (LH - yb) * 0.5;
       ctx.save(); ctx.font = `800 ${pt(11)}px Montserrat`; ctx.fillStyle = S.man.style.INK; ctx.textAlign = "right"; ctx.textBaseline = "middle";
-      ctx.fillText(`Max height: ${Math.round(maxv)} ft`, st.x0 + st.W, yc); ctx.restore();
+      ctx.fillText(`Max height: ${Math.round(maxv)} ft`, st.x0 + st.W, yc); ctx.restore(); }
     }
   }
   const t3 = performance.now();
@@ -947,6 +990,7 @@ async function render(lite) {
   S.last = { data_ms: t1 - t0, fill_ms: t2 - t1, overlay_ms: t3 - t2, total_ms: t3 - t0 };
   $("stat").textContent = `F+${f}  data ${S.last.data_ms.toFixed(0)} ms · fill ${S.last.fill_ms.toFixed(0)} ms · lines/labels ${S.last.overlay_ms.toFixed(0)} ms`;
   window.__drawn = `${pid}/${vid}/${f}` + (lite ? "~" : ""); window.__rs = rs;
+  showCoast(cv, V, { title: P.title, valid: step.valid_line, sub: `${S.runs[run].runline}  \u00b7  ${V.label}  \u00b7  ${extra}` + (maxv != null ? `  ·  Max height ${Math.round(maxv)} ft` : ""), badge: step.badge, P, pid, towns: !!(st.towns && tmode !== "none") });
   postCompare(run, pid, vid, step);
   if (lite) { if (window.onStudioDraw && Q.get("studio")) window.onStudioDraw(cv_(), S.cur, step, true); return; }
   // iOS Safari throws after 100 history.replaceState calls in 10 s: update the URL once things settle
