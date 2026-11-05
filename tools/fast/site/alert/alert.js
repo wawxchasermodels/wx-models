@@ -7,11 +7,11 @@ const Alerts = (() => {
   const UA = "WAWeatherChasersStudio/1.0 (alerts; benjamin@wawxchasers)";
   const NWS = "https://api.weather.gov/alerts/active?area=" + AREAS.join(",");
   const FALLBACK = "#888888";
-  const C_OCEAN = "#040a12";
-  const C_WATER = "#163a58";
-  const C_LAND = "#334560";
-  const C_COUNTY = "rgba(170,190,220,0.45)";
-  const C_STATE = "rgba(230,240,255,0.95)";
+  const C_OCEAN = "#030912";
+  const C_WATER = "#1a4568";
+  const C_LAND = "#3a5068";
+  const C_COUNTY = "rgba(200,215,235,0.72)";
+  const C_STATE = "rgba(245,250,255,1)";
   const WA0 = { lon0: -125.15, lon1: -116.7, lat0: 45.4, lat1: 49.1 };
   const CSS = 1600;
   const SIDE_PREF = { "Oak Harbor": "left" };
@@ -148,8 +148,10 @@ const Alerts = (() => {
     if (lon1 <= lon0 || lat1 <= lat0) { lon0 = MAX.lon0; lon1 = MAX.lon1; lat0 = MAX.lat0; lat1 = MAX.lat1; }
 
     const usable = 1 - RIGHT_CLEAR; // content in left 87%
-    const midLon = (lon0 + lon1) / 2, midLat = (lat0 + lat1) / 2;
-    let contentW = Math.max(0.35, lon1 - lon0), contentH = Math.max(0.25, lat1 - lat0);
+    // Soft-cap far-west marine so All/Gale don't leave a dark ocean "bar" on the left
+    const frameLon0 = Math.max(lon0, -125.55);
+    const midLon = (frameLon0 + lon1) / 2, midLat = (lat0 + lat1) / 2;
+    let contentW = Math.max(0.35, lon1 - frameLon0), contentH = Math.max(0.25, lat1 - lat0);
     // Cover into 16:9 shows full canvas width; size so alerts fill ~usable width
     let spanX = contentW / Math.max(0.55, usable * 0.92);
     let spanY = contentH / 0.82;
@@ -163,8 +165,8 @@ const Alerts = (() => {
     // Place alert cluster in the left usable band (not the face-cam strip)
     const midFracX = usable * 0.48;
     let v0 = midLon - midFracX * spanX, v1 = v0 + spanX;
-    // Prefer showing land: if view starts too far west of content, shift east a bit
-    if (v0 < lon0 - contentW * 0.35) { const shift = (lon0 - contentW * 0.35) - v0; v0 += shift; v1 += shift; }
+    // Prefer showing land: if view starts too far west of framed content, shift east
+    if (v0 < frameLon0 - contentW * 0.2) { const shift = (frameLon0 - contentW * 0.2) - v0; v0 += shift; v1 += shift; }
     S.viewLL = { lon0: v0, lon1: v1, lat0: midLat - spanY / 2, lat1: midLat + spanY / 2 };
     S.k = 1; S.cx = CSS / 2; S.cy = CSS / 2;
     req();
@@ -237,14 +239,14 @@ const Alerts = (() => {
     if (S.countyGeoms && S.countyGeoms.length) {
       ctx.beginPath();
       for (const g of S.countyGeoms) pathGeoJSON(g, ctx);
-      ctx.lineWidth = 1;
+      ctx.lineWidth = 1.6;
       ctx.strokeStyle = C_COUNTY;
       ctx.stroke();
     }
     // State outline (strong)
     if (S.stateGeom) {
       ctx.beginPath(); pathGeoJSON(S.stateGeom, ctx);
-      ctx.lineWidth = 3.5;
+      ctx.lineWidth = 4.2;
       ctx.strokeStyle = C_STATE;
       ctx.stroke();
     }
