@@ -1279,7 +1279,14 @@ if (!CLEAN) {
   // Next, and stretches across the row under the tabs and the View menu. The short #step stays in the page (hidden) and is still the
   // one the viewer reads; this one drives it. Phones keep it under the 16:9 frame (bottom dock unchanged).
   // 11-04 (t2343u): its own row under the menu items, starting under the View menu and running ~480 px toward Share (not on the menu line)
-  if (innerWidth > 820) { const bar_ = document.getElementById("bar"); box.classList.add("inbar"); document.body.classList.add("longscrub"); bar_.appendChild(box);
+  // 11-05 (Benjamin t2444u): desktop second menu row = action buttons on the LEFT (Save image, Share, Meteogram, Pass Forecaster,
+  // Observations, Request a change), then the long hour scrubber to their right filling the rest of the line (in flow, wraps on narrow).
+  if (innerWidth > 820) { const bar_ = document.getElementById("bar"), ar = document.createElement("div"); ar.id = "actrow";
+    ["save", "share", "mgbtn", "pfbtn", "obsbtn"].forEach(id => { const e = document.getElementById(id); if (e) ar.appendChild(e); });
+    box.classList.add("inbar", "inrow"); document.body.classList.add("longscrub", "actrow"); ar.appendChild(box); const st_ = document.getElementById("stat"); if (st_) ar.appendChild(st_); bar_.appendChild(ar);
+    const ln = document.getElementById("loadnote"); if (ln) box.querySelector(".sw").appendChild(ln);
+    document.addEventListener("DOMContentLoaded", () => { const rq = document.getElementById("rqb"); if (rq) ar.insertBefore(rq, box); }); }
+  else if (false) { const bar_ = document.getElementById("bar"); box.classList.add("inbar"); document.body.classList.add("longscrub"); bar_.appendChild(box);
     // t2343u: overlay row under the View menu (absolute, so the bar height and the frames stay exactly as in Map); the short #step keeps its space, invisible
     // Placement: nearest free spot under the View menu (scan down, then left toward Share) that touches no visible control or frame,
     // so the scrubber never covers a button and the frames never move.
