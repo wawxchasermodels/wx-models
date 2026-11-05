@@ -1,0 +1,30 @@
+/* Studio Active Alerts panel (WA preview) */
+#alertp{display:none}
+body.alertmode #alertp{display:block}
+#alertp .al-root{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;color:#e8eef7;font:13px/1.3 Montserrat,system-ui,sans-serif}
+#alertp .al-title{font-weight:800;letter-spacing:.02em;margin-right:4px}
+#alertp .al-chips{display:flex;flex-wrap:wrap;gap:6px;max-width:100%}
+#alertp .al-chip{
+  display:inline-flex;align-items:center;gap:6px;background:#1a2740;color:#e8eef7;
+  border:1px solid rgba(255,255,255,.14);border-radius:999px;padding:5px 10px;cursor:pointer;font:inherit
+}
+#alertp .al-chip .sw{width:12px;height:12px;border-radius:3px;border:1px solid rgba(0,0,0,.35);flex:none}
+#alertp .al-chip[aria-pressed="true"]{outline:2px solid #7cb7ff;outline-offset:1px}
+#alertp .al-chip:hover{border-color:#4a6288}
+#alertp .al-meta{color:#9aa8bc;font-size:12px}
+#alertp button.al-btn{background:#1a2740;color:#e8eef7;border:1px solid rgba(255,255,255,.14);border-radius:8px;padding:5px 10px;cursor:pointer;font:inherit}
+#alertp button.al-btn:hover{border-color:#4a6288}
+#alertp #alstage{position:fixed!important;left:-20000px!important;top:0!important;width:1600px!important;height:1600px!important;flex:none!important;visibility:visible}
+#alertp #al-canvas{width:1600px;height:1600px;display:block;background:#0b1220}
+
+#alertp .al-opacity{display:flex;align-items:center;gap:10px;margin-left:6px;padding:4px 8px;background:#141c2a;border:1px solid rgba(255,255,255,.14);border-radius:10px;user-select:none}
+#alertp .al-opacity-lab{font-weight:700;font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:#9aa8bc}
+#alertp .al-opacity-val{font-weight:800;font-variant-numeric:tabular-nums;min-width:3.2em;color:#e8eef7}
+#alertp #al-opacity{
+  -webkit-appearance:none;appearance:none;width:min(280px,32vw);height:28px;background:transparent;cursor:pointer;
+}
+#alertp #al-opacity:focus{outline:2px solid #7cb7ff;outline-offset:2px;border-radius:8px}
+#alertp #al-opacity::-webkit-slider-runnable-track{height:10px;border-radius:999px;background:linear-gradient(90deg,#2a3548,#7cb7ff)}
+#alertp #al-opacity::-moz-range-track{height:10px;border-radius:999px;background:linear-gradient(90deg,#2a3548,#7cb7ff)}
+#alertp #al-opacity::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:28px;height:28px;margin-top:-9px;border-radius:50%;background:#f2f5fa;border:2px solid #0b1220;box-shadow:0 1px 4px rgba(0,0,0,.45)}
+#alertp #al-opacity::-moz-range-thumb{width:28px;height:28px;border-radius:50%;background:#f2f5fa;border:2px solid #0b1220;box-shadow:0 1px 4px rgba(0,0,0,.45)}
