@@ -349,8 +349,8 @@ function renderObs(k, frO) {
   window.__studio = (window.__studio || 0) + 1; window.__studioObs = (window.__studioObs || 0) + 1;
 }
 
-// ---- Active Alerts in Studio (11-05, t2420u/t2426u WA-only preview): same header / LIVE badge / credit style as Observations
-const ALERT_CREDIT = ["Alerts: NWS api.weather.gov.  Places: GeoNames, CC BY 4.0.  Basemap: dark WA land / counties / marine zones."];
+// ---- Active Alerts in Studio (11-05): header + credit style as Observations; no LIVE badge (t2437u)
+const ALERT_CREDIT = ["Places: GeoNames, CC BY 4.0."];  // alert mode only; Census/TIGER basemap is public domain — no credit required
 function alertInfo() {
   const S_ = typeof Alerts !== "undefined" && Alerts._state; if (!S_) return null;
   const title = (typeof Alerts.titleText === "function" ? Alerts.titleText() : null) || S_.selectedType || "All Alerts";
@@ -366,18 +366,17 @@ function renderAlert(k, frO) {
   if (!MG.img || !I || !I.t) { c0.font = `700 ${k === "v" ? 40 : 34}px Montserrat`; c0.fillStyle = "#c9ced8"; c0.textAlign = "center"; c0.fillText(MG.msg || "Loading alerts\u2026", f.W / 2, f.H / 2); c0.textAlign = "left"; return; }
   const r = crop(k, fr); c0.imageSmoothingEnabled = true; c0.imageSmoothingQuality = "high";
   c0.drawImage(MG.img, f.W / 2 - r.cx * r.kk, f.H / 2 - r.cy * r.kk, IW(MG.img) * r.kk, IH(MG.img) * r.kk);
-  // TOP LEFT title exactly like other Studio modes (product name style): pill + title + time + LIVE badge
+  // TOP LEFT title (alert mode): pill + title + time — no LIVE badge (Benjamin t2437u)
   const c = ovLayer(f), x = f.pad; let y = k === "v" ? 120 : 34;
+  const by = y; // top-right anchor without a LIVE badge
   c.save(); sharpShadow(c, k);
   const pw = pill(c, x, y, "ALERTS", Math.round(f.run * 0.95), "#7c3aed", "#fff");
   c.font = `600 ${f.run}px Montserrat`; c.fillStyle = "#c9ced8"; c.fillText("NWS \u00b7 Washington", x + pw + 14, y + f.run * 1.08);
   y += f.run * 1.55 + f.title * 1.02; c.font = `800 ${f.title}px Montserrat`; c.fillStyle = "#fff"; c.fillText(I.title, x, y);
   y += f.day * 1.3; c.font = `800 ${f.day}px Montserrat`; c.fillStyle = "#ffc24d"; c.fillText(I.when, x, y);
   const headBot = y + f.day * 0.45;
-  c.font = `800 ${Math.round(f.valid * 1.1)}px Montserrat`; const bt = "LIVE", bw = c.measureText(bt).width + 40, bx = badgeRight(k) - bw, by = k === "v" ? 120 : 34;
-  c.fillStyle = "rgba(17,19,22,0.85)"; c.strokeStyle = "rgba(255,255,255,0.35)"; c.lineWidth = 2; c.beginPath(); c.roundRect ? c.roundRect(bx, by, bw, f.valid * 1.9, 14) : c.rect(bx, by, bw, f.valid * 1.9); c.fill(); noShadow(c); c.stroke(); sharpShadow(c, k);
-  c.fillStyle = "#fff"; c.textAlign = "center"; c.fillText(bt, bx + bw / 2, by + f.valid * 1.32); c.textAlign = "left"; c.restore();
-  const cnr = BR.corner && LOGOS[BR.logo] ? cornerBox(k, by + f.valid * 1.9, headBot, f.H - f.bot + (k === "v" ? 110 : 62)) : null;
+  c.restore();
+  const cnr = BR.corner && LOGOS[BR.logo] ? cornerBox(k, by, headBot, f.H - f.bot + (k === "v" ? 110 : 62)) : null;
   // bottom-left credits (keep ~13% right clear for face cam — credits already left on 9:16)
   c.save(); sharpShadow(c, k);
   const dl = ALERT_CREDIT; let dfs = k === "v" ? 15 : 14; c.font = `600 ${dfs}px Montserrat`;

@@ -8,9 +8,9 @@ const Alerts = (() => {
   const NWS = "https://api.weather.gov/alerts/active?area=" + AREAS.join(",");
   const FALLBACK = "#888888";
   const C_OCEAN = "#030912";
-  const C_WATER = "#1a4568";
-  const C_LAND = "#3a5068";
-  const C_COUNTY = "rgba(200,215,235,0.72)";
+  const C_WATER = "#153a58";
+  const C_LAND = "#1a222e";
+  const C_COUNTY = "rgba(210,220,235,0.85)";
   const C_STATE = "rgba(245,250,255,1)";
   const WA0 = { lon0: -125.15, lon1: -116.7, lat0: 45.4, lat1: 49.1 };
   const CSS = 1600;
@@ -23,7 +23,7 @@ const Alerts = (() => {
     cx: CSS / 2, cy: CSS / 2, k: 1, view: "wa",
     viewLL: Object.assign({}, WA0),
     colors: {}, zones: new Map(), towns: [], alerts: [],
-    selectedType: null, status: "", raf: 0, sig: "",
+    selectedType: null, fillAlpha: 1, status: "", raf: 0, sig: "",
     landFeats: [], waterFeats: [], stateGeom: null, countyGeoms: []
   };
   const $ = (id) => document.getElementById(id);
@@ -150,24 +150,34 @@ const Alerts = (() => {
     const usable = 1 - RIGHT_CLEAR; // content in left 87%
     // Soft-cap far-west marine so All/Gale don't leave a dark ocean "bar" on the left
     const frameLon0 = Math.max(lon0, -125.55);
-    const midLon = (frameLon0 + lon1) / 2, midLat = (lat0 + lat1) / 2;
+    // Extra north pad so San Juans / Northern Inland Waters survive 16:9 cover crop
+    // (cover of square into 16:9 crops ~22% top+bottom of the canvas)
+    const COVER_SAFE = 0.56; // vertical fraction of square visible after 16:9 cover
+    const midLon = (frameLon0 + lon1) / 2;
     let contentW = Math.max(0.35, lon1 - frameLon0), contentH = Math.max(0.25, lat1 - lat0);
-    // Cover into 16:9 shows full canvas width; size so alerts fill ~usable width
+    // Grow contentH so padded alerts fit inside the cover-safe band
+    contentH = Math.max(contentH, contentH / COVER_SAFE * 0.92);
     let spanX = contentW / Math.max(0.55, usable * 0.92);
-    let spanY = contentH / 0.82;
+    let spanY = contentH / COVER_SAFE;
+    const midLat = (lat0 + lat1) / 2;
     const latMid = midLat * Math.PI / 180;
     const lonUnit = Math.cos(latMid);
-    // Keep geographic aspect reasonable on the square canvas
     if (spanX * lonUnit > spanY) spanY = spanX * lonUnit;
     else spanX = spanY / Math.max(lonUnit, 0.25);
     spanX = Math.min(Math.max(spanX, 0.8), MAX.lon1 - MAX.lon0);
     spanY = Math.min(Math.max(spanY, 0.5), MAX.lat1 - MAX.lat0);
-    // Place alert cluster in the left usable band (not the face-cam strip)
+    // Bias midLat slightly south of geometric center so north edge clears the crop
+    const biasLat = midLat - Math.min(0.12, contentH * 0.04);
     const midFracX = usable * 0.48;
     let v0 = midLon - midFracX * spanX, v1 = v0 + spanX;
-    // Prefer showing land: if view starts too far west of framed content, shift east
     if (v0 < frameLon0 - contentW * 0.2) { const shift = (frameLon0 - contentW * 0.2) - v0; v0 += shift; v1 += shift; }
-    S.viewLL = { lon0: v0, lon1: v1, lat0: midLat - spanY / 2, lat1: midLat + spanY / 2 };
+    let vLat0 = biasLat - spanY / 2, vLat1 = biasLat + spanY / 2;
+    // Guarantee alert lat1 (north) sits below the cropped top band
+    const northNeed = lat1 + Math.max(0.05, (lat1 - lat0) * 0.08);
+    if (vLat1 < northNeed) { const d = northNeed - vLat1; vLat0 += d; vLat1 += d; }
+    if (vLat1 > MAX.lat1) { const d = vLat1 - MAX.lat1; vLat0 -= d; vLat1 -= d; }
+    if (vLat0 < MAX.lat0) vLat0 = MAX.lat0;
+    S.viewLL = { lon0: v0, lon1: v1, lat0: vLat0, lat1: vLat1 };
     S.k = 1; S.cx = CSS / 2; S.cy = CSS / 2;
     req();
   }
@@ -309,15 +319,16 @@ const Alerts = (() => {
     for (const a of vis) {
       const g = a._geom; if (!g) continue;
       const col = colorFor(a.properties.event);
+      const aFill = Math.max(0.2, Math.min(1, S.fillAlpha));
       ctx.beginPath(); pathGeom(g, ctx);
-      ctx.fillStyle = hexToRgba(col, 0.52);
+      ctx.fillStyle = hexToRgba(col, aFill);
       ctx.fill("evenodd");
       ctx.lineWidth = 2.4;
-      ctx.strokeStyle = hexToRgba(col, 0.98);
+      ctx.strokeStyle = hexToRgba(col, Math.max(0.85, aFill));
       ctx.stroke();
     }
     drawTowns(ctx);
-    S.sig = [S.loaded, S.selectedType || "ALL", S.k.toFixed(3), S.cx.toFixed(1), S.cy.toFixed(1),
+    S.sig = [S.loaded, S.selectedType || "ALL", S.fillAlpha.toFixed(2), S.k.toFixed(3), S.cx.toFixed(1), S.cy.toFixed(1),
       S.viewLL.lon0.toFixed(3), S.viewLL.lat0.toFixed(3), vis.length, dpr].join("|");
   }
   function req() { if (S.raf) return; S.raf = requestAnimationFrame(() => { S.raf = 0; draw(); }); }
@@ -413,6 +424,11 @@ const Alerts = (() => {
       <div class="al-root">
         <span class="al-title">Active Alerts · WA</span>
         <div class="al-chips" id="al-chips" role="listbox" aria-label="Alert types"></div>
+        <label class="al-opacity" title="Alert fill opacity">
+          <span class="al-opacity-lab">Opacity</span>
+          <input type="range" id="al-opacity" min="20" max="100" step="1" value="100" aria-label="Alert fill opacity" />
+          <span class="al-opacity-val" id="al-opacity-val">100%</span>
+        </label>
         <button type="button" class="al-btn" id="al-refresh">Refresh</button>
         <button type="button" class="al-btn" id="al-reset">Fit view</button>
         <span class="al-meta" id="al-status">…</span>
@@ -420,6 +436,20 @@ const Alerts = (() => {
       <div id="alstage"><canvas id="al-canvas" width="1600" height="1600" aria-label="Active NWS alerts for Washington"></canvas></div>`;
     $("al-refresh").onclick = () => loadAlerts();
     $("al-reset").onclick = () => fitToSelection();
+    const op = $("al-opacity"), opv = $("al-opacity-val");
+    const syncOp = () => {
+      const pct = Math.max(20, Math.min(100, +op.value || 100));
+      S.fillAlpha = pct / 100;
+      if (opv) opv.textContent = pct + "%";
+      req();
+      // refresh Studio frame (opacity is on the offscreen canvas that Studio crops)
+      if (typeof render === "function") {
+        try { const k = document.body.classList.contains("phone") ? "v" : "h"; render(k); } catch (e) {}
+      }
+    };
+    op.addEventListener("input", syncOp);
+    op.addEventListener("change", syncOp);
+    S.fillAlpha = 1; op.value = "100";
     wireCanvas();
     S.inited = true;
   }
@@ -466,6 +496,7 @@ const Alerts = (() => {
   return {
     show, hide, redraw: req, drawNow: draw, load: loadAlerts,
     fitToSelection, titleText, eventTypes,
+    setFillAlpha: (a) => { S.fillAlpha = Math.max(0.2, Math.min(1, +a || 1)); const op=$("al-opacity"), opv=$("al-opacity-val"); if (op) op.value=String(Math.round(S.fillAlpha*100)); if (opv) opv.textContent=Math.round(S.fillAlpha*100)+"%"; req(); },
     _state: S
   };
 })();
