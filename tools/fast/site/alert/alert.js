@@ -10,7 +10,7 @@ const Alerts = (() => {
   const C_OCEAN = "#030912";
   const C_WATER = "#153a58";
   const C_LAND = "#1a222e";
-  const C_COUNTY = "rgba(170,185,205,0.55)";
+  const C_COUNTY = "rgba(90,105,125,0.7)";
   const C_STATE = "rgba(200,215,235,0.9)";
   const WA0 = { lon0: -125.15, lon1: -116.7, lat0: 45.4, lat1: 49.1 };
   const CSS = 1600;
@@ -282,11 +282,25 @@ const Alerts = (() => {
       for (const f of S.landFeats) if (f.geometry) pathGeom(f.geometry, ctx);
       ctx.fillStyle = C_LAND; ctx.fill("evenodd");
     }
-    // County lines (faint) — keep
+    // County lines (faint, exterior rings only — hole strokes looked like Sound marine borders)
     if (S.countyGeoms && S.countyGeoms.length) {
       ctx.beginPath();
-      for (const g of S.countyGeoms) pathGeoJSON(g, ctx);
-      ctx.lineWidth = 1.25;
+      for (const g of S.countyGeoms) {
+        const rings = []; exteriorRings(g, rings);
+        for (const ring of rings) {
+          if (!ring || !ring.length) continue;
+          const [x0, y0] = llToXY(ring[0][0], ring[0][1]);
+          const [sx0, sy0] = worldToScreen(x0, y0);
+          ctx.moveTo(sx0, sy0);
+          for (let i = 1; i < ring.length; i++) {
+            const [x, y] = llToXY(ring[i][0], ring[i][1]);
+            const [sx, sy] = worldToScreen(x, y);
+            ctx.lineTo(sx, sy);
+          }
+          ctx.closePath();
+        }
+      }
+      ctx.lineWidth = 1.1;
       ctx.strokeStyle = C_COUNTY;
       ctx.stroke();
     }
