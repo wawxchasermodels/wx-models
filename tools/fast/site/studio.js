@@ -415,10 +415,12 @@ function renderAlert(k, frO) {
   c.fillStyle = "rgba(236,239,244,0.95)";
   if (k === "v") dl.forEach((l, i) => c.fillText(l, f.pad + (cB && BR.cpos === "bl" ? cB.s + 18 : 0), f.H - 70 - (dl.length - 1 - i) * dlh));
   else { c.textAlign = "right"; dl.forEach((l, i) => c.fillText(l, f.W - f.pad - (cB && BR.cpos === "br" ? cB.s + 20 : 0), f.H - 24 - (dl.length - 1 - i) * dlh)); c.textAlign = "left"; }
-  // legend pills for visible types
+  // legend pills: only toggled-on types (empty selection = All → show every type) (t2496u)
   let lx = f.pad, ly = k === "v" ? f.H - 70 - (dl.length - 1) * dlh - dfs - 30 - 30 * 1.55 : f.H - 24 - 30 * 1.55 + 30 * 0.35;
   const lgS = k === "v" ? 28 : 24;
-  for (const t of I.types) {
+  const Ssel = (typeof Alerts !== "undefined" && Alerts._state && Alerts._state.selectedTypes) || null;
+  const legendTypes = (Ssel && Ssel.size) ? I.types.filter((t) => Ssel.has(t.event)) : I.types;
+  for (const t of legendTypes) {
     c.font = `800 ${lgS}px Montserrat`; const lab = t.event, w = c.measureText(lab).width + lgS * 1.2, h = lgS * 1.55;
     if (lx + w > (k === "v" ? f.W * 0.82 : f.W * 0.46) && lx > f.pad + 1) break; // keep right ~18% clear
     noShadow(c); c.fillStyle = "rgba(17,19,22,0.78)"; c.beginPath(); c.roundRect ? c.roundRect(lx, ly, w, h, h / 2) : c.rect(lx, ly, w, h); c.fill(); sharpShadow(c, k);
