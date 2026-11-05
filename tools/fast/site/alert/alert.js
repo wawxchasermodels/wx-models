@@ -7,11 +7,11 @@ const Alerts = (() => {
   const UA = "WAWeatherChasersStudio/1.0 (alerts; benjamin@wawxchasers)";
   const NWS = "https://api.weather.gov/alerts/active?area=" + AREAS.join(",");
   const FALLBACK = "#888888";
-  const C_OCEAN = "#07101c";
-  const C_WATER = "#0f2740";
-  const C_LAND = "#243044";
-  const C_COUNTY = "rgba(140,160,190,0.28)";
-  const C_STATE = "rgba(200,215,235,0.85)";
+  const C_OCEAN = "#040a12";
+  const C_WATER = "#163a58";
+  const C_LAND = "#334560";
+  const C_COUNTY = "rgba(170,190,220,0.45)";
+  const C_STATE = "rgba(230,240,255,0.95)";
   const WA0 = { lon0: -125.15, lon1: -116.7, lat0: 45.4, lat1: 49.1 };
   const CSS = 1600;
   const SIDE_PREF = { "Oak Harbor": "left" };
@@ -147,31 +147,25 @@ const Alerts = (() => {
     lat0 = Math.max(lat0, MAX.lat0); lat1 = Math.min(lat1, MAX.lat1);
     if (lon1 <= lon0 || lat1 <= lat0) { lon0 = MAX.lon0; lon1 = MAX.lon1; lat0 = MAX.lat0; lat1 = MAX.lat1; }
 
-    const usable = 1 - RIGHT_CLEAR; // content in left 87% of canvas (face-cam clear on right of frame under cover)
+    const usable = 1 - RIGHT_CLEAR; // content in left 87%
     const midLon = (lon0 + lon1) / 2, midLat = (lat0 + lat1) / 2;
-    let contentW = lon1 - lon0, contentH = lat1 - lat0;
-    // Under cover into 16:9, full canvas width is visible; height shows center ~56%.
-    // Size view so content fills usable width and stays inside the vertical cover band.
-    let viewW = contentW / usable;
-    let viewH = contentH / 0.88; // keep a little vertical pad inside cover band
-    // Square canvas: equalize so geographic content isn't stretched oddly
-    const midFracX = usable / 2; // center of left band
-    // Prefer not zooming out past statewide
-    viewW = Math.min(Math.max(viewW, 0.7), MAX.lon1 - MAX.lon0);
-    viewH = Math.min(Math.max(viewH, 0.45), MAX.lat1 - MAX.lat0);
-    // Match aspect of canvas (1:1 in CSS) using lon/lat degrees roughly scaled
+    let contentW = Math.max(0.35, lon1 - lon0), contentH = Math.max(0.25, lat1 - lat0);
+    // Cover into 16:9 shows full canvas width; size so alerts fill ~usable width
+    let spanX = contentW / Math.max(0.55, usable * 0.92);
+    let spanY = contentH / 0.82;
     const latMid = midLat * Math.PI / 180;
-    const lonUnit = Math.cos(latMid); // deg lon vs deg lat visual
-    let spanX = viewW, spanY = viewH;
+    const lonUnit = Math.cos(latMid);
+    // Keep geographic aspect reasonable on the square canvas
     if (spanX * lonUnit > spanY) spanY = spanX * lonUnit;
-    else spanX = spanY / Math.max(lonUnit, 0.2);
-    // Re-center in left usable band
-    S.viewLL = {
-      lon0: midLon - midFracX * spanX,
-      lon1: midLon - midFracX * spanX + spanX,
-      lat0: midLat - spanY / 2,
-      lat1: midLat + spanY / 2
-    };
+    else spanX = spanY / Math.max(lonUnit, 0.25);
+    spanX = Math.min(Math.max(spanX, 0.8), MAX.lon1 - MAX.lon0);
+    spanY = Math.min(Math.max(spanY, 0.5), MAX.lat1 - MAX.lat0);
+    // Place alert cluster in the left usable band (not the face-cam strip)
+    const midFracX = usable * 0.48;
+    let v0 = midLon - midFracX * spanX, v1 = v0 + spanX;
+    // Prefer showing land: if view starts too far west of content, shift east a bit
+    if (v0 < lon0 - contentW * 0.35) { const shift = (lon0 - contentW * 0.35) - v0; v0 += shift; v1 += shift; }
+    S.viewLL = { lon0: v0, lon1: v1, lat0: midLat - spanY / 2, lat1: midLat + spanY / 2 };
     S.k = 1; S.cx = CSS / 2; S.cy = CSS / 2;
     req();
   }
@@ -250,7 +244,7 @@ const Alerts = (() => {
     // State outline (strong)
     if (S.stateGeom) {
       ctx.beginPath(); pathGeoJSON(S.stateGeom, ctx);
-      ctx.lineWidth = 2.2;
+      ctx.lineWidth = 3.5;
       ctx.strokeStyle = C_STATE;
       ctx.stroke();
     }
