@@ -12,9 +12,9 @@ Usage: watch.py            run forever
        watch.py --help     usage; unknown args print usage and exit 2
 """
 # ---------------- config ----------------
-OVERNIGHT_URGENT_ALLOWED = True     # post life-safety alerts during the 9 PM-2 AM PT pause
-OVERNIGHT_START_HOUR = 21           # America/Los_Angeles; 10-21-26 4:57 PM Benjamin: 9 PM-2 AM, same as quiet USA posts
-OVERNIGHT_END_HOUR = 2            # 10-21-26 4:05 PM Benjamin: USA non-urgent urgent-watcher wakes hold 9 PM-2 AM PT (start changed 4:57 PM)
+OVERNIGHT_URGENT_ALLOWED = True     # post life-safety alerts during the 11 PM-2 AM PT pause
+OVERNIGHT_START_HOUR = 23           # 11-04-26 Benjamin: USA hold now 11 PM-2 AM (was 21); America/Los_Angeles; 10-21-26 4:57 PM Benjamin: 9 PM-2 AM, same as quiet USA posts
+OVERNIGHT_END_HOUR = 2            # 10-21-26 4:05 PM Benjamin: USA non-urgent urgent-watcher wakes hold 11 PM-2 AM PT (start 23 since 11-04-26)
 POLL_SECONDS = 30   # 10-21-26 9:22 AM: tornado warnings out almost immediately
 MAX_POSTS_PER_HOUR = 6
 SEED_RECENT_MINUTES = 15            # on first start, alerts newer than this still fire
@@ -332,7 +332,7 @@ def svr_population(feature):
             log.warning("SVR population cache write failed (%s)", type(e).__name__)
     log.info("SVR population %s: %s", aid[-20:], n)
     return n
-WA_HOLD_START_HOUR = 21   # WA page overnight hold is 9 PM-5 AM PT (USA hold is 9 PM-2 AM, OVERNIGHT_START_HOUR)
+WA_HOLD_START_HOUR = 21   # WA page overnight hold is 9 PM-5 AM PT (USA hold is 11 PM-2 AM since 11-04-26)
 WA_HOLD_END_HOUR = 5      # 10-21-26 final check: own constant; it used OVERNIGHT_END_HOUR, which became 2 at 4:05 PM
 
 

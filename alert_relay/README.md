@@ -31,7 +31,7 @@ Missing, unparseable, or stale means that channel is down and the relay acts as 
 
 While the quiet heartbeat is fresh the relay still refreshes the WSDOT mountain-pass snapshot (at most every 15 minutes) and does not POST. Pass-change ids are a hash of the whole change list. Keeping the snapshot current means a takeover does not bundle a week of already-sent pass changes into a new id. That refresh can miss a change that landed in the last poll before the box died.
 
-On takeover, alerts the box issued while its heartbeat was still fresh are marked seen and not POSTed, except alerts issued inside an overnight hold (USA 9 PM–2 AM PT, WA 9 PM–5 AM PT, plus the urgent watcher's WA severe-thunderstorm hold until 5 AM). Those were deliberately not sent. Life-safety urgent alerts are not held. Alerts issued after the last heartbeat are eligible, including ones older than 15 minutes, because that is the outage window. With no heartbeat at all, the first run uses the box's own 15-minute cold start so enabling the workflow does not dump every active alert in the country.
+On takeover, alerts the box issued while its heartbeat was still fresh are marked seen and not POSTed, except alerts issued inside an overnight hold (USA 11 PM–2 AM PT, WA 9 PM–5 AM PT, plus the urgent watcher's WA severe-thunderstorm hold until 5 AM). Those were deliberately not sent. Life-safety urgent alerts are not held. Alerts issued after the last heartbeat are eligible, including ones older than 15 minutes, because that is the outage window. With no heartbeat at all, the first run uses the box's own 15-minute cold start so enabling the workflow does not dump every active alert in the country.
 
 ## State and dedupe
 

@@ -77,7 +77,12 @@ def test_heartbeat():
 
 
 def test_hold_and_classify():
-    check("USA hold at 9 PM PT", watch_quiet.overnight_held("USA", pt(21)))
+    check("USA open at 9 PM PT", not watch_quiet.overnight_held("USA", pt(21)))
+    check("USA open at 10 PM PT", not watch_quiet.overnight_held("USA", pt(22)))
+    check("USA hold at 11 PM PT", watch_quiet.overnight_held("USA", pt(23)))
+    check("WA hold at 9 PM PT", watch_quiet.overnight_held("WA", pt(21)))
+    check("urgent USA open 10 PM, held 11 PM", not watch.in_overnight(pt(22)) and watch.in_overnight(pt(23)))
+    check("WA SVR hold at 9 PM", watch.wa_hold(pt(21)))
     check("USA hold at 1 AM PT", watch_quiet.overnight_held("USA", pt(1)))
     check("USA open at 2 AM PT", not watch_quiet.overnight_held("USA", pt(2)))
     check("WA hold at 3 AM PT", watch_quiet.overnight_held("WA", pt(3)))

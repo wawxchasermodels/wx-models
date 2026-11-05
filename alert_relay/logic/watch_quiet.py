@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Adapted from the box quiet watcher for the GitHub Actions relay.
-# Filters, batch payload shape, payload ids, and the 9 PM-2 AM / 9 PM-5 AM PT hold are unchanged.
+# Filters, batch payload shape, payload ids, and the 11 PM-2 AM (USA, since 11-04-26) / 9 PM-5 AM (WA) PT hold are unchanged.
 """Quiet routine-alert watcher (no AI while idle).
 
 Polls api.weather.gov every ~30 min and wakes an agent ONLY on a NEW
@@ -63,7 +63,7 @@ Government imagery (10-21-26): every 30 min, only 5:00 AM to 8:30 PM PT,
   which goes out in this tick's single POST. Dedupe: gov_imagery_seen.json keys
   "feeds" (recorded only once queued) and "feed_checked" (NESDIS pages opened).
 
-Overnight hold (10-22-26): USA 9 PM-2 AM PT, WA 9 PM-5 AM PT. No prep wakes: held alerts are only
+Overnight hold (10-22-26): USA 11 PM-2 AM PT (since 11-04-26), WA 9 PM-5 AM PT. No prep wakes: held alerts are only
   remembered (state overnight_held); the first poll after the window opens re-checks current NWS data
   (alerts + updates) and sends normal wakes for what is still active (current Update if replaced; skips
   anything ending within 60 min). Same catch-up after a freeze/outage (state alert_outages).
@@ -362,7 +362,7 @@ def mark_seen(seen, it, now):
     for i in item_ids(it):
         seen[f'{i}|{it["page"]}'] = now.isoformat()
 
-HOLD_START_PT = 21                      # 10-20 rule: non-urgent quiet posts hold from 9 PM PT
+HOLD_START_PT = {"USA": 23, "WA": 21}   # 10-20 rule; 11-04-26 Benjamin: USA hold now starts 11 PM PT (WA stays 9 PM)
 HOLD_END_PT = {"USA": 2, "WA": 5}       # ...until 2 AM PT (USA) / 5 AM PT (WA); still-active items post then
 # 10-22-26 (Benjamin): NO overnight prep wakes. During the hold an alert is only remembered (not sent,
 # not marked seen, no claim). The first poll after the window opens (forced, not waiting for the 30-min
@@ -376,7 +376,7 @@ HELD_KEEP_HOURS = 30
 def overnight_held(page, now=None):
     from zoneinfo import ZoneInfo
     h = (now or datetime.now(timezone.utc)).astimezone(ZoneInfo("America/Los_Angeles")).hour
-    return h >= HOLD_START_PT or h < HOLD_END_PT.get(page, 5)
+    return h >= HOLD_START_PT.get(page, 21) or h < HOLD_END_PT.get(page, 5)
 
 
 def note_overnight_held(state, items, now):

@@ -27,7 +27,9 @@ SECRET_NAMES = (
 
 # Alerts issued during the overnight hold were not sent by a live box.
 # Matches watch_quiet.HOLD_* and the urgent WA SVR hold.
-HOLD_START_HOUR = 21
+HOLD_START_USA = 23   # 11-04-26 Benjamin: USA hold now 11 PM-2 AM PT
+HOLD_START_WA = 21    # WA unchanged 9 PM-5 AM PT
+HOLD_START_HOUR = HOLD_START_WA   # legacy name (earliest start)
 HOLD_END_USA = 2
 HOLD_END_WA = 5
 SEED_RECENT_MINUTES = 15
