@@ -1429,7 +1429,7 @@ if (!CLEAN) {
         if (!hits.length) { tip.hidden = true; cv.style.cursor = ""; return; }
         tip.textContent = hits.join(" · "); tip.hidden = false;
         tip.style.left = (e.clientX + 14) + "px"; tip.style.top = (e.clientY - 32) + "px";
-        cv.style.cursor = "help";
+        cv.style.cursor = "pointer";
       });
       cv.addEventListener("pointerleave", () => { if (ALERTM()) { tip.hidden = true; cv.style.cursor = ""; } });
     }
