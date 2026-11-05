@@ -314,8 +314,21 @@ const Alerts = (() => {
     status("Loading alerts…");
     try {
       let data;
-      try { data = await loadJSON(NWS, { headers: { Accept: "application/geo+json", "User-Agent": UA } }); }
-      catch (liveErr) { data = await loadJSON("alert/active_wa.json"); status("Using cached snapshot (live NWS unavailable)"); }
+      try {
+        const land = await loadJSON(NWS, { headers: { Accept: "application/geo+json", "User-Agent": UA } });
+        const byId = new Map();
+        for (const a of (land.features || [])) byId.set(a.id || (a.properties && a.properties.id), a);
+        // marine PZZ: one extra request using zones present in the local pack
+        const pzz = [...S.zones.keys()].filter((k) => /^PZZ\d+$/.test(k));
+        for (let i = 0; i < pzz.length; i += 15) {
+          const chunk = pzz.slice(i, i + 15);
+          try {
+            const m = await loadJSON("https://api.weather.gov/alerts/active?zone=" + chunk.join(","), { headers: { Accept: "application/geo+json", "User-Agent": UA } });
+            for (const a of (m.features || [])) byId.set(a.id || (a.properties && a.properties.id), a);
+          } catch (e) { /* chunk skip */ }
+        }
+        data = { type: "FeatureCollection", features: [...byId.values()] };
+      } catch (liveErr) { data = await loadJSON("alert/active_wa.json"); status("Using cached snapshot (live NWS unavailable)"); }
       const feats = (data.features || []).filter((a) => {
         // keep land WA + marine PZZ (and any geometry already present)
         const zones = (a.properties && a.properties.affectedZones) || [];
