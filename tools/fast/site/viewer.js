@@ -2099,7 +2099,8 @@ function mgChart(cv, T, box) {
       const hiP = Math.max(0.1, ...(pc || []).filter(v => v != null), ...(p6 || []).filter(v => v != null));
       const runS = sn ? sn.reduce((acc, v, k) => (acc.push((acc[k - 1] || 0) + (v || 0)), acc), []) : sn6 ? (() => { let q = 0; return sn6.map((v, k) => T.f[k] % 6 === 0 ? (q += v || 0) : null); })() : [];
       const anySnow = (sn || sn6 || []).some(v => v > 0.05), hiS = Math.max(1, ...runS.filter(v => v != null)), topS = niceStep(hiS) * Math.ceil(hiS / niceStep(hiS)), scS = scale(0, topS);
-      const pTop = Math.max(T.P && T.P.k === "pass" && pc && (T.f[1] - T.f[0] || 1) === 1 ? 3 : 0, niceStep(hiP) * Math.ceil(hiP / niceStep(hiP)));   /* t2305u: pass in per hour axis at least 3 in */
+      const stepH = T.f.length > 1 ? (T.f[1] - T.f[0] || 1) : 1;
+      const pTop = passPrecipAxisTop(hiP, stepH, !!(T.P && T.P.k === "pass" && pc && stepH === 1));   /* t2305u: pass in per hour axis at least 3 in */
       const scP = scale(0, pTop); axis(0, pTop, scP, "\u2033", false, "#6fd38a");
       if (p6 && T.pcp) bars(p6.map((v, k) => T.f[k] % 6 === 0 && T.f[k] > 36 ? v : null), scP, "#3ea95888", 2.2);
       if (pc) bars(pc, scP, "#3ea958"); else if (p6) bars(p6.map((v, k) => T.f[k] % 6 === 0 ? v : null), scP, "#3ea958", 2.2);
@@ -2111,7 +2112,7 @@ function mgChart(cv, T, box) {
       const sn = T.snow || null, sn6 = T.snow6 || null;
       const s6 = T.f.map((f, k) => f % 6 !== 0 ? null : sn ? sumWin(T, sn, f - 6, f) : sn6[k]);
       let q = 0; const runS = sn ? sn.map(v => (q += v || 0)) : sn6.map((v, k) => T.f[k] % 6 === 0 ? (q += v || 0) : null), tot = q;
-      const hiB = Math.max(12, ...s6.filter(v => v != null))   /* t2305u: pass snow per 6 h axis at least 12 in */, topB = niceStep(hiB) * Math.ceil(hiB / niceStep(hiB)), scB = scale(0, topB);
+      const topB = passSnow6AxisTop(s6)   /* t2305u: pass snow per 6 h axis at least 12 in */, scB = scale(0, topB);
       const hiR = Math.max(1, ...runS.filter(v => v != null)), topR = niceStep(hiR) * Math.ceil(hiR / niceStep(hiR)), scR = scale(0, topR);
       axis(0, topB, scB, "\u2033", false, "#9fc8ff"); axis(0, topR, scR, "\u2033", true, "#f4f2ee");
       c.fillStyle = "#5b9dff"; const gap6 = Math.max(1, (X(T.t[n - 1]) - X(T.t[0])) / Math.max(1, (t1 - t0) / 216e5) * 0.12);
@@ -2132,6 +2133,29 @@ function mgChart(cv, T, box) {
   c.textAlign = "left";
 }
 function niceStep(x) { const p = Math.pow(10, Math.floor(Math.log10(x || 1))), r = x / p; return (r <= 1 ? 1 : r <= 2 ? 2 : r <= 2.5 ? 2.5 : r <= 5 ? 5 : 10) * p; }
+// t2305u floors. Pass charts only. studioPassChart is the same math the axes use, so a guard can read it
+// without skipping the check. Do not lower these.
+const MG_FLOORS = window.MG_FLOORS = { pcpPerHour: 3, snowPer6h: 12 };
+function passPrecipAxisTop(hi, stepH, applyFloor) {
+  const h = Math.max(0.1, isFinite(+hi) ? +hi : 0.1);
+  const dataTop = niceStep(h) * Math.ceil(h / niceStep(h));
+  return Math.max(applyFloor && stepH === 1 ? MG_FLOORS.pcpPerHour : 0, dataTop);
+}
+function passSnow6AxisTop(vals) {
+  const xs = (Array.isArray(vals) ? vals : [vals]).filter((v) => v != null && isFinite(+v)).map(Number);
+  const h = Math.max(MG_FLOORS.snowPer6h, ...(xs.length ? xs : [0]));
+  return niceStep(h) * Math.ceil(h / niceStep(h));
+}
+window.studioPassChart = function (opt) {
+  const o = opt || {};
+  const isPass = o.pass !== false && o.k !== "town";
+  const stepH = o.stepH == null ? 1 : +o.stepH;
+  const prec = [].concat(o.precip == null && o.pcp == null ? [] : (o.precip != null ? o.precip : o.pcp)).filter((v) => v != null && isFinite(+v)).map(Number);
+  const snow = [].concat(o.snow6 == null && o.snow == null ? [] : (o.snow6 != null ? o.snow6 : o.snow)).filter((v) => v != null && isFinite(+v)).map(Number);
+  const hiP = o.precipMax != null ? +o.precipMax : Math.max(0.1, ...(prec.length ? prec : [0.1]));
+  const hourly = o.hourly !== false && stepH === 1 && o.pcp6only !== true;
+  return { floors: MG_FLOORS, pass: !!isPass, stepH, precipTop: passPrecipAxisTop(hiP, stepH, !!(isPass && hourly)), snow6Top: passSnow6AxisTop(snow), keepsRun: true };
+};
 // Pass summit elevations, ft (WSDOT MountainPass feed, wsdot.com/Travel/Real-time/Service/api/MountainPass/Details/<id>, read
 // 10-30-26 8:15 PM; same as temp_maps.WA_PASSES, checked 10-24 against USGS 3DEP). BC: DriveBC summit heights (fast_encode).
 const PASS_ELEV = { Snoqualmie: 3022, Stevens: 4061, White: 4500, Chinook: 5430, Blewett: 4102, Sherman: 5575, Satus: 3107, Wauconda: 4310,
