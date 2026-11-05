@@ -31,7 +31,9 @@ const Alerts = (() => {
     cx: 0, cy: 0, scale: 1, k: 1, view: "wa",
     viewLL: Object.assign({}, WA0), // diagnostic / legacy readout of approx lonlat window
     colors: {}, zones: new Map(), towns: [], alerts: [],
-    selectedType: null, fillAlpha: 1, status: "", raf: 0, sig: "",
+    selectedTypes: new Set(), fillAlpha: 1,  // multi-select (t2490u); empty = All
+    selectedType: null, // legacy single when exactly one type selected
+    status: "", raf: 0, sig: "",
     landFeats: [], waterFeats: [], stateGeom: null, countyGeoms: []
   };
   const $ = (id) => document.getElementById(id);
@@ -149,8 +151,8 @@ const Alerts = (() => {
   }
 
   function visibleAlerts() {
-    if (!S.selectedType) return S.alerts;
-    return S.alerts.filter((a) => (a.properties && a.properties.event) === S.selectedType);
+    if (!S.selectedTypes || !S.selectedTypes.size) return S.alerts;
+    return S.alerts.filter((a) => S.selectedTypes.has((a.properties && a.properties.event) || ""));
   }
   function eventTypes() {
     const m = new Map();
@@ -402,20 +404,32 @@ const Alerts = (() => {
     }
     drawTowns(ctx);
     S.viewLL = approxViewLL();
-    S.sig = [S.loaded, S.selectedType || "ALL", S.fillAlpha.toFixed(2), S.k.toFixed(3), S.scale.toFixed(1),
+    S.sig = [S.loaded, (S.selectedTypes && S.selectedTypes.size ? [...S.selectedTypes].sort().join(',') : 'ALL'), S.fillAlpha.toFixed(2), S.k.toFixed(3), S.scale.toFixed(1),
       S.cx.toFixed(5), S.cy.toFixed(5), S.viewLL.lon0.toFixed(3), S.viewLL.lat0.toFixed(3), vis.length, dpr].join("|");
   }
   function req() { if (S.raf) return; S.raf = requestAnimationFrame(() => { S.raf = 0; draw(); }); }
 
   function renderChips() {
     const box = $("al-chips"); if (!box) return;
+    if (!S.selectedTypes) S.selectedTypes = new Set();
     const types = eventTypes();
+    const allOn = S.selectedTypes.size === 0;
     const mk = (label, type, color, n) => {
       const b = document.createElement("button");
       b.type = "button"; b.className = "al-chip";
-      b.setAttribute("aria-pressed", type === S.selectedType || (type === null && S.selectedType === null) ? "true" : "false");
+      const on = type === null ? allOn : S.selectedTypes.has(type);
+      b.setAttribute("aria-pressed", on ? "true" : "false");
       b.innerHTML = `<span class="sw" style="background:${color || '#7cb7ff'}"></span><span>${label}${n != null ? " · " + n : ""}</span>`;
-      b.onclick = () => { S.selectedType = (S.selectedType === type) ? null : type; renderChips(); req(); };  // t2484u: toggle type on/off, do not refit/jump
+      b.onclick = () => {
+        // t2490u: multi-toggle; All clears the set. Tapping a type adds/removes; last type off → All.
+        if (type === null) { S.selectedTypes.clear(); }
+        else {
+          if (S.selectedTypes.has(type)) S.selectedTypes.delete(type);
+          else S.selectedTypes.add(type);
+        }
+        S.selectedType = S.selectedTypes.size === 1 ? [...S.selectedTypes][0] : null;
+        renderChips(); req();
+      };
       return b;
     };
     box.innerHTML = "";
@@ -587,7 +601,11 @@ const Alerts = (() => {
     return mercToLonLat(mx, my);
   }
 
-  function titleText() { return S.selectedType || "All Alerts"; }
+  function titleText() {
+    if (!S.selectedTypes || !S.selectedTypes.size) return "All Alerts";
+    if (S.selectedTypes.size === 1) return [...S.selectedTypes][0];
+    return [...S.selectedTypes].sort().join(" · ");
+  }
 
   return {
     show, hide, redraw: req, drawNow: draw, load: loadAlerts,
