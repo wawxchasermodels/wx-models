@@ -76,8 +76,7 @@ function stateRect(V, m) {   // Washington's box in the wide view's figure px: t
   return { x: t.x + q[0] * t.w, y: t.y + q[1] * t.h, w: q[2] * t.w, h: q[3] * t.h };
 }
 function mgBase(k) {   // meteogram: whole chart fitted inside the frame (9:16: centred a little above the middle)
-  if (ALERTM()) { const f = F[k], iw = IW(MG.img), ih = IH(MG.img); return { cx: iw / 2, cy: ih / 2, k0: Math.min(f.W / iw, f.H / ih) }; }   // alert: contain so fitted bounds stay fully in both frames
-  if (OBSM()) { const f = F[k], iw = IW(MG.img), ih = IH(MG.img); return { cx: iw / 2, cy: ih / 2, k0: Math.max(f.W / iw, f.H / ih) }; }   // obs: the map covers the frame
+  if (OBSM() || ALERTM()) { const f = F[k], iw = IW(MG.img), ih = IH(MG.img); return { cx: iw / 2, cy: ih / 2, k0: Math.max(f.W / iw, f.H / ih) }; }   // obs/alert: cover — map fills the frame
   const f = F[k], im = MG.img, iw = im.naturalWidth, ih = im.naturalHeight, padX = f.pad * 0.5, top = k === "v" ? 200 : 60, bot = k === "v" ? 200 : 70;
   const k0 = Math.min((f.W - 2 * padX) / iw, (f.H - top - bot) / ih);
   return { cx: iw / 2, cy: ih / 2 - ((top + (f.H - bot)) / 2 - f.H / 2) / k0, k0 };
@@ -120,12 +119,7 @@ function obsPan(k, fr) {   // pan past the bitmap edge: move the obs map by the 
 const obsZv = (fr) => Math.round((fr.zoom || 1) * (OBSM() && typeof Obs !== "undefined" && Obs._state ? (ozSync(), OZ.sub) : 1) * 100);
 function crop(k, fr) {   // source rect (map bitmap px) for frame k: base camera, then zoom / pan; the panel stays covering the frame when it
   // can, and when it is smaller than the frame (wide view) it stays wholly in the frame (the rest is background)
-  if (ALERTM() && MG.img) {   // alert: contain fitted canvas; allow pan; keep whole map available
-    const B = base(k), kk = B.k0 * Math.max(1, fr.zoom || 1), iw = IW(MG.img), ih = IH(MG.img);
-    const cx = B.cx - (fr.dx || 0) / kk, cy = B.cy - (fr.dy || 0) / kk;
-    return { kk, cx, cy, bx: B.cx, by: B.cy, sx: 0, sy: 0, sw: F[k].W / kk, sh: F[k].H / kk, px: 0, py: 0, pw: iw, ph: ih, rs: 1 };
-  }
-  if (OBSM() && MG.img) {   // obs map: zoom in / pan, the map always covers the frame
+  if ((OBSM() || ALERTM()) && MG.img) {   // obs/alert: cover fill; pan/zoom
     const B = base(k), kk = B.k0 * Math.max(1, fr.zoom || 1), iw = IW(MG.img), ih = IH(MG.img), cl = (v, a, b) => Math.min(b, Math.max(a, v)), hw = F[k].W / kk / 2, hh = F[k].H / kk / 2;
     const cx = cl(B.cx - (fr.dx || 0) / kk, hw, iw - hw), cy = cl(B.cy - (fr.dy || 0) / kk, hh, ih - hh);
     return { kk, cx, cy, bx: B.cx, by: B.cy, sx: 0, sy: 0, sw: F[k].W / kk, sh: F[k].H / kk, px: 0, py: 0, pw: iw, ph: ih, rs: 1 };
@@ -356,7 +350,7 @@ function renderObs(k, frO) {
 }
 
 // ---- Active Alerts in Studio (11-05, t2420u/t2426u WA-only preview): same header / LIVE badge / credit style as Observations
-const ALERT_CREDIT = ["Alerts: NWS api.weather.gov.  Places: GeoNames, CC BY 4.0.  Basemap: dark land / marine zones."];
+const ALERT_CREDIT = ["Alerts: NWS api.weather.gov.  Places: GeoNames, CC BY 4.0.  Basemap: dark WA land / counties / marine zones."];
 function alertInfo() {
   const S_ = typeof Alerts !== "undefined" && Alerts._state; if (!S_) return null;
   const title = (typeof Alerts.titleText === "function" ? Alerts.titleText() : null) || S_.selectedType || "All Alerts";
@@ -1455,7 +1449,7 @@ if (!CLEAN) {   // Studio: Map | Meteogram switch (first in the menu bar) + the 
       if (!document.getElementById("alertp")) { const ap = document.createElement("div"); ap.id = "alertp"; ap.innerHTML = `<div id="alert-root"></div>`; pnl.appendChild(ap); }
       window.__alertLoad = window.__alertLoad || new Promise((ok, bad) => {
         if (!document.querySelector('link[href="alert/alert.css"]')) { const l = document.createElement("link"); l.rel = "stylesheet"; l.href = "alert/alert.css"; document.head.appendChild(l); }
-        const sc = document.createElement("script"); sc.src = "alert/alert.js?v=20261105c"; sc.onload = ok; sc.onerror = bad; document.body.appendChild(sc); });
+        const sc = document.createElement("script"); sc.src = "alert/alert.js?v=20261105d"; sc.onload = ok; sc.onerror = bad; document.body.appendChild(sc); });
       MG.msg = "Loading alerts\u2026"; let asig = "";
       const agrab = () => { const S_ = typeof Alerts !== "undefined" && Alerts._state, cv_ = document.getElementById("al-canvas"); if (!S_ || !cv_ || !cv_.width) return;
         const sig = [S_.loaded, S_.selectedType || "ALL", S_.k, S_.cx, S_.cy, cv_.width, (S_.alerts || []).length, S_.sig || ""].join("|");

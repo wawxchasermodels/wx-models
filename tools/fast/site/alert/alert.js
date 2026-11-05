@@ -1,35 +1,30 @@
 /* Active Alerts map for Studio (WA land + PZZ marine). Preview 2026-11-05.
-   Dark basemap (no satellite). Auto-fits to selected alert type bounds.
-   OR/ID later via AREAS / zone packs. API: show/hide/redraw/fitToSelection/_state. */
+   Dark basemap, auto-fit, single shared equirect projection (dpr-safe). */
 "use strict";
 const Alerts = (() => {
-  const AREAS = ["WA"]; // extend later: "OR","ID"
+  const AREAS = ["WA"];
   const REFRESH_MS = 5 * 60 * 1000;
   const UA = "WAWeatherChasersStudio/1.0 (alerts; benjamin@wawxchasers)";
   const NWS = "https://api.weather.gov/alerts/active?area=" + AREAS.join(",");
   const FALLBACK = "#888888";
-  // Dark flat basemap (Benjamin t2433u): dark land, slightly lighter water, subtle outlines
-  const C_OCEAN = "#0a1628";
-  const C_WATER = "#12243a";
-  const C_LAND = "#1b2433";
-  const C_LAND_LINE = "rgba(120,140,170,0.35)";
-  const C_COAST = "rgba(160,180,210,0.45)";
-  // WA default extent (fallback before alerts load)
+  const C_OCEAN = "#07101c";
+  const C_WATER = "#0f2740";
+  const C_LAND = "#243044";
+  const C_COUNTY = "rgba(140,160,190,0.28)";
+  const C_STATE = "rgba(200,215,235,0.85)";
   const WA0 = { lon0: -125.15, lon1: -116.7, lat0: 45.4, lat1: 49.1 };
   const CSS = 1600;
   const SIDE_PREF = { "Oak Harbor": "left" };
-  const RIGHT_CLEAR = 0.13; // keep right 13% of canvas clear for Studio face-cam overlays
-  const PAD = 0.10; // padding around fitted bounds
+  const RIGHT_CLEAR = 0.13;
+  const PAD = 0.12;
 
   const S = {
     shown: false, inited: false, loaded: 0, timer: null, dpr: 1,
     cx: CSS / 2, cy: CSS / 2, k: 1, view: "wa",
-    // dynamic lon/lat window the canvas currently covers at k=1,cx=cy=center
     viewLL: Object.assign({}, WA0),
     colors: {}, zones: new Map(), towns: [], alerts: [],
-    selectedType: null, // null = All
-    status: "", raf: 0, sig: "",
-    landFeats: [], waterFeats: []
+    selectedType: null, status: "", raf: 0, sig: "",
+    landFeats: [], waterFeats: [], stateGeom: null, countyGeoms: []
   };
   const $ = (id) => document.getElementById(id);
   const status = (t) => { S.status = t; const el = $("al-status"); if (el) el.textContent = t; };
@@ -40,21 +35,16 @@ const Alerts = (() => {
     return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
   }
 
+  // Shared equirect: lon/lat -> world (canvas CSS px at identity)
   function llToXY(lon, lat) {
     const { lon0, lon1, lat0, lat1 } = S.viewLL;
-    const x = ((lon - lon0) / (lon1 - lon0)) * CSS;
-    const y = ((lat1 - lat) / (lat1 - lat0)) * CSS;
-    return [x, y];
+    return [((lon - lon0) / (lon1 - lon0)) * CSS, ((lat1 - lat) / (lat1 - lat0)) * CSS];
   }
   function worldToScreen(x, y) {
     return [(x - S.cx) * S.k + CSS / 2, (y - S.cy) * S.k + CSS / 2];
   }
   function screenToWorld(sx, sy) {
     return [(sx - CSS / 2) / S.k + S.cx, (sy - CSS / 2) / S.k + S.cy];
-  }
-  function xyToLL(x, y) {
-    const { lon0, lon1, lat0, lat1 } = S.viewLL;
-    return [lon0 + (x / CSS) * (lon1 - lon0), lat1 - (y / CSS) * (lat1 - lat0)];
   }
 
   async function loadJSON(url, opts) {
@@ -98,13 +88,11 @@ const Alerts = (() => {
     else if (t === "MultiPolygon") geom.coordinates.forEach((poly) => poly.forEach((ring) => fn(ring)));
     else if (t === "GeometryCollection") (geom.geometries || []).forEach((g) => walkCoords(g, fn));
   }
-
   function pointInRing(x, y, ring) {
     let inside = false;
     for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
       const xi = ring[i][0], yi = ring[i][1], xj = ring[j][0], yj = ring[j][1];
-      const inter = ((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / ((yj - yi) || 1e-12) + xi);
-      if (inter) inside = !inside;
+      if (((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / ((yj - yi) || 1e-12) + xi)) inside = !inside;
     }
     return inside;
   }
@@ -113,21 +101,18 @@ const Alerts = (() => {
     walkCoords(geom, (ring) => { if (!ok && pointInRing(lon, lat, ring)) ok = true; });
     return ok;
   }
-
   function geomBounds(geom) {
     let lo = Infinity, la0 = Infinity, hi = -Infinity, la1 = -Infinity, n = 0;
     walkCoords(geom, (ring) => {
       for (const p of ring) {
-        const lon = p[0], lat = p[1];
-        if (!isFinite(lon) || !isFinite(lat)) continue;
-        if (lon < lo) lo = lon; if (lon > hi) hi = lon;
-        if (lat < la0) la0 = lat; if (lat > la1) la1 = lat;
+        if (!isFinite(p[0]) || !isFinite(p[1])) continue;
+        if (p[0] < lo) lo = p[0]; if (p[0] > hi) hi = p[0];
+        if (p[1] < la0) la0 = p[1]; if (p[1] > la1) la1 = p[1];
         n++;
       }
     });
     return n ? { lon0: lo, lon1: hi, lat0: la0, lat1: la1 } : null;
   }
-
   function mergeBounds(a, b) {
     if (!a) return b; if (!b) return a;
     return { lon0: Math.min(a.lon0, b.lon0), lon1: Math.max(a.lon1, b.lon1), lat0: Math.min(a.lat0, b.lat0), lat1: Math.max(a.lat1, b.lat1) };
@@ -137,7 +122,6 @@ const Alerts = (() => {
     if (!S.selectedType) return S.alerts;
     return S.alerts.filter((a) => (a.properties && a.properties.event) === S.selectedType);
   }
-
   function eventTypes() {
     const m = new Map();
     for (const a of S.alerts) {
@@ -148,74 +132,57 @@ const Alerts = (() => {
     return [...m.values()].sort((a, b) => a.event.localeCompare(b.event));
   }
 
-  /** Fit canvas viewLL so visible alert bounds fill the usable area (left 87%, padded). */
+  /** Fit view so selected alerts fill the frame under Studio COVER crop, left-biased for 13% right clear. */
   function fitToSelection() {
     const vis = visibleAlerts();
     let b = null;
     for (const a of vis) b = mergeBounds(b, geomBounds(a._geom));
     if (!b) b = Object.assign({}, WA0);
-    // padding
-    const dlon = Math.max(0.15, (b.lon1 - b.lon0) * PAD);
-    const dlat = Math.max(0.1, (b.lat1 - b.lat0) * PAD);
+    const dlon = Math.max(0.12, (b.lon1 - b.lon0) * PAD);
+    const dlat = Math.max(0.08, (b.lat1 - b.lat0) * PAD);
     let lon0 = b.lon0 - dlon, lon1 = b.lon1 + dlon, lat0 = b.lat0 - dlat, lat1 = b.lat1 + dlat;
-    // usable width = left (1 - RIGHT_CLEAR) of canvas; expand lon so content sits in that band centered vertically
-    const usable = 1 - RIGHT_CLEAR;
-    const contentW = lon1 - lon0, contentH = lat1 - lat0;
-    // Make view square in lon/lat-scaled canvas space: aspect of CSS is 1:1
-    // Horizontal: content must fit in usable*CSS width → view lon span = contentW / usable
-    // Vertical: content fits in full height with same k
-    const spanLon = contentW / usable;
-    const spanLat = contentH; // will equalize to square world
-    // Equalize so one CSS unit is consistent: use max of needed spans for square canvas
-    // x uses spanLon across full CSS, but content only in left usable → 
-    // view lon width = contentW / usable, centered in the left usable band
-    let viewW = Math.max(spanLon, spanLat * (WA0.lon1 - WA0.lon0) / (WA0.lat1 - WA0.lat0) * 0.85);
-    let viewH = Math.max(spanLat, spanLon * (WA0.lat1 - WA0.lat0) / (WA0.lon1 - WA0.lon0) * 0.85);
-    // Prefer keeping geographic aspect ~ square canvas mapping
-    const midLon = (lon0 + lon1) / 2;
-    const midLat = (lat0 + lat1) / 2;
-    // Place content center at horizontal position usable/2 (center of left 87% band)
-    const contentCenterFracX = usable / 2; // 0.435
-    // viewLL such that midLon maps to x = contentCenterFracX * CSS at identity
-    // x = (lon - lon0) / (lon1-lon0) * CSS = contentCenterFracX * CSS
-    // => (midLon - lon0) / viewW = contentCenterFracX => lon0 = midLon - contentCenterFracX * viewW
-    viewW = Math.max(viewW, 0.8);
-    viewH = Math.max(viewH, 0.5);
+    // Clamp into WA theater so strays can't explode the view
+    const MAX = { lon0: -126.5, lon1: -116.5, lat0: 45.4, lat1: 49.15 };
+    lon0 = Math.max(lon0, MAX.lon0); lon1 = Math.min(lon1, MAX.lon1);
+    lat0 = Math.max(lat0, MAX.lat0); lat1 = Math.min(lat1, MAX.lat1);
+    if (lon1 <= lon0 || lat1 <= lat0) { lon0 = MAX.lon0; lon1 = MAX.lon1; lat0 = MAX.lat0; lat1 = MAX.lat1; }
+
+    const usable = 1 - RIGHT_CLEAR; // content in left 87% of canvas (face-cam clear on right of frame under cover)
+    const midLon = (lon0 + lon1) / 2, midLat = (lat0 + lat1) / 2;
+    let contentW = lon1 - lon0, contentH = lat1 - lat0;
+    // Under cover into 16:9, full canvas width is visible; height shows center ~56%.
+    // Size view so content fills usable width and stays inside the vertical cover band.
+    let viewW = contentW / usable;
+    let viewH = contentH / 0.88; // keep a little vertical pad inside cover band
+    // Square canvas: equalize so geographic content isn't stretched oddly
+    const midFracX = usable / 2; // center of left band
+    // Prefer not zooming out past statewide
+    viewW = Math.min(Math.max(viewW, 0.7), MAX.lon1 - MAX.lon0);
+    viewH = Math.min(Math.max(viewH, 0.45), MAX.lat1 - MAX.lat0);
+    // Match aspect of canvas (1:1 in CSS) using lon/lat degrees roughly scaled
+    const latMid = midLat * Math.PI / 180;
+    const lonUnit = Math.cos(latMid); // deg lon vs deg lat visual
+    let spanX = viewW, spanY = viewH;
+    if (spanX * lonUnit > spanY) spanY = spanX * lonUnit;
+    else spanX = spanY / Math.max(lonUnit, 0.2);
+    // Re-center in left usable band
     S.viewLL = {
-      lon0: midLon - contentCenterFracX * viewW,
-      lon1: midLon - contentCenterFracX * viewW + viewW,
-      lat0: midLat - viewH / 2,
-      lat1: midLat + viewH / 2
+      lon0: midLon - midFracX * spanX,
+      lon1: midLon - midFracX * spanX + spanX,
+      lat0: midLat - spanY / 2,
+      lat1: midLat + spanY / 2
     };
-    // Clamp / floor: never zoom out past the WA theater (keeps CA/OR strays from blowing the view)
-    const MAX = { lon0: -126.7, lon1: -116.4, lat0: 45.35, lat1: 49.2 };
-    if (S.viewLL.lon0 < MAX.lon0 || S.viewLL.lon1 > MAX.lon1 || S.viewLL.lat0 < MAX.lat0 || S.viewLL.lat1 > MAX.lat1
-        || (S.viewLL.lon1 - S.viewLL.lon0) > (MAX.lon1 - MAX.lon0) * 1.05) {
-      // if bounds exceed WA theater, fit to intersection with MAX instead
-      const iLon0 = Math.max(b.lon0 - dlon, MAX.lon0), iLon1 = Math.min(b.lon1 + dlon, MAX.lon1);
-      const iLat0 = Math.max(b.lat0 - dlat, MAX.lat0), iLat1 = Math.min(b.lat1 + dlat, MAX.lat1);
-      const midLon2 = (iLon0 + iLon1) / 2, midLat2 = (iLat0 + iLat1) / 2;
-      let vW = Math.max((iLon1 - iLon0) / usable, 0.8);
-      let vH = Math.max(iLat1 - iLat0, 0.5);
-      // keep square-ish
-      const asp = (MAX.lon1 - MAX.lon0) / (MAX.lat1 - MAX.lat0);
-      if (vW / vH < asp) vW = vH * asp; else vH = vW / asp;
-      S.viewLL = { lon0: midLon2 - contentCenterFracX * vW, lon1: midLon2 - contentCenterFracX * vW + vW, lat0: midLat2 - vH / 2, lat1: midLat2 + vH / 2 };
-    }
-    S.k = 1;
-    S.cx = CSS / 2;
-    S.cy = CSS / 2;
+    S.k = 1; S.cx = CSS / 2; S.cy = CSS / 2;
     req();
   }
 
   function townBudget() {
-    if (S.k < 1.15) return { maxTier: 0, n: 18 };
-    if (S.k < 1.6) return { maxTier: 1, n: 28 };
-    if (S.k < 2.2) return { maxTier: 2, n: 40 };
-    if (S.k < 3.2) return { maxTier: 3, n: 55 };
-    return { maxTier: 4, n: 80 };
+    if (S.k < 1.15) return { maxTier: 0, n: 20 };
+    if (S.k < 1.6) return { maxTier: 1, n: 32 };
+    if (S.k < 2.2) return { maxTier: 2, n: 45 };
+    if (S.k < 3.2) return { maxTier: 3, n: 60 };
+    return { maxTier: 4, n: 85 };
   }
-
   function pickTowns() {
     const budget = townBudget();
     const vis = visibleAlerts();
@@ -229,10 +196,11 @@ const Alerts = (() => {
     const out = [];
     const take = (arr, n) => { for (const t of arr) { if (out.length >= n) break; out.push(t); } };
     take(inside, budget.n);
-    take(outside, Math.min(budget.n, out.length + Math.max(6, Math.floor(budget.n * 0.35))));
+    take(outside, Math.min(budget.n, out.length + Math.max(6, Math.floor(budget.n * 0.3))));
     return out;
   }
 
+  // All drawing in CSS pixel space; caller sets ctx transform to dpr.
   function pathGeom(g, ctx) {
     walkCoords(g, (ring) => {
       if (!ring.length) return;
@@ -247,68 +215,85 @@ const Alerts = (() => {
       ctx.closePath();
     });
   }
+  function pathGeoJSON(gj, ctx) {
+    if (!gj) return;
+    if (gj.type === "Feature") return pathGeom(gj.geometry, ctx);
+    if (gj.type === "FeatureCollection") return (gj.features || []).forEach((f) => pathGeom(f.geometry, ctx));
+    return pathGeom(gj, ctx);
+  }
 
   function drawBasemap(ctx) {
-    const W = CSS * S.dpr, H = CSS * S.dpr;
     ctx.fillStyle = C_OCEAN;
-    ctx.fillRect(0, 0, W, H);
-    // water (PZZ) slightly lighter
+    ctx.fillRect(0, 0, CSS, CSS);
+    // Marine forecast zones (slightly lighter water)
     ctx.beginPath();
     for (const f of S.waterFeats) if (f.geometry) pathGeom(f.geometry, ctx);
     ctx.fillStyle = C_WATER;
     ctx.fill("evenodd");
-    // land
-    ctx.beginPath();
-    for (const f of S.landFeats) if (f.geometry) pathGeom(f.geometry, ctx);
-    ctx.fillStyle = C_LAND;
-    ctx.fill("evenodd");
-    // subtle land outlines
-    ctx.beginPath();
-    for (const f of S.landFeats) if (f.geometry) pathGeom(f.geometry, ctx);
-    ctx.lineWidth = 1.0 * S.dpr;
-    ctx.strokeStyle = C_LAND_LINE;
-    ctx.stroke();
-    // coast / marine outlines a touch brighter
+    // State land fill (clear shape)
+    if (S.stateGeom) {
+      ctx.beginPath(); pathGeoJSON(S.stateGeom, ctx);
+      ctx.fillStyle = C_LAND; ctx.fill("evenodd");
+    } else {
+      ctx.beginPath();
+      for (const f of S.landFeats) if (f.geometry) pathGeom(f.geometry, ctx);
+      ctx.fillStyle = C_LAND; ctx.fill("evenodd");
+    }
+    // County lines (subtle)
+    if (S.countyGeoms && S.countyGeoms.length) {
+      ctx.beginPath();
+      for (const g of S.countyGeoms) pathGeoJSON(g, ctx);
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = C_COUNTY;
+      ctx.stroke();
+    }
+    // State outline (strong)
+    if (S.stateGeom) {
+      ctx.beginPath(); pathGeoJSON(S.stateGeom, ctx);
+      ctx.lineWidth = 2.2;
+      ctx.strokeStyle = C_STATE;
+      ctx.stroke();
+    }
+    // Marine outlines
     ctx.beginPath();
     for (const f of S.waterFeats) if (f.geometry) pathGeom(f.geometry, ctx);
-    ctx.lineWidth = 1.1 * S.dpr;
-    ctx.strokeStyle = C_COAST;
+    ctx.lineWidth = 1.2;
+    ctx.strokeStyle = "rgba(150,180,210,0.4)";
     ctx.stroke();
   }
 
   function drawTowns(ctx) {
     const picks = pickTowns();
     const placed = [];
-    const fs = Math.max(11, Math.min(16, 12 * Math.sqrt(S.k))) * S.dpr;
+    const fs = Math.max(11, Math.min(16, 12 * Math.sqrt(S.k)));
     ctx.font = `700 ${fs}px Montserrat, system-ui, sans-serif`;
     ctx.textBaseline = "middle";
-    const pad = 4 * S.dpr;
-    const maxX = CSS * S.dpr * (1 - RIGHT_CLEAR); // don't put labels in face-cam band
+    const pad = 4;
+    const maxX = CSS * (1 - RIGHT_CLEAR);
     const collides = (b) => placed.some((p) => !(b[2] < p[0] || b[0] > p[2] || b[3] < p[1] || b[1] > p[3]));
     for (const t of picks) {
       const [wx, wy] = llToXY(t.lon, t.lat);
       const [sx, sy] = worldToScreen(wx, wy);
-      if (sx < 20 || sy < 20 || sx > CSS * (1 - RIGHT_CLEAR) - 20 || sy > CSS - 20) continue;
-      const dx = sx * S.dpr, dy = sy * S.dpr;
+      if (sx < 20 || sy < 20 || sx > maxX - 20 || sy > CSS - 20) continue;
       const tw = ctx.measureText(t.n).width;
       const side = t.side || SIDE_PREF[t.n] || "right";
-      const gap = 8 * S.dpr;
+      const gap = 8;
       const cands = side === "left"
-        ? [[dx - gap - tw, dy], [dx + gap, dy], [dx - tw / 2, dy - gap - fs], [dx - tw / 2, dy + gap + fs]]
-        : [[dx + gap, dy], [dx - gap - tw, dy], [dx - tw / 2, dy - gap - fs], [dx - tw / 2, dy + gap + fs]];
+        ? [[sx - gap - tw, sy], [sx + gap, sy], [sx - tw / 2, sy - gap - fs], [sx - tw / 2, sy + gap + fs]]
+        : [[sx + gap, sy], [sx - gap - tw, sy], [sx - tw / 2, sy - gap - fs], [sx - tw / 2, sy + gap + fs]];
       let spot = null;
       for (const [tx, ty] of cands) {
         const b = [tx - pad, ty - fs / 2 - pad, tx + tw + pad, ty + fs / 2 + pad];
-        if (b[0] < 8 || b[1] < 8 || b[2] > maxX - 8 || b[3] > CSS * S.dpr - 8) continue;
+        if (b[0] < 8 || b[1] < 8 || b[2] > maxX - 8 || b[3] > CSS - 8) continue;
         if (collides(b)) continue;
         spot = { tx, ty, b }; break;
       }
       if (!spot) continue;
       ctx.beginPath();
-      ctx.arc(dx, dy, 3.2 * S.dpr, 0, Math.PI * 2);
+      ctx.arc(sx, sy, 3.2, 0, Math.PI * 2);
       ctx.fillStyle = "#fff"; ctx.fill();
-      ctx.lineWidth = 1.5 * S.dpr; ctx.strokeStyle = "rgba(0,0,0,0.75)"; ctx.stroke();
-      ctx.lineWidth = 3.5 * S.dpr; ctx.strokeStyle = "rgba(12,16,24,0.9)";
+      ctx.lineWidth = 1.5; ctx.strokeStyle = "rgba(0,0,0,0.75)"; ctx.stroke();
+      ctx.lineWidth = 3.5; ctx.strokeStyle = "rgba(12,16,24,0.9)";
       ctx.fillStyle = "#f2f5fa";
       ctx.strokeText(t.n, spot.tx, spot.ty);
       ctx.fillText(t.n, spot.tx, spot.ty);
@@ -321,24 +306,24 @@ const Alerts = (() => {
     const ctx = c.getContext("2d");
     const dpr = Math.min(2, window.devicePixelRatio || 1); S.dpr = dpr;
     if (c.width !== CSS * dpr || c.height !== CSS * dpr) { c.width = CSS * dpr; c.height = CSS * dpr; }
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    // ONE transform: all geometry + towns share CSS pixel space
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     drawBasemap(ctx);
     const vis = visibleAlerts();
     for (const a of vis) {
       const g = a._geom; if (!g) continue;
       const col = colorFor(a.properties.event);
       ctx.beginPath(); pathGeom(g, ctx);
-      ctx.fillStyle = hexToRgba(col, 0.48);
+      ctx.fillStyle = hexToRgba(col, 0.52);
       ctx.fill("evenodd");
-      ctx.lineWidth = 2.2 * S.dpr;
-      ctx.strokeStyle = hexToRgba(col, 0.95);
+      ctx.lineWidth = 2.4;
+      ctx.strokeStyle = hexToRgba(col, 0.98);
       ctx.stroke();
     }
     drawTowns(ctx);
     S.sig = [S.loaded, S.selectedType || "ALL", S.k.toFixed(3), S.cx.toFixed(1), S.cy.toFixed(1),
-      S.viewLL.lon0.toFixed(3), S.viewLL.lat0.toFixed(3), vis.length].join("|");
+      S.viewLL.lon0.toFixed(3), S.viewLL.lat0.toFixed(3), vis.length, dpr].join("|");
   }
-
   function req() { if (S.raf) return; S.raf = requestAnimationFrame(() => { S.raf = 0; draw(); }); }
 
   function renderChips() {
@@ -371,7 +356,7 @@ const Alerts = (() => {
           try {
             const m = await loadJSON("https://api.weather.gov/alerts/active?zone=" + chunk.join(","), { headers: { Accept: "application/geo+json", "User-Agent": UA } });
             for (const a of (m.features || [])) byId.set(a.id || (a.properties && a.properties.id), a);
-          } catch (e) { /* chunk skip */ }
+          } catch (e) { /* skip */ }
         }
         data = { type: "FeatureCollection", features: [...byId.values()] };
       } catch (liveErr) {
@@ -392,7 +377,8 @@ const Alerts = (() => {
       });
       S.alerts = feats;
       S.loaded = Date.now();
-      status(`${feats.length} active · WA land + marine · updated ${new Date(S.loaded).toLocaleTimeString("en-US", { timeZone: "America/Los_Angeles" })} PT`);
+      const miss = feats.filter((a) => !a._geom).length;
+      status(`${feats.length} active · WA land + marine${miss ? " · " + miss + " without geometry" : ""} · updated ${new Date(S.loaded).toLocaleTimeString("en-US", { timeZone: "America/Los_Angeles" })} PT`);
       renderChips();
       fitToSelection();
     } catch (e) {
@@ -417,8 +403,7 @@ const Alerts = (() => {
       const sx = (e.clientX - rect.left) * (CSS / rect.width);
       const sy = (e.clientY - rect.top) * (CSS / rect.height);
       const [wx, wy] = screenToWorld(sx, sy);
-      const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
-      S.k = Math.min(8, Math.max(0.55, S.k * factor));
+      S.k = Math.min(8, Math.max(0.55, S.k * (e.deltaY < 0 ? 1.12 : 1 / 1.12)));
       const [nx, ny] = screenToWorld(sx, sy);
       S.cx += wx - nx; S.cy += wy - ny;
       req();
@@ -442,7 +427,6 @@ const Alerts = (() => {
     wireCanvas();
     S.inited = true;
   }
-
   function hide() { S.shown = false; }
 
   async function show() {
@@ -460,6 +444,13 @@ const Alerts = (() => {
     }
     if (!S.zones.size) {
       try { buildZoneIndex(await loadJSON("alert/zones_wa.json")); } catch (e) { status("Zone pack missing"); }
+    }
+    if (!S.stateGeom) {
+      try {
+        const bm = await loadJSON("alert/basemap_wa.json");
+        S.stateGeom = bm.state || null;
+        S.countyGeoms = bm.counties || [];
+      } catch (e) { /* optional */ }
     }
     if (!S.towns.length) {
       try {
