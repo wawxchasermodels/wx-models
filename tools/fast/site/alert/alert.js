@@ -415,7 +415,7 @@ const Alerts = (() => {
       b.type = "button"; b.className = "al-chip";
       b.setAttribute("aria-pressed", type === S.selectedType || (type === null && S.selectedType === null) ? "true" : "false");
       b.innerHTML = `<span class="sw" style="background:${color || '#7cb7ff'}"></span><span>${label}${n != null ? " · " + n : ""}</span>`;
-      b.onclick = () => { S.selectedType = type; renderChips(); fitToSelection(); };
+      b.onclick = () => { S.selectedType = (S.selectedType === type) ? null : type; renderChips(); req(); };  // t2484u: toggle type on/off, do not refit/jump
       return b;
     };
     box.innerHTML = "";
