@@ -379,7 +379,7 @@ function alertRefitForAspect() {
   addEventListener("resize", () => { if (ALERTM() && typeof alertRefitForAspect === "function") alertRefitForAspect(); });
 })();
 // ---- Active Alerts in Studio (11-05): header + credit style as Observations; no LIVE badge (t2437u)
-const ALERT_CREDIT = ["Places: GeoNames, CC BY 4.0."];  // alert mode only; Census/TIGER basemap is public domain — no credit required
+const ALERT_CREDIT = ["Places: GeoNames, CC BY 4.0.", "Basemap: US Census Bureau. Roads: Natural Earth."];  // alert mode only. Census boundaries are public domain; Natural Earth roads/BC context are public domain.
 function alertInfo() {
   const S_ = typeof Alerts !== "undefined" && Alerts._state; if (!S_) return null;
   const title = (typeof Alerts.titleText === "function" ? Alerts.titleText() : null) || S_.selectedType || "All Alerts";
@@ -395,8 +395,8 @@ function renderAlert(k, frO) {
   if (!MG.img || !I || !I.t) { c0.font = `700 ${k === "v" ? 40 : 34}px Montserrat`; c0.fillStyle = "#c9ced8"; c0.textAlign = "center"; c0.fillText(MG.msg || "Loading alerts\u2026", f.W / 2, f.H / 2); c0.textAlign = "left"; return; }
   const r = crop(k, fr); c0.imageSmoothingEnabled = true; c0.imageSmoothingQuality = "high";
   c0.drawImage(MG.img, f.W / 2 - r.cx * r.kk, f.H / 2 - r.cy * r.kk, IW(MG.img) * r.kk, IH(MG.img) * r.kk);
-  // Towns in this frame's pixels so zoom does not grow the type (t2499u). Vertical and landscape each use their own camera.
-  if (typeof Alerts !== "undefined" && Alerts.paintFrameTowns) Alerts.paintFrameTowns(c0, { dpr: (Alerts._state && Alerts._state.dpr) || 1, W: f.W, H: f.H, zoom: Math.max(1, fr.zoom || 1), cx: r.cx, cy: r.cy, kk: r.kk });
+  // Towns, highways and boundary strokes in this frame's pixels (t2499u / t2504u). Each frame keeps its own camera.
+  if (typeof Alerts !== "undefined" && Alerts.paintFrameScene) Alerts.paintFrameScene(c0, { dpr: (Alerts._state && Alerts._state.dpr) || 1, W: f.W, H: f.H, zoom: Math.max(1, fr.zoom || 1), cx: r.cx, cy: r.cy, kk: r.kk });
   // TOP LEFT title (alert mode): pill + title + time — no LIVE badge (Benjamin t2437u)
   const c = ovLayer(f), x = f.pad; let y = k === "v" ? 120 : 34;
   const by = y; // top-right anchor without a LIVE badge
@@ -705,6 +705,7 @@ for (const k of ["v", "h"]) {
     // as a pinch and zoomed the frame as the scrubber finger moved. Only a real two-finger pinch on this frame zooms it now
     // (targetTouches = fingers that started on this canvas, and no other finger on the screen).
     if (CLEAN || !last || REC.on || PIN.mode || e.targetTouches.length !== 2 || e.touches.length !== 2) { if (pz && e.targetTouches.length !== 2) pz = null; return; }
+    cv._alertPinch = 1;
     e.preventDefault(); d = null;
     const [a, b] = [oxy(e.targetTouches[0]), oxy(e.targetTouches[1])], fr0 = getFr(k), r0 = crop(k, fr0), ox = (a[0] + b[0]) / 2, oy = (a[1] + b[1]) / 2;
     pz = { d: Math.max(10, Math.hypot(a[0] - b[0], a[1] - b[1])), z: OBSM() ? obsZv(fr0) / 100 : Math.max(1, fr0.zoom || 1), mx: r0.cx + (ox - f.W / 2) / r0.kk, my: r0.cy + (oy - f.H / 2) / r0.kk };
@@ -718,7 +719,7 @@ for (const k of ["v", "h"]) {
     const fr = frAt(k, pz.mx - (ox - f.W / 2) / kk, pz.my - (oy - f.H / 2) / kk, z), r = crop(k, fr);   // map point under the fingers stays under them
     fr.dx = (r.bx - r.cx) * r.kk; fr.dy = (r.by - r.cy) * r.kk; setFr(k, fr); render(k); window.__spinch = { k, zoom: z };
   }, { passive: false });
-  const pend = (e) => { if (pz && e.targetTouches.length < 2) pz = null; };
+  const pend = (e) => { if (pz && e.targetTouches.length < 2) pz = null; if (e.targetTouches.length < 2) setTimeout(() => { cv._alertPinch = 0; }, 0); };
   cv.addEventListener("touchend", pend); cv.addEventListener("touchcancel", pend);
   cv.addEventListener("keydown", (e) => {
     const fr = getFr(k), st = e.shiftKey ? 10 : 1; let hit = true;
@@ -1434,6 +1435,19 @@ if (!CLEAN) {
         cv.style.cursor = "pointer";
       });
       cv.addEventListener("pointerleave", () => { if (ALERTM()) { tip.hidden = true; cv.style.cursor = ""; } });
+      let down = null;
+      cv.addEventListener("pointerdown", (e) => { if (!ALERTM() || CLEAN) { down = null; return; } down = { x: e.clientX, y: e.clientY, id: e.pointerId }; });
+      cv.addEventListener("pointerup", (e) => {
+        const d0 = down; down = null;
+        if (!d0 || d0.id !== e.pointerId || !ALERTM() || CLEAN || cv._alertPinch) return;
+        if (typeof Alerts === "undefined" || !Alerts.openAt || !Alerts.isMapClick(e.clientX - d0.x, e.clientY - d0.y)) return;
+        const r = crop(k, getFr(k)), b = cv.getBoundingClientRect();
+        const ox = (e.clientX - b.left) * f.W / b.width, oy = (e.clientY - b.top) * f.H / b.height;
+        const bx = r.cx + (ox - f.W / 2) / r.kk, by = r.cy + (oy - f.H / 2) / r.kk;
+        const dpr = (Alerts._state && Alerts._state.dpr) || 1;
+        const [lon, lat] = Alerts.cssToLonLat(bx / dpr, by / dpr);
+        Alerts.openAt(lon, lat);
+      });
     }
   })();
 
@@ -1515,8 +1529,8 @@ if (!CLEAN) {   // Studio: Map | Meteogram switch (first in the menu bar) + the 
       if (typeof Obs !== "undefined" && Obs.hide) Obs.hide();
       if (!document.getElementById("alertp")) { const ap = document.createElement("div"); ap.id = "alertp"; ap.innerHTML = `<div id="alert-root"></div>`; pnl.appendChild(ap); }
       window.__alertLoad = window.__alertLoad || new Promise((ok, bad) => {
-        if (!document.querySelector('link[href="alert/alert.css"]')) { const l = document.createElement("link"); l.rel = "stylesheet"; l.href = "alert/alert.css"; document.head.appendChild(l); }
-        const sc = document.createElement("script"); sc.src = "alert/alert.js?v=20261105t18"; sc.onload = ok; sc.onerror = bad; document.body.appendChild(sc); });
+        if (!document.querySelector('link[href^="alert/alert.css"]')) { const l = document.createElement("link"); l.rel = "stylesheet"; l.href = "alert/alert.css?v=20261105t19"; document.head.appendChild(l); }
+        const sc = document.createElement("script"); sc.src = "alert/alert.js?v=20261105t19"; sc.onload = ok; sc.onerror = bad; document.body.appendChild(sc); });
       MG.msg = "Loading alerts\u2026"; let asig = "";
       const agrab = () => { const S_ = typeof Alerts !== "undefined" && Alerts._state, cv_ = document.getElementById("al-canvas"); if (!S_ || !cv_ || !cv_.width) return;
         const sel = (S_.selectedTypes && S_.selectedTypes.size) ? [...S_.selectedTypes].sort().join(',') : 'ALL'; const sig = [S_.loaded, sel, S_.k, S_.cx, S_.cy, cv_.width, (S_.alerts || []).length, S_.sig || ""].join("|");
