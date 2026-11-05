@@ -1,5 +1,5 @@
 /* Active Alerts map for Studio (WA land + PZZ marine). Preview 2026-11-05.
-   Dark basemap, auto-fit, single shared equirect projection (dpr-safe). */
+   Dark basemap, auto-fit, UNIFORM-SCALE Web Mercator (no lon/lat squish). */
 "use strict";
 const Alerts = (() => {
   const AREAS = ["WA"];
@@ -17,11 +17,19 @@ const Alerts = (() => {
   const SIDE_PREF = { "Oak Harbor": "left" };
   const RIGHT_CLEAR = 0.13;
   const PAD = 0.12;
+  // Cover of square canvas into frame: visible fraction of the square on the short axis
+  // 16:9 (h): crops top/bottom → safe vertical band ~ H/W = 9/16 of width… = 0.5625 of CSS
+  // 9:16 (v): crops left/right → safe horizontal band ~ 0.5625 of CSS
+  function coverSafe() {
+    const phone = typeof document !== "undefined" && document.body && document.body.classList.contains("phone");
+    return { horiz: phone ? 0.56 : 1, vert: phone ? 1 : 0.56, phone: !!phone };
+  }
 
   const S = {
     shown: false, inited: false, loaded: 0, timer: null, dpr: 1,
-    cx: CSS / 2, cy: CSS / 2, k: 1, view: "wa",
-    viewLL: Object.assign({}, WA0),
+    // Mercator camera: cx/cy in mercator units, scale = CSS px per mercator-unit at k=1
+    cx: 0, cy: 0, scale: 1, k: 1, view: "wa",
+    viewLL: Object.assign({}, WA0), // diagnostic / legacy readout of approx lonlat window
     colors: {}, zones: new Map(), towns: [], alerts: [],
     selectedType: null, fillAlpha: 1, status: "", raf: 0, sig: "",
     landFeats: [], waterFeats: [], stateGeom: null, countyGeoms: []
@@ -35,16 +43,38 @@ const Alerts = (() => {
     return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
   }
 
-  // Shared equirect: lon/lat -> world (canvas CSS px at identity)
+  /** Web Mercator (EPSG:3857-ish) in radians: uniform scale on x and y — no geographic squish. */
+  function mercXY(lon, lat) {
+    const latc = Math.max(-85.05112878, Math.min(85.05112878, lat));
+    const x = lon * Math.PI / 180;
+    const y = Math.log(Math.tan(Math.PI / 4 + latc * Math.PI / 360));
+    return [x, y];
+  }
+  function mercToLonLat(mx, my) {
+    const lon = mx * 180 / Math.PI;
+    const lat = (2 * Math.atan(Math.exp(my)) - Math.PI / 2) * 180 / Math.PI;
+    return [lon, lat];
+  }
+  function scaleNow() { return S.scale * S.k; }
+  /** lon/lat → CSS canvas px (identity camera then zoom). ONE uniform scale. */
   function llToXY(lon, lat) {
-    const { lon0, lon1, lat0, lat1 } = S.viewLL;
-    return [((lon - lon0) / (lon1 - lon0)) * CSS, ((lat1 - lat) / (lat1 - lat0)) * CSS];
+    const [mx, my] = mercXY(lon, lat);
+    const s = scaleNow();
+    return [(mx - S.cx) * s + CSS / 2, -(my - S.cy) * s + CSS / 2];
   }
-  function worldToScreen(x, y) {
-    return [(x - S.cx) * S.k + CSS / 2, (y - S.cy) * S.k + CSS / 2];
+  function worldToScreen(wx, wy) {
+    // wx/wy already CSS-world at k=1 relative… kept for callers that pass merc deltas via cx
+    return [(wx - S.cx) * S.k + CSS / 2, (wy - S.cy) * S.k + CSS / 2];
   }
-  function screenToWorld(sx, sy) {
-    return [(sx - CSS / 2) / S.k + S.cx, (sy - CSS / 2) / S.k + S.cy];
+  function screenToMerc(sx, sy) {
+    const s = scaleNow() || 1;
+    return [(sx - CSS / 2) / s + S.cx, -((sy - CSS / 2) / s) + S.cy];
+  }
+  function screenToWorld(sx, sy) { return screenToMerc(sx, sy); }
+  function approxViewLL() {
+    const corners = [[0, 0], [CSS, 0], [0, CSS], [CSS, CSS]].map(([x, y]) => mercToLonLat(...screenToMerc(x, y)));
+    const lons = corners.map((c) => c[0]), lats = corners.map((c) => c[1]);
+    return { lon0: Math.min(...lons), lon1: Math.max(...lons), lat0: Math.min(...lats), lat1: Math.max(...lats) };
   }
 
   async function loadJSON(url, opts) {
@@ -132,53 +162,57 @@ const Alerts = (() => {
     return [...m.values()].sort((a, b) => a.event.localeCompare(b.event));
   }
 
-  /** Fit view so selected alerts fill the frame under Studio COVER crop, left-biased for 13% right clear. */
+  /** Fit so selected alerts fill the cover-safe band with UNIFORM mercator scale (crop, never stretch). */
   function fitToSelection() {
     const vis = visibleAlerts();
     let b = null;
     for (const a of vis) b = mergeBounds(b, geomBounds(a._geom));
     if (!b) b = Object.assign({}, WA0);
     const dlon = Math.max(0.12, (b.lon1 - b.lon0) * PAD);
-    const dlat = Math.max(0.08, (b.lat1 - b.lat0) * PAD);
-    let lon0 = b.lon0 - dlon, lon1 = b.lon1 + dlon, lat0 = b.lat0 - dlat, lat1 = b.lat1 + dlat;
-    // Clamp into WA theater so strays can't explode the view
+    const dlat = Math.max(0.10, (b.lat1 - b.lat0) * PAD);
     const MAX = { lon0: -126.5, lon1: -116.5, lat0: 45.4, lat1: 49.15 };
-    lon0 = Math.max(lon0, MAX.lon0); lon1 = Math.min(lon1, MAX.lon1);
-    lat0 = Math.max(lat0, MAX.lat0); lat1 = Math.min(lat1, MAX.lat1);
-    if (lon1 <= lon0 || lat1 <= lat0) { lon0 = MAX.lon0; lon1 = MAX.lon1; lat0 = MAX.lat0; lat1 = MAX.lat1; }
+    let lon0 = Math.max(b.lon0 - dlon, MAX.lon0), lon1 = Math.min(b.lon1 + dlon, MAX.lon1);
+    let lat0 = Math.max(b.lat0 - dlat, MAX.lat0), lat1 = Math.min(b.lat1 + dlat, MAX.lat1);
+    // Extra north pad so San Juans / N Inland Waters clear the 16:9 top crop
+    lat1 = Math.min(MAX.lat1, lat1 + Math.max(0.15, (lat1 - lat0) * 0.12));
+    // Soft-cap far-west marine for framing (still drawn; just don't dominate the fit bbox)
+    lon0 = Math.max(lon0, -125.55);
 
-    const usable = 1 - RIGHT_CLEAR; // content in left 87%
-    // Soft-cap far-west marine so All/Gale don't leave a dark ocean "bar" on the left
-    const frameLon0 = Math.max(lon0, -125.55);
-    // Extra north pad so San Juans / Northern Inland Waters survive 16:9 cover crop
-    // (cover of square into 16:9 crops ~22% top+bottom of the canvas)
-    const COVER_SAFE = 0.56; // vertical fraction of square visible after 16:9 cover
-    const midLon = (frameLon0 + lon1) / 2;
-    let contentW = Math.max(0.35, lon1 - frameLon0), contentH = Math.max(0.25, lat1 - lat0);
-    // Grow contentH so padded alerts fit inside the cover-safe band
-    contentH = Math.max(contentH, contentH / COVER_SAFE * 0.92);
-    let spanX = contentW / Math.max(0.55, usable * 0.92);
-    let spanY = contentH / COVER_SAFE;
-    const midLat = (lat0 + lat1) / 2;
-    const latMid = midLat * Math.PI / 180;
-    const lonUnit = Math.cos(latMid);
-    if (spanX * lonUnit > spanY) spanY = spanX * lonUnit;
-    else spanX = spanY / Math.max(lonUnit, 0.25);
-    spanX = Math.min(Math.max(spanX, 0.8), MAX.lon1 - MAX.lon0);
-    spanY = Math.min(Math.max(spanY, 0.5), MAX.lat1 - MAX.lat0);
-    // Bias midLat slightly south of geometric center so north edge clears the crop
-    const biasLat = midLat - Math.min(0.12, contentH * 0.04);
-    const midFracX = usable * 0.48;
-    let v0 = midLon - midFracX * spanX, v1 = v0 + spanX;
-    if (v0 < frameLon0 - contentW * 0.2) { const shift = (frameLon0 - contentW * 0.2) - v0; v0 += shift; v1 += shift; }
-    let vLat0 = biasLat - spanY / 2, vLat1 = biasLat + spanY / 2;
-    // Guarantee alert lat1 (north) sits below the cropped top band
-    const northNeed = lat1 + Math.max(0.05, (lat1 - lat0) * 0.08);
-    if (vLat1 < northNeed) { const d = northNeed - vLat1; vLat0 += d; vLat1 += d; }
-    if (vLat1 > MAX.lat1) { const d = vLat1 - MAX.lat1; vLat0 -= d; vLat1 -= d; }
-    if (vLat0 < MAX.lat0) vLat0 = MAX.lat0;
-    S.viewLL = { lon0: v0, lon1: v1, lat0: vLat0, lat1: vLat1 };
-    S.k = 1; S.cx = CSS / 2; S.cy = CSS / 2;
+    const [mx0, my0] = mercXY(lon0, lat0);
+    const [mx1, my1] = mercXY(lon1, lat1);
+    const mWest = Math.min(mx0, mx1), mEast = Math.max(mx0, mx1);
+    const mSouth = Math.min(my0, my1), mNorth = Math.max(my0, my1);
+    let mW = Math.max(1e-6, mEast - mWest), mH = Math.max(1e-6, mNorth - mSouth);
+
+    const safe = coverSafe();
+    const usableW = CSS * (1 - RIGHT_CLEAR) * (safe.horiz < 1 ? safe.horiz : 1);
+    // Vertical: keep content inside the cover-visible band of the square
+    const usableH = CSS * safe.vert * 0.92;
+    // CONTAIN into usable band with one scale (never stretch axes independently)
+    let scale = Math.min(usableW / mW, usableH / mH);
+    scale = Math.max(scale * 0.92, 1e-6); // small pad inside the band
+
+    const midX = (mWest + mEast) / 2;
+    const midY = (mSouth + mNorth) / 2;
+    // Place content in left usable band (face-cam clear on the right of the square / 16:9)
+    const midFracX = (1 - RIGHT_CLEAR) * 0.48;
+    // Screen x of content center = midFracX * CSS
+    // (mx - cx) * scale + CSS/2 = midFracX * CSS  => cx = mx - (midFracX*CSS - CSS/2) / scale
+    S.scale = scale;
+    S.k = 1;
+    S.cx = midX - (midFracX * CSS - CSS / 2) / scale;
+    // Vertically center in the square (cover crops equal top/bottom on 16:9)
+    S.cy = midY;
+    S.viewLL = approxViewLL();
+    // Ensure north mercator edge of alerts maps below the cropped top band
+    const topSafe = (CSS - usableH) / 2 + 8;
+    const [, syNorth] = llToXY((lon0 + lon1) / 2, lat1);
+    if (syNorth < topSafe) {
+      // shift camera north (increase cy) so north content moves down on screen
+      const s = scaleNow();
+      S.cy += (topSafe - syNorth) / s;
+      S.viewLL = approxViewLL();
+    }
     req();
   }
 
@@ -210,12 +244,10 @@ const Alerts = (() => {
   function pathGeom(g, ctx) {
     walkCoords(g, (ring) => {
       if (!ring.length) return;
-      const [x0, y0] = llToXY(ring[0][0], ring[0][1]);
-      const [sx0, sy0] = worldToScreen(x0, y0);
+      const [sx0, sy0] = llToXY(ring[0][0], ring[0][1]);
       ctx.moveTo(sx0, sy0);
       for (let i = 1; i < ring.length; i++) {
-        const [x, y] = llToXY(ring[i][0], ring[i][1]);
-        const [sx, sy] = worldToScreen(x, y);
+        const [sx, sy] = llToXY(ring[i][0], ring[i][1]);
         ctx.lineTo(sx, sy);
       }
       ctx.closePath();
@@ -253,12 +285,10 @@ const Alerts = (() => {
       const a = ringArea(rings[i]); if (a > bestA) { best = rings[i]; bestA = a; }
     }
     if (!best || !best.length) return;
-    const [x0, y0] = llToXY(best[0][0], best[0][1]);
-    const [sx0, sy0] = worldToScreen(x0, y0);
+    const [sx0, sy0] = llToXY(best[0][0], best[0][1]);
     ctx.moveTo(sx0, sy0);
     for (let i = 1; i < best.length; i++) {
-      const [x, y] = llToXY(best[i][0], best[i][1]);
-      const [sx, sy] = worldToScreen(x, y);
+      const [sx, sy] = llToXY(best[i][0], best[i][1]);
       ctx.lineTo(sx, sy);
     }
     ctx.closePath();
@@ -289,12 +319,10 @@ const Alerts = (() => {
         const rings = []; exteriorRings(g, rings);
         for (const ring of rings) {
           if (!ring || !ring.length) continue;
-          const [x0, y0] = llToXY(ring[0][0], ring[0][1]);
-          const [sx0, sy0] = worldToScreen(x0, y0);
+          const [sx0, sy0] = llToXY(ring[0][0], ring[0][1]);
           ctx.moveTo(sx0, sy0);
           for (let i = 1; i < ring.length; i++) {
-            const [x, y] = llToXY(ring[i][0], ring[i][1]);
-            const [sx, sy] = worldToScreen(x, y);
+            const [sx, sy] = llToXY(ring[i][0], ring[i][1]);
             ctx.lineTo(sx, sy);
           }
           ctx.closePath();
@@ -324,8 +352,7 @@ const Alerts = (() => {
     const maxX = CSS * (1 - RIGHT_CLEAR);
     const collides = (b) => placed.some((p) => !(b[2] < p[0] || b[0] > p[2] || b[3] < p[1] || b[1] > p[3]));
     for (const t of picks) {
-      const [wx, wy] = llToXY(t.lon, t.lat);
-      const [sx, sy] = worldToScreen(wx, wy);
+      const [sx, sy] = llToXY(t.lon, t.lat);
       if (sx < 20 || sy < 20 || sx > maxX - 20 || sy > CSS - 20) continue;
       const tw = ctx.measureText(t.n).width;
       const side = t.side || SIDE_PREF[t.n] || "right";
@@ -374,8 +401,9 @@ const Alerts = (() => {
       ctx.stroke();
     }
     drawTowns(ctx);
-    S.sig = [S.loaded, S.selectedType || "ALL", S.fillAlpha.toFixed(2), S.k.toFixed(3), S.cx.toFixed(1), S.cy.toFixed(1),
-      S.viewLL.lon0.toFixed(3), S.viewLL.lat0.toFixed(3), vis.length, dpr].join("|");
+    S.viewLL = approxViewLL();
+    S.sig = [S.loaded, S.selectedType || "ALL", S.fillAlpha.toFixed(2), S.k.toFixed(3), S.scale.toFixed(1),
+      S.cx.toFixed(5), S.cy.toFixed(5), S.viewLL.lon0.toFixed(3), S.viewLL.lat0.toFixed(3), vis.length, dpr].join("|");
   }
   function req() { if (S.raf) return; S.raf = requestAnimationFrame(() => { S.raf = 0; draw(); }); }
 
@@ -446,8 +474,11 @@ const Alerts = (() => {
     c.addEventListener("pointerdown", (e) => { drag = { x: e.clientX, y: e.clientY, cx: S.cx, cy: S.cy }; c.setPointerCapture(e.pointerId); });
     c.addEventListener("pointermove", (e) => {
       if (!drag) return;
-      const dx = (e.clientX - drag.x) / S.k, dy = (e.clientY - drag.y) / S.k;
-      S.cx = drag.cx - dx; S.cy = drag.cy - dy; req();
+      // pointer CSS-px → mercator via uniform scale
+      const s = scaleNow() || 1;
+      const dx = (e.clientX - drag.x) / s, dy = (e.clientY - drag.y) / s;
+      S.cx = drag.cx - dx; S.cy = drag.cy + dy; // +dy: screen y down, merc y north
+      req();
     });
     c.addEventListener("pointerup", () => { drag = null; });
     c.addEventListener("wheel", (e) => {
@@ -455,10 +486,10 @@ const Alerts = (() => {
       const rect = c.getBoundingClientRect();
       const sx = (e.clientX - rect.left) * (CSS / rect.width);
       const sy = (e.clientY - rect.top) * (CSS / rect.height);
-      const [wx, wy] = screenToWorld(sx, sy);
+      const [mx, my] = screenToMerc(sx, sy);
       S.k = Math.min(8, Math.max(0.55, S.k * (e.deltaY < 0 ? 1.12 : 1 / 1.12)));
-      const [nx, ny] = screenToWorld(sx, sy);
-      S.cx += wx - nx; S.cy += wy - ny;
+      const [nx, ny] = screenToMerc(sx, sy);
+      S.cx += mx - nx; S.cy += my - ny;
       req();
     }, { passive: false });
   }
@@ -541,7 +572,7 @@ const Alerts = (() => {
 
   return {
     show, hide, redraw: req, drawNow: draw, load: loadAlerts,
-    fitToSelection, titleText, eventTypes,
+    fitToSelection, titleText, eventTypes, coverSafe, mercXY, llToXY, approxViewLL,
     setFillAlpha: (a) => { S.fillAlpha = Math.max(0.2, Math.min(1, +a || 1)); const op=$("al-opacity"), opv=$("al-opacity-val"); if (op) op.value=String(Math.round(S.fillAlpha*100)); if (opv) opv.textContent=Math.round(S.fillAlpha*100)+"%"; req(); },
     _state: S
   };
