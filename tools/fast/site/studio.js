@@ -27,7 +27,15 @@ if (CLEAN) {
 // refresh / restore, OBS included) and this tab's sessionStorage. The shared localStorage value is no longer read, so a Studio opened or
 // re-opened without them starts on Map, never on another window's Meteogram / Observations / Pass Forecaster.
 const MODES_OK = ["map", "mg", "obs", "pass", "wafc"];
-const MODE0 = MODES_OK.includes(SQ.get("smode")) ? SQ.get("smode") : "map";   // the address only: a bare studio.html always opens on Map
+// 11-05 (Benjamin: refresh on Observations Satellite jumped to the underlying map product, e.g. Integrated Vapor Transport):
+// mode is still address-first (?smode=). saveMode also writes sessionStorage, but MODE0 used to ignore it — so a refresh whose
+// address lost smode (iOS replaceState limit, or a write that rebuilt the query without it) fell back to Map and showed the
+// previous map product under the satellite view. On a reload only, fall back to this tab's sessionStorage mode; a bare
+// studio.html navigate (bookmark / new open) still starts on Map (t2337u).
+const MODE0 = (() => { const u = SQ.get("smode"); if (MODES_OK.includes(u)) return u;
+  let nav = ""; try { nav = (performance.getEntriesByType("navigation")[0] || {}).type || ""; } catch (e) { /* old webkit */ }
+  if (nav === "reload") { try { const s = sessionStorage.getItem("studio:mode"); if (MODES_OK.includes(s)) return s; } catch (e) { /* private */ } }
+  return "map"; })();
 const saveMode = (m) => { try { sessionStorage.setItem("studio:mode", m); } catch (e) { /* private mode */ }
   if (CLEAN) return; try { const u = new URL(location); if (m === "map") u.searchParams.delete("smode"); else u.searchParams.set("smode", m); history.replaceState(null, "", u); } catch (e) { /* replaceState limit */ } };
 const MG = { on: !CLEAN && ["mg", "obs", "pass", "wafc"].includes(MODE0), kind: ["obs", "pass", "wafc"].includes(MODE0) ? MODE0 : "mg", img: null, src: "" };
