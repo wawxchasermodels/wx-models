@@ -1404,6 +1404,30 @@ if (!CLEAN) {
     const key = S.run + ":" + n; if (key === tkKey) return; tkKey = key;   // tick labels every 24 h (by forecast hour), rebuilt per run / new hours
     tk.innerHTML = st.map((x, i) => x.f % 24 === 0 && (x.f % 48 === 0 || st[n - 1].f <= 168) ? `<span style="left:calc(9px + (100% - 18px) * ${n > 1 ? i / (n - 1) : 0})">${x.f}</span>` : "").join("");
   };
+  // 11-05 t2486u: Active Alerts hover — show alert type(s) under the cursor on Studio frames
+  (function alertHoverTip() {
+    const tip = document.getElementById("stip") || (() => { const d = document.createElement("div"); d.id = "stip"; d.hidden = true; document.body.appendChild(d); return d; })();
+    for (const k of ["v", "h"]) {
+      const f = F[k], cv = f.cv;
+      cv.addEventListener("pointermove", (e) => {
+        if (!ALERTM() || e.pointerType !== "mouse" || e.buttons || REC.on || typeof Alerts === "undefined" || !Alerts.hitAt || !MG.img) return;
+        const r = crop(k, getFr(k)), b = cv.getBoundingClientRect();
+        const ox = (e.clientX - b.left) * f.W / b.width, oy = (e.clientY - b.top) * f.H / b.height;
+        const bx = r.cx + (ox - f.W / 2) / r.kk, by = r.cy + (oy - f.H / 2) / r.kk;  // bitmap CSS px (al-canvas space)
+        const dpr = (Alerts._state && Alerts._state.dpr) || 1;
+        const sx = bx / dpr, sy = by / dpr;
+        if (sx < 0 || sy < 0 || sx > 1600 || sy > 1600) { tip.hidden = true; return; }
+        const [lon, lat] = Alerts.cssToLonLat(sx, sy);
+        const hits = Alerts.hitAt(lon, lat);
+        if (!hits.length) { tip.hidden = true; cv.style.cursor = ""; return; }
+        tip.textContent = hits.join(" · "); tip.hidden = false;
+        tip.style.left = (e.clientX + 14) + "px"; tip.style.top = (e.clientY - 32) + "px";
+        cv.style.cursor = "help";
+      });
+      cv.addEventListener("pointerleave", () => { if (ALERTM()) { tip.hidden = true; cv.style.cursor = ""; } });
+    }
+  })();
+
   // hover readout: frame px -> map figure px (same camera as crop()) -> a pointer position on the hidden map -> viewer readout()
   const tip = document.createElement("div"); tip.id = "stip"; tip.hidden = true; document.body.appendChild(tip);
   for (const k of ["v", "h"]) {
@@ -1483,7 +1507,7 @@ if (!CLEAN) {   // Studio: Map | Meteogram switch (first in the menu bar) + the 
       if (!document.getElementById("alertp")) { const ap = document.createElement("div"); ap.id = "alertp"; ap.innerHTML = `<div id="alert-root"></div>`; pnl.appendChild(ap); }
       window.__alertLoad = window.__alertLoad || new Promise((ok, bad) => {
         if (!document.querySelector('link[href="alert/alert.css"]')) { const l = document.createElement("link"); l.rel = "stylesheet"; l.href = "alert/alert.css"; document.head.appendChild(l); }
-        const sc = document.createElement("script"); sc.src = "alert/alert.js?v=20261105t14"; sc.onload = ok; sc.onerror = bad; document.body.appendChild(sc); });
+        const sc = document.createElement("script"); sc.src = "alert/alert.js?v=20261105t15"; sc.onload = ok; sc.onerror = bad; document.body.appendChild(sc); });
       MG.msg = "Loading alerts\u2026"; let asig = "";
       const agrab = () => { const S_ = typeof Alerts !== "undefined" && Alerts._state, cv_ = document.getElementById("al-canvas"); if (!S_ || !cv_ || !cv_.width) return;
         const sig = [S_.loaded, S_.selectedType || "ALL", S_.k, S_.cx, S_.cy, cv_.width, (S_.alerts || []).length, S_.sig || ""].join("|");

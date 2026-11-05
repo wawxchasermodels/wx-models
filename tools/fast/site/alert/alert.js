@@ -568,11 +568,30 @@ const Alerts = (() => {
     S.timer = setInterval(() => { if (S.shown && !document.hidden) loadAlerts(); }, REFRESH_MS);
   }
 
+
+  function hitAt(lon, lat) {
+    const vis = visibleAlerts();
+    const hits = [];
+    for (let i = vis.length - 1; i >= 0; i--) {
+      const a = vis[i], g = a._geom; if (!g) continue;
+      if (pointInGeom(lon, lat, g)) {
+        const ev = (a.properties && a.properties.event) || "Alert";
+        if (!hits.includes(ev)) hits.push(ev);
+      }
+    }
+    return hits;
+  }
+  /** Bitmap CSS-px (alert canvas space) → lon/lat. */
+  function cssToLonLat(sx, sy) {
+    const [mx, my] = screenToMerc(sx, sy);
+    return mercToLonLat(mx, my);
+  }
+
   function titleText() { return S.selectedType || "All Alerts"; }
 
   return {
     show, hide, redraw: req, drawNow: draw, load: loadAlerts,
-    fitToSelection, titleText, eventTypes, coverSafe, mercXY, llToXY, approxViewLL,
+    fitToSelection, titleText, eventTypes, coverSafe, mercXY, llToXY, approxViewLL, hitAt, cssToLonLat,
     setFillAlpha: (a) => { S.fillAlpha = Math.max(0.2, Math.min(1, +a || 1)); const op=$("al-opacity"), opv=$("al-opacity-val"); if (op) op.value=String(Math.round(S.fillAlpha*100)); if (opv) opv.textContent=Math.round(S.fillAlpha*100)+"%"; req(); },
     _state: S
   };
