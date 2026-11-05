@@ -681,13 +681,7 @@ for (const k of ["v", "h"]) {
     if (!d && !PD && PIN.show && !PIN.mode && e.pointerType === "mouse") cv.style.cursor = pinHit(k, cv, e) ? "grab" : "";
     if (!d || pz || (d.id !== undefined && e.pointerId !== d.id)) return; const s = f.W / cv.clientWidth, fr = getFr(k);
     fr.dx = d.fr.dx + (e.clientX - d.x) * s; fr.dy = d.fr.dy + (e.clientY - d.y) * s;
-    if (ALERTM() && typeof Alerts !== "undefined" && Alerts._state && MG.img) {
-      const S_ = Alerts._state, r = crop(k, fr), kk = r.kk, rect = F[k].cv.getBoundingClientRect();
-      const cssDx = ((e.clientX - d.x) * F[k].W / rect.width) / kk / (S_.dpr || 1);
-      const cssDy = ((e.clientY - d.y) * F[k].H / rect.height) / kk / (S_.dpr || 1);
-      const s = (S_.scale || 1) * (S_.k || 1) || 1;
-      S_.cx -= cssDx / s; S_.cy += cssDy / s; // mercator y is north-up
-      Alerts.redraw(); d.x = e.clientX; d.y = e.clientY; setFr(k, fr); render(k); return; }
+    // 11-05 t2480u: Active Alerts pan/zoom is per Studio frame (fr), not the shared Alerts mercator camera — so 9:16 and 16:9 move independently.
     if (OBSM()) { obsPan(k, fr); d.x = e.clientX; d.y = e.clientY; d.fr = Object.assign({}, fr); setFr(k, fr); render(k); return; }   // 11-04: free pan
     const r = crop(k, fr);   // keep the stored offset inside the panel
     fr.dx = (r.bx - r.cx) * r.kk; fr.dy = (r.by - r.cy) * r.kk; setFr(k, fr); render(k); });
@@ -704,20 +698,13 @@ for (const k of ["v", "h"]) {
     if (CLEAN || !last || REC.on || PIN.mode || e.targetTouches.length !== 2 || e.touches.length !== 2) { if (pz && e.targetTouches.length !== 2) pz = null; return; }
     e.preventDefault(); d = null;
     const [a, b] = [oxy(e.targetTouches[0]), oxy(e.targetTouches[1])], fr0 = getFr(k), r0 = crop(k, fr0), ox = (a[0] + b[0]) / 2, oy = (a[1] + b[1]) / 2;
-    pz = { d: Math.max(10, Math.hypot(a[0] - b[0], a[1] - b[1])), z: OBSM() ? obsZv(fr0) / 100 : (ALERTM() && typeof Alerts !== "undefined" && Alerts._state ? (Alerts._state.k || 1) : Math.max(1, fr0.zoom || 1)), mx: r0.cx + (ox - f.W / 2) / r0.kk, my: r0.cy + (oy - f.H / 2) / r0.kk };
+    pz = { d: Math.max(10, Math.hypot(a[0] - b[0], a[1] - b[1])), z: OBSM() ? obsZv(fr0) / 100 : Math.max(1, fr0.zoom || 1), mx: r0.cx + (ox - f.W / 2) / r0.kk, my: r0.cy + (oy - f.H / 2) / r0.kk };
   }, { passive: false });
   cv.addEventListener("touchmove", (e) => {
     if (PD) { e.preventDefault(); return; }
     if (!pz) return; e.preventDefault(); if (e.targetTouches.length !== 2 || e.touches.length !== 2) return;   // a finger elsewhere (scrubber, other frame, a third one): hold the zoom
     const [a, b] = [oxy(e.targetTouches[0]), oxy(e.targetTouches[1])], ox = (a[0] + b[0]) / 2, oy = (a[1] + b[1]) / 2;
     if (OBSM()) { const zo = Math.min(2.5, Math.max(0.05, pz.z * Math.max(10, Math.hypot(a[0] - b[0], a[1] - b[1])) / pz.d)), fo = obsZoom(k, getFr(k), zo); setFr(k, fo); render(k); window.__spinch = { k, zoom: zo }; return; }   // 11-04: zoom out past 1x
-    if (ALERTM() && typeof Alerts !== "undefined" && Alerts._state) {
-      const zo = Math.min(8, Math.max(0.7, pz.z * Math.max(10, Math.hypot(a[0] - b[0], a[1] - b[1])) / pz.d));
-      Alerts._state.k = zo; Alerts.redraw();
-      const fr = getFr(k); fr.zoom = 1; fr.dx = 0; fr.dy = 0; setFr(k, fr);
-      if (f.zoom) f.zoom.value = String(Math.round(zo * 100));
-      render(k); window.__spinch = { k, zoom: zo }; return;
-    }
     const z = Math.min(2.5, Math.max(1, pz.z * Math.max(10, Math.hypot(a[0] - b[0], a[1] - b[1])) / pz.d)), kk = base(k).k0 * z;
     const fr = frAt(k, pz.mx - (ox - f.W / 2) / kk, pz.my - (oy - f.H / 2) / kk, z), r = crop(k, fr);   // map point under the fingers stays under them
     fr.dx = (r.bx - r.cx) * r.kk; fr.dy = (r.by - r.cy) * r.kk; setFr(k, fr); render(k); window.__spinch = { k, zoom: z };
@@ -727,22 +714,13 @@ for (const k of ["v", "h"]) {
   cv.addEventListener("keydown", (e) => {
     const fr = getFr(k), st = e.shiftKey ? 10 : 1; let hit = true;
     if (OBSM() && ["+", "=", "-"].includes(e.key)) { obsZoom(k, fr, obsZv(fr) / 100 + (e.key === "-" ? -0.01 : 0.01)); e.preventDefault(); e.stopPropagation(); setFr(k, fr); render(k); return; }
-    if (ALERTM() && typeof Alerts !== "undefined" && Alerts._state && ["+", "=", "-", "0"].includes(e.key)) {
-      if (e.key === "0") Alerts._state.k = 1;
-      else Alerts._state.k = Math.min(8, Math.max(0.7, (Alerts._state.k || 1) + (e.key === "-" ? -0.05 : 0.05)));
-      Alerts.redraw(); fr.zoom = 1; fr.dx = 0; fr.dy = 0; if (f.zoom) f.zoom.value = String(Math.round(Alerts._state.k * 100));
-      e.preventDefault(); e.stopPropagation(); setFr(k, fr); render(k); return;
-    }
     if (e.key === "ArrowLeft") fr.dx -= st; else if (e.key === "ArrowRight") fr.dx += st; else if (e.key === "ArrowUp") fr.dy -= st; else if (e.key === "ArrowDown") fr.dy += st;
     else if (e.key === "+" || e.key === "=") fr.zoom = Math.min(2.5, (fr.zoom || 1) + 0.01); else if (e.key === "-") fr.zoom = Math.max(1, (fr.zoom || 1) - 0.01);
     else if (e.key === "0") { fr.dx = fr.dy = 0; fr.zoom = 1; } else hit = false;
     if (hit && OBSM() && e.key.startsWith("Arrow")) obsPan(k, fr);
     if (hit) { e.preventDefault(); e.stopPropagation(); setFr(k, fr); render(k); }
   }, true);
-  f.zoom.oninput = () => { const fr = getFr(k); if (OBSM()) obsZoom(k, fr, f.zoom.value / 100); else if (ALERTM() && typeof Alerts !== "undefined" && Alerts._state) {
-      // Zoom lives in mercator camera (uniform S.k); keep Studio cover crop at 1 so we never stretch
-      Alerts._state.k = Math.max(0.7, f.zoom.value / 100); Alerts.redraw(); fr.zoom = 1; fr.dx = 0; fr.dy = 0;
-    } else { fr.zoom = Math.max(1, f.zoom.value / 100); } setFr(k, fr); render(k); };
+  f.zoom.oninput = () => { const fr = getFr(k); if (OBSM()) obsZoom(k, fr, f.zoom.value / 100); else { fr.zoom = Math.max(1, f.zoom.value / 100); } setFr(k, fr); render(k); };
   cv.parentNode.querySelector(".shd").addEventListener("click", async (e) => {
     const a = e.target.closest("button[data-a]"); if (!a || !last) return;
     if (a.dataset.a === "reset") { if (ALERTM() && typeof Alerts !== "undefined") { if (Alerts.fitToSelection) Alerts.fitToSelection(); else if (Alerts._state) { Alerts._state.k = 1; Alerts.redraw(); } } if (OBSM() && typeof Obs !== "undefined" && Obs._state && OZ.sub < 1) { ozSync(); Obs._state.k = OZ.ref; OZ.sub = 1; Obs.redraw(); } setFr(k, { dx: 0, dy: 0, zoom: 1 }); if (ALERTM() && f.zoom) f.zoom.value = "100"; render(k); }
