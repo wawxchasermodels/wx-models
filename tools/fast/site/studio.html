@@ -195,6 +195,8 @@ body.actrow #stepctl #step{display:none}
 #scrub.inbar.inrow .sr{flex-wrap:nowrap;align-items:center}
 #scrub.inbar.inrow .sw{flex:1 1 auto;width:auto;min-width:160px;padding-bottom:12px}
 #actrow #stat{min-width:0}
+/* 11-05 (t2449u): exactly two rows on desktop: compact first-row controls so Studio..Play fits on one line at 1512 */
+@media (min-width:1300px){body.actrow #bar{gap:6px;column-gap:6px}body.actrow #bar>label select,body.actrow #smodel select{max-width:150px;padding:4px 4px}body.actrow #run{max-width:150px}body.actrow #view{max-width:170px}body.actrow #prod{max-width:170px}body.actrow #tabs button{padding:3px 8px}body.actrow #tabs{gap:4px}body.actrow #bar>#stat{display:none}}
 </style></head>
 <body>
 <div id="bar">
@@ -260,7 +262,7 @@ body.actrow #stepctl #step{display:none}
 </script>
 <script src="viewer.js?v=20261104s32"></script>
 <script src="stormfind.js?v=20261031c"></script>
-<script src="studio.js?v=20261105t"></script>
+<script src="studio.js?v=20261105u"></script>
 <script src="reqbox.js?v=20261103m"></script>
 <footer class="lic"><details><summary>Data: &copy; <span class="yr">2026</span> ECMWF (www.ecmwf.int), CC BY 4.0 &middot; Places: GeoNames, CC BY 4.0 &middot; NOAA (public domain) &middot; Natural Earth &middot; <u>Credits</u></summary>
 <p>Based on data and products of the European Centre for Medium-Range Weather Forecasts (ECMWF). Copyright &copy; <span class="yr">2026</span> ECMWF, <a href="https://www.ecmwf.int">www.ecmwf.int</a>. Licensed under CC BY 4.0 (<a href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a>). Maps are modified from the original data. ECMWF does not accept any liability whatsoever for any error or omission in the data, their availability, or for any loss or damage arising from their use.</p>
