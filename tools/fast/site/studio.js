@@ -693,7 +693,7 @@ for (const k of ["v", "h"]) {
     if (hit && OBSM() && e.key.startsWith("Arrow")) obsPan(k, fr);
     if (hit) { e.preventDefault(); e.stopPropagation(); setFr(k, fr); render(k); }
   }, true);
-  f.zoom.oninput = () => { const fr = getFr(k); if (OBSM()) obsZoom(k, fr, f.zoom.value / 100); else { fr.zoom = Math.max(1, f.zoom.value / 100); if (ALERTM() && typeof Alerts !== "undefined") { /* frame zoom only; towns densify via Alerts._state.k from wheel on offscreen */ } } setFr(k, fr); render(k); };
+  f.zoom.oninput = () => { const fr = getFr(k); if (OBSM()) obsZoom(k, fr, f.zoom.value / 100); else { fr.zoom = Math.max(1, f.zoom.value / 100); if (ALERTM() && typeof Alerts !== "undefined" && Alerts._state) { Alerts._state.k = Math.max(0.7, fr.zoom); Alerts.redraw(); } } setFr(k, fr); render(k); };
   cv.parentNode.querySelector(".shd").addEventListener("click", async (e) => {
     const a = e.target.closest("button[data-a]"); if (!a || !last) return;
     if (a.dataset.a === "reset") { if (ALERTM() && typeof Alerts !== "undefined" && Alerts._state) { Alerts._state.k = 1; Alerts._state.cx = 800; Alerts._state.cy = 800; Alerts.redraw(); } if (OBSM() && typeof Obs !== "undefined" && Obs._state && OZ.sub < 1) { ozSync(); Obs._state.k = OZ.ref; OZ.sub = 1; Obs.redraw(); } setFr(k, { dx: 0, dy: 0, zoom: 1 }); render(k); }
