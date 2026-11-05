@@ -1507,7 +1507,7 @@ if (!CLEAN) {   // Studio: Map | Meteogram switch (first in the menu bar) + the 
       if (!document.getElementById("alertp")) { const ap = document.createElement("div"); ap.id = "alertp"; ap.innerHTML = `<div id="alert-root"></div>`; pnl.appendChild(ap); }
       window.__alertLoad = window.__alertLoad || new Promise((ok, bad) => {
         if (!document.querySelector('link[href="alert/alert.css"]')) { const l = document.createElement("link"); l.rel = "stylesheet"; l.href = "alert/alert.css"; document.head.appendChild(l); }
-        const sc = document.createElement("script"); sc.src = "alert/alert.js?v=20261105t16"; sc.onload = ok; sc.onerror = bad; document.body.appendChild(sc); });
+        const sc = document.createElement("script"); sc.src = "alert/alert.js?v=20261105t17"; sc.onload = ok; sc.onerror = bad; document.body.appendChild(sc); });
       MG.msg = "Loading alerts\u2026"; let asig = "";
       const agrab = () => { const S_ = typeof Alerts !== "undefined" && Alerts._state, cv_ = document.getElementById("al-canvas"); if (!S_ || !cv_ || !cv_.width) return;
         const sel = (S_.selectedTypes && S_.selectedTypes.size) ? [...S_.selectedTypes].sort().join(',') : 'ALL'; const sig = [S_.loaded, sel, S_.k, S_.cx, S_.cy, cv_.width, (S_.alerts || []).length, S_.sig || ""].join("|");

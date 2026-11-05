@@ -218,31 +218,62 @@ const Alerts = (() => {
     req();
   }
 
+  // Match posted alert maps (alert_style MAIN cities + coastal) — t2491u/t2493u
+  const MAIN_TOWNS = new Set([
+    "Seattle", "Tacoma", "Spokane", "Olympia", "Everett", "Bellingham", "Vancouver",
+    "Yakima", "Tri-Cities", "Wenatchee", "Walla Walla", "Aberdeen", "Longview",
+    "Mount Vernon", "Ellensburg", "Port Angeles", "Bellevue", "Kent", "Renton",
+    "Kennewick", "Richland", "Pasco", "Bremerton", "Pullman"
+  ]);
+  const COASTAL_TOWNS = new Set([
+    "Aberdeen", "Hoquiam", "Westport", "Ocean Shores", "Long Beach", "Ilwaco",
+    "Forks", "Neah Bay", "La Push", "Port Angeles", "Sequim", "Port Townsend",
+    "Anacortes", "Friday Harbor", "Oak Harbor", "Blaine", "Birch Bay", "Raymond",
+    "South Bend", "Tokeland", "Pacific Beach", "Moclips", "Copalis Beach",
+    "Quinault", "Amanda Park", "Kalaloch", "Ozette"
+  ]);
+  function townPriority(t) {
+    if (MAIN_TOWNS.has(t.n)) return 0;
+    if (COASTAL_TOWNS.has(t.n) || t.notable) return 1;
+    return 2 + (t.tier || 0);
+  }
+
   function townBudget() {
-    if (S.k < 1.15) return { maxTier: 0, n: 20 };
-    if (S.k < 1.6) return { maxTier: 1, n: 32 };
-    if (S.k < 2.2) return { maxTier: 2, n: 45 };
-    if (S.k < 3.2) return { maxTier: 3, n: 60 };
-    return { maxTier: 4, n: 85 };
+    // Looser at overview so main + coastal towns show like other WA products (t2491u/t2493u)
+    if (S.k < 1.15) return { maxTier: 2, n: 48 };
+    if (S.k < 1.6) return { maxTier: 3, n: 60 };
+    if (S.k < 2.2) return { maxTier: 3, n: 72 };
+    if (S.k < 3.2) return { maxTier: 4, n: 90 };
+    return { maxTier: 4, n: 110 };
   }
   function pickTowns() {
     const budget = townBudget();
     const vis = visibleAlerts();
     const geoms = vis.map((a) => a._geom).filter(Boolean);
-    const inside = [], outside = [];
+    const cand = [];
     for (const t of S.towns) {
-      if (t.tier > budget.maxTier && !t.notable) continue;
+      const force = MAIN_TOWNS.has(t.n) || COASTAL_TOWNS.has(t.n) || t.notable;
+      if (!force && t.tier > budget.maxTier) continue;
       const hit = geoms.length ? geoms.some((g) => pointInGeom(t.lon, t.lat, g)) : false;
-      (hit ? inside : outside).push(t);
+      cand.push({ t, hit, pri: townPriority(t), pop: t.pop || 0 });
     }
-    const out = [];
-    const take = (arr, n) => { for (const t of arr) { if (out.length >= n) break; out.push(t); } };
-    take(inside, budget.n);
-    take(outside, Math.min(budget.n, out.length + Math.max(6, Math.floor(budget.n * 0.3))));
+    cand.sort((a, b) => (a.pri - b.pri) || (b.pop - a.pop) || ((b.hit ? 1 : 0) - (a.hit ? 1 : 0)));
+    const out = [], seen = new Set();
+    // Always try main + coastal first (even if outside alert fill)
+    for (const row of cand) {
+      if (out.length >= budget.n) break;
+      if (row.pri > 1) continue; // main/coastal/notable pass
+      if (seen.has(row.t.n)) continue;
+      seen.add(row.t.n); out.push(row.t);
+    }
+    for (const row of cand) {
+      if (out.length >= budget.n) break;
+      if (seen.has(row.t.n)) continue;
+      seen.add(row.t.n); out.push(row.t);
+    }
     return out;
   }
 
-  // All drawing in CSS pixel space; caller sets ctx transform to dpr.
   function pathGeom(g, ctx) {
     walkCoords(g, (ring) => {
       if (!ring.length) return;
@@ -572,7 +603,7 @@ const Alerts = (() => {
     if (!S.towns.length) {
       try {
         const t = await loadJSON("alert/towns_wa.json");
-        S.towns = (t.places || []).slice().sort((a, b) => (b.notable - a.notable) || (a.tier - b.tier) || (b.pop - a.pop));
+        S.towns = (t.places || []).slice().sort((a, b) => townPriority(a) - townPriority(b) || (b.pop || 0) - (a.pop || 0) || (a.tier - b.tier));
       } catch (e) { S.towns = []; }
     }
     req();
