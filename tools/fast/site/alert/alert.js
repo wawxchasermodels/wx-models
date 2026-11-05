@@ -231,11 +231,13 @@ const Alerts = (() => {
   function drawBasemap(ctx) {
     ctx.fillStyle = C_OCEAN;
     ctx.fillRect(0, 0, CSS, CSS);
-    // Marine forecast zones (slightly lighter water)
-    ctx.beginPath();
-    for (const f of S.waterFeats) if (f.geometry) pathGeom(f.geometry, ctx);
+    // Inactive marine zones: subtle water tint only — NO borders (Benjamin: look like a normal map)
     ctx.fillStyle = C_WATER;
-    ctx.fill("evenodd");
+    for (const f of S.waterFeats) {
+      if (!f.geometry) continue;
+      ctx.beginPath(); pathGeom(f.geometry, ctx);
+      ctx.fill(); // nonzero overpaint; avoids evenodd slivers in S Puget Sound
+    }
     // State land fill (clear shape)
     if (S.stateGeom) {
       ctx.beginPath(); pathGeoJSON(S.stateGeom, ctx);
@@ -245,7 +247,7 @@ const Alerts = (() => {
       for (const f of S.landFeats) if (f.geometry) pathGeom(f.geometry, ctx);
       ctx.fillStyle = C_LAND; ctx.fill("evenodd");
     }
-    // County lines (subtle)
+    // County lines (subtle) — keep
     if (S.countyGeoms && S.countyGeoms.length) {
       ctx.beginPath();
       for (const g of S.countyGeoms) pathGeoJSON(g, ctx);
@@ -253,19 +255,14 @@ const Alerts = (() => {
       ctx.strokeStyle = C_COUNTY;
       ctx.stroke();
     }
-    // State outline (strong)
+    // State outline (strong) — keep
     if (S.stateGeom) {
       ctx.beginPath(); pathGeoJSON(S.stateGeom, ctx);
       ctx.lineWidth = 4.2;
       ctx.strokeStyle = C_STATE;
       ctx.stroke();
     }
-    // Marine outlines
-    ctx.beginPath();
-    for (const f of S.waterFeats) if (f.geometry) pathGeom(f.geometry, ctx);
-    ctx.lineWidth = 1.2;
-    ctx.strokeStyle = "rgba(150,180,210,0.4)";
-    ctx.stroke();
+    // No inactive zone strokes. Active alerts draw their own alert-colored stroke in draw().
   }
 
   function drawTowns(ctx) {
