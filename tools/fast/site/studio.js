@@ -1283,7 +1283,7 @@ if (!CLEAN) {
   // Observations, Request a change), then the long hour scrubber to their right filling the rest of the line (in flow, wraps on narrow).
   if (innerWidth > 820) { const bar_ = document.getElementById("bar"), ar = document.createElement("div"); ar.id = "actrow";
     ["save", "share", "mgbtn", "pfbtn", "obsbtn"].forEach(id => { const e = document.getElementById(id); if (e) ar.appendChild(e); });
-    box.classList.add("inbar", "inrow"); document.body.classList.add("longscrub", "actrow"); ar.appendChild(box); const st_ = document.getElementById("stat"); if (st_) ar.appendChild(st_); bar_.appendChild(ar);
+    box.classList.add("inbar", "inrow"); document.body.classList.add("longscrub", "actrow"); ar.appendChild(box); const st_ = document.getElementById("stat"); bar_.insertBefore(ar, st_ && st_.parentNode === bar_ ? st_.nextSibling : null);
     const ln = document.getElementById("loadnote"); if (ln) box.querySelector(".sw").appendChild(ln);
     document.addEventListener("DOMContentLoaded", () => { const rq = document.getElementById("rqb"); if (rq) ar.insertBefore(rq, box); }); }
   else if (false) { const bar_ = document.getElementById("bar"); box.classList.add("inbar"); document.body.classList.add("longscrub"); bar_.appendChild(box);
