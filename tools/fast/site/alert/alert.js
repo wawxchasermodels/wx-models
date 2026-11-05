@@ -11,7 +11,7 @@ const Alerts = (() => {
   const C_WATER = "#153a58";
   const C_LAND = "#1a222e";
   const C_COUNTY = "rgba(210,220,235,0.85)";
-  const C_STATE = "rgba(245,250,255,1)";
+  const C_STATE = "rgba(200,215,235,0.9)";
   const WA0 = { lon0: -125.15, lon1: -116.7, lat0: 45.4, lat1: 49.1 };
   const CSS = 1600;
   const SIDE_PREF = { "Oak Harbor": "left" };
@@ -227,6 +227,28 @@ const Alerts = (() => {
     if (gj.type === "FeatureCollection") return (gj.features || []).forEach((f) => pathGeom(f.geometry, ctx));
     return pathGeom(gj, ctx);
   }
+  /** Stroke only exterior rings (skip lake/Sound holes that look like marine-zone borders). */
+  function pathExterior(g, ctx) {
+    if (!g) return;
+    const strokeRing = (ring) => {
+      if (!ring || !ring.length) return;
+      const [x0, y0] = llToXY(ring[0][0], ring[0][1]);
+      const [sx0, sy0] = worldToScreen(x0, y0);
+      ctx.moveTo(sx0, sy0);
+      for (let i = 1; i < ring.length; i++) {
+        const [x, y] = llToXY(ring[i][0], ring[i][1]);
+        const [sx, sy] = worldToScreen(x, y);
+        ctx.lineTo(sx, sy);
+      }
+      ctx.closePath();
+    };
+    const t = g.type;
+    if (t === "Polygon") strokeRing(g.coordinates[0]);
+    else if (t === "MultiPolygon") g.coordinates.forEach((poly) => strokeRing(poly[0]));
+    else if (t === "GeometryCollection") (g.geometries || []).forEach((gg) => pathExterior(gg, ctx));
+    else if (t === "Feature") pathExterior(g.geometry, ctx);
+    else if (t === "FeatureCollection") (g.features || []).forEach((f) => pathExterior(f.geometry, ctx));
+  }
 
   function drawBasemap(ctx) {
     ctx.fillStyle = C_OCEAN;
@@ -255,10 +277,10 @@ const Alerts = (() => {
       ctx.strokeStyle = C_COUNTY;
       ctx.stroke();
     }
-    // State outline (strong) — keep
+    // State outline: exterior rings only (not Sound/lake holes — those looked like marine borders)
     if (S.stateGeom) {
-      ctx.beginPath(); pathGeoJSON(S.stateGeom, ctx);
-      ctx.lineWidth = 4.2;
+      ctx.beginPath(); pathExterior(S.stateGeom, ctx);
+      ctx.lineWidth = 2.4;
       ctx.strokeStyle = C_STATE;
       ctx.stroke();
     }
