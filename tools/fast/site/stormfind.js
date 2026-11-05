@@ -44,9 +44,13 @@ async function decode(DATA, R, name, f) {   // viewer.js getField (packed channe
 let landP = null;
 function landMask(DATA) {   // fn(lat, lon) -> true land / false sea / null unknown, from the newest ECMWF run's wave field
   return landP || (landP = (async () => {
-    const man = await (await fetch(DATA + "manifest.json", { cache: "no-cache" })).json(), rs = (man.runs || {}).ifs || [];
+    const manRes = await fetch(DATA + "manifest.json", { cache: "no-cache" });
+    if (!manRes.ok) throw new Error("manifest.json HTTP " + manRes.status);
+    const man = await manRes.json(), rs = (man.runs || {}).ifs || [];
     for (const r of rs.slice().reverse()) {
-      const R = await (await fetch(`${DATA}runs/ifs/${r}/run.json`)).json(); if (!R.fields.includes("swh")) continue;
+      const runRes = await fetch(`${DATA}runs/ifs/${r}/run.json`);
+      if (!runRes.ok) continue;
+      const R = await runRes.json(); if (!R.fields || !R.fields.includes("swh")) continue;
       const st = R.steps.find((s) => s.ranges && s.ranges.swh); if (!st) continue;
       const F = await decode(DATA, R, "swh", st.f);
       return (lat, lon) => { const [i, j] = IFS.ij(lat, lon), ii = Math.round(i), jj = Math.round(j);

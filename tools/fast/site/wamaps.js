@@ -81,9 +81,10 @@ const PRODUCTS = {
   snow: { title: () => "Total Snowfall", pal: SNOW, key: "Snow (in)", field: { nbm: "ns6", def: "asnow" }, word: "Snowiest", none: "Little or no snow at labeled spots" },
 };
 // ---------------------------------------------------------------- data (same R2 layout / decoding as viewer.js)
-async function loadRun(c) { if (!WA.runs[c]) WA.runs[c] = await (await fetch(`${DATA}runs/nbm/${c}/run.json`, { cache: "no-cache" })).json(); return WA.runs[c]; }
+async function readJSON(url) { const r = await fetch(url, { cache: "no-cache" }); const text = await r.text(); if (!r.ok) throw new Error(url + ": HTTP " + r.status); try { return JSON.parse(text); } catch (e) { throw new Error(url + ": response is not JSON"); } }
+async function loadRun(c) { if (!WA.runs[c]) WA.runs[c] = await readJSON(`${DATA}runs/nbm/${c}/run.json`); return WA.runs[c]; }
 const rkey = (m, c) => m === "nbm" ? c : `${m}/${c}`;   // NBM keeps the Phase 1 keys
-async function loadRunM(m, c) { const k = rkey(m, c); if (!WA.runs[k]) WA.runs[k] = await (await fetch(`${DATA}runs/${m}/${c}/run.json`, { cache: "no-cache" })).json(); return WA.runs[k]; }
+async function loadRunM(m, c) { const k = rkey(m, c); if (!WA.runs[k]) WA.runs[k] = await readJSON(`${DATA}runs/${m}/${c}/run.json`); return WA.runs[k]; }
 const pix = new Map();
 function getPixels(url) {
   if (pix.has(url)) return pix.get(url);
@@ -273,7 +274,7 @@ async function render(cv, c, kind, view, d) {
 async function renderTotals(cv, m, c, kind, view, w) {
   const P = PRODUCTS[kind], pal = P.pal;
   const [K, VK, F, T, LB] = await Promise.all([kindKit("low", view), viewKit(view, lutOf(m)), totalField(m, c, kind, w.f0, w.f1),
-    fetch(KIT + view + "/totals.json").then(r => r.json()), m === "nbm" ? null : fetch(KIT + view + `/lab_${lutOf(m)}.json`).then(r => r.json())]);
+    readJSON(KIT + view + "/totals.json"), m === "nbm" ? null : readJSON(KIT + view + `/lab_${lutOf(m)}.json`)]);
   const [base, over, title] = await Promise.all([loadImg(KIT + view + "/base.png"), loadImg(KIT + view + "/plain_overlay.png"), loadImg(KIT + view + `/titles/${P.timg ? P.timg(w) : kind}.png`)]);
   cv.width = K.W; cv.height = K.H; const ctx = cv.getContext("2d");
   ctx.drawImage(base, 0, 0); fillData(ctx, K, VK, F, pal); ctx.drawImage(over, 0, 0); ctx.drawImage(title, 0, 0);
@@ -368,7 +369,7 @@ async function draw() {
     if (tot) { u.searchParams.set("model", S.m); u.searchParams.set("from", S.f0); u.searchParams.set("to", S.f1); } else u.searchParams.set("day", S.day);
     try { history.replaceState(null, "", u); } catch (e) {}
     window.__drawn = (window.__drawn || 0) + 1;
-  } catch (e) { console.error(e); if (my === S.busy) $("msg").textContent = "Could not draw: " + e.message; }
+  } catch (e) { if (my === S.busy && $("msg")) $("msg").textContent = "Could not draw: " + (e && e.message || e); }
 }
 function fit() {   // whole map in the window (phones: full width)
   const cv = $("map"), wr = $("wrap"), r = wr.getBoundingClientRect(), k = Math.min(r.width / cv.width, (r.height || 1e9) / cv.height);
@@ -387,7 +388,7 @@ function save() {
   }, "image/jpeg", 0.95);
 }
 async function boot() {
-  const [man] = await Promise.all([fetch(DATA + "manifest.json", { cache: "no-cache" }).then(r => r.json()), document.fonts.load("800 40px Montserrat")]);
+  const [man] = await Promise.all([readJSON(DATA + "manifest.json"), document.fonts.load("800 40px Montserrat")]);
   WA.man = man; if (!(man.runs.nbm || []).length) { $("msg").textContent = "No NBM run available."; return; }
   const ms = MODELS_T.filter(m => (man.runs[m] || []).length); if (!ms.includes(S.m)) S.m = "nbm";
   fillSel($("model"), ms.map(m => [m, SRC[m].name]), S.m);
@@ -406,4 +407,4 @@ async function boot() {
   ph(); (mq.addEventListener ? mq.addEventListener("change", ph) : mq.addListener(ph)); addEventListener("resize", fit);
   await draw(); window.__ready = true;
 }
-boot().catch(e => { console.error(e); $("msg").textContent = "Could not load: " + e.message; });
+boot().catch(e => { if ($("msg")) $("msg").textContent = "Could not load: " + (e && e.message || e); });

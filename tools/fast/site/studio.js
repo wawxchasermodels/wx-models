@@ -883,7 +883,8 @@ function loopTimes(n) {
 // hour slider / buttons / arrow keys / Play keep working, "Start = now" / "End = now" take the hour on the map, and the loop
 // range is shaded on the hour slider.
 function mpSync() {
-  if ($s("mp4p").hidden || !S.run) return; const st = S.runs[S.run].steps, sl = $("step"), mx = Math.max(1, +sl.max || st.length - 1);
+  const Rsync = S.run && S.runs[S.run];
+  if ($s("mp4p").hidden || !Rsync || !Rsync.steps) return; const st = Rsync.steps, sl = $("step"), mx = Math.max(1, +sl.max || st.length - 1);
   if (+$s("mpa").options.length !== st.length) return;   // run changed: options rebuilt on next open
   $s("mpnow").textContent = `Map now: ${lbl(st[S.i])}`;
   const a = +$s("mpa").value, b = +$s("mpb").value; sl.style.setProperty("--ra", String(Math.min(a, b) / mx)); sl.style.setProperty("--rb", String(Math.max(a, b) / mx));
@@ -1295,7 +1296,7 @@ if (!CLEAN && $s("mp4p")) {
 const PLAY = { on: SQ.get("play") === "1", t: 0, next() {
   clearTimeout(PLAY.t); const dwell = +SQ.get("dwell") || 700, stepH = +SQ.get("step") || 0;
   PLAY.t = setTimeout(async () => {
-    const st = S.runs[S.run].steps; let i = S.i + 1; if (stepH) while (i < st.length && st[i].f - st[S.i].f < stepH) i++;
+    const Rplay = S.runs[S.run]; if (!Rplay || !Rplay.steps) return; const st = Rplay.steps; let i = S.i + 1; if (stepH) while (i < st.length && st[i].f - st[S.i].f < stepH) i++;
     if (i >= st.length) {
       if (SQ.get("loop") === "0") return;
       if (SQ.get("model") && !SQ.get("run")) { try { const M2 = await (await fetch(DATA + "manifest.json", { cache: "no-cache" })).json(), rs = (M2.runs || {})[SQ.get("model")] || [];
@@ -1563,7 +1564,16 @@ if (!CLEAN) {   // Studio: Map | Meteogram switch (first in the menu bar) + the 
   const pfOpen = (name) => { const m = PF.run.split("/")[0], h = "#" + new URLSearchParams({ s: PFSEC[m] || m, w: name, p: pfProd(PFSEC[m] || m) }).toString();
     localStorage.setItem("studio:mghash", h); localStorage.setItem("studio:mgfrom", "pass"); hov.hidden = true;
     if (fr_) { MG.img = null; MG.src = ""; try { fr_.contentWindow.location.hash = h; } catch (e) { fr_.src = "meteograms.html" + h; } }
-    MG.kind = "mg"; sel.value = "mg"; setMode("mg"); backSync(); window.__pfOpened = { name, hash: h }; };
+    MG.kind = "mg"; sel.value = "mg"; setMode("mg"); backSync(); window.__pfOpened = { name, hash: h, run: PF.run }; };
+  // Same chart studioPassChart draws for this pass and this run. pfOpen replaces __pfOpened, so the chart is attached after it.
+  window.__pfChart = async (name) => {
+    const run = (document.getElementById("pfrun") && document.getElementById("pfrun").value) || PF.run;
+    if (run) PF.run = run;
+    const chart = await window.studioPassChart(run, name, 1800, 960);
+    pfOpen(name);
+    window.__pfOpened = Object.assign({}, window.__pfOpened, { name, run, chart });
+    return chart;
+  };
   for (const k of ["v", "h"]) { const cv = F[k].cv; let dn = null;
     cv.addEventListener("pointermove", (e) => { if (!PASSM()) return; const i = REC.on ? -1 : pfRow(k, e); cv.style.cursor = i >= 0 ? "pointer" : (PASSM() ? "default" : ""); if (i >= 0 && e.pointerType === "mouse") hovAt(k, i); else hov.hidden = true; });
     cv.addEventListener("pointerleave", () => { hov.hidden = true; if (PASSM()) cv.style.cursor = ""; });

@@ -286,7 +286,7 @@ async function boot() {
   // 10-29: manifest, fonts and the shown run's run.json in parallel; other runs load when picked
   PV = await fetch("pdata/manifest_pv.json", { cache: "no-cache" }).then(r => r.ok ? r.json() : null).catch(() => null);
   if (PV) PV.re = new RegExp(`^(runs/(${Object.keys(PV.models).join("|")})/|static/(x2/)?(lut|key)_(${Object.keys(PV.models).join("|")})_)`);
-  const [man, sv, vf, wv] = await Promise.all([fetch(DATA + "manifest.json", { cache: "no-cache" }).then(r => r.json()).then(pvMerge),
+  const [man, sv, vf, wv] = await Promise.all([readJSON(DATA + "manifest.json", { cache: "no-cache" }).then(pvMerge),
                                    fetch(DATA + "static/studio_views.json", { cache: "no-cache" }).then(r => r.ok ? r.json() : null, () => null),
                                    fetch(DATA + "static/view_fixes.json", { cache: "no-cache" }).then(r => r.ok ? r.json() : null, () => null),
                                    fetch(DATA + "static/wave_views.json", { cache: "no-cache" }).then(r => r.ok ? r.json() : null, () => null),
@@ -311,13 +311,22 @@ async function boot() {
   if (qr && !Q.get("embed") && !Q.get("id") && !Q.get("slim")) { const qm2 = qr.split("/")[0], cyc = qr.split("/")[1] || "", nw = all.find(r => r.startsWith(qm2 + "/")), f0q = +Q.get("f");
     if (nw && nw !== qr) { S.run = nw;
       if (/^\d{10}$/.test(cyc) && isFinite(f0q)) vKeep = Date.UTC(+cyc.slice(0, 4), +cyc.slice(4, 6) - 1, +cyc.slice(6, 8), +cyc.slice(8, 10)) + f0q * 3600e3; } }
-  await loadRun(S.run);
+  try { await loadRun(S.run); } catch (e) { if (qr && qr !== S.run) { try { await loadRun(qr); S.run = qr; vKeep = null; } catch (e2) { throw e; } } else throw e; }
   // 11-04 (Benjamin t2319u/t2336u "It refreshes into a different product"): a refresh moves to the model's newest run, but a run that is
   // still coming in (or lacks this product) used to drop the product back to the tab's first one. Now the newest run is used only when it
   // carries the product; otherwise the refresh stays on the run in the address (same product, same hour).
   if (qr && S.run !== qr && Q.get("prod")) { const P0 = PRODS()[Q.get("prod")], carries = r => P0 && P0.fields.every(f => new Set((S.runs[r] || {}).fields || []).has(f));
     if (P0 && !carries(S.run)) { const m0 = qr.split("/")[0], cand = [qr, ...all.filter(r => r.startsWith(m0 + "/") && r !== S.run && r !== qr)].filter(r => all.includes(r)).slice(0, 3);
       for (const r of cand) { try { await loadRun(r); } catch (e) { continue; } if (carries(r)) { if (r !== qr) { /* keep the valid time */ } else vKeep = null; S.run = r; break; } } } }
+  // 11-05 Coast refresh: the newest cycle can list the product and still only have the first few hours (screen was F+36, reload
+  // opened that partial run at F+3). Keep the run in the address when the newest one has neither this forecast hour nor a step
+  // within 3 h of that valid time.
+  if (qr && S.run !== qr && all.includes(qr)) {
+    const newest = S.run;
+    const known = (r) => (r === newest ? (S.runs[newest] || {}).steps : (S.runs[r] && S.runs[r].steps));
+    if (refreshKeepsRun(qr, newest, Q.get("f"), vKeep, known) === qr && !(S.runs[qr] && S.runs[qr].steps)) { try { await loadRun(qr); } catch (e) { /* newest stays */ } }
+    if (refreshKeepsRun(qr, newest, Q.get("f"), vKeep, r => (S.runs[r] || {}).steps) === qr) { S.run = qr; vKeep = null; }
+  }
   // "Runs" menu (Benjamin 10-29 7:10 PM): every available run, grouped by model, newest first; picking one keeps the valid time
   const runLabel = r => { const [m, c] = r.split("/"), p = ((S.man.progress || {})[m] || {})[c];
     if (m === "oisst") { const st = (S.runs[r] || {}).steps, d = x => { const v = new Date(x.valid); return `${v.getUTCMonth() + 1}-${v.getUTCDate()}`; };   // 11-03: daily analyses, not a run time
@@ -332,7 +341,7 @@ async function boot() {
   runMenu(order, all); S.runMenu = () => S._runs && runMenu(...S._runs);
   // 10-31 frame at a time: every 2 min re-read the manifest so a run that just started shows up in the Runs menu without a reload
   setInterval(async () => {
-    if (document.hidden) return; let M2; try { M2 = await (await fetch(DATA + "manifest.json", { cache: "no-cache" })).json(); } catch (e) { return; }
+    if (document.hidden) return; let M2; try { M2 = await readJSON(DATA + "manifest.json", { cache: "no-cache" }); } catch (e) { return; }
     mergeRunsX(pvMerge(M2)); if (JSON.stringify([M2.runs, M2.progress]) === JSON.stringify([S.man.runs, S.man.progress])) return;
     S.man.runs = M2.runs; S.man.progress = M2.progress; S.man.mgruns = M2.mgruns;
     const o2 = order.filter(m => (S.man.runs[m] || []).length), a2 = []; for (const m of o2) for (const c of [...S.man.runs[m]].reverse()) a2.push(`${m}/${c}`);
@@ -340,14 +349,24 @@ async function boot() {
     runMenu(o2, a2); loadNote();
   }, 120e3);
   setLists();
-  if (vKeep != null && !S.runs[S.run].steps.some(x => Math.abs(Date.parse(x.valid) - vKeep) <= 3 * 3600e3)) vKeep = null;
-  const f0 = vKeep != null ? null : Q.get("f"), steps = S.runs[S.run].steps; S.i = f0 ? Math.max(0, steps.findIndex(s => s.f == +f0)) : S.run.startsWith("oisst/") ? steps.length - 1 : 0;   // 11-03: daily analyses open on the newest day
+  if (vKeep != null && !(S.runs[S.run] && S.runs[S.run].steps || []).some(x => Math.abs(Date.parse(x.valid) - vKeep) <= 3 * 3600e3)) vKeep = null;
+  const f0 = vKeep != null ? null : Q.get("f"), steps = (S.runs[S.run] && S.runs[S.run].steps) || [], found = f0 ? steps.findIndex(s => s.f == +f0) : -1;
+  S.i = found >= 0 ? found : (String(S.run || "").startsWith("oisst/") ? Math.max(0, steps.length - 1) : 0);   // 11-03: daily analyses open on the newest day. A missing hour is not index 0 via findIndex -1.
   const vq = vKeep != null ? vKeep : Date.parse(Q.get("valid") || ""); if (!f0 && vq) { let b = 0; steps.forEach((x, k) => { if (Math.abs(Date.parse(x.valid) - vq) < Math.abs(Date.parse(steps[b].valid) - vq)) b = k; }); S.i = b; }   // old-site links
   $("step").value = S.i;
   $("run").onchange = async e => {   // keep the same valid time when switching runs/models (nearest step)
-    const vt = Date.parse(S.runs[S.run].steps[S.i].valid); S.run = e.target.value; await loadRun(S.run); setLists();
-    const st = S.runs[S.run].steps; let b = 0; st.forEach((x, k) => { if (Math.abs(Date.parse(x.valid) - vt) < Math.abs(Date.parse(st[b].valid) - vt)) b = k; });
-    S.i = b; $("step").value = b; memUI(); draw(); loadNote(); };
+    const prev = S.run, R0 = S.runs[prev]; if (!R0 || !R0.steps || !R0.steps[S.i]) return;
+    const vt = Date.parse(R0.steps[S.i].valid), next = e.target.value;
+    try {
+      const R_ = await loadRun(next);
+      if (!R_ || !R_.steps || !R_.steps.length) throw new Error(next + ": run has no hours");
+      S.run = next; setLists();
+      const st = R_.steps; let b = 0; st.forEach((x, k) => { if (Math.abs(Date.parse(x.valid) - vt) < Math.abs(Date.parse(st[b].valid) - vt)) b = k; });
+      S.i = b; $("step").value = b; memUI(); draw(); loadNote();
+    } catch (err) {
+      S.run = prev; if ($("run")) $("run").value = prev;
+      showErr(new Error("Could not load " + next + ". Still showing " + prev + ". " + (err && err.message || err)));
+    } };
   memUI();
   // phones: hour slider under the map (Benjamin 10-29 9:01 PM)
   const mq = matchMedia("(max-width: 700px), (max-height: 500px)"), placeSteps = () => {
@@ -397,7 +416,7 @@ function loadNote() {
 }
 async function refreshPartial() {
   const r = S.run, R_ = S.runs[r]; if (!R_ || R_.complete !== false || document.hidden) return;
-  let N; try { N = await (await fetch(`${DATA}runs/${r}/${runFile(r)}`, { cache: "no-cache" })).json(); } catch (e) { return; }
+  let N; try { N = await readJSON(`${DATA}runs/${r}/${runFile(r)}`, { cache: "no-cache" }); } catch (e) { return; }
   if (S.run !== r || !N || !N.steps || N.steps.length < R_.steps.length) return;
   const newF = N.fields.join() !== R_.fields.join();
   S.runs[r] = prepRun(N); if (newF) setLists(); $("step").max = N.steps.length - 1; $("step").value = S.i; loadNote();
@@ -446,7 +465,31 @@ async function onCompareMsg(e) {
     st.forEach((x, k) => { if (Math.abs(Date.parse(x.valid) - vt) < Math.abs(Date.parse(st[b].valid) - vt)) b = k; }); S.i = b; $("step").value = b; }
   cmpEcho = !lead; draw(); loadNote();
 }
-async function loadRun(r) { if (!S.runs[r]) S.runs[r] = prepRun(await (await fetch(`${DATA}runs/${r}/${runFile(r)}`, { cache: "no-cache" })).json()); return S.runs[r]; }
+async function readJSON(url, opts) {
+  const r = await fetch(url, opts), text = await r.text();
+  if (!r.ok) { const err = new Error(url + ": HTTP " + r.status + (text && text.length < 80 ? " " + JSON.stringify(text) : "")); err.status = r.status; err.url = url; throw err; }
+  try { return JSON.parse(text); }
+  catch (e) { const err = new Error(url + ": response is not JSON"); err.status = r.status; err.url = url; throw err; }
+}
+// Newest cycle vs the run in the address. A partial newest run (product listed, hour not published yet) does not replace a run that has the hour.
+function refreshKeepsRun(qr, newest, fQuery, vKeep, stepsOf) {
+  if (!qr || !newest || newest === qr) return newest || qr;
+  const f = +fQuery; if (!isFinite(f)) return newest;
+  const steps = (r) => stepsOf(r);
+  const hasF = (r) => Array.isArray(steps(r)) && steps(r).some(s => s.f == f);
+  const near = (r) => vKeep != null && Array.isArray(steps(r)) && steps(r).some(s => Math.abs(Date.parse(s.valid) - vKeep) <= 3 * 3600e3);
+  if (hasF(newest) || near(newest)) return newest;
+  if (!Array.isArray(steps(qr))) return qr;
+  if (hasF(qr)) return qr;
+  return newest;
+}
+window.refreshKeepsRun = refreshKeepsRun;
+async function loadRun(r) {
+  if (S.runs[r] && Array.isArray(S.runs[r].steps)) return S.runs[r];
+  const url = `${DATA}runs/${r}/${runFile(r)}`, N = await readJSON(url, { cache: "no-cache" });
+  if (!N || !Array.isArray(N.steps)) { const err = new Error(url + ": run has no hours"); err.url = url; throw err; }
+  S.runs[r] = prepRun(N); return S.runs[r];
+}
 const SV = () => (S.man.static_v ? `?v=${S.man.static_v}` : "");   // cache-buster for static layers (they are cached 1 day)
 const MD = () => S.man.models[S.run.split("/")[0]];
 // Severe tab (10-31): new products are published under the manifest's products_x (production's older viewer only reads "products")
@@ -613,7 +656,9 @@ function getField(run, name, f) {
   const key = `${rk(run)}/${name}/${f}`;
   if (S.fields.has(key)) return S.fields.get(key);
   const p = (async () => {
-    const st = S.runs[run].steps.find(s => s.f === f);
+    const Rfield = S.runs[run];
+    if (!Rfield || !Rfield.steps) throw new Error(`nodata:${name}`);
+    const st = Rfield.steps.find(s => s.f === f);
     if (!st || !st.ranges[name]) throw new Error(`nodata:${name}`);
     const [url, ch0, tile] = fieldURL(run, name, f), I0 = await getPixels(url), T = S.runs[run].tiles || 1;
     const I = T > 1 ? { w: I0.w, h: I0.h / T, bytes: I0.bytes } : I0, ch = ch0 + tile * I.w * I.h * 4;   // tile k = rows k*h .. (k+1)*h-1
@@ -869,7 +914,9 @@ async function render(lite) {
   const seq = ++drawSeq, t0 = performance.now();
   const dir = lastKey === S.run && lastI !== null && S.i < lastI ? -1 : 1; lastI = S.i; lastKey = S.run;
   if ((VIEWS()[S.view] || {}).waveOnly && !WAVE_PIDS.test(S.prod)) setLists();   // wave-only view (West Coast) + another product
-  const run = S.run, vid = S.view, pid = S.prod, step = S.runs[run].steps[S.i], f = step.f;
+  const run = S.run, vid = S.view, pid = S.prod, Rrun = S.runs[run];
+  if (!Rrun || !Rrun.steps || !Rrun.steps[S.i]) { showErr(new Error("No forecast hours are available for " + (run || "this run") + ".")); return; }
+  const step = Rrun.steps[S.i], f = step.f;
   let st, D, key;
   try { [st, D, key] = await Promise.all([viewStatic(vid), productFields(run, pid, f), getKey(pid, vid)]); }
   catch (e) {
@@ -994,12 +1041,14 @@ async function render(lite) {
   postCompare(run, pid, vid, step);
   if (lite) { if (window.onStudioDraw && Q.get("studio")) window.onStudioDraw(cv_(), S.cur, step, true); return; }
   // iOS Safari throws after 100 history.replaceState calls in 10 s: update the URL once things settle
-  if (!Q.get("clean")) clearTimeout(urlTimer), urlTimer = setTimeout(() => { const u = new URL(location); u.searchParams.set("prod", pid); u.searchParams.set("view", vid);
+  // Write the hour into the address when the frame finishes, not 400 ms later. A water-vapor frame blocks the main
+  // thread in long chunks; a reload in that gap used to keep an older f (1920 obs water vapor: 36 on screen, 3 after reload).
+  if (!Q.get("clean")) { const u = new URL(location); u.searchParams.set("prod", pid); u.searchParams.set("view", vid);
     u.searchParams.set("f", f); u.searchParams.set("run", run); u.searchParams.delete("model");
     if (isMemRun(run)) u.searchParams.set("mem", S.mem); else u.searchParams.delete("mem");
     u.searchParams.delete("mg"); u.searchParams.delete("obs"); try { history.replaceState(null, "", u); } catch (e) {}
     // 11-04 (t2283u): last map kept so a bare studio.html / index.html open (bookmark, home-screen app) comes back on it (not compare / embeds)
-    if (!Q.get("embed") && !Q.get("id") && !Q.get("slim") && !Q.get("make")) try { localStorage.setItem(Q.get("studio") ? "studio:last" : "viewer:last", u.search); } catch (e) { /* private mode */ } }, 400);
+    if (!Q.get("embed") && !Q.get("id") && !Q.get("slim") && !Q.get("make")) try { localStorage.setItem(Q.get("studio") ? "studio:last" : "viewer:last", u.search); } catch (e) { /* private mode */ } }
   preload(run, pid, S.i);
   if (window.onStudioDraw) window.onStudioDraw(cv_(), S.cur, step);
 }
@@ -1999,11 +2048,11 @@ async function mgSeries(r) {   // {points, steps:[{f, valid}], v: {field: [[town
     const R_ = await loadRun(r); if (!R_.points) return null;
     const st = R_.steps, out = new Array(st.length); let k = 0;
     if ((R_.agg || []).includes("pts")) try {   // complete runs: one aggregated file (single/pts_all.json) instead of ~50
-      const A = await (await fetch(`${DATA}runs/${r}/single/pts_all.json`)).json(), by = new Map(A.f.map((f, i) => [f, A.d[i]]));
+      const A = await readJSON(`${DATA}runs/${r}/single/pts_all.json`), by = new Map(A.f.map((f, i) => [f, A.d[i]]));
       st.forEach((s, i) => { out[i] = by.get(s.f) || null; });
     } catch (e) { out.fill(null); }
     const one = async () => { while (k < st.length) { const i = k++; if (out[i]) continue; const f = String(st[i].f).padStart(3, "0");
-      try { out[i] = await (await fetch(`${DATA}runs/${r}/single/pts_f${f}.json`)).json(); } catch (e) { out[i] = null; } } };
+      try { out[i] = await readJSON(`${DATA}runs/${r}/single/pts_f${f}.json`); } catch (e) { out[i] = null; } } };
     await Promise.all(Array.from({ length: 8 }, one));
     const ok = st.map((s, i) => [s, out[i]]).filter(x => x[1]);
     return { points: R_.points, steps: ok.map(x => x[0]), d: ok.map(x => x[1]) };
@@ -2060,11 +2109,13 @@ async function mgDraw() {
   const pg = $("mgpage"); if (pg) pg.href = `meteograms#s=${MG.run.split("/")[0]}&w=${encodeURIComponent(MG.town)}`;
   const T = mgTown(D, MG.town); body.innerHTML = `<canvas id="mgc"></canvas>`; mgChart($("mgc"), T, body);
 }
+const MG_FLOORS = window.MG_FLOORS = { passPrecipIn: 3, passSnow6In: 12 };
 function mgChart(cv, T, box) {
   const dpr = Math.min(2, devicePixelRatio || 1), W = box.clientWidth, sm0 = W < 600;
   // Benjamin 10-31 8:58 AM "A snowfall graph on the pass meteograms would be cool": passes with snow data get their own Snow panel
   // (bars = snow per 6 h, inches; line = running total, right axis); the precip panel then shows precip only. Towns unchanged.
   const snowPan = !!(T.P && T.P.k === "pass" && (T.snow || T.snow6));
+  let axisPcp = null, axisSnow = null, stepHours = T.f && T.f.length > 1 ? (T.f[1] - T.f[0] || 1) : 1;
   const npan = [T.t2m, T.wind || T.gust, T.pcp || T.snow || T.snow6 || T.pcp6, snowPan, T.tcc].filter(Boolean).length;   // each panel has its own time axis (Benjamin 10-30)
   const H = Math.max(sm0 ? 520 : 560, 52 + 40 * npan + (sm0 ? 52 : 60) * 8, box.clientHeight - 4);
   cv.width = W * dpr; cv.height = H * dpr; cv.style.width = W + "px"; cv.style.height = H + "px";
@@ -2143,7 +2194,9 @@ function mgChart(cv, T, box) {
       const hiP = Math.max(0.1, ...(pc || []).filter(v => v != null), ...(p6 || []).filter(v => v != null));
       const runS = sn ? sn.reduce((acc, v, k) => (acc.push((acc[k - 1] || 0) + (v || 0)), acc), []) : sn6 ? (() => { let q = 0; return sn6.map((v, k) => T.f[k] % 6 === 0 ? (q += v || 0) : null); })() : [];
       const anySnow = (sn || sn6 || []).some(v => v > 0.05), hiS = Math.max(1, ...runS.filter(v => v != null)), topS = niceStep(hiS) * Math.ceil(hiS / niceStep(hiS)), scS = scale(0, topS);
-      const pTop = Math.max(T.P && T.P.k === "pass" && pc && (T.f[1] - T.f[0] || 1) === 1 ? 3 : 0, niceStep(hiP) * Math.ceil(hiP / niceStep(hiP)));   /* t2305u: pass in per hour axis at least 3 in */
+      stepHours = T.f && T.f.length > 1 ? (T.f[1] - T.f[0] || 1) : 1;
+      const pTop = Math.max(T.P && T.P.k === "pass" && pc && stepHours === 1 ? MG_FLOORS.passPrecipIn : 0, niceStep(hiP) * Math.ceil(hiP / niceStep(hiP)));   /* t2305u: pass in per hour axis at least 3 in */
+      axisPcp = pTop;
       const scP = scale(0, pTop); axis(0, pTop, scP, "\u2033", false, "#6fd38a");
       if (p6 && T.pcp) bars(p6.map((v, k) => T.f[k] % 6 === 0 && T.f[k] > 36 ? v : null), scP, "#3ea95888", 2.2);
       if (pc) bars(pc, scP, "#3ea958"); else if (p6) bars(p6.map((v, k) => T.f[k] % 6 === 0 ? v : null), scP, "#3ea958", 2.2);
@@ -2155,7 +2208,8 @@ function mgChart(cv, T, box) {
       const sn = T.snow || null, sn6 = T.snow6 || null;
       const s6 = T.f.map((f, k) => f % 6 !== 0 ? null : sn ? sumWin(T, sn, f - 6, f) : sn6[k]);
       let q = 0; const runS = sn ? sn.map(v => (q += v || 0)) : sn6.map((v, k) => T.f[k] % 6 === 0 ? (q += v || 0) : null), tot = q;
-      const hiB = Math.max(12, ...s6.filter(v => v != null))   /* t2305u: pass snow per 6 h axis at least 12 in */, topB = niceStep(hiB) * Math.ceil(hiB / niceStep(hiB)), scB = scale(0, topB);
+      const hiB = Math.max(MG_FLOORS.passSnow6In, ...s6.filter(v => v != null))   /* t2305u: pass snow per 6 h axis at least 12 in */, topB = niceStep(hiB) * Math.ceil(hiB / niceStep(hiB)), scB = scale(0, topB);
+      axisSnow = topB;
       const hiR = Math.max(1, ...runS.filter(v => v != null)), topR = niceStep(hiR) * Math.ceil(hiR / niceStep(hiR)), scR = scale(0, topR);
       axis(0, topB, scB, "\u2033", false, "#9fc8ff"); axis(0, topR, scR, "\u2033", true, "#f4f2ee");
       c.fillStyle = "#5b9dff"; const gap6 = Math.max(1, (X(T.t[n - 1]) - X(T.t[0])) / Math.max(1, (t1 - t0) / 216e5) * 0.12);
@@ -2174,8 +2228,27 @@ function mgChart(cv, T, box) {
     c.restore(); tAxis(y1 + 4);
   }
   c.textAlign = "left";
+  window.__mgAxisInfo = window.__mgAxisInfo || {};
+  window.__mgAxisInfo[cv.id || "chart"] = { panels: panels.map((p) => p[0]), want: ["temp", "wind", "pcp", "snow", "cloud"], pcp: axisPcp, snow: axisSnow, step: stepHours };
 }
 function niceStep(x) { const p = Math.pow(10, Math.floor(Math.log10(x || 1))), r = x / p; return (r <= 1 ? 1 : r <= 2 ? 2 : r <= 2.5 ? 2.5 : r <= 5 ? 5 : 10) * p; }
+// Same pass meteogram mgChart draws. Guard: studioPassChart(run, name, w, h) then __mgAxisInfo.studio_h.
+window.studioPassChart = async function (run, name, w, h) {
+  w = w || 1800; h = h || 960;
+  const D = await mgSeries(run);
+  if (!D) throw new Error(run + ": no town/pass points in this run");
+  const T = mgTown(D, name);
+  if (!T) throw new Error(run + ": no place named " + name);
+  const prevRun = MG.run, prevTown = MG.town;
+  MG.run = run; MG.town = name;
+  const box = document.createElement("div");
+  box.style.cssText = "position:absolute;left:0;top:0;width:" + w + "px;height:" + h + "px;visibility:hidden";
+  document.body.appendChild(box);
+  const cv = document.createElement("canvas"); cv.id = "studio_h"; box.appendChild(cv);
+  try { mgChart(cv, T, box); }
+  finally { MG.run = prevRun; MG.town = prevTown; }
+  return (window.__mgAxisInfo || {}).studio_h || null;
+};
 // Pass summit elevations, ft (WSDOT MountainPass feed, wsdot.com/Travel/Real-time/Service/api/MountainPass/Details/<id>, read
 // 10-30-26 8:15 PM; same as temp_maps.WA_PASSES, checked 10-24 against USGS 3DEP). BC: DriveBC summit heights (fast_encode).
 const PASS_ELEV = { Snoqualmie: 3022, Stevens: 4061, White: 4500, Chinook: 5430, Blewett: 4102, Sherman: 5575, Satus: 3107, Wauconda: 4310,
@@ -2229,9 +2302,10 @@ async function bench() {
   document.title = "BENCH " + JSON.stringify(out);
   const pre = document.createElement("pre"); pre.id = "bench"; pre.textContent = JSON.stringify(out); document.body.appendChild(pre);
 }
-function showErr(e) { const p = document.createElement("pre"); p.id = "err"; p.style.color = "#f88"; p.textContent = String(e && e.stack || e); document.body.appendChild(p); }
-addEventListener("error", e => showErr(e.error || e.message)); addEventListener("unhandledrejection", e => showErr(e.reason));
-boot();
+function showErr(e) { let p = document.getElementById("err"); if (!p) { p = document.createElement("pre"); p.id = "err"; p.style.cssText = "color:#f88;white-space:pre-wrap"; document.body.appendChild(p); } p.textContent = String(e && e.message || e); }
+addEventListener("error", e => { if (e.error) showErr(e.error); });
+addEventListener("unhandledrejection", e => { showErr(e.reason); });
+boot().catch((e) => showErr(e));
 
 // ---- Observations (old site's live obs module, unchanged: browser-drawn from NWS/IEM + Environment Canada, loaded on first open)
 let obsLoad = null;
