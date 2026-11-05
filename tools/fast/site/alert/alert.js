@@ -10,7 +10,7 @@ const Alerts = (() => {
   const C_OCEAN = "#030912";
   const C_WATER = "#153a58";
   const C_LAND = "#1a222e";
-  const C_COUNTY = "rgba(210,220,235,0.85)";
+  const C_COUNTY = "rgba(170,185,205,0.55)";
   const C_STATE = "rgba(200,215,235,0.9)";
   const WA0 = { lon0: -125.15, lon1: -116.7, lat0: 45.4, lat1: 49.1 };
   const CSS = 1600;
@@ -227,40 +227,53 @@ const Alerts = (() => {
     if (gj.type === "FeatureCollection") return (gj.features || []).forEach((f) => pathGeom(f.geometry, ctx));
     return pathGeom(gj, ctx);
   }
-  /** Stroke only exterior rings (skip lake/Sound holes that look like marine-zone borders). */
-  function pathExterior(g, ctx) {
+  /** Collect exterior rings (Polygon / MultiPolygon / Feature*). */
+  function exteriorRings(g, out) {
     if (!g) return;
-    const strokeRing = (ring) => {
-      if (!ring || !ring.length) return;
-      const [x0, y0] = llToXY(ring[0][0], ring[0][1]);
-      const [sx0, sy0] = worldToScreen(x0, y0);
-      ctx.moveTo(sx0, sy0);
-      for (let i = 1; i < ring.length; i++) {
-        const [x, y] = llToXY(ring[i][0], ring[i][1]);
-        const [sx, sy] = worldToScreen(x, y);
-        ctx.lineTo(sx, sy);
-      }
-      ctx.closePath();
-    };
     const t = g.type;
-    if (t === "Polygon") strokeRing(g.coordinates[0]);
-    else if (t === "MultiPolygon") g.coordinates.forEach((poly) => strokeRing(poly[0]));
-    else if (t === "GeometryCollection") (g.geometries || []).forEach((gg) => pathExterior(gg, ctx));
-    else if (t === "Feature") pathExterior(g.geometry, ctx);
-    else if (t === "FeatureCollection") (g.features || []).forEach((f) => pathExterior(f.geometry, ctx));
+    if (t === "Polygon") out.push(g.coordinates[0]);
+    else if (t === "MultiPolygon") g.coordinates.forEach((poly) => out.push(poly[0]));
+    else if (t === "GeometryCollection") (g.geometries || []).forEach((gg) => exteriorRings(gg, out));
+    else if (t === "Feature") exteriorRings(g.geometry, out);
+    else if (t === "FeatureCollection") (g.features || []).forEach((f) => exteriorRings(f.geometry, out));
+  }
+  function ringArea(ring) {
+    let a = 0;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      a += ring[j][0] * ring[i][1] - ring[i][0] * ring[j][1];
+    }
+    return Math.abs(a) * 0.5;
+  }
+  /** Stroke only the mainland exterior (largest ring). Island strokes looked like marine-zone borders. */
+  function pathMainlandOutline(g, ctx) {
+    const rings = []; exteriorRings(g, rings);
+    if (!rings.length) return;
+    let best = rings[0], bestA = ringArea(rings[0]);
+    for (let i = 1; i < rings.length; i++) {
+      const a = ringArea(rings[i]); if (a > bestA) { best = rings[i]; bestA = a; }
+    }
+    if (!best || !best.length) return;
+    const [x0, y0] = llToXY(best[0][0], best[0][1]);
+    const [sx0, sy0] = worldToScreen(x0, y0);
+    ctx.moveTo(sx0, sy0);
+    for (let i = 1; i < best.length; i++) {
+      const [x, y] = llToXY(best[i][0], best[i][1]);
+      const [sx, sy] = worldToScreen(x, y);
+      ctx.lineTo(sx, sy);
+    }
+    ctx.closePath();
   }
 
   function drawBasemap(ctx) {
+    // Plain ocean — do NOT fill/stroke individual PZZ zones (their edges read as white jagged borders)
     ctx.fillStyle = C_OCEAN;
     ctx.fillRect(0, 0, CSS, CSS);
-    // Inactive marine zones: subtle water tint only — NO borders (Benjamin: look like a normal map)
+    // Subtle inland-water tint: one flat wash under land, still no zone strokes
     ctx.fillStyle = C_WATER;
-    for (const f of S.waterFeats) {
-      if (!f.geometry) continue;
-      ctx.beginPath(); pathGeom(f.geometry, ctx);
-      ctx.fill(); // nonzero overpaint; avoids evenodd slivers in S Puget Sound
-    }
-    // State land fill (clear shape)
+    ctx.globalAlpha = 0.35;
+    ctx.fillRect(0, 0, CSS, CSS);
+    ctx.globalAlpha = 1;
+    // State land fill (islands included via evenodd)
     if (S.stateGeom) {
       ctx.beginPath(); pathGeoJSON(S.stateGeom, ctx);
       ctx.fillStyle = C_LAND; ctx.fill("evenodd");
@@ -269,22 +282,22 @@ const Alerts = (() => {
       for (const f of S.landFeats) if (f.geometry) pathGeom(f.geometry, ctx);
       ctx.fillStyle = C_LAND; ctx.fill("evenodd");
     }
-    // County lines (subtle) — keep
+    // County lines (faint) — keep
     if (S.countyGeoms && S.countyGeoms.length) {
       ctx.beginPath();
       for (const g of S.countyGeoms) pathGeoJSON(g, ctx);
-      ctx.lineWidth = 1.6;
+      ctx.lineWidth = 1.25;
       ctx.strokeStyle = C_COUNTY;
       ctx.stroke();
     }
-    // State outline: exterior rings only (not Sound/lake holes — those looked like marine borders)
+    // Mainland WA outline only (skip island strokes that looked like marine zones)
     if (S.stateGeom) {
-      ctx.beginPath(); pathExterior(S.stateGeom, ctx);
-      ctx.lineWidth = 2.4;
+      ctx.beginPath(); pathMainlandOutline(S.stateGeom, ctx);
+      ctx.lineWidth = 2.2;
       ctx.strokeStyle = C_STATE;
       ctx.stroke();
     }
-    // No inactive zone strokes. Active alerts draw their own alert-colored stroke in draw().
+    // Active alerts alone get colored strokes in draw().
   }
 
   function drawTowns(ctx) {
