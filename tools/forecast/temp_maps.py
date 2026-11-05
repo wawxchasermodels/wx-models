@@ -51,8 +51,9 @@ CREDIT = "{name}: ECMWF open data, CC BY 4.0. Modified. \u00a9 ECMWF, www.ecmwf.
 CREDIT_NOAA = "Basemap: Natural Earth."
 VIEWS = {   # same NA / PNW frames as the AIFS upper-air maps, plus a Washington frame
     "na": dict(label="North America", size=(16, 12),
-               proj=ccrs.LambertConformal(central_longitude=-120, central_latitude=48, standard_parallels=(35, 60)),
-               extent=(-4.67e6, 4.33e6, -3.3e6, 3.4e6), box=(-210, -5, 5, 88)),
+               # 11-04 t2359u/t2384u: lon0 -120→-130, x extent shifted west 0.5e6 m; N-S (y) unchanged; same frame size
+               proj=ccrs.LambertConformal(central_longitude=-130, central_latitude=48, standard_parallels=(35, 60)),
+               extent=(-5.17e6, 3.83e6, -3.3e6, 3.4e6), box=(-210, -5, 5, 88)),
     "pnw": dict(label="Pacific Northwest", size=(16, 10.5), proj=ccrs.Mercator(central_longitude=-130), ll=(-160, -103, 37, 61), box=(-165, -98, 32, 66)),
     "wa": dict(label="Washington", size=(16, 10.5), proj=ccrs.LambertConformal(central_longitude=-120.5, central_latitude=47.3, standard_parallels=(45, 49)),
                ll=(-125.0, -116.6, 45.3, 49.25), box=(-127, -114.5, 44.3, 50.3)),

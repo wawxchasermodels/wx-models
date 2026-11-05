@@ -32,10 +32,11 @@ LEVELS, ANOM_TICKS, CMAP = HS.ANOM_LEVELS, HS.ANOM_TICKS, HS.anom_cmap()
 MSLP_LEVELS, MSLP_TICKS, MSLP_CMAP = HS.MSLP_LEVELS, HS.MSLP_TICKS, HS.mslp_cmap()
 VIEWS = {
     # North America view (10-24-26): centered on the Pacific Northwest and reaching out over the NE Pacific (Gulf of Alaska, Hawaii)
-    # while keeping CONUS through Maine. Same 9,000 x 6,700 km frame as before (was central_longitude=-100, x -4.6e6..4.4e6).
+    # while keeping CONUS through Maine. Same 9,000 x 6,700 km frame as before (was central_longitude=-120 (10-24); now -130 (11-04), x -4.6e6..4.4e6).
     "na": dict(label="North America", size=(16, 12),
-               proj=ccrs.LambertConformal(central_longitude=-120, central_latitude=48, standard_parallels=(35, 60)),
-               extent=(-4.67e6, 4.33e6, -3.3e6, 3.4e6), cint=6),
+               # 11-04 t2359u/t2384u: lon0 -120→-130, x extent shifted west 0.5e6 m; N-S (y) unchanged
+               proj=ccrs.LambertConformal(central_longitude=-130, central_latitude=48, standard_parallels=(35, 60)),
+               extent=(-5.17e6, 3.83e6, -3.3e6, 3.4e6), cint=6),
     "pnw": dict(label="Pacific Northwest", size=(16, 10.5), proj=ccrs.Mercator(central_longitude=-130),
                 ll=(-160, -103, 37, 61), cint=3),
     # Pacific NW tight: same frame as temp_maps / ens_maps (Mercator 138 W-113.5 W, 40.5-54.5 N)
