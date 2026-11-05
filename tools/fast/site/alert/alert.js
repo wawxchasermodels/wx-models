@@ -313,7 +313,9 @@ const Alerts = (() => {
   async function loadAlerts() {
     status("Loading alerts…");
     try {
-      const data = await loadJSON(NWS, { headers: { Accept: "application/geo+json", "User-Agent": UA } });
+      let data;
+      try { data = await loadJSON(NWS, { headers: { Accept: "application/geo+json", "User-Agent": UA } }); }
+      catch (liveErr) { data = await loadJSON("alert/active_wa.json"); status("Using cached snapshot (live NWS unavailable)"); }
       const feats = (data.features || []).filter((a) => {
         // keep land WA + marine PZZ (and any geometry already present)
         const zones = (a.properties && a.properties.affectedZones) || [];
@@ -418,3 +420,4 @@ const Alerts = (() => {
     _state: S
   };
 })();
+window.Alerts = Alerts;
