@@ -395,6 +395,8 @@ function renderAlert(k, frO) {
   if (!MG.img || !I || !I.t) { c0.font = `700 ${k === "v" ? 40 : 34}px Montserrat`; c0.fillStyle = "#c9ced8"; c0.textAlign = "center"; c0.fillText(MG.msg || "Loading alerts\u2026", f.W / 2, f.H / 2); c0.textAlign = "left"; return; }
   const r = crop(k, fr); c0.imageSmoothingEnabled = true; c0.imageSmoothingQuality = "high";
   c0.drawImage(MG.img, f.W / 2 - r.cx * r.kk, f.H / 2 - r.cy * r.kk, IW(MG.img) * r.kk, IH(MG.img) * r.kk);
+  // Towns in this frame's pixels so zoom does not grow the type (t2499u). Vertical and landscape each use their own camera.
+  if (typeof Alerts !== "undefined" && Alerts.paintFrameTowns) Alerts.paintFrameTowns(c0, { dpr: (Alerts._state && Alerts._state.dpr) || 1, W: f.W, H: f.H, zoom: Math.max(1, fr.zoom || 1), cx: r.cx, cy: r.cy, kk: r.kk });
   // TOP LEFT title (alert mode): pill + title + time — no LIVE badge (Benjamin t2437u)
   const c = ovLayer(f), x = f.pad; let y = k === "v" ? 120 : 34;
   const by = y; // top-right anchor without a LIVE badge
@@ -1514,7 +1516,7 @@ if (!CLEAN) {   // Studio: Map | Meteogram switch (first in the menu bar) + the 
       if (!document.getElementById("alertp")) { const ap = document.createElement("div"); ap.id = "alertp"; ap.innerHTML = `<div id="alert-root"></div>`; pnl.appendChild(ap); }
       window.__alertLoad = window.__alertLoad || new Promise((ok, bad) => {
         if (!document.querySelector('link[href="alert/alert.css"]')) { const l = document.createElement("link"); l.rel = "stylesheet"; l.href = "alert/alert.css"; document.head.appendChild(l); }
-        const sc = document.createElement("script"); sc.src = "alert/alert.js?v=20261105t17"; sc.onload = ok; sc.onerror = bad; document.body.appendChild(sc); });
+        const sc = document.createElement("script"); sc.src = "alert/alert.js?v=20261105t18"; sc.onload = ok; sc.onerror = bad; document.body.appendChild(sc); });
       MG.msg = "Loading alerts\u2026"; let asig = "";
       const agrab = () => { const S_ = typeof Alerts !== "undefined" && Alerts._state, cv_ = document.getElementById("al-canvas"); if (!S_ || !cv_ || !cv_.width) return;
         const sel = (S_.selectedTypes && S_.selectedTypes.size) ? [...S_.selectedTypes].sort().join(',') : 'ALL'; const sig = [S_.loaded, sel, S_.k, S_.cx, S_.cy, cv_.width, (S_.alerts || []).length, S_.sig || ""].join("|");

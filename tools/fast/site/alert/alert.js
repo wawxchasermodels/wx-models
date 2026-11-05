@@ -234,44 +234,27 @@ const Alerts = (() => {
   ]);
   function townPriority(t) {
     if (MAIN_TOWNS.has(t.n)) return 0;
-    if (COASTAL_TOWNS.has(t.n) || t.notable) return 1;
-    return 2 + (t.tier || 0);
+    if (COASTAL_TOWNS.has(t.n)) return 1; // ahead of other notables so the coast is not crowded out (t2491u/t2493u)
+    if (t.notable) return 2;
+    return 3 + (t.tier || 0);
   }
 
-  function townBudget() {
-    // Looser at overview so main + coastal towns show like other WA products (t2491u/t2493u)
-    if (S.k < 1.15) return { maxTier: 2, n: 48 };
-    if (S.k < 1.6) return { maxTier: 3, n: 60 };
-    if (S.k < 2.2) return { maxTier: 3, n: 72 };
-    if (S.k < 3.2) return { maxTier: 4, n: 90 };
-    return { maxTier: 4, n: 110 };
+  function townBudget(zoom) {
+    // Frame zoom (Studio crop), not Alerts._state.k. Overview keeps the approved main + coastal density (t2491u/t2493u).
+    // Past that, every town inside this frame is a candidate — offscreen towns never take a slot (t2499u).
+    const z = Math.max(1, +zoom || 1);
+    if (z < 1.25) return { maxTier: 2, n: 48 };
+    if (z < 1.7) return { maxTier: 3, n: Infinity };
+    if (z < 2.2) return { maxTier: 4, n: Infinity };
+    return { maxTier: 4, n: Infinity };
   }
-  function pickTowns() {
-    const budget = townBudget();
-    const vis = visibleAlerts();
-    const geoms = vis.map((a) => a._geom).filter(Boolean);
-    const cand = [];
-    for (const t of S.towns) {
-      const force = MAIN_TOWNS.has(t.n) || COASTAL_TOWNS.has(t.n) || t.notable;
-      if (!force && t.tier > budget.maxTier) continue;
-      const hit = geoms.length ? geoms.some((g) => pointInGeom(t.lon, t.lat, g)) : false;
-      cand.push({ t, hit, pri: townPriority(t), pop: t.pop || 0 });
-    }
-    cand.sort((a, b) => (a.pri - b.pri) || (b.pop - a.pop) || ((b.hit ? 1 : 0) - (a.hit ? 1 : 0)));
-    const out = [], seen = new Set();
-    // Always try main + coastal first (even if outside alert fill)
-    for (const row of cand) {
-      if (out.length >= budget.n) break;
-      if (row.pri > 1) continue; // main/coastal/notable pass
-      if (seen.has(row.t.n)) continue;
-      seen.add(row.t.n); out.push(row.t);
-    }
-    for (const row of cand) {
-      if (out.length >= budget.n) break;
-      if (seen.has(row.t.n)) continue;
-      seen.add(row.t.n); out.push(row.t);
-    }
-    return out;
+  // Zoom-1 label size on a 1920-long Studio frame (12 CSS px on the 1600 map). Does not grow with zoom (t2499u).
+  function townFrameStyle(frameMax) {
+    const u = (frameMax > 0 ? frameMax : 1920) / CSS;
+    return { u, fs: 12 * u, gap: 8 * u, pad: 4 * u, dotR: 3.2 * u, halo: 3.5 * u, dotStroke: 1.5 * u };
+  }
+  function townOverlaps(a, b) {
+    return !(a[2] < b[0] || a[0] > b[2] || a[3] < b[1] || a[1] > b[3]);
   }
 
   function pathGeom(g, ctx) {
@@ -375,42 +358,101 @@ const Alerts = (() => {
     // Active alerts alone get colored strokes in draw().
   }
 
-  function drawTowns(ctx) {
-    const picks = pickTowns();
-    const placed = [];
-    const fs = Math.max(11, Math.min(16, 12 * Math.sqrt(S.k)));
-    ctx.font = `700 ${fs}px Montserrat, system-ui, sans-serif`;
-    ctx.textBaseline = "middle";
-    const pad = 4;
-    const maxX = CSS * (1 - RIGHT_CLEAR);
-    const collides = (b) => placed.some((p) => !(b[2] < p[0] || b[0] > p[2] || b[3] < p[1] || b[1] > p[3]));
-    for (const t of picks) {
-      const [sx, sy] = llToXY(t.lon, t.lat);
-      if (sx < 20 || sy < 20 || sx > maxX - 20 || sy > CSS - 20) continue;
-      const tw = ctx.measureText(t.n).width;
-      const side = t.side || SIDE_PREF[t.n] || "right";
-      const gap = 8;
-      const cands = side === "left"
-        ? [[sx - gap - tw, sy], [sx + gap, sy], [sx - tw / 2, sy - gap - fs], [sx - tw / 2, sy + gap + fs]]
-        : [[sx + gap, sy], [sx - gap - tw, sy], [sx - tw / 2, sy - gap - fs], [sx - tw / 2, sy + gap + fs]];
-      let spot = null;
-      for (const [tx, ty] of cands) {
-        const b = [tx - pad, ty - fs / 2 - pad, tx + tw + pad, ty + fs / 2 + pad];
-        if (b[0] < 8 || b[1] < 8 || b[2] > maxX - 8 || b[3] > CSS - 8) continue;
-        if (collides(b)) continue;
-        spot = { tx, ty, b }; break;
-      }
-      if (!spot) continue;
-      ctx.beginPath();
-      ctx.arc(sx, sy, 3.2, 0, Math.PI * 2);
-      ctx.fillStyle = "#fff"; ctx.fill();
-      ctx.lineWidth = 1.5; ctx.strokeStyle = "rgba(0,0,0,0.75)"; ctx.stroke();
-      ctx.lineWidth = 3.5; ctx.strokeStyle = "rgba(12,16,24,0.9)";
-      ctx.fillStyle = "#f2f5fa";
-      ctx.strokeText(t.n, spot.tx, spot.ty);
-      ctx.fillText(t.n, spot.tx, spot.ty);
-      placed.push(spot.b);
+  // Towns are laid out in final frame pixels (t2499u). The shared alert bitmap has no labels, so each
+  // frame's own zoom/pan keeps labels the same size and only spends the budget on towns inside that frame.
+  function layoutTowns(project, W, H, zoom, measure) {
+    const budget = townBudget(zoom);
+    const style = townFrameStyle(Math.max(W, H));
+    const fs = style.fs, gap = style.gap, pad = style.pad;
+    const vis = visibleAlerts();
+    const geoms = vis.map((a) => a._geom).filter(Boolean);
+    const edge = style.dotR + style.dotStroke;
+    const inView = (x, y) => x >= edge && y >= edge && x <= W - edge && y <= H - edge;
+    const cand = [];
+    let offscreen = 0;
+    for (const t of S.towns) {
+      const force = MAIN_TOWNS.has(t.n) || COASTAL_TOWNS.has(t.n) || t.notable;
+      if (!force && (t.tier || 0) > budget.maxTier) continue;
+      const [sx, sy] = project(t.lon, t.lat);
+      if (!inView(sx, sy)) { offscreen++; continue; }
+      const hit = geoms.length ? geoms.some((g) => pointInGeom(t.lon, t.lat, g)) : false;
+      cand.push({ t, hit, pri: townPriority(t), pop: t.pop || 0, sx, sy });
     }
+    cand.sort((a, b) => (a.pri - b.pri) || (b.pop - a.pop) || ((b.hit ? 1 : 0) - (a.hit ? 1 : 0)));
+    const placed = [], items = [], seen = new Set();
+    const hitsAny = (b) => placed.some((p) => townOverlaps(b, p));
+    let attempts = 0;
+    for (const row of cand) {
+      if (attempts >= budget.n) break;
+      if (seen.has(row.t.n)) continue;
+      seen.add(row.t.n);
+      attempts++;
+      const t = row.t, sx = row.sx, sy = row.sy;
+      const tw = measure(t.n, fs);
+      const side = t.side || SIDE_PREF[t.n] || "right";
+      const dotBox = [sx - edge, sy - edge, sx + edge, sy + edge];
+      const dotFree = !hitsAny(dotBox);
+      const anchors = (side === "left"
+        ? [[sx - gap - tw, sy], [sx + gap, sy], [sx - tw / 2, sy - gap - fs], [sx - tw / 2, sy + gap + fs]]
+        : [[sx + gap, sy], [sx - gap - tw, sy], [sx - tw / 2, sy - gap - fs], [sx - tw / 2, sy + gap + fs]]
+      ).map(([tx, ty]) => ({ tx, ty, b: [tx - pad, ty - fs / 2 - pad, tx + tw + pad, ty + fs / 2 + pad] }));
+      let spot = null;
+      if (dotFree) {
+        for (const a of anchors) {
+          const b = a.b;
+          if (b[0] < 2 || b[1] < 2 || b[2] > W - 2 || b[3] > H - 2) continue;
+          if (townOverlaps(b, dotBox) || hitsAny(b)) continue;
+          spot = a; break;
+        }
+      }
+      if (spot) {
+        placed.push(dotBox, spot.b);
+        items.push({ n: t.n, sx, sy, tx: spot.tx, ty: spot.ty, tw, label: true, b: spot.b, dotBox, tier: t.tier || 0, pri: row.pri });
+      } else if (dotFree) {
+        // Label lost the collision. Keep the dot so a later label cannot cover this town (t2499u).
+        placed.push(dotBox);
+        items.push({ n: t.n, sx, sy, tx: sx, ty: sy, tw, label: false, b: null, dotBox, tier: t.tier || 0, pri: row.pri });
+      }
+    }
+    return { style, items, inView: cand.length, attempts, offscreen, labeled: items.filter((it) => it.label).length, dotted: items.length };
+  }
+  function paintTownItems(ctx, laid) {
+    if (!ctx || !laid) return;
+    const { fs, dotR, halo, dotStroke } = laid.style;
+    ctx.save();
+    ctx.font = `700 ${fs}px Montserrat, system-ui, sans-serif`;
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    for (const it of laid.items) {
+      ctx.beginPath();
+      ctx.arc(it.sx, it.sy, dotR, 0, Math.PI * 2);
+      ctx.fillStyle = "#fff"; ctx.fill();
+      ctx.lineWidth = dotStroke; ctx.strokeStyle = "rgba(0,0,0,0.75)"; ctx.stroke();
+      if (!it.label) continue;
+      ctx.lineWidth = halo; ctx.strokeStyle = "rgba(12,16,24,0.9)";
+      ctx.fillStyle = "#f2f5fa";
+      ctx.strokeText(it.n, it.tx, it.ty);
+      ctx.fillText(it.n, it.tx, it.ty);
+    }
+    ctx.restore();
+  }
+  function paintFrameTowns(ctx, cam) {
+    if (!cam || !S.towns.length) return null;
+    const dpr = cam.dpr || S.dpr || 1;
+    const project = (lon, lat) => {
+      const [sx, sy] = llToXY(lon, lat);
+      return [cam.W / 2 + (sx * dpr - cam.cx) * cam.kk, cam.H / 2 + (sy * dpr - cam.cy) * cam.kk];
+    };
+    const measure = (name, fs) => {
+      if (ctx && ctx.measureText) {
+        ctx.font = `700 ${fs}px Montserrat, system-ui, sans-serif`;
+        return ctx.measureText(name).width;
+      }
+      return fs * 0.56 * String(name).length;
+    };
+    const laid = layoutTowns(project, cam.W, cam.H, cam.zoom || 1, measure);
+    paintTownItems(ctx, laid);
+    return laid;
   }
 
   function draw() {
@@ -418,7 +460,7 @@ const Alerts = (() => {
     const ctx = c.getContext("2d");
     const dpr = Math.min(2, window.devicePixelRatio || 1); S.dpr = dpr;
     if (c.width !== CSS * dpr || c.height !== CSS * dpr) { c.width = CSS * dpr; c.height = CSS * dpr; }
-    // ONE transform: all geometry + towns share CSS pixel space
+    // ONE transform: basemap geometry shares CSS pixel space. Town labels are drawn in frame pixels.
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     drawBasemap(ctx);
     const vis = visibleAlerts();
@@ -433,10 +475,10 @@ const Alerts = (() => {
       ctx.strokeStyle = hexToRgba(col, Math.max(0.85, aFill));
       ctx.stroke();
     }
-    drawTowns(ctx);
+    // Town labels are painted per Studio frame (paintFrameTowns), not baked into this bitmap (t2499u).
     S.viewLL = approxViewLL();
     S.sig = [S.loaded, (S.selectedTypes && S.selectedTypes.size ? [...S.selectedTypes].sort().join(',') : 'ALL'), S.fillAlpha.toFixed(2), S.k.toFixed(3), S.scale.toFixed(1),
-      S.cx.toFixed(5), S.cy.toFixed(5), S.viewLL.lon0.toFixed(3), S.viewLL.lat0.toFixed(3), vis.length, dpr].join("|");
+      S.cx.toFixed(5), S.cy.toFixed(5), S.viewLL.lon0.toFixed(3), S.viewLL.lat0.toFixed(3), vis.length, S.towns.length, dpr].join("|");
   }
   function req() { if (S.raf) return; S.raf = requestAnimationFrame(() => { S.raf = 0; draw(); }); }
 
@@ -641,6 +683,7 @@ const Alerts = (() => {
   return {
     show, hide, redraw: req, drawNow: draw, load: loadAlerts,
     fitToSelection, titleText, eventTypes, coverSafe, mercXY, llToXY, approxViewLL, hitAt, cssToLonLat,
+    layoutTowns, paintFrameTowns, townFrameStyle, townBudget,
     setFillAlpha: (a) => { S.fillAlpha = Math.max(0.2, Math.min(1, +a || 1)); const op=$("al-opacity"), opv=$("al-opacity-val"); if (op) op.value=String(Math.round(S.fillAlpha*100)); if (opv) opv.textContent=Math.round(S.fillAlpha*100)+"%"; req(); },
     _state: S
   };
