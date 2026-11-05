@@ -573,12 +573,17 @@ async function render(k, frO) {   // frO: camera override (MP4 storm-track pan)
     c.font = `800 ${f.day}px Montserrat`; hw = Math.max(hw, c.measureText((step.valid_line || "").replace(/^Valid /, "")).width);
     c.font = `600 ${f.run}px Montserrat`; hw = Math.max(hw, pw + 14 + c.measureText("daily analysis").width);
     f.hdr = [x - 12, (k === "v" ? 120 : 34) - 12, x + hw + 16, headBot + 14]; }
-  // F+ badge (top right)
-  c.font = `800 ${Math.round(f.valid * 1.1)}px Montserrat`; const bt = m === "oisst" && step.badge ? step.badge[0] : `F+${step.f}`, bw = c.measureText(bt).width + 40, bx = badgeRight(k) - bw, by = k === "v" ? 120 : 34;
-  c.fillStyle = "rgba(17,19,22,0.85)"; c.strokeStyle = "rgba(255,255,255,0.35)"; c.lineWidth = 2; c.beginPath(); c.roundRect ? c.roundRect(bx, by, bw, f.valid * 1.9, 14) : c.rect(bx, by, bw, f.valid * 1.9); c.fill(); noShadow(c); c.stroke(); sharpShadow(c, k);
-  c.fillStyle = "#fff"; c.textAlign = "center"; c.fillText(bt, bx + bw / 2, by + f.valid * 1.32); c.textAlign = "left"; c.restore();
-  f.badge = [bx - 12, by - 12, bx + bw + 12, by + f.valid * 1.9 + 12];
-  const cnr = BR.corner && LOGOS[BR.logo] ? cornerBox(k, by + f.valid * 1.9, headBot, f.H - f.bot + (k === "v" ? 110 : 62)) : null;
+  // F+ badge (top right) — hidden on vertical 9:16 (t2495u)
+  let by = k === "v" ? 120 : 34, badgeBot = by;
+  if (k !== "v") {
+    c.font = `800 ${Math.round(f.valid * 1.1)}px Montserrat`; const bt = m === "oisst" && step.badge ? step.badge[0] : `F+${step.f}`, bw = c.measureText(bt).width + 40, bx = badgeRight(k) - bw;
+    c.fillStyle = "rgba(17,19,22,0.85)"; c.strokeStyle = "rgba(255,255,255,0.35)"; c.lineWidth = 2; c.beginPath(); c.roundRect ? c.roundRect(bx, by, bw, f.valid * 1.9, 14) : c.rect(bx, by, bw, f.valid * 1.9); c.fill(); noShadow(c); c.stroke(); sharpShadow(c, k);
+    c.fillStyle = "#fff"; c.textAlign = "center"; c.fillText(bt, bx + bw / 2, by + f.valid * 1.32); c.textAlign = "left";
+    f.badge = [bx - 12, by - 12, bx + bw + 12, by + f.valid * 1.9 + 12];
+    badgeBot = by + f.valid * 1.9;
+  } else { f.badge = null; }
+  c.restore();
+  const cnr = BR.corner && LOGOS[BR.logo] ? cornerBox(k, badgeBot, headBot, f.H - f.bot + (k === "v" ? 110 : 62)) : null;
   // bottom: color bar + credit (no dark band any more: their text gets a shadow so it stays readable on the map)
   c.save(); sharpShadow(c, k);
   // 11-02 (Benjamin t2115u "move the scale further down"): 9:16: the bar sits just above the credit line (tick numbers ~14 px clear of it;
