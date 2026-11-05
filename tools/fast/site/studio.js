@@ -1285,7 +1285,7 @@ if (!CLEAN) {
     ["save", "share", "mgbtn", "pfbtn", "obsbtn"].forEach(id => { const e = document.getElementById(id); if (e) ar.appendChild(e); });
     box.classList.add("inbar", "inrow"); document.body.classList.add("longscrub", "actrow"); ar.appendChild(box); const st_ = document.getElementById("stat"); bar_.insertBefore(ar, st_ && st_.parentNode === bar_ ? st_.nextSibling : null);
     const ln = document.getElementById("loadnote"); if (ln) box.querySelector(".sw").appendChild(ln);
-    document.addEventListener("DOMContentLoaded", () => { const rq = document.getElementById("rqb"); if (rq) ar.insertBefore(rq, box); }); }
+    document.addEventListener("DOMContentLoaded", () => { const rq = document.getElementById("rqb"); if (rq) ar.insertBefore(rq, box); const st2 = document.getElementById("stat"); if (st2) ar.appendChild(st2); }); }
   else if (false) { const bar_ = document.getElementById("bar"); box.classList.add("inbar"); document.body.classList.add("longscrub"); bar_.appendChild(box);
     // t2343u: overlay row under the View menu (absolute, so the bar height and the frames stay exactly as in Map); the short #step keeps its space, invisible
     // Placement: nearest free spot under the View menu (scan down, then left toward Share) that touches no visible control or frame,
