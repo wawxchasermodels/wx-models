@@ -187,6 +187,21 @@ const Alerts = (() => {
       lat0: midLat - viewH / 2,
       lat1: midLat + viewH / 2
     };
+    // Clamp / floor: never zoom out past the WA theater (keeps CA/OR strays from blowing the view)
+    const MAX = { lon0: -126.7, lon1: -116.4, lat0: 45.35, lat1: 49.2 };
+    if (S.viewLL.lon0 < MAX.lon0 || S.viewLL.lon1 > MAX.lon1 || S.viewLL.lat0 < MAX.lat0 || S.viewLL.lat1 > MAX.lat1
+        || (S.viewLL.lon1 - S.viewLL.lon0) > (MAX.lon1 - MAX.lon0) * 1.05) {
+      // if bounds exceed WA theater, fit to intersection with MAX instead
+      const iLon0 = Math.max(b.lon0 - dlon, MAX.lon0), iLon1 = Math.min(b.lon1 + dlon, MAX.lon1);
+      const iLat0 = Math.max(b.lat0 - dlat, MAX.lat0), iLat1 = Math.min(b.lat1 + dlat, MAX.lat1);
+      const midLon2 = (iLon0 + iLon1) / 2, midLat2 = (iLat0 + iLat1) / 2;
+      let vW = Math.max((iLon1 - iLon0) / usable, 0.8);
+      let vH = Math.max(iLat1 - iLat0, 0.5);
+      // keep square-ish
+      const asp = (MAX.lon1 - MAX.lon0) / (MAX.lat1 - MAX.lat0);
+      if (vW / vH < asp) vW = vH * asp; else vH = vW / asp;
+      S.viewLL = { lon0: midLon2 - contentCenterFracX * vW, lon1: midLon2 - contentCenterFracX * vW + vW, lat0: midLat2 - vH / 2, lat1: midLat2 + vH / 2 };
+    }
     S.k = 1;
     S.cx = CSS / 2;
     S.cy = CSS / 2;
@@ -363,15 +378,18 @@ const Alerts = (() => {
         data = await loadJSON("alert/active_wa.json");
         status("Using cached snapshot (live NWS unavailable)");
       }
-      const feats = (data.features || []).filter((a) => {
+      const WA_BOX = { lon0: -126.6, lon1: -116.5, lat0: 45.5, lat1: 49.2 };
+      const feats0 = (data.features || []).filter((a) => {
         const zones = (a.properties && a.properties.affectedZones) || [];
         if (!zones.length) return !!a.geometry;
-        return zones.some((z) => {
-          const id = zoneId(z);
-          return id.startsWith("WAZ") || id.startsWith("PZZ") || id.startsWith("WA");
-        });
+        return zones.some((z) => S.zones.has(zoneId(z)) || S.zones.has(z));
       });
-      for (const a of feats) a._geom = geomFromZones(a);
+      for (const a of feats0) a._geom = geomFromZones(a);
+      const feats = feats0.filter((a) => {
+        const b = geomBounds(a._geom); if (!b) return false;
+        const cx = (b.lon0 + b.lon1) / 2, cy = (b.lat0 + b.lat1) / 2;
+        return cx >= WA_BOX.lon0 && cx <= WA_BOX.lon1 && cy >= WA_BOX.lat0 && cy <= WA_BOX.lat1;
+      });
       S.alerts = feats;
       S.loaded = Date.now();
       status(`${feats.length} active · WA land + marine · updated ${new Date(S.loaded).toLocaleTimeString("en-US", { timeZone: "America/Los_Angeles" })} PT`);
