@@ -379,7 +379,7 @@ function alertRefitForAspect() {
   addEventListener("resize", () => { if (ALERTM() && typeof alertRefitForAspect === "function") alertRefitForAspect(); });
 })();
 // ---- Active Alerts in Studio (11-05): header + credit style as Observations; no LIVE badge (t2437u)
-const ALERT_CREDIT = ["Places: GeoNames, CC BY 4.0."];  // alert mode only; Census/TIGER basemap is public domain — no credit required
+const ALERT_CREDIT = ["Places: GeoNames, CC BY 4.0.", "Basemap: US Census Bureau. Roads: Natural Earth."];  // alert mode only. Census boundaries are public domain; Natural Earth roads/BC context are public domain.
 function alertInfo() {
   const S_ = typeof Alerts !== "undefined" && Alerts._state; if (!S_) return null;
   const title = (typeof Alerts.titleText === "function" ? Alerts.titleText() : null) || S_.selectedType || "All Alerts";
@@ -395,6 +395,8 @@ function renderAlert(k, frO) {
   if (!MG.img || !I || !I.t) { c0.font = `700 ${k === "v" ? 40 : 34}px Montserrat`; c0.fillStyle = "#c9ced8"; c0.textAlign = "center"; c0.fillText(MG.msg || "Loading alerts\u2026", f.W / 2, f.H / 2); c0.textAlign = "left"; return; }
   const r = crop(k, fr); c0.imageSmoothingEnabled = true; c0.imageSmoothingQuality = "high";
   c0.drawImage(MG.img, f.W / 2 - r.cx * r.kk, f.H / 2 - r.cy * r.kk, IW(MG.img) * r.kk, IH(MG.img) * r.kk);
+  // Towns, highways and boundary strokes in this frame's pixels (t2499u / t2504u). Each frame keeps its own camera.
+  if (typeof Alerts !== "undefined" && Alerts.paintFrameScene) Alerts.paintFrameScene(c0, { dpr: (Alerts._state && Alerts._state.dpr) || 1, W: f.W, H: f.H, zoom: Math.max(1, fr.zoom || 1), cx: r.cx, cy: r.cy, kk: r.kk });
   // TOP LEFT title (alert mode): pill + title + time — no LIVE badge (Benjamin t2437u)
   const c = ovLayer(f), x = f.pad; let y = k === "v" ? 120 : 34;
   const by = y; // top-right anchor without a LIVE badge
@@ -415,10 +417,12 @@ function renderAlert(k, frO) {
   c.fillStyle = "rgba(236,239,244,0.95)";
   if (k === "v") dl.forEach((l, i) => c.fillText(l, f.pad + (cB && BR.cpos === "bl" ? cB.s + 18 : 0), f.H - 70 - (dl.length - 1 - i) * dlh));
   else { c.textAlign = "right"; dl.forEach((l, i) => c.fillText(l, f.W - f.pad - (cB && BR.cpos === "br" ? cB.s + 20 : 0), f.H - 24 - (dl.length - 1 - i) * dlh)); c.textAlign = "left"; }
-  // legend pills for visible types
+  // legend pills: only toggled-on types (empty selection = All → show every type) (t2496u)
   let lx = f.pad, ly = k === "v" ? f.H - 70 - (dl.length - 1) * dlh - dfs - 30 - 30 * 1.55 : f.H - 24 - 30 * 1.55 + 30 * 0.35;
   const lgS = k === "v" ? 28 : 24;
-  for (const t of I.types) {
+  const Ssel = (typeof Alerts !== "undefined" && Alerts._state && Alerts._state.selectedTypes) || null;
+  const legendTypes = (Ssel && Ssel.size) ? I.types.filter((t) => Ssel.has(t.event)) : I.types;
+  for (const t of legendTypes) {
     c.font = `800 ${lgS}px Montserrat`; const lab = t.event, w = c.measureText(lab).width + lgS * 1.2, h = lgS * 1.55;
     if (lx + w > (k === "v" ? f.W * 0.82 : f.W * 0.46) && lx > f.pad + 1) break; // keep right ~18% clear
     noShadow(c); c.fillStyle = "rgba(17,19,22,0.78)"; c.beginPath(); c.roundRect ? c.roundRect(lx, ly, w, h, h / 2) : c.rect(lx, ly, w, h); c.fill(); sharpShadow(c, k);
@@ -573,12 +577,17 @@ async function render(k, frO) {   // frO: camera override (MP4 storm-track pan)
     c.font = `800 ${f.day}px Montserrat`; hw = Math.max(hw, c.measureText((step.valid_line || "").replace(/^Valid /, "")).width);
     c.font = `600 ${f.run}px Montserrat`; hw = Math.max(hw, pw + 14 + c.measureText("daily analysis").width);
     f.hdr = [x - 12, (k === "v" ? 120 : 34) - 12, x + hw + 16, headBot + 14]; }
-  // F+ badge (top right)
-  c.font = `800 ${Math.round(f.valid * 1.1)}px Montserrat`; const bt = m === "oisst" && step.badge ? step.badge[0] : `F+${step.f}`, bw = c.measureText(bt).width + 40, bx = badgeRight(k) - bw, by = k === "v" ? 120 : 34;
-  c.fillStyle = "rgba(17,19,22,0.85)"; c.strokeStyle = "rgba(255,255,255,0.35)"; c.lineWidth = 2; c.beginPath(); c.roundRect ? c.roundRect(bx, by, bw, f.valid * 1.9, 14) : c.rect(bx, by, bw, f.valid * 1.9); c.fill(); noShadow(c); c.stroke(); sharpShadow(c, k);
-  c.fillStyle = "#fff"; c.textAlign = "center"; c.fillText(bt, bx + bw / 2, by + f.valid * 1.32); c.textAlign = "left"; c.restore();
-  f.badge = [bx - 12, by - 12, bx + bw + 12, by + f.valid * 1.9 + 12];
-  const cnr = BR.corner && LOGOS[BR.logo] ? cornerBox(k, by + f.valid * 1.9, headBot, f.H - f.bot + (k === "v" ? 110 : 62)) : null;
+  // F+ badge (top right) — hidden on vertical 9:16 (t2495u)
+  let by = k === "v" ? 120 : 34, badgeBot = by;
+  if (k !== "v") {
+    c.font = `800 ${Math.round(f.valid * 1.1)}px Montserrat`; const bt = m === "oisst" && step.badge ? step.badge[0] : `F+${step.f}`, bw = c.measureText(bt).width + 40, bx = badgeRight(k) - bw;
+    c.fillStyle = "rgba(17,19,22,0.85)"; c.strokeStyle = "rgba(255,255,255,0.35)"; c.lineWidth = 2; c.beginPath(); c.roundRect ? c.roundRect(bx, by, bw, f.valid * 1.9, 14) : c.rect(bx, by, bw, f.valid * 1.9); c.fill(); noShadow(c); c.stroke(); sharpShadow(c, k);
+    c.fillStyle = "#fff"; c.textAlign = "center"; c.fillText(bt, bx + bw / 2, by + f.valid * 1.32); c.textAlign = "left";
+    f.badge = [bx - 12, by - 12, bx + bw + 12, by + f.valid * 1.9 + 12];
+    badgeBot = by + f.valid * 1.9;
+  } else { f.badge = null; }
+  c.restore();
+  const cnr = BR.corner && LOGOS[BR.logo] ? cornerBox(k, badgeBot, headBot, f.H - f.bot + (k === "v" ? 110 : 62)) : null;
   // bottom: color bar + credit (no dark band any more: their text gets a shadow so it stays readable on the map)
   c.save(); sharpShadow(c, k);
   // 11-02 (Benjamin t2115u "move the scale further down"): 9:16: the bar sits just above the credit line (tick numbers ~14 px clear of it;
@@ -681,13 +690,7 @@ for (const k of ["v", "h"]) {
     if (!d && !PD && PIN.show && !PIN.mode && e.pointerType === "mouse") cv.style.cursor = pinHit(k, cv, e) ? "grab" : "";
     if (!d || pz || (d.id !== undefined && e.pointerId !== d.id)) return; const s = f.W / cv.clientWidth, fr = getFr(k);
     fr.dx = d.fr.dx + (e.clientX - d.x) * s; fr.dy = d.fr.dy + (e.clientY - d.y) * s;
-    if (ALERTM() && typeof Alerts !== "undefined" && Alerts._state && MG.img) {
-      const S_ = Alerts._state, r = crop(k, fr), kk = r.kk, rect = F[k].cv.getBoundingClientRect();
-      const cssDx = ((e.clientX - d.x) * F[k].W / rect.width) / kk / (S_.dpr || 1);
-      const cssDy = ((e.clientY - d.y) * F[k].H / rect.height) / kk / (S_.dpr || 1);
-      const s = (S_.scale || 1) * (S_.k || 1) || 1;
-      S_.cx -= cssDx / s; S_.cy += cssDy / s; // mercator y is north-up
-      Alerts.redraw(); d.x = e.clientX; d.y = e.clientY; setFr(k, fr); render(k); return; }
+    // 11-05 t2480u: Active Alerts pan/zoom is per Studio frame (fr), not the shared Alerts mercator camera — so 9:16 and 16:9 move independently.
     if (OBSM()) { obsPan(k, fr); d.x = e.clientX; d.y = e.clientY; d.fr = Object.assign({}, fr); setFr(k, fr); render(k); return; }   // 11-04: free pan
     const r = crop(k, fr);   // keep the stored offset inside the panel
     fr.dx = (r.bx - r.cx) * r.kk; fr.dy = (r.by - r.cy) * r.kk; setFr(k, fr); render(k); });
@@ -702,47 +705,32 @@ for (const k of ["v", "h"]) {
     // as a pinch and zoomed the frame as the scrubber finger moved. Only a real two-finger pinch on this frame zooms it now
     // (targetTouches = fingers that started on this canvas, and no other finger on the screen).
     if (CLEAN || !last || REC.on || PIN.mode || e.targetTouches.length !== 2 || e.touches.length !== 2) { if (pz && e.targetTouches.length !== 2) pz = null; return; }
+    cv._alertPinch = 1;
     e.preventDefault(); d = null;
     const [a, b] = [oxy(e.targetTouches[0]), oxy(e.targetTouches[1])], fr0 = getFr(k), r0 = crop(k, fr0), ox = (a[0] + b[0]) / 2, oy = (a[1] + b[1]) / 2;
-    pz = { d: Math.max(10, Math.hypot(a[0] - b[0], a[1] - b[1])), z: OBSM() ? obsZv(fr0) / 100 : (ALERTM() && typeof Alerts !== "undefined" && Alerts._state ? (Alerts._state.k || 1) : Math.max(1, fr0.zoom || 1)), mx: r0.cx + (ox - f.W / 2) / r0.kk, my: r0.cy + (oy - f.H / 2) / r0.kk };
+    pz = { d: Math.max(10, Math.hypot(a[0] - b[0], a[1] - b[1])), z: OBSM() ? obsZv(fr0) / 100 : Math.max(1, fr0.zoom || 1), mx: r0.cx + (ox - f.W / 2) / r0.kk, my: r0.cy + (oy - f.H / 2) / r0.kk };
   }, { passive: false });
   cv.addEventListener("touchmove", (e) => {
     if (PD) { e.preventDefault(); return; }
     if (!pz) return; e.preventDefault(); if (e.targetTouches.length !== 2 || e.touches.length !== 2) return;   // a finger elsewhere (scrubber, other frame, a third one): hold the zoom
     const [a, b] = [oxy(e.targetTouches[0]), oxy(e.targetTouches[1])], ox = (a[0] + b[0]) / 2, oy = (a[1] + b[1]) / 2;
     if (OBSM()) { const zo = Math.min(2.5, Math.max(0.05, pz.z * Math.max(10, Math.hypot(a[0] - b[0], a[1] - b[1])) / pz.d)), fo = obsZoom(k, getFr(k), zo); setFr(k, fo); render(k); window.__spinch = { k, zoom: zo }; return; }   // 11-04: zoom out past 1x
-    if (ALERTM() && typeof Alerts !== "undefined" && Alerts._state) {
-      const zo = Math.min(8, Math.max(0.7, pz.z * Math.max(10, Math.hypot(a[0] - b[0], a[1] - b[1])) / pz.d));
-      Alerts._state.k = zo; Alerts.redraw();
-      const fr = getFr(k); fr.zoom = 1; fr.dx = 0; fr.dy = 0; setFr(k, fr);
-      if (f.zoom) f.zoom.value = String(Math.round(zo * 100));
-      render(k); window.__spinch = { k, zoom: zo }; return;
-    }
     const z = Math.min(2.5, Math.max(1, pz.z * Math.max(10, Math.hypot(a[0] - b[0], a[1] - b[1])) / pz.d)), kk = base(k).k0 * z;
     const fr = frAt(k, pz.mx - (ox - f.W / 2) / kk, pz.my - (oy - f.H / 2) / kk, z), r = crop(k, fr);   // map point under the fingers stays under them
     fr.dx = (r.bx - r.cx) * r.kk; fr.dy = (r.by - r.cy) * r.kk; setFr(k, fr); render(k); window.__spinch = { k, zoom: z };
   }, { passive: false });
-  const pend = (e) => { if (pz && e.targetTouches.length < 2) pz = null; };
+  const pend = (e) => { if (pz && e.targetTouches.length < 2) pz = null; if (e.targetTouches.length < 2) setTimeout(() => { cv._alertPinch = 0; }, 0); };
   cv.addEventListener("touchend", pend); cv.addEventListener("touchcancel", pend);
   cv.addEventListener("keydown", (e) => {
     const fr = getFr(k), st = e.shiftKey ? 10 : 1; let hit = true;
     if (OBSM() && ["+", "=", "-"].includes(e.key)) { obsZoom(k, fr, obsZv(fr) / 100 + (e.key === "-" ? -0.01 : 0.01)); e.preventDefault(); e.stopPropagation(); setFr(k, fr); render(k); return; }
-    if (ALERTM() && typeof Alerts !== "undefined" && Alerts._state && ["+", "=", "-", "0"].includes(e.key)) {
-      if (e.key === "0") Alerts._state.k = 1;
-      else Alerts._state.k = Math.min(8, Math.max(0.7, (Alerts._state.k || 1) + (e.key === "-" ? -0.05 : 0.05)));
-      Alerts.redraw(); fr.zoom = 1; fr.dx = 0; fr.dy = 0; if (f.zoom) f.zoom.value = String(Math.round(Alerts._state.k * 100));
-      e.preventDefault(); e.stopPropagation(); setFr(k, fr); render(k); return;
-    }
     if (e.key === "ArrowLeft") fr.dx -= st; else if (e.key === "ArrowRight") fr.dx += st; else if (e.key === "ArrowUp") fr.dy -= st; else if (e.key === "ArrowDown") fr.dy += st;
     else if (e.key === "+" || e.key === "=") fr.zoom = Math.min(2.5, (fr.zoom || 1) + 0.01); else if (e.key === "-") fr.zoom = Math.max(1, (fr.zoom || 1) - 0.01);
     else if (e.key === "0") { fr.dx = fr.dy = 0; fr.zoom = 1; } else hit = false;
     if (hit && OBSM() && e.key.startsWith("Arrow")) obsPan(k, fr);
     if (hit) { e.preventDefault(); e.stopPropagation(); setFr(k, fr); render(k); }
   }, true);
-  f.zoom.oninput = () => { const fr = getFr(k); if (OBSM()) obsZoom(k, fr, f.zoom.value / 100); else if (ALERTM() && typeof Alerts !== "undefined" && Alerts._state) {
-      // Zoom lives in mercator camera (uniform S.k); keep Studio cover crop at 1 so we never stretch
-      Alerts._state.k = Math.max(0.7, f.zoom.value / 100); Alerts.redraw(); fr.zoom = 1; fr.dx = 0; fr.dy = 0;
-    } else { fr.zoom = Math.max(1, f.zoom.value / 100); } setFr(k, fr); render(k); };
+  f.zoom.oninput = () => { const fr = getFr(k); if (OBSM()) obsZoom(k, fr, f.zoom.value / 100); else { fr.zoom = Math.max(1, f.zoom.value / 100); } setFr(k, fr); render(k); };
   cv.parentNode.querySelector(".shd").addEventListener("click", async (e) => {
     const a = e.target.closest("button[data-a]"); if (!a || !last) return;
     if (a.dataset.a === "reset") { if (ALERTM() && typeof Alerts !== "undefined") { if (Alerts.fitToSelection) Alerts.fitToSelection(); else if (Alerts._state) { Alerts._state.k = 1; Alerts.redraw(); } } if (OBSM() && typeof Obs !== "undefined" && Obs._state && OZ.sub < 1) { ozSync(); Obs._state.k = OZ.ref; OZ.sub = 1; Obs.redraw(); } setFr(k, { dx: 0, dy: 0, zoom: 1 }); if (ALERTM() && f.zoom) f.zoom.value = "100"; render(k); }
@@ -1387,7 +1375,14 @@ if (!CLEAN) {
   // Next, and stretches across the row under the tabs and the View menu. The short #step stays in the page (hidden) and is still the
   // one the viewer reads; this one drives it. Phones keep it under the 16:9 frame (bottom dock unchanged).
   // 11-04 (t2343u): its own row under the menu items, starting under the View menu and running ~480 px toward Share (not on the menu line)
-  if (innerWidth > 820) { const bar_ = document.getElementById("bar"); box.classList.add("inbar"); document.body.classList.add("longscrub"); bar_.appendChild(box);
+  // 11-05 (Benjamin t2444u): desktop second menu row = action buttons on the LEFT (Save image, Share, Meteogram, Pass Forecaster,
+  // Observations, Request a change), then the long hour scrubber to their right filling the rest of the line (in flow, wraps on narrow).
+  if (innerWidth > 820) { const bar_ = document.getElementById("bar"), ar = document.createElement("div"); ar.id = "actrow";
+    ["save", "share", "mgbtn", "pfbtn", "obsbtn"].forEach(id => { const e = document.getElementById(id); if (e) ar.appendChild(e); });
+    box.classList.add("inbar", "inrow"); document.body.classList.add("longscrub", "actrow"); ar.appendChild(box); const st_ = document.getElementById("stat"); bar_.insertBefore(ar, st_ && st_.parentNode === bar_ ? st_.nextSibling : null);
+    const ln = document.getElementById("loadnote"); if (ln) box.querySelector(".sw").appendChild(ln);
+    document.addEventListener("DOMContentLoaded", () => { const rq = document.getElementById("rqb"); if (rq) ar.insertBefore(rq, box); const st2 = document.getElementById("stat"); if (st2) ar.appendChild(st2); }); }
+  else if (false) { const bar_ = document.getElementById("bar"); box.classList.add("inbar"); document.body.classList.add("longscrub"); bar_.appendChild(box);
     // t2343u: overlay row under the View menu (absolute, so the bar height and the frames stay exactly as in Map); the short #step keeps its space, invisible
     // Placement: nearest free spot under the View menu (scan down, then left toward Share) that touches no visible control or frame,
     // so the scrubber never covers a button and the frames never move.
@@ -1419,6 +1414,43 @@ if (!CLEAN) {
     const key = S.run + ":" + n; if (key === tkKey) return; tkKey = key;   // tick labels every 24 h (by forecast hour), rebuilt per run / new hours
     tk.innerHTML = st.map((x, i) => x.f % 24 === 0 && (x.f % 48 === 0 || st[n - 1].f <= 168) ? `<span style="left:calc(9px + (100% - 18px) * ${n > 1 ? i / (n - 1) : 0})">${x.f}</span>` : "").join("");
   };
+  // 11-05 t2486u: Active Alerts hover — show alert type(s) under the cursor on Studio frames
+  (function alertHoverTip() {
+    const tip = document.getElementById("stip") || (() => { const d = document.createElement("div"); d.id = "stip"; d.hidden = true; document.body.appendChild(d); return d; })();
+    for (const k of ["v", "h"]) {
+      const f = F[k], cv = f.cv;
+      cv.addEventListener("pointermove", (e) => {
+        if (!ALERTM() || e.pointerType !== "mouse" || e.buttons || REC.on || typeof Alerts === "undefined" || !Alerts.hitAt || !MG.img) return;
+        const r = crop(k, getFr(k)), b = cv.getBoundingClientRect();
+        const ox = (e.clientX - b.left) * f.W / b.width, oy = (e.clientY - b.top) * f.H / b.height;
+        const bx = r.cx + (ox - f.W / 2) / r.kk, by = r.cy + (oy - f.H / 2) / r.kk;  // bitmap CSS px (al-canvas space)
+        const dpr = (Alerts._state && Alerts._state.dpr) || 1;
+        const sx = bx / dpr, sy = by / dpr;
+        if (sx < 0 || sy < 0 || sx > 1600 || sy > 1600) { tip.hidden = true; return; }
+        const [lon, lat] = Alerts.cssToLonLat(sx, sy);
+        const hits = Alerts.hitAt(lon, lat);
+        if (!hits.length) { tip.hidden = true; cv.style.cursor = ""; return; }
+        tip.textContent = hits.join(" · "); tip.hidden = false;
+        tip.style.left = (e.clientX + 14) + "px"; tip.style.top = (e.clientY - 32) + "px";
+        cv.style.cursor = "pointer";
+      });
+      cv.addEventListener("pointerleave", () => { if (ALERTM()) { tip.hidden = true; cv.style.cursor = ""; } });
+      let down = null;
+      cv.addEventListener("pointerdown", (e) => { if (!ALERTM() || CLEAN) { down = null; return; } down = { x: e.clientX, y: e.clientY, id: e.pointerId }; });
+      cv.addEventListener("pointerup", (e) => {
+        const d0 = down; down = null;
+        if (!d0 || d0.id !== e.pointerId || !ALERTM() || CLEAN || cv._alertPinch) return;
+        if (typeof Alerts === "undefined" || !Alerts.openAt || !Alerts.isMapClick(e.clientX - d0.x, e.clientY - d0.y)) return;
+        const r = crop(k, getFr(k)), b = cv.getBoundingClientRect();
+        const ox = (e.clientX - b.left) * f.W / b.width, oy = (e.clientY - b.top) * f.H / b.height;
+        const bx = r.cx + (ox - f.W / 2) / r.kk, by = r.cy + (oy - f.H / 2) / r.kk;
+        const dpr = (Alerts._state && Alerts._state.dpr) || 1;
+        const [lon, lat] = Alerts.cssToLonLat(bx / dpr, by / dpr);
+        Alerts.openAt(lon, lat);
+      });
+    }
+  })();
+
   // hover readout: frame px -> map figure px (same camera as crop()) -> a pointer position on the hidden map -> viewer readout()
   const tip = document.createElement("div"); tip.id = "stip"; tip.hidden = true; document.body.appendChild(tip);
   for (const k of ["v", "h"]) {
@@ -1497,11 +1529,11 @@ if (!CLEAN) {   // Studio: Map | Meteogram switch (first in the menu bar) + the 
       if (typeof Obs !== "undefined" && Obs.hide) Obs.hide();
       if (!document.getElementById("alertp")) { const ap = document.createElement("div"); ap.id = "alertp"; ap.innerHTML = `<div id="alert-root"></div>`; pnl.appendChild(ap); }
       window.__alertLoad = window.__alertLoad || new Promise((ok, bad) => {
-        if (!document.querySelector('link[href="alert/alert.css"]')) { const l = document.createElement("link"); l.rel = "stylesheet"; l.href = "alert/alert.css"; document.head.appendChild(l); }
-        const sc = document.createElement("script"); sc.src = "alert/alert.js?v=20261105h"; sc.onload = ok; sc.onerror = bad; document.body.appendChild(sc); });
+        if (!document.querySelector('link[href^="alert/alert.css"]')) { const l = document.createElement("link"); l.rel = "stylesheet"; l.href = "alert/alert.css?v=20261105t19"; document.head.appendChild(l); }
+        const sc = document.createElement("script"); sc.src = "alert/alert.js?v=20261105t19"; sc.onload = ok; sc.onerror = bad; document.body.appendChild(sc); });
       MG.msg = "Loading alerts\u2026"; let asig = "";
       const agrab = () => { const S_ = typeof Alerts !== "undefined" && Alerts._state, cv_ = document.getElementById("al-canvas"); if (!S_ || !cv_ || !cv_.width) return;
-        const sig = [S_.loaded, S_.selectedType || "ALL", S_.k, S_.cx, S_.cy, cv_.width, (S_.alerts || []).length, S_.sig || ""].join("|");
+        const sel = (S_.selectedTypes && S_.selectedTypes.size) ? [...S_.selectedTypes].sort().join(',') : 'ALL'; const sig = [S_.loaded, sel, S_.k, S_.cx, S_.cy, cv_.width, (S_.alerts || []).length, S_.sig || ""].join("|");
         if (sig !== asig || MG.img !== cv_) { asig = sig; MG.img = S_.loaded ? cv_ : null; MG.msg = S_.loaded ? "" : "Loading alerts\u2026"; if (!REC.on && !PV.on) renderAll(); } };
       window.__alertLoad.then(() => { if (ALERTM()) { Alerts.show(); fitFrames(); } }, () => { window.__alertLoad = null; MG.msg = "Alerts could not load."; renderAll(); });
       poll = setInterval(agrab, 400); renderAll(); fitFrames(); return;

@@ -180,7 +180,7 @@ body.passmode #bar>:not(#smodel){display:none!important}body.passmode #scrub,bod
 /* 11-05: Studio > Active Alerts (WA preview) */
 body.alertmode #mgp{display:block;flex:0 0 auto;background:#1d2027;border-bottom:1px solid #2c3039;padding:6px 10px}
 #alertp{display:none}body.alertmode #alertp{display:block}body.alertmode #mgf,body.alertmode #obsp,body.alertmode #pfp,body.alertmode #wff{display:none}
-body.alertmode #bar>:not(#smodel){display:none!important}body.alertmode #scrub,body.alertmode #dock,body.alertmode #pinhint,body.alertmode .shd button[data-a="mp4"],body.alertmode .shd button[data-a="obs"],body.alertmode .shd input,body.alertmode .shint{display:none!important}
+body.alertmode #bar>:not(#smodel){display:none!important}body.alertmode #scrub,body.alertmode #dock,body.alertmode #pinhint,body.alertmode .shd button[data-a="mp4"],body.alertmode .shd button[data-a="obs"]{display:none!important}
 body.phone.alertmode{padding-bottom:0}
 
 
@@ -195,6 +195,15 @@ body.longscrub #step{visibility:hidden!important}#bar{position:relative}
 #scrub.inbar .sw{flex:0 0 var(--scrw,480px);width:var(--scrw,480px);padding-bottom:12px;margin-top:0}#bar #scrub.inbar input[type=range]{height:18px;width:100%}
 #scrub.inbar #shour{flex:0 0 auto;width:auto;min-width:0!important;white-space:nowrap;line-height:18px}#scrub.inbar #loadnote{top:9px}
 body.mprange #hscrub::-webkit-slider-runnable-track{background:linear-gradient(90deg,#3a3f4a calc(9px + (100% - 18px) * var(--ra)),#2f8cffaa calc(9px + (100% - 18px) * var(--ra)),#2f8cffaa calc(9px + (100% - 18px) * var(--rb)),#3a3f4a calc(9px + (100% - 18px) * var(--rb)))}
+/* 11-05 (t2444u): Studio action row: buttons left, hour scrubber right of them on the same line (flows, wraps gracefully) */
+#actrow{flex:1 0 100%;display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;min-width:0}
+body.actrow #stepctl #step{display:none}
+#scrub.inbar.inrow{position:relative;left:auto;top:auto;z-index:auto;flex:1 1 360px;min-width:260px;width:auto}
+#scrub.inbar.inrow .sr{flex-wrap:nowrap;align-items:center}
+#scrub.inbar.inrow .sw{flex:1 1 auto;width:auto;min-width:160px;padding-bottom:12px}
+#actrow #stat{min-width:0}
+/* 11-05 (t2449u): exactly two rows on desktop: compact first-row controls so Studio..Play fits on one line at 1512 */
+@media (min-width:1300px){body.actrow #bar{gap:6px;column-gap:6px}body.actrow #bar>label select,body.actrow #smodel select{max-width:150px;padding:4px 4px}body.actrow #run{max-width:150px}body.actrow #view{max-width:170px}body.actrow #prod{max-width:170px}body.actrow #tabs button{padding:3px 8px}body.actrow #tabs{gap:4px}body.actrow #bar>#stat{display:none}}
 </style></head>
 <body>
 <div id="bar">
@@ -258,9 +267,9 @@ body.mprange #hscrub::-webkit-slider-runnable-track{background:linear-gradient(9
   if (q.get("from") && !q.get("f")) q.set("f", q.get("from"));
   history.replaceState(null, "", location.pathname + "?" + q.toString()); })();
 </script>
-<script src="viewer.js?v=20261104s32"></script>
+<script src="viewer.js?v=20261105pass1"></script>
 <script src="stormfind.js?v=20261031c"></script>
-<script src="studio.js?v=20261105alert10"></script>
+<script src="studio.js?v=20261105alert22"></script>
 <script src="reqbox.js?v=20261103m"></script>
 <footer class="lic"><details><summary>Data: &copy; <span class="yr">2026</span> ECMWF (www.ecmwf.int), CC BY 4.0 &middot; Places: GeoNames, CC BY 4.0 &middot; NOAA (public domain) &middot; Natural Earth &middot; <u>Credits</u></summary>
 <p>Based on data and products of the European Centre for Medium-Range Weather Forecasts (ECMWF). Copyright &copy; <span class="yr">2026</span> ECMWF, <a href="https://www.ecmwf.int">www.ecmwf.int</a>. Licensed under CC BY 4.0 (<a href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a>). Maps are modified from the original data. ECMWF does not accept any liability whatsoever for any error or omission in the data, their availability, or for any loss or damage arising from their use.</p>

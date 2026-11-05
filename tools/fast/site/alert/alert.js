@@ -14,6 +14,9 @@ const Alerts = (() => {
   const C_STATE = "rgba(200,215,235,0.9)";
   const WA0 = { lon0: -125.15, lon1: -116.7, lat0: 45.4, lat1: 49.1 };
   const CSS = 1600;
+  // Backing store is finer than the logical camera so a 250% Studio crop is still near 1 bitmap pixel per frame pixel.
+  // Source shorelines are Census 1:500k, not a larger-scale coast. See basemap_wa.json "source".
+  const MAP_PX = 4096;
   const SIDE_PREF = { "Oak Harbor": "left" };
   const RIGHT_CLEAR = 0.13;
   const PAD = 0.12;
@@ -31,8 +34,10 @@ const Alerts = (() => {
     cx: 0, cy: 0, scale: 1, k: 1, view: "wa",
     viewLL: Object.assign({}, WA0), // diagnostic / legacy readout of approx lonlat window
     colors: {}, zones: new Map(), towns: [], alerts: [],
-    selectedType: null, fillAlpha: 1, status: "", raf: 0, sig: "",
-    landFeats: [], waterFeats: [], stateGeom: null, countyGeoms: []
+    selectedTypes: new Set(), fillAlpha: 1,  // multi-select (t2490u); empty = All
+    selectedType: null, // legacy single when exactly one type selected
+    status: "", raf: 0, sig: "",
+    landFeats: [], waterFeats: [], stateGeom: null, countyGeoms: [], contextGeoms: [], roads: null
   };
   const $ = (id) => document.getElementById(id);
   const status = (t) => { S.status = t; const el = $("al-status"); if (el) el.textContent = t; };
@@ -149,8 +154,8 @@ const Alerts = (() => {
   }
 
   function visibleAlerts() {
-    if (!S.selectedType) return S.alerts;
-    return S.alerts.filter((a) => (a.properties && a.properties.event) === S.selectedType);
+    if (!S.selectedTypes || !S.selectedTypes.size) return S.alerts;
+    return S.alerts.filter((a) => S.selectedTypes.has((a.properties && a.properties.event) || ""));
   }
   function eventTypes() {
     const m = new Map();
@@ -216,31 +221,45 @@ const Alerts = (() => {
     req();
   }
 
-  function townBudget() {
-    if (S.k < 1.15) return { maxTier: 0, n: 20 };
-    if (S.k < 1.6) return { maxTier: 1, n: 32 };
-    if (S.k < 2.2) return { maxTier: 2, n: 45 };
-    if (S.k < 3.2) return { maxTier: 3, n: 60 };
-    return { maxTier: 4, n: 85 };
-  }
-  function pickTowns() {
-    const budget = townBudget();
-    const vis = visibleAlerts();
-    const geoms = vis.map((a) => a._geom).filter(Boolean);
-    const inside = [], outside = [];
-    for (const t of S.towns) {
-      if (t.tier > budget.maxTier && !t.notable) continue;
-      const hit = geoms.length ? geoms.some((g) => pointInGeom(t.lon, t.lat, g)) : false;
-      (hit ? inside : outside).push(t);
-    }
-    const out = [];
-    const take = (arr, n) => { for (const t of arr) { if (out.length >= n) break; out.push(t); } };
-    take(inside, budget.n);
-    take(outside, Math.min(budget.n, out.length + Math.max(6, Math.floor(budget.n * 0.3))));
-    return out;
+  // Match posted alert maps (alert_style MAIN cities + coastal) — t2491u/t2493u
+  const MAIN_TOWNS = new Set([
+    "Seattle", "Tacoma", "Spokane", "Olympia", "Everett", "Bellingham", "Vancouver",
+    "Yakima", "Tri-Cities", "Wenatchee", "Walla Walla", "Aberdeen", "Longview",
+    "Mount Vernon", "Ellensburg", "Port Angeles", "Bellevue", "Kent", "Renton",
+    "Kennewick", "Richland", "Pasco", "Bremerton", "Pullman"
+  ]);
+  const COASTAL_TOWNS = new Set([
+    "Aberdeen", "Hoquiam", "Westport", "Ocean Shores", "Long Beach", "Ilwaco",
+    "Forks", "Neah Bay", "La Push", "Port Angeles", "Sequim", "Port Townsend",
+    "Anacortes", "Friday Harbor", "Oak Harbor", "Blaine", "Birch Bay", "Raymond",
+    "South Bend", "Tokeland", "Pacific Beach", "Moclips", "Copalis Beach",
+    "Quinault", "Amanda Park", "Kalaloch", "Ozette"
+  ]);
+  function townPriority(t) {
+    if (MAIN_TOWNS.has(t.n)) return 0;
+    if (COASTAL_TOWNS.has(t.n)) return 1; // ahead of other notables so the coast is not crowded out (t2491u/t2493u)
+    if (t.notable) return 2;
+    return 3 + (t.tier || 0);
   }
 
-  // All drawing in CSS pixel space; caller sets ctx transform to dpr.
+  function townBudget(zoom) {
+    // Frame zoom (Studio crop), not Alerts._state.k. Overview keeps the approved main + coastal density (t2491u/t2493u).
+    // Past that, every town inside this frame is a candidate — offscreen towns never take a slot (t2499u).
+    const z = Math.max(1, +zoom || 1);
+    if (z < 1.25) return { maxTier: 2, n: 48 };
+    if (z < 1.7) return { maxTier: 3, n: Infinity };
+    if (z < 2.2) return { maxTier: 4, n: Infinity };
+    return { maxTier: 4, n: Infinity };
+  }
+  // Zoom-1 label size on a 1920-long Studio frame (12 CSS px on the 1600 map). Does not grow with zoom (t2499u).
+  function townFrameStyle(frameMax) {
+    const u = (frameMax > 0 ? frameMax : 1920) / CSS;
+    return { u, fs: 12 * u, gap: 8 * u, pad: 4 * u, dotR: 3.2 * u, halo: 3.5 * u, dotStroke: 1.5 * u };
+  }
+  function townOverlaps(a, b) {
+    return !(a[2] < b[0] || a[0] > b[2] || a[3] < b[1] || a[1] > b[3]);
+  }
+
   function pathGeom(g, ctx) {
     walkCoords(g, (ring) => {
       if (!ring.length) return;
@@ -304,6 +323,11 @@ const Alerts = (() => {
     ctx.fillRect(0, 0, CSS, CSS);
     ctx.globalAlpha = 1;
     // State land fill (islands included via evenodd)
+    if (S.contextGeoms && S.contextGeoms.length) {
+      ctx.beginPath();
+      for (const g of S.contextGeoms) pathGeom(g, ctx);
+      ctx.fillStyle = C_LAND; ctx.fill("evenodd");
+    }
     if (S.stateGeom) {
       ctx.beginPath(); pathGeoJSON(S.stateGeom, ctx);
       ctx.fillStyle = C_LAND; ctx.fill("evenodd");
@@ -312,80 +336,112 @@ const Alerts = (() => {
       for (const f of S.landFeats) if (f.geometry) pathGeom(f.geometry, ctx);
       ctx.fillStyle = C_LAND; ctx.fill("evenodd");
     }
-    // County lines (faint, exterior rings only — hole strokes looked like Sound marine borders)
-    if (S.countyGeoms && S.countyGeoms.length) {
-      ctx.beginPath();
-      for (const g of S.countyGeoms) {
-        const rings = []; exteriorRings(g, rings);
-        for (const ring of rings) {
-          if (!ring || !ring.length) continue;
-          const [sx0, sy0] = llToXY(ring[0][0], ring[0][1]);
-          ctx.moveTo(sx0, sy0);
-          for (let i = 1; i < ring.length; i++) {
-            const [sx, sy] = llToXY(ring[i][0], ring[i][1]);
-            ctx.lineTo(sx, sy);
-          }
-          ctx.closePath();
-        }
-      }
-      ctx.lineWidth = 1.1;
-      ctx.strokeStyle = C_COUNTY;
-      ctx.stroke();
-    }
-    // Mainland WA outline only (skip island strokes that looked like marine zones)
-    if (S.stateGeom) {
-      ctx.beginPath(); pathMainlandOutline(S.stateGeom, ctx);
-      ctx.lineWidth = 2.2;
-      ctx.strokeStyle = C_STATE;
-      ctx.stroke();
-    }
-    // Active alerts alone get colored strokes in draw().
+    // County lines and state outlines are stroked in frame pixels (paintFrameEdges) so zoom does not blur them.
   }
 
-  function drawTowns(ctx) {
-    const picks = pickTowns();
-    const placed = [];
-    const fs = Math.max(11, Math.min(16, 12 * Math.sqrt(S.k)));
-    ctx.font = `700 ${fs}px Montserrat, system-ui, sans-serif`;
-    ctx.textBaseline = "middle";
-    const pad = 4;
-    const maxX = CSS * (1 - RIGHT_CLEAR);
-    const collides = (b) => placed.some((p) => !(b[2] < p[0] || b[0] > p[2] || b[3] < p[1] || b[1] > p[3]));
-    for (const t of picks) {
-      const [sx, sy] = llToXY(t.lon, t.lat);
-      if (sx < 20 || sy < 20 || sx > maxX - 20 || sy > CSS - 20) continue;
-      const tw = ctx.measureText(t.n).width;
-      const side = t.side || SIDE_PREF[t.n] || "right";
-      const gap = 8;
-      const cands = side === "left"
-        ? [[sx - gap - tw, sy], [sx + gap, sy], [sx - tw / 2, sy - gap - fs], [sx - tw / 2, sy + gap + fs]]
-        : [[sx + gap, sy], [sx - gap - tw, sy], [sx - tw / 2, sy - gap - fs], [sx - tw / 2, sy + gap + fs]];
-      let spot = null;
-      for (const [tx, ty] of cands) {
-        const b = [tx - pad, ty - fs / 2 - pad, tx + tw + pad, ty + fs / 2 + pad];
-        if (b[0] < 8 || b[1] < 8 || b[2] > maxX - 8 || b[3] > CSS - 8) continue;
-        if (collides(b)) continue;
-        spot = { tx, ty, b }; break;
-      }
-      if (!spot) continue;
-      ctx.beginPath();
-      ctx.arc(sx, sy, 3.2, 0, Math.PI * 2);
-      ctx.fillStyle = "#fff"; ctx.fill();
-      ctx.lineWidth = 1.5; ctx.strokeStyle = "rgba(0,0,0,0.75)"; ctx.stroke();
-      ctx.lineWidth = 3.5; ctx.strokeStyle = "rgba(12,16,24,0.9)";
-      ctx.fillStyle = "#f2f5fa";
-      ctx.strokeText(t.n, spot.tx, spot.ty);
-      ctx.fillText(t.n, spot.tx, spot.ty);
-      placed.push(spot.b);
+  // Towns are laid out in final frame pixels (t2499u). The shared alert bitmap has no labels, so each
+  // frame's own zoom/pan keeps labels the same size and only spends the budget on towns inside that frame.
+  function layoutTowns(project, W, H, zoom, measure) {
+    const budget = townBudget(zoom);
+    const style = townFrameStyle(Math.max(W, H));
+    const fs = style.fs, gap = style.gap, pad = style.pad;
+    const vis = visibleAlerts();
+    const geoms = vis.map((a) => a._geom).filter(Boolean);
+    const edge = style.dotR + style.dotStroke;
+    const inView = (x, y) => x >= edge && y >= edge && x <= W - edge && y <= H - edge;
+    const cand = [];
+    let offscreen = 0;
+    for (const t of S.towns) {
+      const force = MAIN_TOWNS.has(t.n) || COASTAL_TOWNS.has(t.n) || t.notable;
+      if (!force && (t.tier || 0) > budget.maxTier) continue;
+      const [sx, sy] = project(t.lon, t.lat);
+      if (!inView(sx, sy)) { offscreen++; continue; }
+      const hit = geoms.length ? geoms.some((g) => pointInGeom(t.lon, t.lat, g)) : false;
+      cand.push({ t, hit, pri: townPriority(t), pop: t.pop || 0, sx, sy });
     }
+    cand.sort((a, b) => (a.pri - b.pri) || (b.pop - a.pop) || ((b.hit ? 1 : 0) - (a.hit ? 1 : 0)));
+    const placed = [], items = [], seen = new Set();
+    const hitsAny = (b) => placed.some((p) => townOverlaps(b, p));
+    let attempts = 0;
+    for (const row of cand) {
+      if (attempts >= budget.n) break;
+      if (seen.has(row.t.n)) continue;
+      seen.add(row.t.n);
+      attempts++;
+      const t = row.t, sx = row.sx, sy = row.sy;
+      const tw = measure(t.n, fs);
+      const side = t.side || SIDE_PREF[t.n] || "right";
+      const dotBox = [sx - edge, sy - edge, sx + edge, sy + edge];
+      const dotFree = !hitsAny(dotBox);
+      const anchors = (side === "left"
+        ? [[sx - gap - tw, sy], [sx + gap, sy], [sx - tw / 2, sy - gap - fs], [sx - tw / 2, sy + gap + fs]]
+        : [[sx + gap, sy], [sx - gap - tw, sy], [sx - tw / 2, sy - gap - fs], [sx - tw / 2, sy + gap + fs]]
+      ).map(([tx, ty]) => ({ tx, ty, b: [tx - pad, ty - fs / 2 - pad, tx + tw + pad, ty + fs / 2 + pad] }));
+      let spot = null;
+      if (dotFree) {
+        for (const a of anchors) {
+          const b = a.b;
+          if (b[0] < 2 || b[1] < 2 || b[2] > W - 2 || b[3] > H - 2) continue;
+          if (townOverlaps(b, dotBox) || hitsAny(b)) continue;
+          spot = a; break;
+        }
+      }
+      if (spot) {
+        placed.push(dotBox, spot.b);
+        items.push({ n: t.n, sx, sy, tx: spot.tx, ty: spot.ty, tw, label: true, b: spot.b, dotBox, tier: t.tier || 0, pri: row.pri });
+      } else if (dotFree) {
+        // Label lost the collision. Keep the dot so a later label cannot cover this town (t2499u).
+        placed.push(dotBox);
+        items.push({ n: t.n, sx, sy, tx: sx, ty: sy, tw, label: false, b: null, dotBox, tier: t.tier || 0, pri: row.pri });
+      }
+    }
+    return { style, items, inView: cand.length, attempts, offscreen, labeled: items.filter((it) => it.label).length, dotted: items.length };
+  }
+  function paintTownItems(ctx, laid) {
+    if (!ctx || !laid) return;
+    const { fs, dotR, halo, dotStroke } = laid.style;
+    ctx.save();
+    ctx.font = `700 ${fs}px Montserrat, system-ui, sans-serif`;
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    for (const it of laid.items) {
+      ctx.beginPath();
+      ctx.arc(it.sx, it.sy, dotR, 0, Math.PI * 2);
+      ctx.fillStyle = "#fff"; ctx.fill();
+      ctx.lineWidth = dotStroke; ctx.strokeStyle = "rgba(0,0,0,0.75)"; ctx.stroke();
+      if (!it.label) continue;
+      ctx.lineWidth = halo; ctx.strokeStyle = "rgba(12,16,24,0.9)";
+      ctx.fillStyle = "#f2f5fa";
+      ctx.strokeText(it.n, it.tx, it.ty);
+      ctx.fillText(it.n, it.tx, it.ty);
+    }
+    ctx.restore();
+  }
+  function paintFrameTowns(ctx, cam) {
+    if (!cam || !S.towns.length) return null;
+    const dpr = cam.dpr || S.dpr || 1;
+    const project = (lon, lat) => {
+      const [sx, sy] = llToXY(lon, lat);
+      return [cam.W / 2 + (sx * dpr - cam.cx) * cam.kk, cam.H / 2 + (sy * dpr - cam.cy) * cam.kk];
+    };
+    const measure = (name, fs) => {
+      if (ctx && ctx.measureText) {
+        ctx.font = `700 ${fs}px Montserrat, system-ui, sans-serif`;
+        return ctx.measureText(name).width;
+      }
+      return fs * 0.56 * String(name).length;
+    };
+    const laid = layoutTowns(project, cam.W, cam.H, cam.zoom || 1, measure);
+    paintTownItems(ctx, laid);
+    return laid;
   }
 
   function draw() {
     const c = $("al-canvas"); if (!c) return;
     const ctx = c.getContext("2d");
-    const dpr = Math.min(2, window.devicePixelRatio || 1); S.dpr = dpr;
-    if (c.width !== CSS * dpr || c.height !== CSS * dpr) { c.width = CSS * dpr; c.height = CSS * dpr; }
-    // ONE transform: all geometry + towns share CSS pixel space
+    const dpr = MAP_PX / CSS; S.dpr = dpr;
+    if (c.width !== MAP_PX || c.height !== MAP_PX) { c.width = MAP_PX; c.height = MAP_PX; }
+    // ONE transform: basemap geometry shares CSS pixel space. Town labels are drawn in frame pixels.
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     drawBasemap(ctx);
     const vis = visibleAlerts();
@@ -396,26 +452,35 @@ const Alerts = (() => {
       ctx.beginPath(); pathGeom(g, ctx);
       ctx.fillStyle = hexToRgba(col, aFill);
       ctx.fill("evenodd");
-      ctx.lineWidth = 2.4;
-      ctx.strokeStyle = hexToRgba(col, Math.max(0.85, aFill));
-      ctx.stroke();
     }
-    drawTowns(ctx);
+    // Town labels are painted per Studio frame (paintFrameTowns), not baked into this bitmap (t2499u).
     S.viewLL = approxViewLL();
-    S.sig = [S.loaded, S.selectedType || "ALL", S.fillAlpha.toFixed(2), S.k.toFixed(3), S.scale.toFixed(1),
-      S.cx.toFixed(5), S.cy.toFixed(5), S.viewLL.lon0.toFixed(3), S.viewLL.lat0.toFixed(3), vis.length, dpr].join("|");
+    S.sig = [S.loaded, (S.selectedTypes && S.selectedTypes.size ? [...S.selectedTypes].sort().join(',') : 'ALL'), S.fillAlpha.toFixed(2), S.k.toFixed(3), S.scale.toFixed(1),
+      S.cx.toFixed(5), S.cy.toFixed(5), S.viewLL.lon0.toFixed(3), S.viewLL.lat0.toFixed(3), vis.length, S.towns.length, (S.roads || []).length, (S.contextGeoms || []).length, dpr].join("|");
   }
   function req() { if (S.raf) return; S.raf = requestAnimationFrame(() => { S.raf = 0; draw(); }); }
 
   function renderChips() {
     const box = $("al-chips"); if (!box) return;
+    if (!S.selectedTypes) S.selectedTypes = new Set();
     const types = eventTypes();
+    const allOn = S.selectedTypes.size === 0;
     const mk = (label, type, color, n) => {
       const b = document.createElement("button");
       b.type = "button"; b.className = "al-chip";
-      b.setAttribute("aria-pressed", type === S.selectedType || (type === null && S.selectedType === null) ? "true" : "false");
+      const on = type === null ? allOn : S.selectedTypes.has(type);
+      b.setAttribute("aria-pressed", on ? "true" : "false");
       b.innerHTML = `<span class="sw" style="background:${color || '#7cb7ff'}"></span><span>${label}${n != null ? " · " + n : ""}</span>`;
-      b.onclick = () => { S.selectedType = type; renderChips(); fitToSelection(); };
+      b.onclick = () => {
+        // t2490u: multi-toggle; All clears the set. Tapping a type adds/removes; last type off → All.
+        if (type === null) { S.selectedTypes.clear(); }
+        else {
+          if (S.selectedTypes.has(type)) S.selectedTypes.delete(type);
+          else S.selectedTypes.add(type);
+        }
+        S.selectedType = S.selectedTypes.size === 1 ? [...S.selectedTypes][0] : null;
+        renderChips(); req();
+      };
       return b;
     };
     box.innerHTML = "";
@@ -444,6 +509,7 @@ const Alerts = (() => {
         data = await loadJSON("alert/active_wa.json");
         status("Using cached snapshot (live NWS unavailable)");
       }
+      // Existing coverage: WA land alerts plus PZZ marine, with the box reaching the OR/ID border. Do not tighten this (t2504u).
       const WA_BOX = { lon0: -126.6, lon1: -116.5, lat0: 45.5, lat1: 49.2 };
       const feats0 = (data.features || []).filter((a) => {
         const zones = (a.properties && a.properties.affectedZones) || [];
@@ -553,13 +619,18 @@ const Alerts = (() => {
         const bm = await loadJSON("alert/basemap_wa.json");
         S.stateGeom = bm.state || null;
         S.countyGeoms = bm.counties || [];
+        S.contextGeoms = bm.context || [];
       } catch (e) { /* optional */ }
     }
     if (!S.towns.length) {
       try {
         const t = await loadJSON("alert/towns_wa.json");
-        S.towns = (t.places || []).slice().sort((a, b) => (b.notable - a.notable) || (a.tier - b.tier) || (b.pop - a.pop));
+        S.towns = (t.places || []).slice().sort((a, b) => townPriority(a) - townPriority(b) || (b.pop || 0) - (a.pop || 0) || (a.tier - b.tier));
       } catch (e) { S.towns = []; }
+    }
+    if (!S.roads) {
+      try { S.roads = (await loadJSON("alert/roads_wa.json")).roads || []; }
+      catch (e) { S.roads = []; }
     }
     req();
     if (!S.loaded || Date.now() - S.loaded > REFRESH_MS) loadAlerts();
@@ -568,11 +639,311 @@ const Alerts = (() => {
     S.timer = setInterval(() => { if (S.shown && !document.hidden) loadAlerts(); }, REFRESH_MS);
   }
 
-  function titleText() { return S.selectedType || "All Alerts"; }
+
+  function alertId(a) {
+    const p = a && a.properties;
+    return (a && a.id) || (p && (p.id || p["@id"])) || "";
+  }
+  function hitAt(lon, lat) {
+    const hits = [];
+    for (const a of alertsAt(lon, lat)) {
+      const ev = (a.properties && a.properties.event) || "Alert";
+      if (!hits.includes(ev)) hits.push(ev);
+    }
+    return hits;
+  }
+  /** Topmost drawn alert first. Only alerts the chips currently show. */
+  function alertsAt(lon, lat) {
+    const vis = visibleAlerts();
+    const hits = [];
+    for (let i = vis.length - 1; i >= 0; i--) {
+      const a = vis[i], g = a._geom; if (!g) continue;
+      if (pointInGeom(lon, lat, g)) hits.push(a);
+    }
+    return hits;
+  }
+  function propText(p, k) {
+    const v = p && p[k];
+    return v == null ? "" : String(v);
+  }
+  function fmtWhen(iso) {
+    if (!iso) return "";
+    const t = new Date(iso);
+    if (isNaN(t.getTime())) return String(iso);
+    try {
+      return new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(t) + " PT";
+    } catch (e) { return String(iso); }
+  }
+  function readoutModel(alert, note) {
+    const p = (alert && alert.properties) || {};
+    const description = propText(p, "description").trim();
+    const instruction = propText(p, "instruction").trim();
+    const headline = propText(p, "headline").trim();
+    const times = [["Effective", propText(p, "effective")], ["Onset", propText(p, "onset")], ["Ends", propText(p, "ends")], ["Expires", propText(p, "expires")], ["Sent", propText(p, "sent")]].filter((x) => x[1]);
+    return {
+      id: alertId(alert),
+      event: propText(p, "event") || "Alert",
+      headline, description, instruction,
+      area: propText(p, "areaDesc").trim(),
+      severity: propText(p, "severity"),
+      urgency: propText(p, "urgency"),
+      certainty: propText(p, "certainty"),
+      sender: propText(p, "senderName"),
+      web: propText(p, "web"),
+      times: times.map(([k, v]) => [k, fmtWhen(v)]),
+      missing: !description && !instruction && !headline,
+      note: note || ""
+    };
+  }
+  const READ_MISS = "NWS did not include the full text for this alert.";
+  const READ_STALE = "Could not refresh from NWS. Showing the copy already loaded.";
+  const READ_GONE = "NWS no longer lists this alert. Showing the last copy loaded.";
+  let readGen = 0, readStack = [], readIndex = 0;
+  function ensureReadout() {
+    let el = document.getElementById("alread");
+    if (el) return el;
+    el = document.createElement("div");
+    el.id = "alread"; el.hidden = true; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", "NWS alert text");
+    document.body.appendChild(el);
+    el.addEventListener("click", (e) => {
+      const b = e.target.closest("button"); if (!b) return;
+      if (b.dataset.act === "close") dismissReadout();
+      else if (b.dataset.act === "next") { showReadout(readIndex + 1); refreshReadout(readStack[readIndex], readGen); }
+      else if (b.dataset.act === "back") { showReadout(readIndex - 1); refreshReadout(readStack[readIndex], readGen); }
+    });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape" && el && !el.hidden) { dismissReadout(); e.preventDefault(); } });
+    return el;
+  }
+  function addLine(parent, tag, text, cls) {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    n.textContent = text;
+    parent.appendChild(n);
+    return n;
+  }
+  function paintReadout(model, n, total) {
+    const el = ensureReadout();
+    el.innerHTML = "";
+    const head = document.createElement("div"); head.className = "alr-h";
+    addLine(head, "b", model.event || "Alert", "alr-ev");
+    const tools = document.createElement("span"); tools.className = "alr-tools";
+    if (total > 1) {
+      const back = document.createElement("button"); back.type = "button"; back.dataset.act = "back"; back.textContent = "Back"; back.disabled = readIndex <= 0;
+      const lab = document.createElement("span"); lab.textContent = (readIndex + 1) + " of " + total;
+      const next = document.createElement("button"); next.type = "button"; next.dataset.act = "next"; next.textContent = "Next"; next.disabled = readIndex >= total - 1;
+      tools.append(back, lab, next);
+    }
+    const close = document.createElement("button"); close.type = "button"; close.dataset.act = "close"; close.textContent = "Close";
+    tools.appendChild(close); head.appendChild(tools); el.appendChild(head);
+    if (model.note) addLine(el, "p", model.note, "alr-note");
+    if (model.missing) addLine(el, "p", READ_MISS, "alr-note");
+    if (model.headline) addLine(el, "p", model.headline, "alr-hd");
+    const meta = [model.area, [model.severity, model.urgency, model.certainty].filter(Boolean).join(" · "), model.sender].filter(Boolean);
+    meta.forEach((t) => addLine(el, "p", t, "alr-meta"));
+    model.times.forEach(([k, v]) => addLine(el, "p", k + ": " + v, "alr-meta"));
+    if (model.description) addLine(el, "p", model.description, "alr-body");
+    if (model.instruction) addLine(el, "p", model.instruction, "alr-body");
+    if (model.web) addLine(el, "p", model.web, "alr-web");
+    addLine(el, "p", "Text: National Weather Service", "alr-src");
+    el.hidden = false;
+    const c = el.querySelector("button[data-act=close]"); if (c) c.focus();
+  }
+  function showReadout(i) {
+    if (!readStack.length) return dismissReadout();
+    readIndex = Math.max(0, Math.min(readStack.length - 1, i));
+    paintReadout(readoutModel(readStack[readIndex], readStack[readIndex]._note || ""), readStack.length, readStack.length);
+  }
+  function dismissReadout() {
+    readGen++; readStack = []; readIndex = 0;
+    const el = document.getElementById("alread"); if (el) { el.hidden = true; el.innerHTML = ""; }
+  }
+  async function refreshReadout(alert, gen) {
+    const id = alertId(alert);
+    const url = /^https?:/i.test(id) ? id : "";
+    if (!url) return;
+    let note = "", gone = false, fresh = null;
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 4500);
+      const r = await fetch(url, { headers: { Accept: "application/geo+json, application/json", "User-Agent": UA }, signal: ctrl.signal });
+      clearTimeout(timer);
+      if (r.status === 404) gone = true;
+      else if (!r.ok) note = READ_STALE;
+      else fresh = await r.json();
+    } catch (e) { note = READ_STALE; }
+    if (gen !== readGen) return;
+    const slot = readStack[readIndex];
+    if (!slot || alertId(slot) !== id) return;
+    if (fresh && fresh.properties) {
+      fresh._geom = slot._geom;
+      readStack[readIndex] = fresh;
+      fresh._note = "";
+    } else if (gone) slot._note = READ_GONE;
+    else if (note) slot._note = note;
+    showReadout(readIndex);
+  }
+  function openAt(lon, lat) {
+    const hits = alertsAt(lon, lat);
+    if (!hits.length) { dismissReadout(); return []; }
+    readGen++; readStack = hits; readIndex = 0;
+    showReadout(0);
+    refreshReadout(hits[0], readGen);
+    return hits.map(alertId);
+  }
+  function isMapClick(dx, dy) { return Math.hypot(dx, dy) < 8; }
+  /** Bitmap CSS-px (alert canvas space) → lon/lat. */
+  function cssToLonLat(sx, sy) {
+    const [mx, my] = screenToMerc(sx, sy);
+    return mercToLonLat(mx, my);
+  }
+
+  function frameProject(cam) {
+    const dpr = cam.dpr || S.dpr || 1;
+    return (lon, lat) => {
+      const [sx, sy] = llToXY(lon, lat);
+      return [cam.W / 2 + (sx * dpr - cam.cx) * cam.kk, cam.H / 2 + (sy * dpr - cam.cy) * cam.kk];
+    };
+  }
+  function allRings(g, out) {
+    if (!g) return;
+    const t = g.type;
+    if (t === "Polygon") (g.coordinates || []).forEach((r) => out.push(r));
+    else if (t === "MultiPolygon") (g.coordinates || []).forEach((p) => (p || []).forEach((r) => out.push(r)));
+    else if (t === "GeometryCollection") (g.geometries || []).forEach((gg) => allRings(gg, out));
+    else if (t === "Feature") allRings(g.geometry, out);
+    else if (t === "FeatureCollection") (g.features || []).forEach((f) => allRings(f.geometry, out));
+  }
+  function strokeProjected(ctx, geom, project) {
+    const rings = []; allRings(geom, rings);
+    for (const ring of rings) {
+      if (!ring || ring.length < 2) continue;
+      ctx.beginPath();
+      for (let i = 0; i < ring.length; i++) {
+        const [x, y] = project(ring[i][0], ring[i][1]);
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      ctx.closePath(); ctx.stroke();
+    }
+  }
+  function paintFrameEdges(ctx, cam) {
+    if (!ctx || !cam) return;
+    const project = frameProject(cam);
+    ctx.save();
+    ctx.lineJoin = "round"; ctx.lineCap = "round";
+    if (S.countyGeoms && S.countyGeoms.length) {
+      ctx.lineWidth = 1.25; ctx.strokeStyle = C_COUNTY;
+      for (const g of S.countyGeoms) strokeProjected(ctx, g, project);
+    }
+    if (S.contextGeoms && S.contextGeoms.length) {
+      ctx.lineWidth = 1.5; ctx.strokeStyle = "rgba(170,186,206,0.55)";
+      for (const g of S.contextGeoms) strokeProjected(ctx, g, project);
+    }
+    if (S.stateGeom) {
+      ctx.lineWidth = 2.6; ctx.strokeStyle = C_STATE;
+      strokeProjected(ctx, S.stateGeom, project);
+    }
+    ctx.lineWidth = 2.6;
+    for (const a of visibleAlerts()) {
+      if (!a._geom) continue;
+      ctx.strokeStyle = hexToRgba(colorFor(a.properties && a.properties.event), 1);
+      strokeProjected(ctx, a._geom, project);
+    }
+    ctx.restore();
+  }
+  function roadsForZoom(zoom) {
+    const z = Math.max(1, +zoom || 1), list = S.roads || [];
+    return list.filter((r) => {
+      if (r.cls === "interstate") return true;
+      if (r.cls === "us") return z >= 1.2 || (r.rank || 9) <= 6;
+      return z >= 1.75;
+    });
+  }
+  function layoutRoads(cam, towns, measure) {
+    const project = frameProject(cam);
+    const roads = roadsForZoom(cam.zoom);
+    const blocks = [];
+    if (towns && towns.items) for (const it of towns.items) { blocks.push(it.dotBox); if (it.b) blocks.push(it.b); }
+    const hit = (b) => blocks.some((p) => townOverlaps(b, p));
+    const shields = [];
+    const lines = [];
+    for (const r of roads) lines.push({ r, xy: r.pts.map(([lon, lat]) => project(lon, lat)) });
+    for (const cls of ["interstate", "us", "state"]) for (const d of lines) if (d.r.cls === cls) {
+      const inside = d.xy.filter(([x, y]) => x >= 8 && y >= 8 && x <= cam.W - 8 && y <= cam.H - 8);
+      if (inside.length < 2) continue;
+      const label = d.r.ref;
+      const tw = measure ? measure(label) : 13 * 0.62 * String(label).length;
+      const w = Math.max(22, tw + 10), h = 18;
+      const spots = [0.5, 0.32, 0.68].map((t) => inside[Math.min(inside.length - 1, Math.round((inside.length - 1) * t))]);
+      for (const [x, y] of spots) {
+        const b = [x - w / 2 - 2, y - h / 2 - 2, x + w / 2 + 2, y + h / 2 + 2];
+        if (b[0] < 2 || b[1] < 2 || b[2] > cam.W - 2 || b[3] > cam.H - 2) continue;
+        if (hit(b) || shields.some((s) => townOverlaps(b, s.b))) continue;
+        const sh = { x, y, b, label, cls };
+        shields.push(sh); blocks.push(b); break;
+      }
+    }
+    return { lines, shields, shown: roads.length };
+  }
+  function paintFrameRoads(ctx, cam, towns) {
+    if (!ctx || !cam) return null;
+    const measure = (label) => { ctx.font = "700 13px Montserrat, system-ui, sans-serif"; return ctx.measureText ? ctx.measureText(label).width : 13 * 0.62 * label.length; };
+    const laid = layoutRoads(cam, towns, measure);
+    ctx.save();
+    ctx.lineJoin = "round"; ctx.lineCap = "round";
+    for (const d of laid.lines) {
+      ctx.beginPath();
+      let on = false;
+      for (const [x, y] of d.xy) {
+        const vis = x >= -80 && y >= -80 && x <= cam.W + 80 && y <= cam.H + 80;
+        if (!vis) { on = false; continue; }
+        if (!on) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        on = true;
+      }
+      ctx.lineWidth = d.r.cls === "interstate" ? 3.2 : d.r.cls === "us" ? 2.2 : 1.5;
+      ctx.strokeStyle = d.r.cls === "interstate" ? "rgba(214,224,238,0.92)" : "rgba(168,184,204,0.8)";
+      ctx.stroke();
+    }
+    ctx.font = "700 13px Montserrat, system-ui, sans-serif";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    for (const s of laid.shields) {
+      const w = s.b[2] - s.b[0] - 4, h = s.b[3] - s.b[1] - 4;
+      ctx.beginPath();
+      ctx.fillStyle = s.cls === "interstate" ? "#1c3e78" : "#f3f0e8";
+      ctx.strokeStyle = s.cls === "interstate" ? "#e8eef8" : "#1c2430";
+      ctx.lineWidth = 1.25;
+      if (ctx.roundRect) ctx.roundRect(s.x - w / 2, s.y - h / 2, w, h, 4);
+      else ctx.rect(s.x - w / 2, s.y - h / 2, w, h);
+      ctx.fill(); ctx.stroke();
+      ctx.fillStyle = s.cls === "interstate" ? "#f4f7fb" : "#1c2430";
+      ctx.fillText(s.label, s.x, s.y + 0.5);
+    }
+    ctx.restore();
+    return laid;
+  }
+  function paintFrameScene(ctx, cam) {
+    paintFrameEdges(ctx, cam);
+    const project = frameProject(cam);
+    const measure = (name, fs) => {
+      if (ctx && ctx.measureText) { ctx.font = `700 ${fs}px Montserrat, system-ui, sans-serif`; return ctx.measureText(name).width; }
+      return fs * 0.56 * String(name).length;
+    };
+    const towns = S.towns.length ? layoutTowns(project, cam.W, cam.H, cam.zoom || 1, measure) : { items: [], style: townFrameStyle(Math.max(cam.W, cam.H)), labeled: 0 };
+    const roads = paintFrameRoads(ctx, cam, towns);
+    paintTownItems(ctx, towns);
+    return { towns, roads };
+  }
+
+  function titleText() {
+    if (!S.selectedTypes || !S.selectedTypes.size) return "All Alerts";
+    if (S.selectedTypes.size === 1) return [...S.selectedTypes][0];
+    return [...S.selectedTypes].sort().join(" · ");
+  }
 
   return {
     show, hide, redraw: req, drawNow: draw, load: loadAlerts,
-    fitToSelection, titleText, eventTypes, coverSafe, mercXY, llToXY, approxViewLL,
+    fitToSelection, titleText, eventTypes, coverSafe, mercXY, llToXY, approxViewLL, hitAt, cssToLonLat,
+    layoutTowns, paintFrameTowns, paintFrameScene, paintFrameEdges, paintFrameRoads, layoutRoads, roadsForZoom, townFrameStyle, townBudget,
+    alertsAt, readoutModel, openAt, dismissReadout, isMapClick, frameProject, mapPixels: () => MAP_PX,
     setFillAlpha: (a) => { S.fillAlpha = Math.max(0.2, Math.min(1, +a || 1)); const op=$("al-opacity"), opv=$("al-opacity-val"); if (op) op.value=String(Math.round(S.fillAlpha*100)); if (opv) opv.textContent=Math.round(S.fillAlpha*100)+"%"; req(); },
     _state: S
   };
