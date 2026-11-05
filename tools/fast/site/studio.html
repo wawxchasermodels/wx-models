@@ -177,6 +177,13 @@ body.passmode #bar>:not(#smodel){display:none!important}body.passmode #scrub,bod
 #obsp #ostage{position:fixed!important;left:-20000px!important;top:0!important;width:1600px!important;height:1600px!important;flex:none!important;visibility:visible}
 #obsp .obs-zoom,#obsp #dl-obs,#obsp .obs-hint,#obsp #obs-tip,#obsp .obs-credit{display:none!important}
 
+/* 11-05: Studio > Active Alerts (WA preview) */
+body.alertmode #mgp{display:block;flex:0 0 auto;background:#1d2027;border-bottom:1px solid #2c3039;padding:6px 10px}
+#alertp{display:none}body.alertmode #alertp{display:block}body.alertmode #mgf,body.alertmode #obsp,body.alertmode #pfp,body.alertmode #wff{display:none}
+body.alertmode #bar>:not(#smodel){display:none!important}body.alertmode #scrub,body.alertmode #dock,body.alertmode #pinhint,body.alertmode .shd button[data-a="mp4"],body.alertmode .shd button[data-a="obs"],body.alertmode .shd input,body.alertmode .shint{display:none!important}
+body.phone.alertmode{padding-bottom:0}
+
+
 #memlab[hidden]{display:none!important}.memstep{background:#262931;color:#f4f2ee;border:1px solid #7d828c;border-radius:6px;padding:2px 8px;margin:0 2px;font:inherit;font-weight:700;cursor:pointer;line-height:1.2}.memstep:hover{background:#343844}#memlab.keep[hidden]{display:block!important;visibility:hidden}/* 11-03: Studio keeps the Member slot so the bar (and the frames under it) never move */
 #bar select,#bar button,#bar input[type=range],#bar label,#mem{box-sizing:border-box;height:30px}#bar label{display:inline-flex;align-items:center;gap:4px}#tabs button{height:26px}
 #shour{flex:0 0 212px;width:212px;min-width:212px!important;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
@@ -253,7 +260,7 @@ body.mprange #hscrub::-webkit-slider-runnable-track{background:linear-gradient(9
 </script>
 <script src="viewer.js?v=20261104s32"></script>
 <script src="stormfind.js?v=20261031c"></script>
-<script src="studio.js?v=20261104w"></script>
+<script src="studio.js?v=20261105alert"></script>
 <script src="reqbox.js?v=20261103m"></script>
 <footer class="lic"><details><summary>Data: &copy; <span class="yr">2026</span> ECMWF (www.ecmwf.int), CC BY 4.0 &middot; Places: GeoNames, CC BY 4.0 &middot; NOAA (public domain) &middot; Natural Earth &middot; <u>Credits</u></summary>
 <p>Based on data and products of the European Centre for Medium-Range Weather Forecasts (ECMWF). Copyright &copy; <span class="yr">2026</span> ECMWF, <a href="https://www.ecmwf.int">www.ecmwf.int</a>. Licensed under CC BY 4.0 (<a href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a>). Maps are modified from the original data. ECMWF does not accept any liability whatsoever for any error or omission in the data, their availability, or for any loss or damage arising from their use.</p>

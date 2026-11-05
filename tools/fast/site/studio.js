@@ -26,11 +26,11 @@ if (CLEAN) {
 // 11-04 (t2337u "refreshed ... and it loaded into a SNOW METEOGRAM"): the mode is per tab only: the address (?smode=, survives any
 // refresh / restore, OBS included) and this tab's sessionStorage. The shared localStorage value is no longer read, so a Studio opened or
 // re-opened without them starts on Map, never on another window's Meteogram / Observations / Pass Forecaster.
-const MODES_OK = ["map", "mg", "obs", "pass", "wafc"];
+const MODES_OK = ["map", "mg", "obs", "pass", "wafc", "alert"];
 const MODE0 = MODES_OK.includes(SQ.get("smode")) ? SQ.get("smode") : "map";   // the address only: a bare studio.html always opens on Map
 const saveMode = (m) => { try { sessionStorage.setItem("studio:mode", m); } catch (e) { /* private mode */ }
   if (CLEAN) return; try { const u = new URL(location); if (m === "map") u.searchParams.delete("smode"); else u.searchParams.set("smode", m); history.replaceState(null, "", u); } catch (e) { /* replaceState limit */ } };
-const MG = { on: !CLEAN && ["mg", "obs", "pass", "wafc"].includes(MODE0), kind: ["obs", "pass", "wafc"].includes(MODE0) ? MODE0 : "mg", img: null, src: "" };
+const MG = { on: !CLEAN && ["mg", "obs", "pass", "wafc", "alert"].includes(MODE0), kind: ["obs", "pass", "wafc", "alert"].includes(MODE0) ? MODE0 : "mg", img: null, src: "" };
 // 11-04 (t2310u/t2311u "my fancy Washington forecast maps ... into studio view", own tab): MG.kind "wafc" = the WA Maps page (wamaps.html: the
 // posted-style NBM lows / highs, gusts (HRRR / ECMWF / ENS / NBM), precip, snow) in a small panel iframe; its finished map canvas is fitted whole
 // into each frame at 2x (PSS). The map carries its own title, scale, logo and credits, so Studio adds nothing on top.
@@ -38,6 +38,7 @@ const WAFCM = () => MG.on && MG.kind === "wafc";
 const PASSM = () => MG.on && MG.kind === "pass";
 const PF = { run: "", rows: null, msg: "" };
 const OBSM = () => MG.on && MG.kind === "obs";
+const ALERTM = () => MG.on && MG.kind === "alert";
 const IW = (im) => im.naturalWidth || im.width, IH = (im) => im.naturalHeight || im.height;
 const key = (k) => `studio:${k}:${MG.on ? MG.kind : S.view}`;
 const getFr = (k) => {
@@ -75,7 +76,7 @@ function stateRect(V, m) {   // Washington's box in the wide view's figure px: t
   return { x: t.x + q[0] * t.w, y: t.y + q[1] * t.h, w: q[2] * t.w, h: q[3] * t.h };
 }
 function mgBase(k) {   // meteogram: whole chart fitted inside the frame (9:16: centred a little above the middle)
-  if (OBSM()) { const f = F[k], iw = IW(MG.img), ih = IH(MG.img); return { cx: iw / 2, cy: ih / 2, k0: Math.max(f.W / iw, f.H / ih) }; }   // obs: the map covers the frame
+  if (OBSM() || ALERTM()) { const f = F[k], iw = IW(MG.img), ih = IH(MG.img); return { cx: iw / 2, cy: ih / 2, k0: Math.max(f.W / iw, f.H / ih) }; }   // obs/alert: the map covers the frame
   const f = F[k], im = MG.img, iw = im.naturalWidth, ih = im.naturalHeight, padX = f.pad * 0.5, top = k === "v" ? 200 : 60, bot = k === "v" ? 200 : 70;
   const k0 = Math.min((f.W - 2 * padX) / iw, (f.H - top - bot) / ih);
   return { cx: iw / 2, cy: ih / 2 - ((top + (f.H - bot)) / 2 - f.H / 2) / k0, k0 };
@@ -118,7 +119,7 @@ function obsPan(k, fr) {   // pan past the bitmap edge: move the obs map by the 
 const obsZv = (fr) => Math.round((fr.zoom || 1) * (OBSM() && typeof Obs !== "undefined" && Obs._state ? (ozSync(), OZ.sub) : 1) * 100);
 function crop(k, fr) {   // source rect (map bitmap px) for frame k: base camera, then zoom / pan; the panel stays covering the frame when it
   // can, and when it is smaller than the frame (wide view) it stays wholly in the frame (the rest is background)
-  if (OBSM() && MG.img) {   // obs map: zoom in / pan, the map always covers the frame
+  if ((OBSM() || ALERTM()) && MG.img) {   // obs/alert map: zoom in / pan, the map always covers the frame
     const B = base(k), kk = B.k0 * Math.max(1, fr.zoom || 1), iw = IW(MG.img), ih = IH(MG.img), cl = (v, a, b) => Math.min(b, Math.max(a, v)), hw = F[k].W / kk / 2, hh = F[k].H / kk / 2;
     const cx = cl(B.cx - (fr.dx || 0) / kk, hw, iw - hw), cy = cl(B.cy - (fr.dy || 0) / kk, hh, ih - hh);
     return { kk, cx, cy, bx: B.cx, by: B.cy, sx: 0, sy: 0, sw: F[k].W / kk, sh: F[k].H / kk, px: 0, py: 0, pw: iw, ph: ih, rs: 1 };
@@ -347,6 +348,58 @@ function renderObs(k, frO) {
   if (PIN.show && !REC.on) drawPins(k, c0, r);
   window.__studio = (window.__studio || 0) + 1; window.__studioObs = (window.__studioObs || 0) + 1;
 }
+
+// ---- Active Alerts in Studio (11-05, t2420u/t2426u WA-only preview): same header / LIVE badge / credit style as Observations
+const ALERT_CREDIT = ["Alerts: NWS api.weather.gov.  Places: GeoNames, CC BY 4.0.  Basemap: Esri World Imagery."];
+function alertInfo() {
+  const S_ = typeof Alerts !== "undefined" && Alerts._state; if (!S_) return null;
+  const title = (typeof Alerts.titleText === "function" ? Alerts.titleText() : null) || S_.selectedType || "All Alerts";
+  const t = S_.loaded ? new Date(S_.loaded) : null;
+  let when = ""; if (t) { const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", weekday: "short", month: "2-digit", day: "2-digit", hour: "numeric", minute: "2-digit" }).formatToParts(t).map((x) => [x.type, x.value])); when = `${p.weekday} ${p.month}-${p.day} \u00b7 ${p.hour}:${p.minute} ${p.dayPeriod} PT`; }
+  const types = typeof Alerts.eventTypes === "function" ? Alerts.eventTypes() : [];
+  return { title, when, t, types, n: (S_.alerts || []).length };
+}
+function renderAlert(k, frO) {
+  const f = F[k], c0 = f.cv.getContext("2d"), fr = frO || getFr(k); if (!frO) { f.zoom.min = "100"; f.zoom.value = Math.round((fr.zoom || 1) * 100); }
+  c0.setTransform(1, 0, 0, 1, 0, 0); c0.clearRect(0, 0, f.W, f.H); c0.fillStyle = BG === "transparent" ? "#111316" : BG; c0.fillRect(0, 0, f.W, f.H);
+  const I = alertInfo();
+  if (!MG.img || !I || !I.t) { c0.font = `700 ${k === "v" ? 40 : 34}px Montserrat`; c0.fillStyle = "#c9ced8"; c0.textAlign = "center"; c0.fillText(MG.msg || "Loading alerts\u2026", f.W / 2, f.H / 2); c0.textAlign = "left"; return; }
+  const r = crop(k, fr); c0.imageSmoothingEnabled = true; c0.imageSmoothingQuality = "high";
+  c0.drawImage(MG.img, f.W / 2 - r.cx * r.kk, f.H / 2 - r.cy * r.kk, IW(MG.img) * r.kk, IH(MG.img) * r.kk);
+  // TOP LEFT title exactly like other Studio modes (product name style): pill + title + time + LIVE badge
+  const c = ovLayer(f), x = f.pad; let y = k === "v" ? 120 : 34;
+  c.save(); sharpShadow(c, k);
+  const pw = pill(c, x, y, "ALERTS", Math.round(f.run * 0.95), "#7c3aed", "#fff");
+  c.font = `600 ${f.run}px Montserrat`; c.fillStyle = "#c9ced8"; c.fillText("NWS \u00b7 Washington", x + pw + 14, y + f.run * 1.08);
+  y += f.run * 1.55 + f.title * 1.02; c.font = `800 ${f.title}px Montserrat`; c.fillStyle = "#fff"; c.fillText(I.title, x, y);
+  y += f.day * 1.3; c.font = `800 ${f.day}px Montserrat`; c.fillStyle = "#ffc24d"; c.fillText(I.when, x, y);
+  const headBot = y + f.day * 0.45;
+  c.font = `800 ${Math.round(f.valid * 1.1)}px Montserrat`; const bt = "LIVE", bw = c.measureText(bt).width + 40, bx = badgeRight(k) - bw, by = k === "v" ? 120 : 34;
+  c.fillStyle = "rgba(17,19,22,0.85)"; c.strokeStyle = "rgba(255,255,255,0.35)"; c.lineWidth = 2; c.beginPath(); c.roundRect ? c.roundRect(bx, by, bw, f.valid * 1.9, 14) : c.rect(bx, by, bw, f.valid * 1.9); c.fill(); noShadow(c); c.stroke(); sharpShadow(c, k);
+  c.fillStyle = "#fff"; c.textAlign = "center"; c.fillText(bt, bx + bw / 2, by + f.valid * 1.32); c.textAlign = "left"; c.restore();
+  const cnr = BR.corner && LOGOS[BR.logo] ? cornerBox(k, by + f.valid * 1.9, headBot, f.H - f.bot + (k === "v" ? 110 : 62)) : null;
+  // bottom-left credits (keep ~13% right clear for face cam — credits already left on 9:16)
+  c.save(); sharpShadow(c, k);
+  const dl = ALERT_CREDIT; let dfs = k === "v" ? 15 : 14; c.font = `600 ${dfs}px Montserrat`;
+  const dMax = k === "v" ? f.W - 2 * f.pad : Math.round(f.W * 0.52);
+  while (dfs > 11 && Math.max(...dl.map((l) => c.measureText(l).width)) > dMax) { dfs -= 1; c.font = `600 ${dfs}px Montserrat`; }
+  const dlh = dfs + 7, cB = cnr && (BR.cpos === "br" || BR.cpos === "bl") ? cnr : null;
+  c.fillStyle = "rgba(236,239,244,0.95)";
+  if (k === "v") dl.forEach((l, i) => c.fillText(l, f.pad + (cB && BR.cpos === "bl" ? cB.s + 18 : 0), f.H - 70 - (dl.length - 1 - i) * dlh));
+  else { c.textAlign = "right"; dl.forEach((l, i) => c.fillText(l, f.W - f.pad - (cB && BR.cpos === "br" ? cB.s + 20 : 0), f.H - 24 - (dl.length - 1 - i) * dlh)); c.textAlign = "left"; }
+  // legend pills for visible types
+  let lx = f.pad, ly = k === "v" ? f.H - 70 - (dl.length - 1) * dlh - dfs - 30 - 30 * 1.55 : f.H - 24 - 30 * 1.55 + 30 * 0.35;
+  const lgS = k === "v" ? 28 : 24;
+  for (const t of I.types) {
+    c.font = `800 ${lgS}px Montserrat`; const lab = t.event, w = c.measureText(lab).width + lgS * 1.2, h = lgS * 1.55;
+    if (lx + w > (k === "v" ? f.W * 0.82 : f.W * 0.46) && lx > f.pad + 1) break; // keep right ~18% clear
+    noShadow(c); c.fillStyle = "rgba(17,19,22,0.78)"; c.beginPath(); c.roundRect ? c.roundRect(lx, ly, w, h, h / 2) : c.rect(lx, ly, w, h); c.fill(); sharpShadow(c, k);
+    c.fillStyle = t.color || "#ccc"; c.textBaseline = "middle"; c.fillText(lab, lx + lgS * 0.6, ly + h / 2 + 1); c.textBaseline = "alphabetic"; lx += w + 12;
+  }
+  c.restore(); ovPut(c0, f, k);
+  if (cnr) cornerLogo(c0, cnr);
+  window.__studio = (window.__studio || 0) + 1; window.__studioAlert = (window.__studioAlert || 0) + 1;
+}
 // ---- Pass Forecaster in Studio (11-04, t2292u). Same table as the map page's Pass Forecaster (viewer.js passTable), laid out per frame:
 // 16:9 every column; 9:16 drops Kuchera, then precip, then gust only if the pass names would get too small. Header like the maps
 // (model pill + run, title, run start in amber), shading key at the bottom, and only the credit a licence needs (ECMWF runs).
@@ -449,6 +502,7 @@ function renderWafc(k) {
 }
 function renderMg(k, frO) {
   if (WAFCM()) return renderWafc(k);
+  if (ALERTM()) return renderAlert(k, frO);
   if (OBSM()) return renderObs(k, frO);
   if (PASSM()) return renderPass(k);
   const f = F[k], c = f.cv.getContext("2d"), fr = frO || getFr(k); f.zoom.min = "100"; f.zoom.value = Math.round((fr.zoom || 1) * 100);
@@ -599,6 +653,8 @@ for (const k of ["v", "h"]) {
     if (!d && !PD && PIN.show && !PIN.mode && e.pointerType === "mouse") cv.style.cursor = pinHit(k, cv, e) ? "grab" : "";
     if (!d || pz || (d.id !== undefined && e.pointerId !== d.id)) return; const s = f.W / cv.clientWidth, fr = getFr(k);
     fr.dx = d.fr.dx + (e.clientX - d.x) * s; fr.dy = d.fr.dy + (e.clientY - d.y) * s;
+    if (ALERTM() && typeof Alerts !== "undefined" && Alerts._state && MG.img) {
+      const S_ = Alerts._state, r = crop(k, fr), kk = r.kk; S_.cx -= ((e.clientX - d.x) * F[k].W / F[k].cv.getBoundingClientRect().width) / kk / (S_.dpr || 1) / S_.k; S_.cy -= ((e.clientY - d.y) * F[k].H / F[k].cv.getBoundingClientRect().height) / kk / (S_.dpr || 1) / S_.k; Alerts.redraw(); d.x = e.clientX; d.y = e.clientY; setFr(k, fr); render(k); return; }
     if (OBSM()) { obsPan(k, fr); d.x = e.clientX; d.y = e.clientY; d.fr = Object.assign({}, fr); setFr(k, fr); render(k); return; }   // 11-04: free pan
     const r = crop(k, fr);   // keep the stored offset inside the panel
     fr.dx = (r.bx - r.cx) * r.kk; fr.dy = (r.by - r.cy) * r.kk; setFr(k, fr); render(k); });
@@ -637,11 +693,14 @@ for (const k of ["v", "h"]) {
     if (hit && OBSM() && e.key.startsWith("Arrow")) obsPan(k, fr);
     if (hit) { e.preventDefault(); e.stopPropagation(); setFr(k, fr); render(k); }
   }, true);
-  f.zoom.oninput = () => { const fr = getFr(k); if (OBSM()) obsZoom(k, fr, f.zoom.value / 100); else fr.zoom = Math.max(1, f.zoom.value / 100); setFr(k, fr); render(k); };
+  f.zoom.oninput = () => { const fr = getFr(k); if (OBSM()) obsZoom(k, fr, f.zoom.value / 100); else { fr.zoom = Math.max(1, f.zoom.value / 100); if (ALERTM() && typeof Alerts !== "undefined") { /* frame zoom only; towns densify via Alerts._state.k from wheel on offscreen */ } } setFr(k, fr); render(k); };
   cv.parentNode.querySelector(".shd").addEventListener("click", async (e) => {
     const a = e.target.closest("button[data-a]"); if (!a || !last) return;
-    if (a.dataset.a === "reset") { if (OBSM() && typeof Obs !== "undefined" && Obs._state && OZ.sub < 1) { ozSync(); Obs._state.k = OZ.ref; OZ.sub = 1; Obs.redraw(); } setFr(k, { dx: 0, dy: 0, zoom: 1 }); render(k); }
+    if (a.dataset.a === "reset") { if (ALERTM() && typeof Alerts !== "undefined" && Alerts._state) { Alerts._state.k = 1; Alerts._state.cx = 800; Alerts._state.cy = 800; Alerts.redraw(); } if (OBSM() && typeof Obs !== "undefined" && Obs._state && OZ.sub < 1) { ozSync(); Obs._state.k = OZ.ref; OZ.sub = 1; Obs.redraw(); } setFr(k, { dx: 0, dy: 0, zoom: 1 }); render(k); }
     if (a.dataset.a === "mp4" && (!MG.on || OBSM())) openMp4(k);
+    if (a.dataset.a === "png" && ALERTM()) { if (!MG.img) return; const I = alertInfo(), st = I && I.t ? new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(I.t).replace(/[^0-9]/g, "") : "now";
+      const nm = `alerts_wa_${(I && I.title || "all").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}_${st}PT_${k === "v" ? "1080x1920" : "1920x1080"}.png`;
+      F[k].cv.toBlob((b) => { if (!b) return; const a2 = document.createElement("a"); a2.href = URL.createObjectURL(b); a2.download = nm; a2.click(); setTimeout(() => URL.revokeObjectURL(a2.href), 4000); }, "image/png"); return; }
     if (a.dataset.a === "png" && OBSM()) { if (!MG.img) return; const I = obsInfo(), st = I && I.t ? new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(I.t).replace(/[^0-9]/g, "") : "now";
       const nm = `obs_${I ? I.view : "pnw"}_${I ? I.on.map((l) => l[0]).join("-") : "plot"}_${st}_${k === "v" ? "1080x1920" : "1920x1080"}.png`;
       cv.toBlob((b) => { const u = URL.createObjectURL(b), l = document.createElement("a"); l.href = u; l.download = nm; l.click(); setTimeout(() => URL.revokeObjectURL(u), 4000); }, "image/png"); return; }
@@ -1332,7 +1391,7 @@ if (!CLEAN) {
 }
 if (!CLEAN) {   // Studio: Map | Meteogram switch (first in the menu bar) + the meteograms page's pickers in a small iframe
   const bar = document.getElementById("bar"), sw = document.createElement("label"); sw.id = "smodel";
-  sw.innerHTML = `Studio <select id="smode"><option value="map">Map</option><option value="mg">Meteogram</option><option value="obs">Observations</option><option value="pass">Pass Forecaster</option><option value="wafc">WA Forecast Maps</option></select>`; bar.insertBefore(sw, bar.firstChild);
+  sw.innerHTML = `Studio <select id="smode"><option value="map">Map</option><option value="mg">Meteogram</option><option value="obs">Observations</option><option value="pass">Pass Forecaster</option><option value="wafc">WA Forecast Maps</option><option value="alert">Active Alerts</option></select>`; bar.insertBefore(sw, bar.firstChild);
   const pnl = document.createElement("div"); pnl.id = "mgp"; bar.after(pnl);
   const sel = document.getElementById("smode"); sel.value = MG.on ? MG.kind : "map"; saveMode(sel.value);
   let fr_ = null, poll = 0;
@@ -1371,16 +1430,34 @@ if (!CLEAN) {   // Studio: Map | Meteogram switch (first in the menu bar) + the 
     else if (!dn && m_ && /Could not|No /.test(m_.textContent) && MG.msg !== m_.textContent) { MG.msg = m_.textContent; renderAll(); } } catch (e) { /* iframe loading */ } };
   const setMode = (mode) => {
     if (mode === "wafc") { MG.on = true; MG.kind = "wafc"; MG.img = null; MG.msg = ""; wdrawn = -1; saveMode("wafc"); clearInterval(poll);
-      document.body.classList.remove("mgmode", "obsmode", "passmode"); document.body.classList.add("wafcmode"); if (typeof Obs !== "undefined" && Obs.hide) Obs.hide();
+      document.body.classList.remove("mgmode", "obsmode", "passmode", "alertmode"); document.body.classList.add("wafcmode"); if (typeof Obs !== "undefined" && Obs.hide) Obs.hide(); if (typeof Alerts !== "undefined" && Alerts.hide) Alerts.hide();
       if (!wf_) { wf_ = document.createElement("iframe"); wf_.id = "wff"; wf_.title = "WA forecast map pickers"; wf_.src = "wamaps.html" + ((() => { try { return sessionStorage.getItem("studio:wafcq"); } catch (e) { return null; } })() || localStorage.getItem("studio:wafcq") || "?kind=low&view=full");   // this tab first (refresh), else the last one used
         wf_.onload = () => { try { const st = wf_.contentDocument.createElement("style"); st.textContent = wcss; wf_.contentDocument.head.appendChild(st); } catch (e) { /* not ready */ } };
         pnl.appendChild(wf_); }
       poll = setInterval(wgrab, 300); renderAll(); fitFrames(); return; }
     document.body.classList.remove("wafcmode"); if (MG.kind === "wafc") { MG.img = null; MG.kind = "mg"; MG.on = false; }
     const wasPass = PASSM(); if (mode === "pass") { MG.on = true; MG.kind = "pass"; MG.img = null; saveMode("pass"); clearInterval(poll);
-      document.body.classList.remove("mgmode", "obsmode"); document.body.classList.add("passmode"); if (typeof Obs !== "undefined" && Obs.hide) Obs.hide();
+      document.body.classList.remove("mgmode", "obsmode", "alertmode"); document.body.classList.add("passmode"); if (typeof Obs !== "undefined" && Obs.hide) Obs.hide(); if (typeof Alerts !== "undefined" && Alerts.hide) Alerts.hide();
       pfLoad(); renderAll(); fitFrames(); return; }
     document.body.classList.remove("passmode"); if (wasPass) { MG.img = null; MG.kind = "mg"; }
+    const wasAlert = ALERTM();
+    if (mode === "alert") {
+      MG.on = true; MG.kind = "alert"; MG.img = null; MG.src = ""; MG.msg = "";
+      saveMode("alert"); clearInterval(poll);
+      document.body.classList.remove("mgmode", "obsmode", "passmode", "wafcmode"); document.body.classList.add("alertmode");
+      if (typeof Obs !== "undefined" && Obs.hide) Obs.hide();
+      if (!document.getElementById("alertp")) { const ap = document.createElement("div"); ap.id = "alertp"; ap.innerHTML = `<div id="alert-root"></div>`; pnl.appendChild(ap); }
+      window.__alertLoad = window.__alertLoad || new Promise((ok, bad) => {
+        if (!document.querySelector('link[href="alert/alert.css"]')) { const l = document.createElement("link"); l.rel = "stylesheet"; l.href = "alert/alert.css"; document.head.appendChild(l); }
+        const sc = document.createElement("script"); sc.src = "alert/alert.js?v=20261105a"; sc.onload = ok; sc.onerror = bad; document.body.appendChild(sc); });
+      MG.msg = "Loading alerts\u2026"; let asig = "";
+      const agrab = () => { const S_ = typeof Alerts !== "undefined" && Alerts._state, cv_ = document.getElementById("al-canvas"); if (!S_ || !cv_ || !cv_.width) return;
+        const sig = [S_.loaded, S_.selectedType || "ALL", S_.k, S_.cx, S_.cy, cv_.width, (S_.alerts || []).length, S_.sig || ""].join("|");
+        if (sig !== asig || MG.img !== cv_) { asig = sig; MG.img = S_.loaded ? cv_ : null; MG.msg = S_.loaded ? "" : "Loading alerts\u2026"; if (!REC.on && !PV.on) renderAll(); } };
+      window.__alertLoad.then(() => { if (ALERTM()) { Alerts.show(); fitFrames(); } }, () => { window.__alertLoad = null; MG.msg = "Alerts could not load."; renderAll(); });
+      poll = setInterval(agrab, 400); renderAll(); fitFrames(); return;
+    }
+    document.body.classList.remove("alertmode"); if (wasAlert && typeof Alerts !== "undefined") Alerts.hide();
     const on = mode === "mg" || mode === "obs", wasObs = OBSM(); if (on && MG.kind !== mode) { MG.img = null; MG.src = ""; MG.msg = ""; }
     MG.on = on; if (on) MG.kind = mode; saveMode(on ? mode : "map"); clearInterval(poll);
     document.body.classList.toggle("mgmode", on && mode === "mg"); document.body.classList.toggle("obsmode", on && mode === "obs");
@@ -1444,6 +1521,6 @@ if (!CLEAN) {
   fitFrames();
 }
 // 11-04 (t2335u guard): read-only state for the refresh regression test (refresh_test.py): what each frame shows right now
-window.__studioQA = () => ({ mode: PASSM() ? "pass" : MG.on ? MG.kind : "map", mg: MG.kind === "mg" ? (MG.src.split("#")[1] || "") : "", pass: PF.run, passRows: PF.rows ? PF.rows.length : 0,
+window.__studioQA = () => ({ mode: PASSM() ? "pass" : MG.on ? MG.kind : "map", mg: MG.kind === "mg" ? (MG.src.split("#")[1] || "") : "", alert: ALERTM() ? ((typeof Alerts !== "undefined" && Alerts.titleText && Alerts.titleText()) || "All Alerts") : "", pass: PF.run, passRows: PF.rows ? PF.rows.length : 0,
   pfL: F.h.pfL ? { x: F.h.pfL.x, y0: F.h.pfL.y0, w: F.h.pfL.w, rh: F.h.pfL.rh, names: F.h.pfL.names } : null, W: F.h.W, fr: { v: getFr("v"), h: getFr("h") } });
 })();
