@@ -2099,8 +2099,8 @@ function mgChart(cv, T, box) {
       const hiP = Math.max(0.1, ...(pc || []).filter(v => v != null), ...(p6 || []).filter(v => v != null));
       const runS = sn ? sn.reduce((acc, v, k) => (acc.push((acc[k - 1] || 0) + (v || 0)), acc), []) : sn6 ? (() => { let q = 0; return sn6.map((v, k) => T.f[k] % 6 === 0 ? (q += v || 0) : null); })() : [];
       const anySnow = (sn || sn6 || []).some(v => v > 0.05), hiS = Math.max(1, ...runS.filter(v => v != null)), topS = niceStep(hiS) * Math.ceil(hiS / niceStep(hiS)), scS = scale(0, topS);
-      const pTop = Math.max(T.P && T.P.k === "pass" && pc && (T.f[1] - T.f[0] || 1) === 1 ? 3 : 0, niceStep(hiP) * Math.ceil(hiP / niceStep(hiP)));   /* t2305u: pass in per hour axis at least 3 in */ axis(0, pTop, scP, "\u2033", false, "#6fd38a");
-      const scP = scale(0, pTop);
+      const pTop = Math.max(T.P && T.P.k === "pass" && pc && (T.f[1] - T.f[0] || 1) === 1 ? 3 : 0, niceStep(hiP) * Math.ceil(hiP / niceStep(hiP)));   /* t2305u: pass in per hour axis at least 3 in */
+      const scP = scale(0, pTop); axis(0, pTop, scP, "\u2033", false, "#6fd38a");
       if (p6 && T.pcp) bars(p6.map((v, k) => T.f[k] % 6 === 0 && T.f[k] > 36 ? v : null), scP, "#3ea95888", 2.2);
       if (pc) bars(pc, scP, "#3ea958"); else if (p6) bars(p6.map((v, k) => T.f[k] % 6 === 0 ? v : null), scP, "#3ea958", 2.2);
       if (anySnow && !snowPan) { axis(0, topS, scS, "\u2033", true, "#d9ecff"); line(runS, scS, "#d9ecff", 2); }
