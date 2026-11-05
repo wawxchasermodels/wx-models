@@ -94,7 +94,9 @@ function getPixels(url) {
   p.catch(() => pix.delete(url)); pix.set(url, p); return p;
 }
 async function getField(c, name, f) {
-  const R_ = WA.runs[c], st = R_.steps.find(s => s.f === f), pk = st.packs && st.packs[name];
+  const R_ = WA.runs[c]; if (!R_ || !R_.steps) throw new Error("run not loaded");
+  const st = R_.steps.find(s => s.f === f); if (!st) throw new Error("step not in run");
+  const pk = st.packs && st.packs[name];
   const url = `${DATA}${R_.base}/` + R_.file.replace("{name}", pk ? pk[0] : name).replace("{f:03d}", String(f).padStart(3, "0")), ch = pk ? pk[1] : 0;
   if (!st.ranges[name]) throw new Error(`no ${name} at F${f}`);
   const I = await getPixels(url), [lo, hi, enc] = st.ranges[name], sc = (hi - lo) / 255, n = I.w * I.h, o = new Float32Array(n);
@@ -132,6 +134,7 @@ async function totalField(m, c, kind, f0, f1) {
   const key = `${m}/${c}/${kind}/${f0}-${f1}`; if (WA.fields.has(key)) return WA.fields.get(key);
   const p = (async () => {
     const rk = rkey(m, c), R_ = WA.runs[rk], fld = PRODUCTS[kind].field[m] || PRODUCTS[kind].field.def;
+    if (!R_ || !R_.steps) throw new Error("run not loaded");
     if (PRODUCTS[kind].max) {   // gusts: max over the steps whose period lies in the window (hourly: valid f0..f1; 3-hourly 3 h max: previous step >= f0), as gust_map.py
       const st = R_.steps.filter(s => s.ranges[fld]), fs = [];
       st.forEach((s, i) => { const prev = i ? st[i - 1].f : 0, hourly = s.f - prev <= 1; if (s.f <= f1 && (hourly ? s.f >= f0 : prev >= f0)) fs.push(s.f); });
@@ -351,13 +354,14 @@ async function setRun() {   // model / kind changed: run list for the model (low
 }
 async function draw() {
   const my = ++S.busy; const tot = isTot(); let d = null, w = null;
-  if (tot) { const T = S.times, a = T.find(t => ymdh(t.ms) === S.f0), b = T.find(t => ymdh(t.ms) === S.f1); w = { f0: a.f, f1: b.f, ms0: a.ms, ms1: b.ms }; const p = ptParts(a.ms); w.day = p.weekday; w.md = `${p.month}-${p.day}`; }
+  if (tot) { const T = S.times || []; const a = T.find(t => ymdh(t.ms) === S.f0), b = T.find(t => ymdh(t.ms) === S.f1); if (!a || !b) { $("msg").textContent = "Loading times\u2026"; return; } w = { f0: a.f, f1: b.f, ms0: a.ms, ms1: b.ms }; const p = ptParts(a.ms); w.day = p.weekday; w.md = `${p.month}-${p.day}`; }
   else { d = S.days.find(x => x.key === S.day); if (!d) { $("msg").textContent = "No data for this day in this run."; return; } }
   $("msg").textContent = "Drawing…"; const t0 = performance.now();
   const cv = document.createElement("canvas");
   try { const info = tot ? await renderTotals(cv, S.m, S.c, S.kind, S.view, w) : await render(cv, S.c, S.kind, S.view, d); if (my !== S.busy) return;
     const old = $("map"); cv.id = "map"; old.replaceWith(cv); S.info = info; fit();
     const R_ = WA.runs[rkey(tot ? S.m : "nbm", S.c)];
+    if (!R_) { $("msg").textContent = "Loading run\u2026"; return; }
     $("msg").textContent = `${R_.runline} · ${tot ? (S.kind === "gust" ? `max of ${info.n} gust steps` : S.m === "nbm" ? `sum of ${info.n} NBM 6 h amounts` : "run total at the end minus at the start") : S.kind === "low" ? "min of " + info.steps.length + " t2m steps" : "NBM 12 h max"} · ${Math.round(performance.now() - t0)} ms`;
     const u = new URL(location); u.searchParams.set("kind", S.kind); u.searchParams.set("view", S.view); u.searchParams.set("run", S.c);
     for (const k of ["day", "model", "from", "to"]) u.searchParams.delete(k);
