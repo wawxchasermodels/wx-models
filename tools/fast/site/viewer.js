@@ -230,6 +230,7 @@ const runFile = (r) => XR.has(r) ? "run_x.json" : "run.json";
 async function boot() {
   if (Q.get("bare")) document.body.classList.add("bare");
   if (Q.get("embed")) { document.body.classList.add("embed"); addEventListener("message", onCompareMsg); }
+  if (Q.get("cmpstudio")) document.documentElement.classList.add("cmpstudio");   // Studio Compare: menus stay in the panel, the map draws off-screen for the frames
   // 10-31 3:17 PM slim compare (Benjamin: "a slimmer phone compare"): menus folded behind a small button, the compare page's shared
   // hour slider replaces this frame's own, the map is sized to the frame width (the page sizes the frame to the map)
   if (Q.get("slim")) document.body.classList.add("cslim");
@@ -917,6 +918,7 @@ async function render(lite) {
   // significant wave height"; t1988u: "Just make them look like the other locations in the map"): NDBC buoys on the ECMWF wave maps only
   if (WT) drawCoast(ctx, st, D, P, V, LW, LH, WT);
   if (P.lows && S.lowPanel && !Q.get("studio")) paintLowPanel(ctx, st, V, S.lowPanel);   // 11-02 (Benjamin t2115u): not in Studio frames (Studio has its own dot key); kept on the viewer
+  else if (P.lows && S.lowPanel) paintStrongLow(ctx, st, S.lowPanel);   // 11-07: Studio frames still label the single strongest member low (the list and dot key stay off the frame)
   // 5. key + header text
   if (!V.studioOnly) ctx.drawImage(L2.key, 0, 0, LW, LH);   // Studio-only view: Studio draws its own color bar (the key file is another view's)
   if (!V.studioOnly) drawCredit(ctx, st, pid, P, LW, LH, st.towns && tmode !== "none");   // 11-01-26 legal audit: credit line redrawn over the key's baked one
@@ -1881,6 +1883,28 @@ function lowGeom(st, D, P, V) {
   return { side, dots, core, means, top, hasNum: !!E.mnum, strong: strongL.slice(0, 10), weak: weakL.slice(0, 10), n: E.n || 50,
            meanVals: means.map(x => x[2]).sort((x, y) => x - y) };
 }
+// 11-07: the single strongest member low (lowest central pressure in view) keeps its ring, and the on-canvas label names that
+// member and its pressure. Older runs without a real member number (no ens "mnum") still get no label.
+function strongLowText(num, mb) { const p = Math.round(mb); return num ? `Strongest: member ${num}, ${p} mb` : `Strongest: ${p} mb`; }
+window.__strongLowText = strongLowText;
+function paintStrongLow(ctx, st, g, obs) {
+  const T = g.top; if (!(T && g.hasNum && T.num)) return;
+  ctx.beginPath(); ctx.arc(T.x, T.y, pt(6.2), 0, 2 * Math.PI); ctx.lineWidth = pt(1.6); ctx.strokeStyle = "#ffffff"; ctx.stroke();
+  ctx.lineWidth = pt(0.9); ctx.strokeStyle = "#0b0d12"; ctx.stroke();
+  const s = strongLowText(T.num, T.mb); ctx.font = `800 ${pt(10.5)}px Montserrat`; const w = ctx.measureText(s).width, gap = pt(9), hh = pt(7.5);
+  const obstacles = g.means.map(([mx, my, mv]) => hlBox(ctx, mx, my, mv)).concat(obs || []);
+  const ov = (a, b) => Math.max(0, Math.min(a[2], b[2]) - Math.max(a[0], b[0])) * Math.max(0, Math.min(a[3], b[3]) - Math.max(a[1], b[1]));
+  const pad = pt(2), cands = [];
+  for (const k of [1, 1.9, 2.8]) for (const [sx, dy] of [[1, -1], [-1, -1], [1, 1], [-1, 1], [1, 0], [-1, 0]]) {
+    const xa = sx > 0 ? T.x + gap * k : T.x - gap * k - w, yc = T.y + dy * pt(9) * k; cands.push([xa, yc]); }
+  let best = null;
+  for (const [xa, yc] of cands) { const R = [xa - pad, yc - hh - pad, xa + w + pad, yc + hh + pad];
+    const out = R[0] < st.x0 + pt(3) || R[2] > st.x0 + st.W - pt(3) || R[1] < st.y0 + pt(3) || R[3] > st.y0 + st.H - pt(3);
+    const cost = (out ? 1e9 : 0) + obstacles.reduce((a, b) => a + ov(R, b), 0);
+    if (!best || cost < best[2]) best = [xa, yc, cost, R]; if (cost === 0) break; }
+  window.__memLab = { s, rect: best[3], cost: best[2], means: g.means.length };   // QA hook (no effect on drawing)
+  haloText(ctx, s, best[0], best[1], `800 ${pt(10.5)}px Montserrat`, "#0b0d12", pt(2.6), "left", "middle");
+}
 function paintLowPanel(ctx, st, V, g) {   // ens_maps.low_panel, drawn inside the left edge of the map + the dot legend
   const [LW, LH] = V.fig, PW = Math.round(0.092 * LW), x0 = g.side === "right" ? st.x0 + st.W - PW - pt(3) : st.x0 + pt(3), y0 = st.y0 + pt(3), H = st.H - pt(6);
   const ms = g.meanVals.slice(0, 4), mrows = Math.max(1, Math.ceil(ms.length / 2));
@@ -1908,27 +1932,11 @@ function paintLowPanel(ctx, st, V, g) {   // ens_maps.low_panel, drawn inside th
       ctx.textBaseline = "top"; y += lh; }
     y += lh * 0.5;
   }
-  // strongest member low in view: ring around its dot + "Mem N · 952" (side away from the list / map edge / red L)
-  const T = g.top; if (T && g.hasNum && T.num) {
-    ctx.beginPath(); ctx.arc(T.x, T.y, pt(6.2), 0, 2 * Math.PI); ctx.lineWidth = pt(1.6); ctx.strokeStyle = "#ffffff"; ctx.stroke();
-    ctx.lineWidth = pt(0.9); ctx.strokeStyle = "#0b0d12"; ctx.stroke();
-    const s = `Mem ${T.num} \u00b7 ${Math.round(T.mb)}`; ctx.font = `800 ${pt(10.5)}px Montserrat`; const w = ctx.measureText(s).width, gap = pt(9), hh = pt(7.5);
-    // 11-03 small fixes (EPS lows: "Mem 10 \u00b7 951" could sit on the mean red L): the label is a box tested against every mean L
-    // (letter + number, hlBox), the list box, the dot key and the map edge; it tries up-right, up-left, down-right, down-left, level,
-    // then further out, and if every spot touches something it takes the spot with the least overlap.
-    const lwK = pt(78), lhK = pt(11) * (DOT_LABELS.length + 1) + pt(8), kx = g.side === "right" ? x0 - lwK - pt(5) : x0 + PW + pt(5), ky = st.y0 + st.H - lhK - pt(5);
-    const obs = g.means.map(([mx, my, mv]) => hlBox(ctx, mx, my, mv)).concat([[x0, y0, x0 + PW, y0 + H], [kx, ky, kx + lwK, ky + lhK]]);
-    const ov = (a, b) => Math.max(0, Math.min(a[2], b[2]) - Math.max(a[0], b[0])) * Math.max(0, Math.min(a[3], b[3]) - Math.max(a[1], b[1]));
-    const pad = pt(2), cands = [];
-    for (const k of [1, 1.9, 2.8]) for (const [sx, dy] of [[1, -1], [-1, -1], [1, 1], [-1, 1], [1, 0], [-1, 0]]) {
-      const xa = sx > 0 ? T.x + gap * k : T.x - gap * k - w, yc = T.y + dy * pt(9) * k; cands.push([xa, yc]); }
-    let best = null;
-    for (const [xa, yc] of cands) { const R = [xa - pad, yc - hh - pad, xa + w + pad, yc + hh + pad];
-      const out = R[0] < st.x0 + pt(3) || R[2] > st.x0 + st.W - pt(3) || R[1] < st.y0 + pt(3) || R[3] > st.y0 + st.H - pt(3);
-      const cost = (out ? 1e9 : 0) + obs.reduce((a, b) => a + ov(R, b), 0);
-      if (!best || cost < best[2]) best = [xa, yc, cost, R]; if (cost === 0) break; }
-    window.__memLab = { s, rect: best[3], cost: best[2], means: g.means.length };   // QA hook (no effect on drawing)
-    haloText(ctx, s, best[0], best[1], `800 ${pt(10.5)}px Montserrat`, "#0b0d12", pt(2.6), "left", "middle"); }
+  // strongest member low in view: ring + "Strongest: member 23, 968 mb" (side away from the list / map edge / red L).
+  // 11-03 small fixes (EPS lows: the label could sit on the mean red L): the label is a box tested against every mean L
+  // (letter + number, hlBox), the list box, the dot key and the map edge.
+  const lwK = pt(78), lhK = pt(11) * (DOT_LABELS.length + 1) + pt(8), kx = g.side === "right" ? x0 - lwK - pt(5) : x0 + PW + pt(5), ky = st.y0 + st.H - lhK - pt(5);
+  paintStrongLow(ctx, st, g, [[x0, y0, x0 + PW, y0 + H], [kx, ky, kx + lwK, ky + lhK]]);
   // "Member low (mb)" legend, lower left of the map just right of the list (old: matplotlib legend, lower left)
   const lw = pt(78), rh = pt(11), lhgt = rh * (DOT_LABELS.length + 1) + pt(8), lx = g.side === "right" ? x0 - lw - pt(5) : x0 + PW + pt(5), ly = st.y0 + st.H - lhgt - pt(5);
   ctx.globalAlpha = 0.92; ctx.fillStyle = "#ffffff"; ctx.fillRect(lx, ly, lw, lhgt); ctx.globalAlpha = 1; ctx.strokeStyle = "#c9c4b8"; ctx.strokeRect(lx, ly, lw, lhgt);

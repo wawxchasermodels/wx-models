@@ -182,6 +182,23 @@ body.alertmode #mgp{display:block;flex:0 0 auto;background:#1d2027;border-bottom
 #alertp{display:none}body.alertmode #alertp{display:block}body.alertmode #mgf,body.alertmode #obsp,body.alertmode #pfp,body.alertmode #wff{display:none}
 body.alertmode #bar>:not(#smodel){display:none!important}body.alertmode #scrub,body.alertmode #dock,body.alertmode #pinhint,body.alertmode .shd button[data-a="mp4"],body.alertmode .shd button[data-a="obs"],body.alertmode .shd input,body.alertmode .shint{display:none!important}
 body.phone.alertmode{padding-bottom:0}
+/* 11-07: Studio > Compare (compare.html in the panel; both maps drawn into the frames) and Studio > Web (a page in each frame) */
+body.cmpmode #mgp,body.webmode #mgp{display:block;flex:0 0 auto;background:#1d2027;border-bottom:1px solid #2c3039}
+body.cmpmode #mgp{padding:0}body.webmode #mgp{padding:6px 10px}
+#cmpf,#webp{display:none}body.cmpmode #cmpf{display:block;width:100%;height:320px;border:0;background:#1d2027}
+body.webmode #webp{display:flex;gap:8px 12px;align-items:center;flex-wrap:wrap}
+body.cmpmode #mgf,body.cmpmode #obsp,body.cmpmode #pfp,body.cmpmode #wff,body.cmpmode #alertp,body.cmpmode #webp,
+body.webmode #mgf,body.webmode #obsp,body.webmode #pfp,body.webmode #wff,body.webmode #alertp,body.webmode #cmpf{display:none!important}
+body.webmode #bar>:not(#smodel){display:none!important}
+body.webmode #scrub,body.webmode #dock,body.webmode #pinhint,body.webmode .shd button[data-a="mp4"],body.webmode .shd button[data-a="obs"]{display:none!important}
+body.cmpmode #bar>:not(#smodel):not(#scrub):not(#stepctl){display:none!important}
+body.cmpmode #pinhint,body.cmpmode .shd button[data-a="obs"],body.cmpmode #mpsfr{display:none!important}
+#weburl{width:min(420px,42vw);background:#111316;color:#f4f2ee;border:1px solid #7d828c;border-radius:6px;padding:4px 8px;font:inherit}
+#webp .mp-note{color:#a7abb3;font-size:12.5px}
+.sfr{position:relative}
+.webov{position:absolute;overflow:hidden;z-index:2;background:#111316;pointer-events:none}
+.webov[hidden]{display:none!important}
+.webov iframe{position:absolute;left:0;top:0;border:0;background:#fff;pointer-events:none}
 
 
 #memlab[hidden]{display:none!important}.memstep{background:#262931;color:#f4f2ee;border:1px solid #7d828c;border-radius:6px;padding:2px 8px;margin:0 2px;font:inherit;font-weight:700;cursor:pointer;line-height:1.2}.memstep:hover{background:#343844}#memlab.keep[hidden]{display:block!important;visibility:hidden}/* 11-03: Studio keeps the Member slot so the bar (and the frames under it) never move */
@@ -258,9 +275,9 @@ body.mprange #hscrub::-webkit-slider-runnable-track{background:linear-gradient(9
   if (q.get("from") && !q.get("f")) q.set("f", q.get("from"));
   history.replaceState(null, "", location.pathname + "?" + q.toString()); })();
 </script>
-<script src="viewer.js?v=20261104s32"></script>
+<script src="viewer.js?v=20261107cmp1"></script>
 <script src="stormfind.js?v=20261031c"></script>
-<script src="studio.js?v=20261105alert10"></script>
+<script src="studio.js?v=20261107cmp1"></script>
 <script src="reqbox.js?v=20261103m"></script>
 <footer class="lic"><details><summary>Data: &copy; <span class="yr">2026</span> ECMWF (www.ecmwf.int), CC BY 4.0 &middot; Places: GeoNames, CC BY 4.0 &middot; NOAA (public domain) &middot; Natural Earth &middot; <u>Credits</u></summary>
 <p>Based on data and products of the European Centre for Medium-Range Weather Forecasts (ECMWF). Copyright &copy; <span class="yr">2026</span> ECMWF, <a href="https://www.ecmwf.int">www.ecmwf.int</a>. Licensed under CC BY 4.0 (<a href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a>). Maps are modified from the original data. ECMWF does not accept any liability whatsoever for any error or omission in the data, their availability, or for any loss or damage arising from their use.</p>
