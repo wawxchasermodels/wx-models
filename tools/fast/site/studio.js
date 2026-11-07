@@ -26,7 +26,7 @@ if (CLEAN) {
 // 11-04 (t2337u "refreshed ... and it loaded into a SNOW METEOGRAM"): the mode is per tab only: the address (?smode=, survives any
 // refresh / restore, OBS included) and this tab's sessionStorage. The shared localStorage value is no longer read, so a Studio opened or
 // re-opened without them starts on Map, never on another window's Meteogram / Observations / Pass Forecaster.
-const MODES_OK = ["map", "mg", "obs", "pass", "wafc", "alert"];
+const MODES_OK = ["map", "mg", "obs", "pass", "wafc", "alert", "cmp", "web"];
 // 11-05 (Benjamin: refresh on Observations Satellite jumped to the underlying map product, e.g. Integrated Vapor Transport):
 // mode is still address-first (?smode=). saveMode also writes sessionStorage, but MODE0 used to ignore it — so a refresh whose
 // address lost smode (iOS replaceState limit, or a write that rebuilt the query without it) fell back to Map and showed the
@@ -38,7 +38,8 @@ const MODE0 = (() => { const u = SQ.get("smode"); if (MODES_OK.includes(u)) retu
   return "map"; })();
 const saveMode = (m) => { try { sessionStorage.setItem("studio:mode", m); } catch (e) { /* private mode */ }
   if (CLEAN) return; try { const u = new URL(location); if (m === "map") u.searchParams.delete("smode"); else u.searchParams.set("smode", m); history.replaceState(null, "", u); } catch (e) { /* replaceState limit */ } };
-const MG = { on: !CLEAN && ["mg", "obs", "pass", "wafc", "alert"].includes(MODE0), kind: ["obs", "pass", "wafc", "alert"].includes(MODE0) ? MODE0 : "mg", img: null, src: "" };
+const MG_KINDS = ["obs", "pass", "wafc", "alert", "cmp", "web"];
+const MG = { on: !CLEAN && ["mg", ...MG_KINDS].includes(MODE0), kind: MG_KINDS.includes(MODE0) ? MODE0 : "mg", img: null, src: "" };
 // 11-04 (t2310u/t2311u "my fancy Washington forecast maps ... into studio view", own tab): MG.kind "wafc" = the WA Maps page (wamaps.html: the
 // posted-style NBM lows / highs, gusts (HRRR / ECMWF / ENS / NBM), precip, snow) in a small panel iframe; its finished map canvas is fitted whole
 // into each frame at 2x (PSS). The map carries its own title, scale, logo and credits, so Studio adds nothing on top.
@@ -47,6 +48,14 @@ const PASSM = () => MG.on && MG.kind === "pass";
 const PF = { run: "", rows: null, msg: "" };
 const OBSM = () => MG.on && MG.kind === "obs";
 const ALERTM = () => MG.on && MG.kind === "alert";
+// Active Alerts zoom range (t2558u / t2559u): 1.5x further out, 2x further in than the old 1–2.5 map range.
+const ALERT_ZMIN = 1 / 1.5, ALERT_ZMAX = 5;
+const alertZ = (z) => Math.min(ALERT_ZMAX, Math.max(ALERT_ZMIN, +z || 1));
+const CMPM = () => MG.on && MG.kind === "cmp";   // 11-07: Compare (compare.html) drawn into both frames
+const WEBM = () => MG.on && MG.kind === "web";   // 11-07: any page, framed with the same zoom bar and drag as the maps
+let cmpFrame = null;
+const CMP = { L: null, R: null, view: { L: null, R: null }, play: 0 };
+const WEB = { url: "" };
 const IW = (im) => im.naturalWidth || im.width, IH = (im) => im.naturalHeight || im.height;
 const key = (k) => `studio:${k}:${MG.on ? MG.kind : S.view}`;
 const getFr = (k) => {
@@ -89,7 +98,9 @@ function mgBase(k) {   // meteogram: whole chart fitted inside the frame (9:16: 
   const k0 = Math.min((f.W - 2 * padX) / iw, (f.H - top - bot) / ih);
   return { cx: iw / 2, cy: ih / 2 - ((top + (f.H - bot)) / 2 - f.H / 2) / k0, k0 };
 }
+function webBase(k) { const f = F[k]; return { cx: f.W / 2, cy: f.H / 2, k0: 1 }; }   // the page lays out at the frame's own pixels
 function base(k) {   // camera at dx = dy = 0, zoom 1: centre (figure px) and scale (output px per figure px)
+  if (WEBM()) return webBase(k);
   if (MG.on && MG.img) return mgBase(k);
   const f = F[k], V = last.cur.V, [px, py, pw, ph] = V.panel, t = V.studioWide ? stateRect(V, last.cur.run.split("/")[0]) : null;
   if (!t) return { cx: px + pw / 2, cy: py + ph / 2, k0: Math.max(f.W / pw, f.H / ph) };   // normal views: the map panel covers the frame
@@ -127,7 +138,20 @@ function obsPan(k, fr) {   // pan past the bitmap edge: move the obs map by the 
 const obsZv = (fr) => Math.round((fr.zoom || 1) * (OBSM() && typeof Obs !== "undefined" && Obs._state ? (ozSync(), OZ.sub) : 1) * 100);
 function crop(k, fr) {   // source rect (map bitmap px) for frame k: base camera, then zoom / pan; the panel stays covering the frame when it
   // can, and when it is smaller than the frame (wide view) it stays wholly in the frame (the rest is background)
-  if ((OBSM() || ALERTM()) && MG.img) {   // obs/alert: cover fill; pan/zoom
+  if (WEBM()) {   // page is the frame itself: same 1–2.5× zoom and drag clamp as a meteogram (some of the page stays in view)
+    const f = F[k], B = webBase(k), kk = B.k0 * Math.max(1, fr.zoom || 1), cl = (v, a, b) => Math.min(b, Math.max(a, v));
+    const cx = cl(B.cx - (fr.dx || 0) / kk, -f.W / kk / 2 + 40 / kk, f.W + f.W / kk / 2 - 40 / kk);
+    const cy = cl(B.cy - (fr.dy || 0) / kk, -f.H / kk / 2 + 40 / kk, f.H + f.H / kk / 2 - 40 / kk);
+    return { kk, cx, cy, bx: B.cx, by: B.cy, sx: 0, sy: 0, sw: f.W / kk, sh: f.H / kk, px: 0, py: 0, pw: f.W, ph: f.H, rs: 1 };
+  }
+  if (ALERTM() && MG.img) {   // alert: cover fill; pan/zoom (z may be <1 — letterbox with ocean, clamp when view exceeds bitmap)
+    const B = base(k), z = alertZ(fr.zoom || 1), kk = B.k0 * z, iw = IW(MG.img), ih = IH(MG.img), cl = (v, a, b) => Math.min(b, Math.max(a, v));
+    const hw = F[k].W / kk / 2, hh = F[k].H / kk / 2;
+    const cx = hw >= iw / 2 ? iw / 2 : cl(B.cx - (fr.dx || 0) / kk, hw, iw - hw);
+    const cy = hh >= ih / 2 ? ih / 2 : cl(B.cy - (fr.dy || 0) / kk, hh, ih - hh);
+    return { kk, cx, cy, bx: B.cx, by: B.cy, sx: 0, sy: 0, sw: F[k].W / kk, sh: F[k].H / kk, px: 0, py: 0, pw: iw, ph: ih, rs: 1 };
+  }
+  if (OBSM() && MG.img) {   // obs: cover fill; pan/zoom
     const B = base(k), kk = B.k0 * Math.max(1, fr.zoom || 1), iw = IW(MG.img), ih = IH(MG.img), cl = (v, a, b) => Math.min(b, Math.max(a, v)), hw = F[k].W / kk / 2, hh = F[k].H / kk / 2;
     const cx = cl(B.cx - (fr.dx || 0) / kk, hw, iw - hw), cy = cl(B.cy - (fr.dy || 0) / kk, hh, ih - hh);
     return { kk, cx, cy, bx: B.cx, by: B.cy, sx: 0, sy: 0, sw: F[k].W / kk, sh: F[k].H / kk, px: 0, py: 0, pw: iw, ph: ih, rs: 1 };
@@ -244,12 +268,14 @@ function cornerLogo(c, b) {
   c.save(); c.globalAlpha = 0.5; c.shadowColor = "rgba(0,0,0,0.45)"; c.shadowBlur = Math.round(b.s * 0.06) * ctxS(c); c.drawImage(lg, b.x, b.y, b.s, b.s); c.restore();
 }
 function lowerThird(k, c) {
-  const f = F[k], step = last.step, lg = getLogo(), h = k === "v" ? 150 : 118, w = k === "v" ? f.W - 2 * f.pad : 860, x = f.pad, y = f.H - f.bot - h - (k === "v" ? 40 : 26);
+  const f = F[k], step = last && last.step, lg = getLogo(), h = k === "v" ? 150 : 118, w = k === "v" ? f.W - 2 * f.pad : 860, x = f.pad, y = f.H - f.bot - h - (k === "v" ? 40 : 26);
   c.save(); c.fillStyle = "rgba(13,15,19,0.84)"; c.beginPath(); c.roundRect ? c.roundRect(x, y, w, h, 16) : c.rect(x, y, w, h); c.fill();
   c.fillStyle = "#2f8cff"; c.fillRect(x, y + 14, 8, h - 28);
   let tx = x + 28; const ls = h - 30;
   if (lg) { c.drawImage(lg, tx, y + 15, ls, ls); tx += ls + 22; }
-  const l1 = BR.storm || BR.title || last.cur.P.title, l2 = `${runText()} \u00b7 ${ptTime(step.valid, { weekday: "short", month: "short", day: "numeric", hour: "numeric" })} PT`;
+  const cmpWhen = CMPM() ? (CMP.view.R || CMP.view.L) : null;
+  const l1 = BR.storm || BR.title || (cmpWhen ? cmpHeadTitle() : (last && last.cur.P.title)) || "";
+  const l2 = cmpWhen ? [cmpWhen.site, cmpWhen.step && String(cmpWhen.step.valid_line || "").replace(/^Valid /, "")].filter(Boolean).join("  \u00b7  ") : (step ? `${runText()} \u00b7 ${ptTime(step.valid, { weekday: "short", month: "short", day: "numeric", hour: "numeric" })} PT` : "");
   c.fillStyle = "#fff"; c.font = `800 ${k === "v" ? 46 : 40}px Montserrat`; c.textBaseline = "alphabetic";
   let t1 = l1; while (c.measureText(t1).width > x + w - tx - 24 && t1.length > 4) t1 = t1.slice(0, -2); if (t1 !== l1) t1 += "\u2026";
   c.fillText(t1, tx, y + h * 0.5); c.font = `600 ${k === "v" ? 28 : 25}px Montserrat`; c.fillStyle = "#ffc24d"; c.fillText(l2, tx, y + h * 0.5 + (k === "v" ? 44 : 38));
@@ -261,12 +287,13 @@ function titleCard(k, c, alpha, a0, a1) {   // over the first map; a0 / a1 = fir
   const ls = k === "v" ? 380 : 300, cx = f.W / 2; let y = k === "v" ? 520 : 150;
   if (lg) { c.drawImage(lg, cx - ls / 2, y, ls, ls); y += ls + (k === "v" ? 110 : 90); } else y += k === "v" ? 300 : 220;
   c.textAlign = "center"; c.fillStyle = "#fff"; c.font = `900 ${k === "v" ? 76 : 80}px Montserrat`;
-  const OI = OBSM() ? obsInfo() : null, words = (BR.title || BR.storm || (OI ? OI.title : last.cur.P.title)).split(" "), maxW = f.W - 2 * f.pad, lines = []; let line = "";
+  const OI = OBSM() ? obsInfo() : null, words = (BR.title || BR.storm || (OI ? OI.title : (CMPM() ? cmpHeadTitle() : last.cur.P.title))).split(" "), maxW = f.W - 2 * f.pad, lines = []; let line = "";
   for (const w_ of words) { const t = line ? line + " " + w_ : w_; if (c.measureText(t).width > maxW && line) { lines.push(line); line = w_; } else line = t; } lines.push(line);
   lines.slice(0, 3).forEach((t, i) => c.fillText(t, cx, y + i * (k === "v" ? 86 : 88))); y += (Math.min(3, lines.length) - 1) * (k === "v" ? 86 : 88) + (k === "v" ? 80 : 74);
   if (BR.storm && BR.title) { c.font = `800 ${k === "v" ? 48 : 46}px Montserrat`; c.fillStyle = "#ffc24d"; c.fillText(BR.storm, cx, y); y += k === "v" ? 70 : 64; }
   c.font = `600 ${k === "v" ? 38 : 36}px Montserrat`; c.fillStyle = "#cfd3da";
   if (OI) { c.fillText(`Station reports \u00b7 ${OI.when}`, cx, y); c.restore(); return; }
+  if (CMPM()) { const when = CMP.view.R || CMP.view.L; c.fillText(when ? `${when.site}  \u00b7  ${when.title}` : "Compare", cx, y); c.restore(); return; }
   c.fillText(`${runText()} \u00b7 ${last.cur.P.title}`, cx, y); y += k === "v" ? 58 : 54;
   if (a0 && a1) c.fillText(`${ptTime(a0.valid, { weekday: "short", month: "short", day: "numeric", hour: "numeric" })} \u2013 ${ptTime(a1.valid, { weekday: "short", month: "short", day: "numeric", hour: "numeric" })} PT`, cx, y);
   c.restore();
@@ -290,9 +317,45 @@ function lowKey(c, f, k, cbY, cbS) {
   for (let i = 0; i < n; i++) { const yy = y0 + hH + i * rh + rh / 2, cx = x0 + rr + 1;
     c.beginPath(); c.arc(cx, yy, rr, 0, 2 * Math.PI); c.fillStyle = DOT_COLS[i]; c.fill(); c.lineWidth = 2; c.strokeStyle = "#ffffff"; c.stroke();
     c.fillStyle = "#fff"; c.fillText(DOT_LABELS[i], cx + rr + 11, yy + 1); }
+  f.lowKeyBox = [x0 - pd, y0 - pd, x0 + w + pd, y0 + tot + pd];
   c.restore();
 }
 // ---- Observations in Studio (11-03, t2192u): same header / badge / credit style as the maps; the obs module's own map is the picture
+// Select the deepest member centre inside THIS frame's crop, not the source view or the ensemble mean.
+function strongestMember(c, f, k, cur, r, headBot, cbY) {
+  const scale = f.W / r.sw, points = [];
+  for (const o of cur.memberLows || []) {
+    if (![o.x, o.y, o.mb].every(Number.isFinite)) continue;
+    const x = (o.x * r.rs - r.sx) * scale, y = (o.y * r.rs - r.sy) * scale;
+    if (x >= 0 && y >= 0 && x <= f.W && y <= f.H) points.push({ ...o, x, y });
+  }
+  const T = points.reduce((a, b) => !a || b.mb < a.mb ? b : a, null);
+  window.__studioStrongest = window.__studioStrongest || {};
+  window.__studioStrongest[k] = T ? { ...T, run: cur.run, frame: cur.f } : null;
+  if (!T) return;
+  c.save(); noShadow(c);
+  c.beginPath(); c.arc(T.x, T.y, 9, 0, 2 * Math.PI); c.strokeStyle = "#fff"; c.lineWidth = 5; c.stroke();
+  c.strokeStyle = "#0b0d12"; c.lineWidth = 2; c.stroke();
+  const fs = k === "v" ? 25 : 22, text = `Strongest member: ${Math.round(T.mb)} mb${T.num != null ? ` · Mem ${T.num}` : ""}`;
+  c.font = `800 ${fs}px Montserrat`;
+  const w = c.measureText(text).width, pad = 8, h = fs + 2 * pad;
+  const blocks = [f.hdr, f.badge, f.lowKeyBox, [0, cbY - 45, f.W, f.H]].filter(Boolean);
+  const overlap = (a, b) => Math.max(0, Math.min(a[2], b[2]) - Math.max(a[0], b[0])) * Math.max(0, Math.min(a[3], b[3]) - Math.max(a[1], b[1]));
+  let best;
+  for (const gap of [16, 45, 80, 125]) for (const [sx, sy] of [[1,-1],[-1,-1],[1,1],[-1,1]]) {
+    const x = Math.max(pad, Math.min(f.W - w - 3 * pad, sx > 0 ? T.x + gap : T.x - gap - w - 2 * pad));
+    const y = Math.max(pad, Math.min(f.H - h - pad, sy < 0 ? T.y - gap - h : T.y + gap));
+    const box = [x, y, x + w + 2 * pad, y + h], cost = blocks.reduce((v, b) => v + overlap(box, b), 0);
+    if (!best || cost < best.cost) best = { x, y, box, cost };
+    if (!cost) break;
+  }
+  c.beginPath(); c.moveTo(T.x, T.y); c.lineTo(Math.max(best.x, Math.min(best.box[2], T.x)), Math.max(best.y, Math.min(best.box[3], T.y)));
+  c.strokeStyle = "#fff"; c.lineWidth = 4; c.stroke(); c.strokeStyle = "#0b0d12"; c.lineWidth = 1.5; c.stroke();
+  c.fillStyle = "rgba(17,19,22,0.82)"; c.fillRect(best.x, best.y, w + 2 * pad, h);
+  c.textAlign = "left"; c.textBaseline = "middle"; c.fillStyle = "#fff"; c.fillText(text, best.x + pad, best.y + h / 2);
+  window.__studioStrongest[k].label = text; window.__studioStrongest[k].box = best.box;
+  c.restore();
+}
 const OBS_LAYERS = [["plot", "Station plot", "#ffffff"], ["hi", "High", "#ff8a6e"], ["lo", "Low", "#7f97ff"], ["pk", "Peak gust", "#ffd23f"], ["feel", "Wind chill / heat index", "#c9a2ff"], ["mslp", "MSLP", "#7fe0b5"]];
 // 11-04 (Benjamin "make the credit line smaller, and remove ones we don't legally need"): only the credits a licence asks for stay on
 // the frames: ECCC (OGL-Canada attribution) when station layers show, GeoNames (CC BY 4.0), Natural Earth (standing rule). NOAA/NWS
@@ -311,7 +374,7 @@ function obsInfo() {
   return { on: [...on, ...imPills], t, title, when, view: S_.view, img: IM };
 }
 function renderObs(k, frO) {
-  const f = F[k], c0 = f.cv.getContext("2d"), fr = frO || getFr(k); if (!frO) { f.zoom.min = "5"; f.zoom.value = obsZv(fr); }
+  const f = F[k], c0 = f.cv.getContext("2d"), fr = frO || getFr(k); if (!frO) { f.zoom.min = "5"; f.zoom.max = "250"; f.zoom.value = obsZv(fr); }
   c0.setTransform(1, 0, 0, 1, 0, 0); c0.clearRect(0, 0, f.W, f.H); c0.fillStyle = BG === "transparent" ? "#111316" : BG; c0.fillRect(0, 0, f.W, f.H);
   const I = obsInfo();
   if (!MG.img || !I || !I.t) { c0.font = `700 ${k === "v" ? 40 : 34}px Montserrat`; c0.fillStyle = "#c9ced8"; c0.textAlign = "center"; c0.fillText(MG.msg || "Loading observations\u2026", f.W / 2, f.H / 2); c0.textAlign = "left"; return; }
@@ -379,7 +442,7 @@ function alertRefitForAspect() {
   addEventListener("resize", () => { if (ALERTM() && typeof alertRefitForAspect === "function") alertRefitForAspect(); });
 })();
 // ---- Active Alerts in Studio (11-05): header + credit style as Observations; no LIVE badge (t2437u)
-const ALERT_CREDIT = ["Places: GeoNames, CC BY 4.0."];  // alert mode only; Census/TIGER basemap is public domain — no credit required
+const ALERT_CREDIT = ["Places: GeoNames, CC BY 4.0.", "Basemap: US Census Bureau. Roads: Natural Earth."];  // alert mode only. Census boundaries are public domain; Natural Earth roads/BC context are public domain.
 function alertInfo() {
   const S_ = typeof Alerts !== "undefined" && Alerts._state; if (!S_) return null;
   const title = (typeof Alerts.titleText === "function" ? Alerts.titleText() : null) || S_.selectedType || "All Alerts";
@@ -389,12 +452,24 @@ function alertInfo() {
   return { title, when, t, types, n: (S_.alerts || []).length };
 }
 function renderAlert(k, frO) {
-  const f = F[k], c0 = f.cv.getContext("2d"), fr = frO || getFr(k); if (!frO) { f.zoom.min = "100"; f.zoom.value = Math.round((fr.zoom || 1) * 100); }
-  c0.setTransform(1, 0, 0, 1, 0, 0); c0.clearRect(0, 0, f.W, f.H); c0.fillStyle = BG === "transparent" ? "#111316" : BG; c0.fillRect(0, 0, f.W, f.H);
+  const f = F[k], c0 = f.cv.getContext("2d"), fr = frO || getFr(k);
+  if (!frO) {
+    f.zoom.min = String(Math.round(ALERT_ZMIN * 100));
+    f.zoom.max = String(Math.round(ALERT_ZMAX * 100));
+    fr.zoom = alertZ(fr.zoom || 1);
+    f.zoom.value = String(Math.round(fr.zoom * 100));
+  }
+  c0.setTransform(1, 0, 0, 1, 0, 0); c0.clearRect(0, 0, f.W, f.H);
+  // Ocean fill so a <1x crop letterboxes in map-ocean, not a blank grey (t2559u).
+  c0.fillStyle = BG === "transparent" ? "#030912" : (BG || "#030912"); c0.fillRect(0, 0, f.W, f.H);
   const I = alertInfo();
   if (!MG.img || !I || !I.t) { c0.font = `700 ${k === "v" ? 40 : 34}px Montserrat`; c0.fillStyle = "#c9ced8"; c0.textAlign = "center"; c0.fillText(MG.msg || "Loading alerts\u2026", f.W / 2, f.H / 2); c0.textAlign = "left"; return; }
   const r = crop(k, fr); c0.imageSmoothingEnabled = true; c0.imageSmoothingQuality = "high";
   c0.drawImage(MG.img, f.W / 2 - r.cx * r.kk, f.H / 2 - r.cy * r.kk, IW(MG.img) * r.kk, IH(MG.img) * r.kk);
+  // Towns, highways and boundary strokes in this frame's pixels (t2499u / t2504u). Each frame keeps its own camera.
+  const settle = !!(frO && frO._alertSettle) || !!(window.__alertSettle && window.__alertSettle[k]);
+  if (window.__alertSettle) window.__alertSettle[k] = 0;
+  if (typeof Alerts !== "undefined" && Alerts.paintFrameScene) Alerts.paintFrameScene(c0, { frame: k, dpr: (Alerts._state && Alerts._state.dpr) || 1, W: f.W, H: f.H, zoom: alertZ(fr.zoom || 1), cx: r.cx, cy: r.cy, kk: r.kk }, settle ? { settle: true } : null);
   // TOP LEFT title (alert mode): pill + title + time — no LIVE badge (Benjamin t2437u)
   const c = ovLayer(f), x = f.pad; let y = k === "v" ? 120 : 34;
   const by = y; // top-right anchor without a LIVE badge
@@ -415,15 +490,19 @@ function renderAlert(k, frO) {
   c.fillStyle = "rgba(236,239,244,0.95)";
   if (k === "v") dl.forEach((l, i) => c.fillText(l, f.pad + (cB && BR.cpos === "bl" ? cB.s + 18 : 0), f.H - 70 - (dl.length - 1 - i) * dlh));
   else { c.textAlign = "right"; dl.forEach((l, i) => c.fillText(l, f.W - f.pad - (cB && BR.cpos === "br" ? cB.s + 20 : 0), f.H - 24 - (dl.length - 1 - i) * dlh)); c.textAlign = "left"; }
-  // legend pills for visible types
+  // legend pills: only toggled-on types (empty selection = All → show every type) (t2496u)
   let lx = f.pad, ly = k === "v" ? f.H - 70 - (dl.length - 1) * dlh - dfs - 30 - 30 * 1.55 : f.H - 24 - 30 * 1.55 + 30 * 0.35;
   const lgS = k === "v" ? 28 : 24;
-  for (const t of I.types) {
-    c.font = `800 ${lgS}px Montserrat`; const lab = t.event, w = c.measureText(lab).width + lgS * 1.2, h = lgS * 1.55;
-    if (lx + w > (k === "v" ? f.W * 0.82 : f.W * 0.46) && lx > f.pad + 1) break; // keep right ~18% clear
-    noShadow(c); c.fillStyle = "rgba(17,19,22,0.78)"; c.beginPath(); c.roundRect ? c.roundRect(lx, ly, w, h, h / 2) : c.rect(lx, ly, w, h); c.fill(); sharpShadow(c, k);
-    c.fillStyle = t.color || "#ccc"; c.textBaseline = "middle"; c.fillText(lab, lx + lgS * 0.6, ly + h / 2 + 1); c.textBaseline = "alphabetic"; lx += w + 12;
-  }
+  const Ssel = (typeof Alerts !== "undefined" && Alerts._state && Alerts._state.selectedTypes) || null;
+  const legendTypes = (Ssel && Ssel.size) ? I.types.filter((t) => Ssel.has(t.event)) : I.types;
+  // t2504u: every toggled-on type is listed: pills that don't fit the row wrap onto rows stacked ABOVE it (was: silently dropped)
+  { c.font = `800 ${lgS}px Montserrat`; const h = lgS * 1.55, maxX = k === "v" ? f.W * 0.82 : f.W * 0.46, rows = [[]]; let rx = f.pad;   // keep right ~18% clear
+    for (const t of legendTypes) { const w = c.measureText(t.event).width + lgS * 1.2;
+      if (rx + w > maxX && rows[rows.length - 1].length) { rows.push([]); rx = f.pad; } rows[rows.length - 1].push([t, rx, w]); rx += w + 12; }
+    rows.forEach((row, r) => { const y = ly - (rows.length - 1 - r) * (h + 8);
+      for (const [t, x, w] of row) {
+        noShadow(c); c.fillStyle = "rgba(17,19,22,0.78)"; c.beginPath(); c.roundRect ? c.roundRect(x, y, w, h, h / 2) : c.rect(x, y, w, h); c.fill(); sharpShadow(c, k);
+        c.font = `800 ${lgS}px Montserrat`; c.fillStyle = t.color || "#ccc"; c.textBaseline = "middle"; c.fillText(t.event, x + lgS * 0.6, y + h / 2 + 1); c.textBaseline = "alphabetic"; } }); }
   c.restore(); ovPut(c0, f, k);
   if (cnr) cornerLogo(c0, cnr);
   window.__studio = (window.__studio || 0) + 1; window.__studioAlert = (window.__studioAlert || 0) + 1;
@@ -444,7 +523,7 @@ function pfCols(head, k) {   // column indexes kept for this frame, most importa
   const a = all.filter((j) => !isK(j)); return [a, a.filter((j) => !isP(j)), a.filter((j) => !isP(j) && !isG(j))];
 }
 function renderPass(k) {
-  const f = F[k]; ssFit(f, PSS); const c0 = f.cv.getContext("2d"); f.zoom.min = "100"; f.zoom.value = "100";
+  const f = F[k]; ssFit(f, PSS); const c0 = f.cv.getContext("2d"); f.zoom.min = "100"; f.zoom.max = "250"; f.zoom.value = "100";
   c0.setTransform(PSS, 0, 0, PSS, 0, 0); c0.clearRect(0, 0, f.W, f.H); c0.fillStyle = BG === "transparent" ? "#111316" : BG; c0.fillRect(0, 0, f.W, f.H);
   const D = PF.rows;
   if (!D) { c0.font = `700 ${k === "v" ? 40 : 34}px Montserrat`; c0.fillStyle = "#c9ced8"; c0.textAlign = "center"; c0.fillText(PF.msg || "Loading the Pass Forecaster\u2026", f.W / 2, f.H / 2); c0.textAlign = "left"; return; }
@@ -521,19 +600,220 @@ function renderPass(k) {
   window.__studio = (window.__studio || 0) + 1; window.__studioPass = (window.__studioPass || 0) + 1;
 }
 function renderWafc(k) {
-  const f = F[k]; ssFit(f, PSS); const c = f.cv.getContext("2d"); f.zoom.min = "100"; f.zoom.value = "100";
+  const f = F[k]; ssFit(f, PSS); const c = f.cv.getContext("2d"); f.zoom.min = "100"; f.zoom.max = "250"; f.zoom.value = "100";
   c.setTransform(PSS, 0, 0, PSS, 0, 0); c.clearRect(0, 0, f.W, f.H); c.fillStyle = BG === "transparent" ? "#111316" : BG; c.fillRect(0, 0, f.W, f.H);
   const im = MG.img; if (!im) { c.font = `700 ${k === "v" ? 40 : 34}px Montserrat`; c.fillStyle = "#c9ced8"; c.textAlign = "center"; c.fillText(MG.msg || "Loading the WA forecast map\u2026", f.W / 2, f.H / 2); c.textAlign = "left"; return; }
   const s = Math.min(f.W / im.width, f.H / im.height), w = im.width * s, h = im.height * s;   // whole map (title to credits), centered
   c.imageSmoothingEnabled = true; c.imageSmoothingQuality = "high"; c.drawImage(im, (f.W - w) / 2, (f.H - h) / 2, w, h);
   window.__studio = (window.__studio || 0) + 1; window.__studioWafc = (window.__studioWafc || 0) + 1;
 }
+function webNormalize(raw) {
+  let s = String(raw || "").trim(); if (!s) return "";
+  if (!/^https?:\/\//i.test(s)) s = "https://" + s;
+  try { const u = new URL(s); if (u.protocol !== "http:" && u.protocol !== "https:") return ""; return u.toString(); } catch (e) { return ""; }
+}
+function webHide() { for (const k of ["v", "h"]) if (F[k].web) F[k].web.hidden = true; }
+function webApply(url) {
+  WEB.url = url || ""; try { if (url) localStorage.setItem("studio:weburl", url); } catch (e) { /* private */ }
+  for (const k of ["v", "h"]) { const ifr = F[k].web && F[k].web.querySelector("iframe"); if (ifr && ifr.getAttribute("src") !== (url || "about:blank")) ifr.src = url || "about:blank"; }
+  if (WEBM()) renderAll();
+}
+function placeWeb(k, frO) {
+  const f = F[k], ov = f.web; if (!ov) return;
+  if (!WEBM() || !WEB.url) { ov.hidden = true; return; }
+  const fr = frO || getFr(k), r = crop(k, fr), cv = f.cv;
+  ov.hidden = false; ov.style.left = cv.offsetLeft + "px"; ov.style.top = cv.offsetTop + "px"; ov.style.width = cv.clientWidth + "px"; ov.style.height = cv.clientHeight + "px";
+  const ifr = ov.querySelector("iframe"), s = (cv.clientWidth || 1) * r.kk / f.W, x0 = r.cx - f.W / (2 * r.kk), y0 = r.cy - f.H / (2 * r.kk);
+  ifr.style.width = f.W + "px"; ifr.style.height = f.H + "px"; ifr.style.transformOrigin = "0 0"; ifr.style.transform = `translate(${-x0 * s}px, ${-y0 * s}px) scale(${s})`;
+}
+function renderWeb(k, frO) {
+  const f = F[k], c = f.cv.getContext("2d"), fr = frO || getFr(k);
+  if (!frO) { f.zoom.min = "100"; f.zoom.value = String(Math.round((fr.zoom || 1) * 100));
+    const r = crop(k, fr); fr.dx = (r.bx - r.cx) * r.kk; fr.dy = (r.by - r.cy) * r.kk; setFr(k, fr); }
+  c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, f.W, f.H); c.fillStyle = BG === "transparent" ? "#111316" : BG; c.fillRect(0, 0, f.W, f.H);
+  c.font = `600 ${k === "v" ? 28 : 24}px Montserrat`; c.fillStyle = "#c9ced8"; c.textAlign = "center";
+  const msg = WEB.url ? "If this stays blank, the site probably doesn't allow embedding." : "Paste a page address above, then Open.";
+  const words = msg.split(" "), maxW = f.W - 2 * f.pad, lines = []; let line = "";
+  for (const w_ of words) { const t = line ? line + " " + w_ : w_; if (c.measureText(t).width > maxW && line) { lines.push(line); line = w_; } else line = t; } if (line) lines.push(line);
+  lines.forEach((t, i) => c.fillText(t, f.W / 2, f.H / 2 + (i - (lines.length - 1) / 2) * (k === "v" ? 40 : 34)));
+  c.textAlign = "left"; placeWeb(k, fr); window.__studio = (window.__studio || 0) + 1; window.__studioWeb = { url: WEB.url, fr: { v: getFr("v"), h: getFr("h") } };
+}
+function cmpApi() { try { return cmpFrame && cmpFrame.contentWindow && cmpFrame.contentWindow.__cmp; } catch (e) { return null; } }
+// viewer.js keeps its state in a script binding (const S) and publishes it only as window.__S. A parent frame's
+// contentWindow.S is undefined; contentWindow.__S is the live object. Fall back to .S if a build ever assigns it.
+function cmpState(w) { return w && (w.__S || w.S) || null; }
+function cmpSteps() {
+  try { const S_ = cmpState(cmpFrame.contentDocument.getElementById("R").contentWindow), run = S_ && S_.run; return run && S_.runs[run] && S_.runs[run].steps; } catch (e) { return null; }
+}
+function cmpPickIdx(steps) {
+  const a = +$s("mpa").value, b = +$s("mpb").value, e = +$s("mpe").value, out = []; if (!steps) return out;
+  for (let i = a; i <= b && i < steps.length; i++) if (!out.length || !e || steps[i].f - steps[out[out.length - 1]].f >= e) out.push(i);
+  return out;
+}
+function cmpGrab() {
+  const api = cmpApi(); if (!api) return;
+  CMP.L = api.L || null; CMP.R = api.R || null;
+  let changed = false;
+  for (const id of ["L", "R"]) {
+    let next = null;
+    try {
+      const w = cmpFrame.contentDocument.getElementById(id).contentWindow, S_ = cmpState(w), cv = w.document.getElementById("map"), cur = S_ && S_.cur;
+      if (cv && cv.width && cur && cur.V && cur.V.panel) {
+        const m = String(cur.run || "").split("/")[0], step = S_.runs[cur.run].steps[S_.i];
+        const sig = [cur.run, cur.pid, step && step.f, cv.width, cv.height, w.__drawn || ""].join("|");
+        next = { cv, panel: cur.V.panel, rs: cv._rs || 1, title: (cur.P && cur.P.title) || "", pid: cur.pid, run: cur.run, model: m,
+          site: (S_.man && S_.man.models[m] && S_.man.models[m].site) || m, step, sig };
+      }
+    } catch (e) { next = null; }
+    if ((CMP.view[id] && CMP.view[id].sig) !== (next && next.sig)) { CMP.view[id] = next; changed = true; }
+  }
+  try { const u = new URL(cmpFrame.contentWindow.location.href); if (u.searchParams.get("l")) { u.searchParams.set("studio", "1"); sessionStorage.setItem("studio:cmpq", "?" + u.searchParams.toString()); } } catch (e) { /* iframe loading */ }
+  if (CMPM()) { if (changed && !REC.on) renderAll(); cmpScrub(); }
+}
+function cmpScrub() {
+  const r = CMP.R || CMP.L; if (!r || !r.n) return;
+  const sl = document.getElementById("hscrub"), lab = document.getElementById("shour"), step = document.getElementById("step");
+  if (sl) { sl.max = String(r.n - 1); if (document.activeElement !== sl) sl.value = String(r.i); }
+  if (step && CMPM()) { step.max = String(r.n - 1); if (document.activeElement !== step) step.value = String(r.i); }
+  if (lab) lab.textContent = `F+${r.f}` + (r.vline ? `  \u00b7  ${String(r.vline).replace(/^Valid /, "")}` : "");
+  const tk = document.getElementById("sticks"), steps = cmpSteps();
+  if (tk && steps && steps.length) { const key = (r.run || "") + ":" + steps.length; if (tk.dataset.key !== key) { tk.dataset.key = key; const n = steps.length;
+    tk.innerHTML = steps.map((x, i) => x.f % 24 === 0 && (x.f % 48 === 0 || steps[n - 1].f <= 168) ? `<span style="left:calc(9px + (100% - 18px) * ${n > 1 ? i / (n - 1) : 0})">${x.f}</span>` : "").join(""); } }
+}
+function cmpSetHour(i) { const api = cmpApi(); if (!api || !CMP.R || !CMP.R.n) return; api.setHour((i + CMP.R.n) % CMP.R.n); }
+function cmpStep(d) { if (CMP.R) cmpSetHour(CMP.R.i + d); }
+// 11-07: Compare's two product menus sit in #cmpf. A fixed 320px iframe clipped the second menu after the first
+// bar grew, and the nested map frames ate wheel / touch. The panel itself scrolls; nothing on it locks scroll.
+function cmpFitPanel() {
+  const pnl = document.getElementById("mgp");
+  if (!CMPM() || !pnl || !cmpFrame) return;
+  const top = Math.max(0, pnl.getBoundingClientRect().top);
+  const maxH = Math.max(200, Math.min(window.innerHeight - top - 8, Math.round(window.innerHeight * 0.72)));
+  pnl.style.setProperty("max-height", maxH + "px");
+  pnl.style.setProperty("overflow-y", "auto");
+  pnl.style.setProperty("overflow-x", "hidden");
+  pnl.style.setProperty("touch-action", "pan-y");
+  pnl.style.setProperty("-webkit-overflow-scrolling", "touch");
+  pnl.style.setProperty("overscroll-behavior", "contain");
+  cmpFrame.style.display = "block";
+  cmpFrame.style.width = "100%";
+  cmpFrame.style.border = "0";
+  cmpFrame.style.touchAction = "pan-y";
+  cmpFrame.style.overflow = "visible";
+  cmpFrame.style.maxHeight = "none";
+  const nudge = (dy) => {
+    const max = pnl.scrollHeight - pnl.clientHeight; if (max <= 2) return false;
+    const before = pnl.scrollTop; pnl.scrollTop = Math.max(0, Math.min(max, before + dy)); return pnl.scrollTop !== before;
+  };
+  const bind = (doc) => {
+    if (!doc || doc.documentElement._cmpScroll) return;
+    doc.documentElement._cmpScroll = true;
+    doc.addEventListener("wheel", (e) => { if (nudge(e.deltaY)) e.preventDefault(); }, { passive: false, capture: true });
+    let y0 = 0;
+    doc.addEventListener("touchstart", (e) => { if (e.touches.length === 1) y0 = e.touches[0].clientY; }, { passive: true, capture: true });
+    doc.addEventListener("touchmove", (e) => {
+      if (e.touches.length !== 1) return;
+      const tgt = e.target && e.target.closest && e.target.closest("select, input, textarea, button, a, option");
+      if (tgt) return;
+      const y = e.touches[0].clientY; if (nudge(y0 - y)) e.preventDefault(); y0 = y;
+    }, { passive: false, capture: true });
+  };
+  try {
+    const doc = cmpFrame.contentDocument; if (!doc || !doc.head || !doc.body) return;
+    bind(doc);
+    let st = doc.getElementById("cmp-scroll-fix");
+    if (!st) { st = doc.createElement("style"); st.id = "cmp-scroll-fix"; doc.head.appendChild(st); }
+    st.textContent = "html,body{height:auto!important;min-height:0!important;overflow:visible!important;touch-action:pan-y!important}#panes,#cbar,#L,#R{touch-action:pan-y!important}";
+    for (const id of ["L", "R"]) {
+      const fr = doc.getElementById(id); if (!fr || !fr.contentDocument || !fr.contentDocument.head || !fr.contentDocument.body) continue;
+      const idoc = fr.contentDocument;
+      bind(idoc);
+      let s2 = idoc.getElementById("cmp-scroll-fix");
+      if (!s2) { s2 = idoc.createElement("style"); s2.id = "cmp-scroll-fix"; idoc.head.appendChild(s2); }
+      s2.textContent = "html,body{height:auto!important;overflow:visible!important;touch-action:pan-y!important}#bar,#bar *{touch-action:pan-y!important}";
+      const bar = idoc.getElementById("bar");
+      const bh = bar ? Math.ceil(bar.getBoundingClientRect().height) : 0;
+      if (bh > 40) fr.style.height = (bh + 12) + "px";
+    }
+    const h = Math.max(doc.documentElement.scrollHeight, doc.body.scrollHeight);
+    if (h > 80) cmpFrame.style.height = h + "px";
+  } catch (e) { /* iframe not same-origin yet */ }
+}
+function cmpSrc() {
+  let saved = ""; try { saved = sessionStorage.getItem("studio:cmpq") || ""; } catch (e) { /* private */ }
+  if (saved) { const u = new URLSearchParams(saved.replace(/^\?/, "")); u.set("studio", "1"); return "compare.html?" + u.toString(); }
+  const q = new URLSearchParams({ studio: "1" });
+  try {
+    if (S.run && S.runs[S.run]) { const st = S.runs[S.run].steps[S.i], [m, cyc] = S.run.split("/"), rs = (S.man.runs[m] || []);
+      const otherC = rs.length > 1 ? (rs[rs.length - 1] === cyc ? rs[rs.length - 2] : rs[rs.length - 1]) : cyc;
+      q.set("l", S.run); q.set("r", m + "/" + otherC); if (S.prod) q.set("prod", S.prod); if (S.view) q.set("view", S.view); if (st && st.valid) q.set("valid", st.valid); }
+  } catch (e) { /* map not ready: compare opens on its own defaults */ }
+  return "compare.html?" + q.toString();
+}
+function cmpHeadTitle() {
+  const a = CMP.view.L, b = CMP.view.R, ta = a && a.title, tb = b && b.title;
+  if (ta && tb && ta === tb) return ta; if (ta && tb) return "Compare"; return ta || tb || "Compare";
+}
+function cmpBadgeText(v) { if (!v || !v.step) return ""; return v.model === "oisst" && v.step.badge ? v.step.badge[0] : "F+" + v.step.f; }
+function cmpDrawPanel(c, k, src, box) {
+  const cap = k === "v" ? 40 : 34; c.fillStyle = "rgba(17,19,22,0.92)"; c.fillRect(box.x, box.y, box.w, cap);
+  c.font = `700 ${k === "v" ? 22 : 20}px Montserrat`; c.fillStyle = "#fff"; c.textBaseline = "middle";
+  const lab = src ? `${src.site}  \u00b7  ${src.title}${src.step ? "  \u00b7  " + cmpBadgeText(src) : ""}` : "Loading\u2026";
+  let t = lab; while (c.measureText(t).width > box.w - 24 && t.length > 8) t = t.slice(0, -2); if (t !== lab) t += "\u2026";
+  c.fillText(t, box.x + 12, box.y + cap / 2 + 1); c.textBaseline = "alphabetic";
+  const inner = { x: box.x, y: box.y + cap, w: box.w, h: Math.max(10, box.h - cap) };
+  if (!src || !src.cv || !src.panel) { c.fillStyle = "#1d2027"; c.fillRect(inner.x, inner.y, inner.w, inner.h); c.fillStyle = "#8e939c"; c.font = `700 ${k === "v" ? 28 : 24}px Montserrat`; c.textAlign = "center"; c.fillText(src ? "Loading\u2026" : "Loading the compare map\u2026", inner.x + inner.w / 2, inner.y + inner.h / 2); c.textAlign = "left"; return; }
+  const [px, py, pw] = src.panel, rs = src.rs || 1, lh = src.cv._lh || (py + src.panel[3]);
+  const ah = Math.max(src.panel[3], lh - py), sx = px * rs, sy = py * rs, sw = pw * rs, sh = ah * rs;
+  const sc = Math.min(inner.w / pw, inner.h / ah), dw = pw * sc, dh = ah * sc;
+  c.imageSmoothingEnabled = true; c.imageSmoothingQuality = "high";
+  try { c.drawImage(src.cv, sx, sy, sw, sh, inner.x + (inner.w - dw) / 2, inner.y + (inner.h - dh) / 2, dw, dh); } catch (e) { /* a map canvas the browser will not read */ }
+}
+function renderCmp(k) {
+  const f = F[k], c0 = f.cv.getContext("2d"); if (f.zoom) { f.zoom.min = "100"; f.zoom.value = "100"; }
+  c0.setTransform(1, 0, 0, 1, 0, 0); c0.clearRect(0, 0, f.W, f.H); c0.fillStyle = BG === "transparent" ? "#111316" : BG; c0.fillRect(0, 0, f.W, f.H);
+  const main = CMP.view.R || CMP.view.L, c = ovLayer(f), x = f.pad; let y = k === "v" ? 120 : 34;
+  c.save(); sharpShadow(c, k);
+  const sites = [CMP.view.L, CMP.view.R].map((v) => v && v.site).filter(Boolean);
+  const pillT = sites.length > 1 && sites[0] !== sites[1] ? "COMPARE" : (sites[0] || "COMPARE").toUpperCase();
+  const pw = pill(c, x, y, pillT, Math.round(f.run * 0.95), "#2f8cff", "#fff");
+  const runL = [CMP.view.L, CMP.view.R].map((v) => v && v.run ? `${v.site} ${String(v.run.split("/")[1] || "").slice(8)}Z` : "").filter(Boolean).join("  \u00b7  ");
+  c.font = `600 ${f.run}px Montserrat`; c.fillStyle = "#c9ced8"; c.fillText(runL || "two models", x + pw + 14, y + f.run * 1.08);
+  y += f.run * 1.55 + f.title * 1.02; c.font = `800 ${f.title}px Montserrat`; c.fillStyle = "#fff";
+  const title = BR.title || cmpHeadTitle(), maxW = f.W - 2 * f.pad - (k === "h" ? 260 : 0);
+  let t1 = title; while (c.measureText(t1).width > maxW && t1.length > 6) t1 = t1.slice(0, -2); if (t1 !== title) t1 += "\u2026";
+  c.fillText(t1, x, y); y += f.day * 1.3;
+  const vline = (main && main.step && main.step.valid_line || "").replace(/^Valid /, "");
+  c.font = `800 ${f.day}px Montserrat`; c.fillStyle = "#ffc24d"; c.fillText(vline, x, y);
+  const headBot = y + f.day * 0.45; c.restore();
+  const bt = cmpBadgeText(main), by = k === "v" ? 120 : 34; let badgeBot = by;
+  if (bt) { c.font = `800 ${Math.round(f.valid * 1.1)}px Montserrat`; const bw = c.measureText(bt).width + 40, bx = badgeRight(k) - bw;
+    c.save(); sharpShadow(c, k); c.fillStyle = "rgba(17,19,22,0.85)"; c.strokeStyle = "rgba(255,255,255,0.35)"; c.lineWidth = 2;
+    c.beginPath(); c.roundRect ? c.roundRect(bx, by, bw, f.valid * 1.9, 14) : c.rect(bx, by, bw, f.valid * 1.9); c.fill(); noShadow(c); c.stroke(); sharpShadow(c, k);
+    c.fillStyle = "#fff"; c.textAlign = "center"; c.fillText(bt, bx + bw / 2, by + f.valid * 1.32); c.textAlign = "left"; c.restore();
+    f.badge = [bx - 12, by - 12, bx + bw + 12, by + f.valid * 1.9 + 12]; badgeBot = by + f.valid * 1.9; }
+  const cnr = BR.corner && LOGOS[BR.logo] ? cornerBox(k, badgeBot, headBot, f.H - 80) : null;
+  ovPut(c0, f, k);
+  const top = headBot + (k === "v" ? 28 : 18), bot = f.H - (k === "v" ? 36 : 24), gap = k === "v" ? 14 : 12;
+  let rects;
+  if (k === "h") { const w = (f.W - 2 * f.pad - gap) / 2, h = Math.max(40, bot - top); rects = [{ x: f.pad, y: top, w, h }, { x: f.pad + w + gap, y: top, w, h }]; }
+  else { const h = Math.max(40, (bot - top - gap) / 2), w = f.W - 2 * f.pad; rects = [{ x: f.pad, y: top, w, h }, { x: f.pad, y: top + h + gap, w, h }]; }
+  c0.save(); cmpDrawPanel(c0, k, CMP.view.L, rects[0]); cmpDrawPanel(c0, k, CMP.view.R, rects[1]);
+  c0.fillStyle = "#2f8cff";
+  if (k === "h") c0.fillRect(rects[0].x + rects[0].w + gap / 2 - 2, top, 4, rects[0].h); else c0.fillRect(f.pad, rects[0].y + rects[0].h + gap / 2 - 2, rects[0].w, 4);
+  c0.restore();
+  if (cnr) cornerLogo(c0, cnr);
+  if (BR.lower && (last || BR.title || BR.storm)) lowerThird(k, c0);
+  window.__studio = (window.__studio || 0) + 1; window.__studioCmp = { l: CMP.L && CMP.L.run, r: CMP.R && CMP.R.run, title };
+}
 function renderMg(k, frO) {
+  if (WEBM()) return renderWeb(k, frO);
+  if (CMPM()) return renderCmp(k);
   if (WAFCM()) return renderWafc(k);
   if (ALERTM()) return renderAlert(k, frO);
   if (OBSM()) return renderObs(k, frO);
   if (PASSM()) return renderPass(k);
-  const f = F[k], c = f.cv.getContext("2d"), fr = frO || getFr(k); f.zoom.min = "100"; f.zoom.value = Math.round((fr.zoom || 1) * 100);
+  const f = F[k], c = f.cv.getContext("2d"), fr = frO || getFr(k); f.zoom.min = "100"; f.zoom.max = "250"; f.zoom.value = Math.round((fr.zoom || 1) * 100);
   c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, f.W, f.H); c.fillStyle = BG === "transparent" ? "#111316" : BG; c.fillRect(0, 0, f.W, f.H);
   if (!MG.img) { c.font = `700 ${k === "v" ? 40 : 34}px Montserrat`; c.fillStyle = "#c9ced8"; c.textAlign = "center"; c.fillText(MG.msg || "Loading the meteogram\u2026", f.W / 2, f.H / 2); c.textAlign = "left"; return; }
   const r = crop(k, fr); c.imageSmoothingEnabled = true; c.imageSmoothingQuality = "high";
@@ -548,7 +828,7 @@ async function render(k, frO) {   // frO: camera override (MP4 storm-track pan)
   ssFit(F[k], PASSM() || WAFCM() ? PSS : 1);   // 11-04 (t2295u): Pass Forecaster draws at 2x; every other mode stays at native frame px
   if (MG.on) return renderMg(k, frO);
   if (!last) return; const f = F[k], c0 = f.cv.getContext("2d"), fr = frO || getFr(k), { cv, cur, step } = last, P = cur.P, [m] = cur.run.split("/"); let c = c0;
-  if (!frO) f.zoom.value = Math.round((fr.zoom || 1) * 100);
+  if (!frO) { f.zoom.min = "100"; f.zoom.max = "250"; f.zoom.value = Math.round((fr.zoom || 1) * 100); }
   c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, f.W, f.H);
   if (BG !== "transparent") { c.fillStyle = BG; c.fillRect(0, 0, f.W, f.H); }
   const r = crop(k, fr); c.imageSmoothingEnabled = true; c.imageSmoothingQuality = last.lite ? "low" : "high";   // lite: slider drag frame (RS 1 map)
@@ -573,12 +853,17 @@ async function render(k, frO) {   // frO: camera override (MP4 storm-track pan)
     c.font = `800 ${f.day}px Montserrat`; hw = Math.max(hw, c.measureText((step.valid_line || "").replace(/^Valid /, "")).width);
     c.font = `600 ${f.run}px Montserrat`; hw = Math.max(hw, pw + 14 + c.measureText("daily analysis").width);
     f.hdr = [x - 12, (k === "v" ? 120 : 34) - 12, x + hw + 16, headBot + 14]; }
-  // F+ badge (top right)
-  c.font = `800 ${Math.round(f.valid * 1.1)}px Montserrat`; const bt = m === "oisst" && step.badge ? step.badge[0] : `F+${step.f}`, bw = c.measureText(bt).width + 40, bx = badgeRight(k) - bw, by = k === "v" ? 120 : 34;
-  c.fillStyle = "rgba(17,19,22,0.85)"; c.strokeStyle = "rgba(255,255,255,0.35)"; c.lineWidth = 2; c.beginPath(); c.roundRect ? c.roundRect(bx, by, bw, f.valid * 1.9, 14) : c.rect(bx, by, bw, f.valid * 1.9); c.fill(); noShadow(c); c.stroke(); sharpShadow(c, k);
-  c.fillStyle = "#fff"; c.textAlign = "center"; c.fillText(bt, bx + bw / 2, by + f.valid * 1.32); c.textAlign = "left"; c.restore();
-  f.badge = [bx - 12, by - 12, bx + bw + 12, by + f.valid * 1.9 + 12];
-  const cnr = BR.corner && LOGOS[BR.logo] ? cornerBox(k, by + f.valid * 1.9, headBot, f.H - f.bot + (k === "v" ? 110 : 62)) : null;
+  // F+ badge (top right) — hidden on vertical 9:16 (t2495u) and on horizontal 16:9 (t2567u); OISST date badge kept
+  let by = k === "v" ? 120 : 34, badgeBot = by;
+  if (k !== "v" && m === "oisst" && step.badge) {
+    c.font = `800 ${Math.round(f.valid * 1.1)}px Montserrat`; const bt = step.badge[0], bw = c.measureText(bt).width + 40, bx = badgeRight(k) - bw;
+    c.fillStyle = "rgba(17,19,22,0.85)"; c.strokeStyle = "rgba(255,255,255,0.35)"; c.lineWidth = 2; c.beginPath(); c.roundRect ? c.roundRect(bx, by, bw, f.valid * 1.9, 14) : c.rect(bx, by, bw, f.valid * 1.9); c.fill(); noShadow(c); c.stroke(); sharpShadow(c, k);
+    c.fillStyle = "#fff"; c.textAlign = "center"; c.fillText(bt, bx + bw / 2, by + f.valid * 1.32); c.textAlign = "left";
+    f.badge = [bx - 12, by - 12, bx + bw + 12, by + f.valid * 1.9 + 12];
+    badgeBot = by + f.valid * 1.9;
+  } else { f.badge = null; }
+  c.restore();
+  const cnr = BR.corner && LOGOS[BR.logo] ? cornerBox(k, badgeBot, headBot, f.H - f.bot + (k === "v" ? 110 : 62)) : null;
   // bottom: color bar + credit (no dark band any more: their text gets a shadow so it stays readable on the map)
   c.save(); sharpShadow(c, k);
   // 11-02 (Benjamin t2115u "move the scale further down"): 9:16: the bar sits just above the credit line (tick numbers ~14 px clear of it;
@@ -618,7 +903,7 @@ async function render(k, frO) {   // frO: camera override (MP4 storm-track pan)
   else { c.textAlign = "right"; dl.forEach((l, i) => c.fillText(l, f.W - f.pad, f.H - 24 - 30 - (dl.length - 1 - i) * dlh)); c.textAlign = "left"; }
   const dUp = k === "v" ? 0 : dl.length * dlh + 4;
   if (logo) { c.font = `800 ${k === "v" ? 34 : 28}px Montserrat`; c.fillStyle = "#fff"; c.textAlign = "right"; c.fillText(logo, f.W - f.pad, f.H - (k === "v" ? 70 : 60) - dUp); c.textAlign = "left"; }
-  if (P.lows) lowKey(c, f, k, cbY, cbS);
+  if (P.lows) { lowKey(c, f, k, cbY, cbS); strongestMember(c, f, k, cur, r, headBot, cbY); }
   c.restore();
   c = c0; ovPut(c, f, k);
   if (cnr) cornerLogo(c, cnr);
@@ -672,7 +957,7 @@ for (const k of ["v", "h"]) {
   const f = F[k], cv = f.cv; let d = null;
   // 10-31 5:12 PM (Benjamin: "drag point a and b for the storm across the map either with my finger, or with my cursor"):
   // grabbing a shown pin drags it (live), anywhere else drags the frame as before
-  cv.addEventListener("pointerdown", (e) => { if (CLEAN || !last || REC.on) return; if (PIN.mode) { placePin(k, cv, e); return; }
+  cv.addEventListener("pointerdown", (e) => { if (CLEAN || REC.on || CMPM()) return; if (!last && !WEBM()) return; if (PIN.mode) { placePin(k, cv, e); return; }
     const hit = pinHit(k, cv, e); if (hit) { e.preventDefault(); cv.setPointerCapture(e.pointerId); PD = { k, n: hit, id: e.pointerId, off: pinOff(k, cv, e, hit) }; cv.classList.add("pindrag"); return; }
     if (e.pointerType === "touch" && (S.dragging || !e.isPrimary)) return;   // 11-03: a second finger, or a finger while the scrubber is held: no frame drag
     cv.setPointerCapture(e.pointerId); cv.focus({ preventScroll: true }); cv.classList.add("drag"); d = { x: e.clientX, y: e.clientY, fr: getFr(k), id: e.pointerId }; });
@@ -681,17 +966,21 @@ for (const k of ["v", "h"]) {
     if (!d && !PD && PIN.show && !PIN.mode && e.pointerType === "mouse") cv.style.cursor = pinHit(k, cv, e) ? "grab" : "";
     if (!d || pz || (d.id !== undefined && e.pointerId !== d.id)) return; const s = f.W / cv.clientWidth, fr = getFr(k);
     fr.dx = d.fr.dx + (e.clientX - d.x) * s; fr.dy = d.fr.dy + (e.clientY - d.y) * s;
-    if (ALERTM() && typeof Alerts !== "undefined" && Alerts._state && MG.img) {
-      const S_ = Alerts._state, r = crop(k, fr), kk = r.kk, rect = F[k].cv.getBoundingClientRect();
-      const cssDx = ((e.clientX - d.x) * F[k].W / rect.width) / kk / (S_.dpr || 1);
-      const cssDy = ((e.clientY - d.y) * F[k].H / rect.height) / kk / (S_.dpr || 1);
-      const s = (S_.scale || 1) * (S_.k || 1) || 1;
-      S_.cx -= cssDx / s; S_.cy += cssDy / s; // mercator y is north-up
-      Alerts.redraw(); d.x = e.clientX; d.y = e.clientY; setFr(k, fr); render(k); return; }
+    // 11-05 t2480u: Active Alerts pan/zoom is per Studio frame (fr), not the shared Alerts mercator camera — so 9:16 and 16:9 move independently.
     if (OBSM()) { obsPan(k, fr); d.x = e.clientX; d.y = e.clientY; d.fr = Object.assign({}, fr); setFr(k, fr); render(k); return; }   // 11-04: free pan
     const r = crop(k, fr);   // keep the stored offset inside the panel
     fr.dx = (r.bx - r.cx) * r.kk; fr.dy = (r.by - r.cy) * r.kk; setFr(k, fr); render(k); });
-  const up = (e) => { if (PD && PD.k === k) { PD = null; cv.classList.remove("pindrag"); mpInfo(); renderAll(); } d = null; cv.classList.remove("drag"); }; cv.addEventListener("pointerup", up); cv.addEventListener("pointercancel", up); cv.addEventListener("lostpointercapture", (e) => { if (d && e.pointerId === d.id) up(e); });
+  const up = (e) => {
+    const wasDrag = !!d;
+    if (PD && PD.k === k) { PD = null; cv.classList.remove("pindrag"); mpInfo(); renderAll(); }
+    d = null; cv.classList.remove("drag");
+    // After an Active Alerts pan, add labels for newly visible area without moving kept ones (t2557u).
+    if (wasDrag && ALERTM() && typeof Alerts !== "undefined") {
+      window.__alertSettle = window.__alertSettle || {}; window.__alertSettle[k] = 1;
+      if (Alerts.settleFrameLabels) Alerts.settleFrameLabels(k);
+      render(k);
+    }
+  }; cv.addEventListener("pointerup", up); cv.addEventListener("pointercancel", up); cv.addEventListener("lostpointercapture", (e) => { if (d && e.pointerId === d.id) up(e); });
   // 10-31 1:39 PM (Benjamin, iPhone): two-finger pinch zooms the frame (1-2.5x) about the fingers' midpoint; moving both fingers pans
   let pz = null;
   const oxy = (t) => { const b = cv.getBoundingClientRect(); return [(t.clientX - b.left) * f.W / b.width, (t.clientY - b.top) * f.H / b.height]; };
@@ -701,52 +990,38 @@ for (const k of ["v", "h"]) {
     // screen (e.touches), so a finger on the hour scrubber (or the other frame, a button, ...) plus one resting on this frame was taken
     // as a pinch and zoomed the frame as the scrubber finger moved. Only a real two-finger pinch on this frame zooms it now
     // (targetTouches = fingers that started on this canvas, and no other finger on the screen).
-    if (CLEAN || !last || REC.on || PIN.mode || e.targetTouches.length !== 2 || e.touches.length !== 2) { if (pz && e.targetTouches.length !== 2) pz = null; return; }
+    if (CLEAN || REC.on || PIN.mode || CMPM() || (!last && !WEBM()) || e.targetTouches.length !== 2 || e.touches.length !== 2) { if (pz && e.targetTouches.length !== 2) pz = null; return; }
+    cv._alertPinch = 1;
     e.preventDefault(); d = null;
     const [a, b] = [oxy(e.targetTouches[0]), oxy(e.targetTouches[1])], fr0 = getFr(k), r0 = crop(k, fr0), ox = (a[0] + b[0]) / 2, oy = (a[1] + b[1]) / 2;
-    pz = { d: Math.max(10, Math.hypot(a[0] - b[0], a[1] - b[1])), z: OBSM() ? obsZv(fr0) / 100 : (ALERTM() && typeof Alerts !== "undefined" && Alerts._state ? (Alerts._state.k || 1) : Math.max(1, fr0.zoom || 1)), mx: r0.cx + (ox - f.W / 2) / r0.kk, my: r0.cy + (oy - f.H / 2) / r0.kk };
+    pz = { d: Math.max(10, Math.hypot(a[0] - b[0], a[1] - b[1])), z: OBSM() ? obsZv(fr0) / 100 : Math.max(1, fr0.zoom || 1), mx: r0.cx + (ox - f.W / 2) / r0.kk, my: r0.cy + (oy - f.H / 2) / r0.kk };
   }, { passive: false });
   cv.addEventListener("touchmove", (e) => {
     if (PD) { e.preventDefault(); return; }
     if (!pz) return; e.preventDefault(); if (e.targetTouches.length !== 2 || e.touches.length !== 2) return;   // a finger elsewhere (scrubber, other frame, a third one): hold the zoom
     const [a, b] = [oxy(e.targetTouches[0]), oxy(e.targetTouches[1])], ox = (a[0] + b[0]) / 2, oy = (a[1] + b[1]) / 2;
     if (OBSM()) { const zo = Math.min(2.5, Math.max(0.05, pz.z * Math.max(10, Math.hypot(a[0] - b[0], a[1] - b[1])) / pz.d)), fo = obsZoom(k, getFr(k), zo); setFr(k, fo); render(k); window.__spinch = { k, zoom: zo }; return; }   // 11-04: zoom out past 1x
-    if (ALERTM() && typeof Alerts !== "undefined" && Alerts._state) {
-      const zo = Math.min(8, Math.max(0.7, pz.z * Math.max(10, Math.hypot(a[0] - b[0], a[1] - b[1])) / pz.d));
-      Alerts._state.k = zo; Alerts.redraw();
-      const fr = getFr(k); fr.zoom = 1; fr.dx = 0; fr.dy = 0; setFr(k, fr);
-      if (f.zoom) f.zoom.value = String(Math.round(zo * 100));
-      render(k); window.__spinch = { k, zoom: zo }; return;
-    }
-    const z = Math.min(2.5, Math.max(1, pz.z * Math.max(10, Math.hypot(a[0] - b[0], a[1] - b[1])) / pz.d)), kk = base(k).k0 * z;
+    const zRaw = pz.z * Math.max(10, Math.hypot(a[0] - b[0], a[1] - b[1])) / pz.d;
+    const z = ALERTM() ? alertZ(zRaw) : Math.min(2.5, Math.max(1, zRaw)), kk = base(k).k0 * z;
     const fr = frAt(k, pz.mx - (ox - f.W / 2) / kk, pz.my - (oy - f.H / 2) / kk, z), r = crop(k, fr);   // map point under the fingers stays under them
     fr.dx = (r.bx - r.cx) * r.kk; fr.dy = (r.by - r.cy) * r.kk; setFr(k, fr); render(k); window.__spinch = { k, zoom: z };
   }, { passive: false });
-  const pend = (e) => { if (pz && e.targetTouches.length < 2) pz = null; };
+  const pend = (e) => { if (pz && e.targetTouches.length < 2) pz = null; if (e.targetTouches.length < 2) setTimeout(() => { cv._alertPinch = 0; }, 0); };
   cv.addEventListener("touchend", pend); cv.addEventListener("touchcancel", pend);
   cv.addEventListener("keydown", (e) => {
     const fr = getFr(k), st = e.shiftKey ? 10 : 1; let hit = true;
     if (OBSM() && ["+", "=", "-"].includes(e.key)) { obsZoom(k, fr, obsZv(fr) / 100 + (e.key === "-" ? -0.01 : 0.01)); e.preventDefault(); e.stopPropagation(); setFr(k, fr); render(k); return; }
-    if (ALERTM() && typeof Alerts !== "undefined" && Alerts._state && ["+", "=", "-", "0"].includes(e.key)) {
-      if (e.key === "0") Alerts._state.k = 1;
-      else Alerts._state.k = Math.min(8, Math.max(0.7, (Alerts._state.k || 1) + (e.key === "-" ? -0.05 : 0.05)));
-      Alerts.redraw(); fr.zoom = 1; fr.dx = 0; fr.dy = 0; if (f.zoom) f.zoom.value = String(Math.round(Alerts._state.k * 100));
-      e.preventDefault(); e.stopPropagation(); setFr(k, fr); render(k); return;
-    }
     if (e.key === "ArrowLeft") fr.dx -= st; else if (e.key === "ArrowRight") fr.dx += st; else if (e.key === "ArrowUp") fr.dy -= st; else if (e.key === "ArrowDown") fr.dy += st;
-    else if (e.key === "+" || e.key === "=") fr.zoom = Math.min(2.5, (fr.zoom || 1) + 0.01); else if (e.key === "-") fr.zoom = Math.max(1, (fr.zoom || 1) - 0.01);
+    else if (e.key === "+" || e.key === "=") fr.zoom = ALERTM() ? alertZ((fr.zoom || 1) + 0.01) : Math.min(2.5, (fr.zoom || 1) + 0.01); else if (e.key === "-") fr.zoom = ALERTM() ? alertZ((fr.zoom || 1) - 0.01) : Math.max(1, (fr.zoom || 1) - 0.01);
     else if (e.key === "0") { fr.dx = fr.dy = 0; fr.zoom = 1; } else hit = false;
     if (hit && OBSM() && e.key.startsWith("Arrow")) obsPan(k, fr);
     if (hit) { e.preventDefault(); e.stopPropagation(); setFr(k, fr); render(k); }
   }, true);
-  f.zoom.oninput = () => { const fr = getFr(k); if (OBSM()) obsZoom(k, fr, f.zoom.value / 100); else if (ALERTM() && typeof Alerts !== "undefined" && Alerts._state) {
-      // Zoom lives in mercator camera (uniform S.k); keep Studio cover crop at 1 so we never stretch
-      Alerts._state.k = Math.max(0.7, f.zoom.value / 100); Alerts.redraw(); fr.zoom = 1; fr.dx = 0; fr.dy = 0;
-    } else { fr.zoom = Math.max(1, f.zoom.value / 100); } setFr(k, fr); render(k); };
+  f.zoom.oninput = () => { const fr = getFr(k); if (CMPM()) { f.zoom.value = "100"; return; } if (OBSM()) obsZoom(k, fr, f.zoom.value / 100); else if (ALERTM()) { fr.zoom = alertZ(f.zoom.value / 100); } else { fr.zoom = Math.max(1, f.zoom.value / 100); } setFr(k, fr); render(k); };
   cv.parentNode.querySelector(".shd").addEventListener("click", async (e) => {
-    const a = e.target.closest("button[data-a]"); if (!a || !last) return;
+    const a = e.target.closest("button[data-a]"); if (!a || (!last && !WEBM() && !CMPM())) return;
     if (a.dataset.a === "reset") { if (ALERTM() && typeof Alerts !== "undefined") { if (Alerts.fitToSelection) Alerts.fitToSelection(); else if (Alerts._state) { Alerts._state.k = 1; Alerts.redraw(); } } if (OBSM() && typeof Obs !== "undefined" && Obs._state && OZ.sub < 1) { ozSync(); Obs._state.k = OZ.ref; OZ.sub = 1; Obs.redraw(); } setFr(k, { dx: 0, dy: 0, zoom: 1 }); if (ALERTM() && f.zoom) f.zoom.value = "100"; render(k); }
-    if (a.dataset.a === "mp4" && (!MG.on || OBSM())) openMp4(k);
+    if (a.dataset.a === "mp4" && (!MG.on || OBSM() || CMPM())) openMp4(k);
     if (a.dataset.a === "png" && ALERTM()) { if (!MG.img) return; const I = alertInfo(), st = I && I.t ? new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(I.t).replace(/[^0-9]/g, "") : "now";
       const nm = `alerts_wa_${(I && I.title || "all").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}_${st}PT_${k === "v" ? "1080x1920" : "1920x1080"}.png`;
       F[k].cv.toBlob((b) => { if (!b) return; const a2 = document.createElement("a"); a2.href = URL.createObjectURL(b); a2.download = nm; a2.click(); setTimeout(() => URL.revokeObjectURL(a2.href), 4000); }, "image/png"); return; }
@@ -757,6 +1032,10 @@ for (const k of ["v", "h"]) {
       cv.toBlob((b) => { const u = URL.createObjectURL(b), l = document.createElement("a"); l.href = u; l.download = nm; l.click(); setTimeout(() => URL.revokeObjectURL(u), 4000); }, "image/png"); return; }
     if (a.dataset.a === "png" && PASSM()) { if (!PF.rows) return; const nm = `pass-forecast_${PF.run.replace("/", "_")}Z_${k === "v" ? "2160x3840" : "3840x2160"}.png`;
       cv.toBlob((b) => { const u = URL.createObjectURL(b), l = document.createElement("a"); l.href = u; l.download = nm; l.click(); setTimeout(() => URL.revokeObjectURL(u), 4000); }, "image/png"); return; }
+    if (a.dataset.a === "png" && CMPM()) { const nm = `compare_${k === "v" ? "1080x1920" : "1920x1080"}.png`;
+      cv.toBlob((b) => { if (!b) return; const u = URL.createObjectURL(b), l = document.createElement("a"); l.href = u; l.download = nm; l.click(); setTimeout(() => URL.revokeObjectURL(u), 4000); }, "image/png"); return; }
+    if (a.dataset.a === "png" && WEBM()) { const nm = `web_${k === "v" ? "1080x1920" : "1920x1080"}.png`;
+      cv.toBlob((b) => { if (!b) return; const u = URL.createObjectURL(b), l = document.createElement("a"); l.href = u; l.download = nm; l.click(); setTimeout(() => URL.revokeObjectURL(u), 4000); }, "image/png"); return; }
     if (a.dataset.a === "png" && MG.on) { if (!MG.img) return; const nm = `meteogram_${(MG.src.split("#")[1] || "").replace(/[^a-z0-9=&_-]/gi, "").replace(/[=&]/g, "_")}_${k === "v" ? "1080x1920" : "1920x1080"}.png`;
       cv.toBlob((b) => { const u = URL.createObjectURL(b), l = document.createElement("a"); l.href = u; l.download = nm; l.click(); setTimeout(() => URL.revokeObjectURL(u), 4000); }, "image/png"); return; }
     if (MG.on && a.dataset.a !== "reset") return;   // MP4 / OBS: maps only
@@ -876,6 +1155,7 @@ function startPin(m_) { PIN.mode = m_; PIN.show = true; $s("mp4p").hidden = true
   h.textContent = `Tap either frame where the loop should ${m_ === "a" ? "START (pin A)" : "END (pin B)"}. Drag the frame first if you need to. Esc cancels.`; render("v"); render("h");
   if (innerWidth <= 820) F[$s("mpk").value].cv.scrollIntoView({ block: "center", behavior: "smooth" }); }   // phone: bring the frame to the thumb
 function openMp4(k) {
+  if (CMPM()) return openCmpMp4(k);
   if (!last) return; const st = S.runs[S.run].steps, a = $s("mpa"), b = $s("mpb");
   const opts = st.map((x, i) => `<option value="${i}">${lbl(x)}</option>`).join(""); a.innerHTML = opts; b.innerHTML = opts;
   const e5 = st.findIndex((x) => x.f >= st[S.i].f + 120);   // default: the next 5 days (or to the end of the run)
@@ -898,7 +1178,17 @@ function loopTimes(n) {
 // hour slider / buttons / arrow keys / Play keep working, "Start = now" / "End = now" take the hour on the map, and the loop
 // range is shaded on the hour slider.
 function mpSync() {
-  if ($s("mp4p").hidden || !S.run) return; const st = S.runs[S.run].steps, sl = $("step"), mx = Math.max(1, +sl.max || st.length - 1);
+  if (CMPM()) {
+    if ($s("mp4p").hidden) return; const st = cmpSteps(); if (!st || !st.length || !CMP.R) return;
+    const i = Math.min(CMP.R.i || 0, st.length - 1), sl = $("hscrub") || $("step"), mx = Math.max(1, st.length - 1);
+    if (+$s("mpa").options.length !== st.length) return;
+    $s("mpnow").textContent = `Map now: ${lbl(st[i])}`;
+    const a = +$s("mpa").value, b = +$s("mpb").value;
+    if (sl) { sl.style.setProperty("--ra", String(Math.min(a, b) / mx)); sl.style.setProperty("--rb", String(Math.max(a, b) / mx)); }
+    document.body.classList.add("mprange"); return;
+  }
+  const Rsync = S.run && S.runs[S.run];
+  if ($s("mp4p").hidden || !Rsync || !Rsync.steps) return; const st = Rsync.steps, sl = $("step"), mx = Math.max(1, +sl.max || st.length - 1);
   if (+$s("mpa").options.length !== st.length) return;   // run changed: options rebuilt on next open
   $s("mpnow").textContent = `Map now: ${lbl(st[S.i])}`;
   const a = +$s("mpa").value, b = +$s("mpb").value; sl.style.setProperty("--ra", String(Math.min(a, b) / mx)); sl.style.setProperty("--rb", String(Math.max(a, b) / mx));
@@ -906,6 +1196,14 @@ function mpSync() {
   document.body.classList.add("mprange");
 }
 function mpInfo() {
+  if (CMPM()) {
+    mpSync(); const st = cmpSteps() || [], s0 = +$s("mps").value, s1 = $s("mps1").value; $s("mpsv").textContent = `${s0} map${s0 === 1 ? "" : "s"}/s`;
+    const idx = cmpPickIdx(st), T = loopTimes(idx.length), hold = +$s("mph").value;
+    $s("mppins").textContent = "";
+    $s("mpinfo").textContent = idx.length < 2 || !st[idx[0]] ? "Pick an end hour after the start hour." :
+      `${idx.length} maps, F+${st[idx[0]].f} to F+${st[idx[idx.length - 1]].f} · both panels · ${(T[idx.length] + hold).toFixed(1)} s of video at 30 fps${s1 && +s1 !== s0 ? ` (speed ${s0} → ${s1} maps/s)` : ""}`;
+    return;
+  }
   if (OBSM()) { const p = getPins(), pan = $s("mpmode").value === "pan", d = +($s("mpdur").value || 6), h = +$s("mph").value;
     $s("mpinfo").textContent = `Live observations: one map, ${d} s camera move + ${h} s hold = ${d + h} s at 30 fps` + (pan ? (p.a && p.b ? " \u00b7 pans A \u2192 B" : " \u00b7 set pins A and B") : "");
     const t = $s("mppins"); if (t) t.textContent = p.a && p.b ? "A and B set" : p.a ? "A set" : ""; return; }
@@ -917,7 +1215,7 @@ function mpInfo() {
   $s("mpinfo").textContent = idx.length < 2 ? "Pick an end hour after the start hour." :
     `${idx.length} maps, F+${S.runs[S.run].steps[idx[0]].f} to F+${S.runs[S.run].steps[idx[idx.length - 1]].f} \u00b7 ${(T[idx.length] + hold).toFixed(1)} s of video at 30 fps${s1 && +s1 !== s0 ? ` (speed ${s0} \u2192 ${s1} maps/s)` : ""}${zt}`;
 }
-function mpMode() { const pan = $s("mpmode").value === "pan"; if (pan && $s("mpz0").value === "f") $s("mpz0").value = "1.8"; /* a pan needs room to move */ $s("mppan").hidden = !pan; PIN.show = pan; render("v"); render("h"); mpInfo(); }
+function mpMode() { if (CMPM() && $s("mpmode").value === "pan") $s("mpmode").value = "loop"; const pan = $s("mpmode").value === "pan"; if (pan && $s("mpz0").value === "f") $s("mpz0").value = "1.8"; /* a pan needs room to move */ $s("mppan").hidden = !pan; PIN.show = pan && !CMPM(); render("v"); render("h"); mpInfo(); }
 let muxP = null;
 const loadMuxer = () => muxP || (muxP = new Promise((res, rej) => { const sc = document.createElement("script"); sc.src = "vendor/mp4-muxer.js?v=522"; sc.onload = res; sc.onerror = () => { muxP = null; rej(new Error("could not load the MP4 writer")); }; document.head.appendChild(sc); }));
 async function makeEncoder(cv, W, H) {
@@ -951,8 +1249,52 @@ async function makeEncoder(cv, W, H) {
     abort() { try { rec.stop(); } catch (e) { /* stopped */ } } };
 }
 const mpSt = (t) => { $s("mpst").textContent = t; };
+function openCmpMp4(k) {
+  const steps = cmpSteps(); if (!steps || steps.length < 2) { mpSt("Wait for the compare maps to load."); return; }
+  const a = $s("mpa"), b = $s("mpb"), opts = steps.map((x, i) => `<option value="${i}">${lbl(x)}</option>`).join("");
+  a.innerHTML = opts; b.innerHTML = opts;
+  const now = Math.min((CMP.R && CMP.R.i) || 0, steps.length - 1), e5 = steps.findIndex((x) => x.f >= steps[now].f + 120);
+  a.value = String(now); b.value = String(e5 > now ? e5 : steps.length - 1);
+  loadOpts(); $s("mpk").value = k; $s("mpmode").value = "loop"; $s("mp4p").hidden = false; $s("mpout").hidden = true; mpMode(); mpInfo();
+}
+async function cmpGo(i) {
+  const api = cmpApi(), steps = cmpSteps(); if (!api || !steps || !steps[i]) return;
+  api.setHour(i); const want = steps[i].f, t0 = performance.now();
+  while (performance.now() - t0 < 12000) { cmpGrab(); const got = CMP.view.R && CMP.view.R.step; if (CMP.R && CMP.R.i === i && got && got.f === want) return; await sleep(80); }
+}
+async function makeCmpMp4() {
+  if (REC.on) return;
+  const steps = cmpSteps(); if (!steps || steps.length < 2) { mpSt("Wait for the compare maps to load."); return; }
+  const k = $s("mpk").value, f = F[k], idx = cmpPickIdx(steps);
+  if (idx.length < 2) { mpSt("Pick an end hour after the start hour."); return; }
+  if ((BR.corner || BR.card || BR.lower) && LOGOS[BR.logo]) { const t0 = performance.now(); while (!getLogo() && performance.now() - t0 < 4000) await sleep(50); }
+  const T = loopTimes(idx.length), holdN = Math.round(+$s("mph").value * FPS), t0 = performance.now(); let enc = null;
+  REC.on = true; REC.cancel = false; $s("mpout").hidden = true; $s("mpgo").disabled = true; $s("mpstop").hidden = false; document.body.classList.add("rec");
+  try {
+    enc = await makeEncoder(f.cv, f.W, f.H); const totN = Math.round(T[idx.length] * FPS) + holdN, pg = $s("mpprog"); pg.hidden = false; pg.value = 0;
+    await cmpGo(idx[0]); await render(k); let n = 0, cardN = 0;
+    if (BR.card) { const cN = Math.round(1.5 * FPS), fN = Math.round(0.5 * FPS), c = f.cv.getContext("2d");
+      for (let j = 0; j < cN; j++) { await render(k); titleCard(k, c, j < cN - fN ? 1 : (cN - j) / fN, steps[idx[0]], steps[idx[idx.length - 1]]); await enc.add(j); }
+      enc.off = cN; cardN = cN; }
+    for (let j = 0; j < idx.length; j++) {
+      if (REC.cancel) throw new Error("stopped");
+      if (j) { if (enc.idle) enc.idle(); await cmpGo(idx[j]); }
+      mpSt(`Making video… F+${steps[idx[j]].f} (${j + 1}/${idx.length})`);
+      const n0 = Math.round(T[j] * FPS), n1 = Math.round(T[j + 1] * FPS) + (j === idx.length - 1 ? holdN : 0); let drawn = false;
+      for (; n < n1; n++) { if (!drawn || enc.realtime) { await render(k); drawn = true; } await enc.add(n + (enc.off || 0)); if (n % 6 === 0) pg.value = n / totN; }
+    }
+    pg.value = 1; mpSt("Finishing…"); const how = enc.how, blob = await enc.done(); enc = null;
+    const nm = `compare_F${steps[idx[0]].f}-F${steps[idx[idx.length - 1]].f}_${k === "v" ? "1080x1920" : "1920x1080"}.${blob.type.includes("mp4") ? "mp4" : "webm"}`;
+    const u = URL.createObjectURL(blob), v = $s("mpv"), dl = $s("mpdl"); if (v.dataset.u) URL.revokeObjectURL(v.dataset.u); v.dataset.u = u; v.src = u; dl.href = u; dl.download = nm;
+    const file = new File([blob], nm, { type: blob.type }); $s("mpshare").hidden = !(navigator.canShare && navigator.canShare({ files: [file] })); $s("mpshare").onclick = () => navigator.share({ files: [file] }).catch(() => {});
+    n += cardN; $s("mpout").hidden = false; window.__mp4 = { name: nm, bytes: blob.size, frames: n, seconds: n / FPS, how, ms: Math.round(performance.now() - t0), blob };
+    mpSt(`Done: ${(blob.size / 1e6).toFixed(1)} MB, ${(n / FPS).toFixed(1)} s, made in ${((performance.now() - t0) / 1000).toFixed(0)} s`);
+  } catch (e) { if (enc) enc.abort(); mpSt(e.message === "stopped" ? "Stopped." : "Could not make the video: " + (e.message || e)); window.__mp4 = { error: String(e.message || e) }; }
+  finally { REC.on = false; $s("mpgo").disabled = false; $s("mpstop").hidden = true; $s("mpprog").hidden = true; document.body.classList.remove("rec"); const back = (CMP.R && CMP.R.i) || 0; cmpGo(back); }
+}
 async function makeMp4() {
   if (OBSM()) return makeObsMp4();
+  if (CMPM()) return makeCmpMp4();
   if (!last || REC.on) return;
   const k = $s("mpk").value, f = F[k], pan = $s("mpmode").value === "pan", pins = getPins(), idx = pickIdx(), steps = S.runs[S.run].steps;
   if (idx.length < 2) { mpSt("Pick an end hour after the start hour."); return; }
@@ -1254,8 +1596,9 @@ if (!CLEAN && $s("mp4p")) {
     if (m_ === "x") { if (!REC.on) { $s("mp4p").hidden = true; PIN.show = false; document.body.classList.remove("mprange"); render("v"); render("h"); } }
     else if (m_ === "min") { const mn = $s("mp4p").classList.toggle("min"); b.innerHTML = mn ? "+" : "&ndash;"; b.title = mn ? "Expand" : "Minimize"; }
     else if (m_ === "sa" || m_ === "sb") { if (REC.on) return; const a = $s("mpa"), z = $s("mpb");
-      if (m_ === "sa") { a.value = String(S.i); if (+z.value <= S.i) z.value = String(Math.min(S.runs[S.run].steps.length - 1, S.i + 1)); }
-      else { z.value = String(S.i); if (+a.value >= S.i) a.value = String(Math.max(0, S.i - 1)); }
+      const now = CMPM() && CMP.R ? CMP.R.i : S.i, n = CMPM() ? ((cmpSteps() || []).length || 1) : S.runs[S.run].steps.length;
+      if (m_ === "sa") { a.value = String(now); if (+z.value <= now) z.value = String(Math.min(n - 1, now + 1)); }
+      else { z.value = String(now); if (+a.value >= now) a.value = String(Math.max(0, now - 1)); }
       mpInfo(); }
     else if (m_ === "a" || m_ === "b") startPin(m_);
     else if (m_ === "pv") previewMove();
@@ -1273,7 +1616,7 @@ if (!CLEAN && $s("mp4p")) {
   $s("brlogo").addEventListener("change", (e) => { BR.logo = e.target.value; saveBR(); renderAll(); });
   $s("brtitle").addEventListener("input", (e) => { BR.title = e.target.value; BR.autoT = false; saveBR(); renderAll(); });
   $s("brstorm").addEventListener("input", (e) => { BR.storm = e.target.value; BR.autoS = false; saveBR(); renderAll(); });
-  $s("brcardpv").addEventListener("click", async () => { if (!last || REC.on) return; const k = $s("mpk").value; getLogo(); await sleep(80); await render(k); titleCard(k, F[k].cv.getContext("2d"), 1, null, null); setTimeout(() => render(k), 2500); });
+  $s("brcardpv").addEventListener("click", async () => { if ((!last && !CMPM()) || REC.on) return; const k = $s("mpk").value; getLogo(); await sleep(80); await render(k); titleCard(k, F[k].cv.getContext("2d"), 1, null, null); setTimeout(() => render(k), 2500); });
   $s("mpbatch").addEventListener("toggle", (e) => { if (e.target.open) bxFill(); });
   $s("mpbatch").addEventListener("change", (e) => { if (e.target.matches("input[type=checkbox]")) bxCount(); });
   $s("bxgo").addEventListener("click", () => batchExport());
@@ -1310,7 +1653,7 @@ if (!CLEAN && $s("mp4p")) {
 const PLAY = { on: SQ.get("play") === "1", t: 0, next() {
   clearTimeout(PLAY.t); const dwell = +SQ.get("dwell") || 700, stepH = +SQ.get("step") || 0;
   PLAY.t = setTimeout(async () => {
-    const st = S.runs[S.run].steps; let i = S.i + 1; if (stepH) while (i < st.length && st[i].f - st[S.i].f < stepH) i++;
+    const Rplay = S.runs[S.run]; if (!Rplay || !Rplay.steps) return; const st = Rplay.steps; let i = S.i + 1; if (stepH) while (i < st.length && st[i].f - st[S.i].f < stepH) i++;
     if (i >= st.length) {
       if (SQ.get("loop") === "0") return;
       if (SQ.get("model") && !SQ.get("run")) { try { const M2 = await (await fetch(DATA + "manifest.json", { cache: "no-cache" })).json(), rs = (M2.runs || {})[SQ.get("model")] || [];
@@ -1327,7 +1670,7 @@ const PLAY = { on: SQ.get("play") === "1", t: 0, next() {
 function fitFrames() {
   const st = document.getElementById("studio"), fv = document.getElementById("fv"), fh = document.getElementById("fh"), cvv = F.v.cv, cvh = F.h.cv;
   const clear = () => { for (const e of [cvv, cvh, fv, fh]) { e.style.width = ""; e.style.height = ""; e.style.flex = ""; } };
-  if (CLEAN || innerWidth <= 820) { clear(); return; }
+  if (CLEAN || innerWidth <= 820) { clear(); if (typeof cmpFitPanel === "function") cmpFitPanel(); return; }
   const cs = getComputedStyle(st), padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight), padB = parseFloat(cs.paddingBottom) + 2;
   const gap = parseFloat(cs.columnGap) || 18, hint = fh.querySelector(".shint"), MINV = 300;   // below ~300 px tall the page scrolls instead
   // STUDIO_NEW_MODE.md: every Studio mode draws into the same two canvases (#cv 9:16, #ch 16:9) and is sized ONLY here. A mode is a
@@ -1337,7 +1680,7 @@ function fitFrames() {
   // The Map layout is measured with the mode class off (same sync pass, never painted), then the mode's panel is padded or capped
   // (scrolls) so the frames start at the same y.
   const bd = document.body, MODES = [...bd.classList].filter((c) => /^[a-z0-9]+mode$/.test(c)), pnl = document.getElementById("mgp");
-  if (pnl) { pnl.style.maxHeight = ""; pnl.style.overflowY = ""; } st.style.marginTop = "";
+  if (pnl) { pnl.style.maxHeight = ""; pnl.style.overflowY = ""; pnl.style.touchAction = ""; } st.style.marginTop = "";
   const SHD = [fv, fh].map((f) => f.querySelector(".shd")); for (const e of SHD) e.style.minHeight = "";
   for (const c of MODES) bd.classList.remove(c);
   let wv = 0, wh = 0;
@@ -1373,6 +1716,8 @@ function fitFrames() {
   }
   window.__fitTop = MODES.length ? topMap : null;
   window.__studioFit = { v: [wv, wv * 16 / 9], h: [wh, wh * 9 / 16] };
+  if (WEBM()) { try { placeWeb("v"); placeWeb("h"); } catch (e) { /* frames not ready */ } }
+  if (typeof cmpFitPanel === "function") cmpFitPanel();
 }
 // ---- 11-01 2 PM (Benjamin t2041u/t2042u): hour scrubber under the 16:9 frame (every forecast hour the model data has: the viewer's
 // own steps, same as the top slider, which it drives), a hover value readout on both frames (the viewer's readout(): same numbers
@@ -1387,7 +1732,14 @@ if (!CLEAN) {
   // Next, and stretches across the row under the tabs and the View menu. The short #step stays in the page (hidden) and is still the
   // one the viewer reads; this one drives it. Phones keep it under the 16:9 frame (bottom dock unchanged).
   // 11-04 (t2343u): its own row under the menu items, starting under the View menu and running ~480 px toward Share (not on the menu line)
-  if (innerWidth > 820) { const bar_ = document.getElementById("bar"); box.classList.add("inbar"); document.body.classList.add("longscrub"); bar_.appendChild(box);
+  // 11-05 (Benjamin t2444u): desktop second menu row = action buttons on the LEFT (Save image, Share, Meteogram, Pass Forecaster,
+  // Observations, Request a change), then the long hour scrubber to their right filling the rest of the line (in flow, wraps on narrow).
+  if (innerWidth > 820) { const bar_ = document.getElementById("bar"), ar = document.createElement("div"); ar.id = "actrow";
+    ["save", "share", "mgbtn", "pfbtn", "obsbtn"].forEach(id => { const e = document.getElementById(id); if (e) ar.appendChild(e); });
+    box.classList.add("inbar", "inrow"); document.body.classList.add("longscrub", "actrow"); ar.appendChild(box); const st_ = document.getElementById("stat"); bar_.insertBefore(ar, st_ && st_.parentNode === bar_ ? st_.nextSibling : null);
+    const ln = document.getElementById("loadnote"); if (ln) box.querySelector(".sw").appendChild(ln);
+    document.addEventListener("DOMContentLoaded", () => { const rq = document.getElementById("rqb"); if (rq) ar.insertBefore(rq, box); const st2 = document.getElementById("stat"); if (st2) ar.appendChild(st2); }); }
+  else if (false) { const bar_ = document.getElementById("bar"); box.classList.add("inbar"); document.body.classList.add("longscrub"); bar_.appendChild(box);
     // t2343u: overlay row under the View menu (absolute, so the bar height and the frames stay exactly as in Map); the short #step keeps its space, invisible
     // Placement: nearest free spot under the View menu (scan down, then left toward Share) that touches no visible control or frame,
     // so the scrubber never covers a button and the frames never move.
@@ -1406,19 +1758,57 @@ if (!CLEAN) {
   else fh.insertBefore(box, hint);
   const sl = document.getElementById("hscrub"), tk = document.getElementById("sticks"), lab = document.getElementById("shour");
   const fwd = (type) => stp.dispatchEvent(new Event(type));
-  sl.addEventListener("pointerdown", () => fwd("pointerdown"));
-  for (const ev of ["pointerup", "pointercancel", "change"]) sl.addEventListener(ev, () => fwd("change"));
-  sl.addEventListener("input", () => { stp.value = sl.value; fwd("input"); });
-  document.getElementById("sprev").onclick = () => document.getElementById("prev").click();
-  document.getElementById("snext").onclick = () => document.getElementById("next").click();
+  sl.addEventListener("pointerdown", () => { if (!CMPM()) fwd("pointerdown"); });
+  for (const ev of ["pointerup", "pointercancel", "change"]) sl.addEventListener(ev, () => { if (!CMPM()) fwd("change"); });
+  sl.addEventListener("input", () => { if (CMPM()) { cmpSetHour(+sl.value); return; } stp.value = sl.value; fwd("input"); });
+  document.getElementById("sprev").onclick = () => { if (CMPM()) { cmpStep(-1); return; } document.getElementById("prev").click(); };
+  document.getElementById("snext").onclick = () => { if (CMPM()) { cmpStep(1); return; } document.getElementById("next").click(); };
   let tkKey = "";
   scrubSync = () => {
+    if (CMPM()) { cmpScrub(); return; }
     const R_ = S.runs[S.run]; if (!R_ || !R_.steps) return; const st = R_.steps, n = st.length, s = st[S.i] || {};
     sl.max = Math.max(0, n - 1); sl.value = S.i;
     lab.textContent = `F+${s.f}` + (s.valid_line ? `  \u00b7  ${s.valid_line.replace(/^Valid /, "")}` : "");
     const key = S.run + ":" + n; if (key === tkKey) return; tkKey = key;   // tick labels every 24 h (by forecast hour), rebuilt per run / new hours
     tk.innerHTML = st.map((x, i) => x.f % 24 === 0 && (x.f % 48 === 0 || st[n - 1].f <= 168) ? `<span style="left:calc(9px + (100% - 18px) * ${n > 1 ? i / (n - 1) : 0})">${x.f}</span>` : "").join("");
   };
+  // 11-05 t2486u: Active Alerts hover — show alert type(s) under the cursor on Studio frames
+  (function alertHoverTip() {
+    const tip = document.getElementById("stip") || (() => { const d = document.createElement("div"); d.id = "stip"; d.hidden = true; document.body.appendChild(d); return d; })();
+    for (const k of ["v", "h"]) {
+      const f = F[k], cv = f.cv;
+      cv.addEventListener("pointermove", (e) => {
+        if (!ALERTM() || e.pointerType !== "mouse" || e.buttons || REC.on || typeof Alerts === "undefined" || !Alerts.hitAt || !MG.img) return;
+        const r = crop(k, getFr(k)), b = cv.getBoundingClientRect();
+        const ox = (e.clientX - b.left) * f.W / b.width, oy = (e.clientY - b.top) * f.H / b.height;
+        const bx = r.cx + (ox - f.W / 2) / r.kk, by = r.cy + (oy - f.H / 2) / r.kk;  // bitmap CSS px (al-canvas space)
+        const dpr = (Alerts._state && Alerts._state.dpr) || 1;
+        const sx = bx / dpr, sy = by / dpr;
+        if (sx < 0 || sy < 0 || sx > 1600 || sy > 1600) { tip.hidden = true; return; }
+        const [lon, lat] = Alerts.cssToLonLat(sx, sy);
+        const hits = Alerts.hitAt(lon, lat);
+        if (!hits.length) { tip.hidden = true; cv.style.cursor = ""; return; }
+        tip.textContent = hits.join(" · "); tip.hidden = false;
+        tip.style.left = (e.clientX + 14) + "px"; tip.style.top = (e.clientY - 32) + "px";
+        cv.style.cursor = "pointer";
+      });
+      cv.addEventListener("pointerleave", () => { if (ALERTM()) { tip.hidden = true; cv.style.cursor = ""; } });
+      let down = null;
+      cv.addEventListener("pointerdown", (e) => { if (!ALERTM() || CLEAN) { down = null; return; } down = { x: e.clientX, y: e.clientY, id: e.pointerId }; });
+      cv.addEventListener("pointerup", (e) => {
+        const d0 = down; down = null;
+        if (!d0 || d0.id !== e.pointerId || !ALERTM() || CLEAN || cv._alertPinch) return;
+        if (typeof Alerts === "undefined" || !Alerts.openAt || !Alerts.isMapClick(e.clientX - d0.x, e.clientY - d0.y)) return;
+        const r = crop(k, getFr(k)), b = cv.getBoundingClientRect();
+        const ox = (e.clientX - b.left) * f.W / b.width, oy = (e.clientY - b.top) * f.H / b.height;
+        const bx = r.cx + (ox - f.W / 2) / r.kk, by = r.cy + (oy - f.H / 2) / r.kk;
+        const dpr = (Alerts._state && Alerts._state.dpr) || 1;
+        const [lon, lat] = Alerts.cssToLonLat(bx / dpr, by / dpr);
+        Alerts.openAt(lon, lat);
+      });
+    }
+  })();
+
   // hover readout: frame px -> map figure px (same camera as crop()) -> a pointer position on the hidden map -> viewer readout()
   const tip = document.createElement("div"); tip.id = "stip"; tip.hidden = true; document.body.appendChild(tip);
   for (const k of ["v", "h"]) {
@@ -1440,7 +1830,7 @@ if (!CLEAN) {
 }
 if (!CLEAN) {   // Studio: Map | Meteogram switch (first in the menu bar) + the meteograms page's pickers in a small iframe
   const bar = document.getElementById("bar"), sw = document.createElement("label"); sw.id = "smodel";
-  sw.innerHTML = `Studio <select id="smode"><option value="map">Map</option><option value="mg">Meteogram</option><option value="obs">Observations</option><option value="pass">Pass Forecaster</option><option value="wafc">WA Forecast Maps</option><option value="alert">Active Alerts</option></select>`; bar.insertBefore(sw, bar.firstChild);
+  sw.innerHTML = `Studio <select id="smode"><option value="map">Map</option><option value="mg">Meteogram</option><option value="obs">Observations</option><option value="pass">Pass Forecaster</option><option value="wafc">WA Forecast Maps</option><option value="alert">Active Alerts</option><option value="cmp">Compare</option><option value="web">Web</option></select>`; bar.insertBefore(sw, bar.firstChild);
   const pnl = document.createElement("div"); pnl.id = "mgp"; bar.after(pnl);
   const sel = document.getElementById("smode"); sel.value = MG.on ? MG.kind : "map"; saveMode(sel.value);
   let fr_ = null, poll = 0;
@@ -1477,7 +1867,53 @@ if (!CLEAN) {   // Studio: Map | Meteogram switch (first in the menu bar) + the 
     const m_ = d.getElementById("msg"), dn = w.__drawn || 0;
     if (dn !== wdrawn && cv_.width && dn > 0) { wdrawn = dn; MG.img = cv_; MG.src = q.replace(/^\?/, "").replace(/&?run=[^&]*/, ""); MG.msg = ""; renderAll(); }
     else if (!dn && m_ && /Could not|No /.test(m_.textContent) && MG.msg !== m_.textContent) { MG.msg = m_.textContent; renderAll(); } } catch (e) { /* iframe loading */ } };
+  for (const k of ["v", "h"]) { const ov = document.createElement("div"); ov.className = "webov"; ov.hidden = true;
+    const ifr = document.createElement("iframe"); ifr.title = k === "v" ? "Web page, 9:16" : "Web page, 16:9"; ifr.setAttribute("referrerpolicy", "no-referrer"); ov.appendChild(ifr);
+    F[k].cv.parentNode.appendChild(ov); F[k].web = ov; }
+  addEventListener("scroll", () => { if (WEBM()) { placeWeb("v"); placeWeb("h"); } }, true);
+  const stopMainPlay = () => { if (S.timer) { clearInterval(S.timer); S.timer = null; const b = document.getElementById("play"); if (b) b.textContent = "Play"; } };
+  const hourGuard = (el, fn) => { if (!el) return; el.addEventListener("click", (e) => { if (!CMPM()) return; e.preventDefault(); e.stopImmediatePropagation(); fn(); }, true); };
+  hourGuard(document.getElementById("prev"), () => cmpStep(-1));
+  hourGuard(document.getElementById("next"), () => cmpStep(1));
+  hourGuard(document.getElementById("play"), () => {
+    const b = document.getElementById("play");
+    if (CMP.play) { clearInterval(CMP.play); CMP.play = 0; b.textContent = "Play"; return; }
+    b.textContent = "Stop"; CMP.play = setInterval(() => cmpStep(1), 800);
+  });
+  const stepEl = document.getElementById("step");
+  if (stepEl) stepEl.addEventListener("input", (e) => { if (!CMPM()) return; e.stopImmediatePropagation(); cmpSetHour(+stepEl.value); }, true);
+  addEventListener("keydown", (e) => {
+    if (!CMPM() || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+    if (e.key === "ArrowRight" || e.key === "ArrowLeft") { e.preventDefault(); e.stopPropagation(); cmpStep(e.key === "ArrowRight" ? 1 : -1); }
+  }, true);
   const setMode = (mode) => {
+    if (mode !== "web") webHide();
+    if (mode !== "cmp" && CMP.play) { clearInterval(CMP.play); CMP.play = 0; const b = document.getElementById("play"); if (b && b.textContent === "Stop") b.textContent = "Play"; }
+    document.body.classList.remove("cmpmode", "webmode");
+    if (mode === "web") {
+      MG.on = true; MG.kind = "web"; MG.img = null; MG.msg = ""; saveMode("web"); clearInterval(poll); stopMainPlay();
+      document.body.classList.remove("mgmode", "obsmode", "passmode", "alertmode", "wafcmode"); document.body.classList.add("webmode");
+      if (typeof Obs !== "undefined" && Obs.hide) Obs.hide(); if (typeof Alerts !== "undefined" && Alerts.hide) Alerts.hide();
+      PIN.show = false; PIN.mode = null;
+      if (!document.getElementById("webp")) { const wp = document.createElement("div"); wp.id = "webp";
+        wp.innerHTML = `<label>Page <input id="weburl" type="url" inputmode="url" placeholder="https://example.com" spellcheck="false" autocomplete="url"></label><button type="button" id="webgo">Open</button><span class="mp-note">If this stays blank, the site probably doesn't allow embedding.</span>`;
+        pnl.appendChild(wp);
+        const go = () => { const inp = document.getElementById("weburl"), u = webNormalize(inp.value); if (!u) return; inp.value = u; webApply(u); };
+        document.getElementById("webgo").onclick = go;
+        document.getElementById("weburl").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); go(); } });
+        document.getElementById("weburl").addEventListener("change", go);
+        let saved = ""; try { saved = localStorage.getItem("studio:weburl") || ""; } catch (e) { /* private */ }
+        if (saved) { document.getElementById("weburl").value = saved; webApply(saved); } }
+      renderAll(); fitFrames(); return;
+    }
+    if (mode === "cmp") {
+      MG.on = true; MG.kind = "cmp"; MG.img = null; MG.msg = ""; saveMode("cmp"); clearInterval(poll); stopMainPlay();
+      document.body.classList.remove("mgmode", "obsmode", "passmode", "alertmode", "wafcmode"); document.body.classList.add("cmpmode");
+      if (typeof Obs !== "undefined" && Obs.hide) Obs.hide(); if (typeof Alerts !== "undefined" && Alerts.hide) Alerts.hide();
+      PIN.show = false; PIN.mode = null;
+      if (!cmpFrame) { cmpFrame = document.createElement("iframe"); cmpFrame.id = "cmpf"; cmpFrame.title = "Compare controls"; cmpFrame.src = cmpSrc(); cmpFrame.addEventListener("load", cmpFitPanel); pnl.appendChild(cmpFrame); }
+      poll = setInterval(() => { cmpGrab(); cmpFitPanel(); }, 300); renderAll(); fitFrames(); cmpFitPanel(); return;
+    }
     if (mode === "wafc") { MG.on = true; MG.kind = "wafc"; MG.img = null; MG.msg = ""; wdrawn = -1; saveMode("wafc"); clearInterval(poll);
       document.body.classList.remove("mgmode", "obsmode", "passmode", "alertmode"); document.body.classList.add("wafcmode"); if (typeof Obs !== "undefined" && Obs.hide) Obs.hide(); if (typeof Alerts !== "undefined" && Alerts.hide) Alerts.hide();
       if (!wf_) { wf_ = document.createElement("iframe"); wf_.id = "wff"; wf_.title = "WA forecast map pickers"; wf_.src = "wamaps.html" + ((() => { try { return sessionStorage.getItem("studio:wafcq"); } catch (e) { return null; } })() || localStorage.getItem("studio:wafcq") || "?kind=low&view=full");   // this tab first (refresh), else the last one used
@@ -1497,11 +1933,11 @@ if (!CLEAN) {   // Studio: Map | Meteogram switch (first in the menu bar) + the 
       if (typeof Obs !== "undefined" && Obs.hide) Obs.hide();
       if (!document.getElementById("alertp")) { const ap = document.createElement("div"); ap.id = "alertp"; ap.innerHTML = `<div id="alert-root"></div>`; pnl.appendChild(ap); }
       window.__alertLoad = window.__alertLoad || new Promise((ok, bad) => {
-        if (!document.querySelector('link[href="alert/alert.css"]')) { const l = document.createElement("link"); l.rel = "stylesheet"; l.href = "alert/alert.css"; document.head.appendChild(l); }
-        const sc = document.createElement("script"); sc.src = "alert/alert.js?v=20261105h"; sc.onload = ok; sc.onerror = bad; document.body.appendChild(sc); });
+        if (!document.querySelector('link[href^="alert/alert.css"]')) { const l = document.createElement("link"); l.rel = "stylesheet"; l.href = "alert/alert.css?v=20261106a4"; document.head.appendChild(l); }
+        const sc = document.createElement("script"); sc.src = "alert/alert.js?v=20261106a4"; sc.onload = ok; sc.onerror = bad; document.body.appendChild(sc); });
       MG.msg = "Loading alerts\u2026"; let asig = "";
       const agrab = () => { const S_ = typeof Alerts !== "undefined" && Alerts._state, cv_ = document.getElementById("al-canvas"); if (!S_ || !cv_ || !cv_.width) return;
-        const sig = [S_.loaded, S_.selectedType || "ALL", S_.k, S_.cx, S_.cy, cv_.width, (S_.alerts || []).length, S_.sig || ""].join("|");
+        const sel = (S_.selectedTypes && S_.selectedTypes.size) ? [...S_.selectedTypes].sort().join(',') : 'ALL'; const sig = [S_.loaded, sel, S_.k, S_.cx, S_.cy, cv_.width, (S_.alerts || []).length, S_.sig || ""].join("|");
         if (sig !== asig || MG.img !== cv_) { asig = sig; MG.img = S_.loaded ? cv_ : null; MG.msg = S_.loaded ? "" : "Loading alerts\u2026"; if (!REC.on && !PV.on) renderAll(); } };
       window.__alertLoad.then(() => { if (ALERTM()) { Alerts.show(); fitFrames(); } }, () => { window.__alertLoad = null; MG.msg = "Alerts could not load."; renderAll(); });
       poll = setInterval(agrab, 400); renderAll(); fitFrames(); return;
@@ -1547,7 +1983,16 @@ if (!CLEAN) {   // Studio: Map | Meteogram switch (first in the menu bar) + the 
   const pfOpen = (name) => { const m = PF.run.split("/")[0], h = "#" + new URLSearchParams({ s: PFSEC[m] || m, w: name, p: pfProd(PFSEC[m] || m) }).toString();
     localStorage.setItem("studio:mghash", h); localStorage.setItem("studio:mgfrom", "pass"); hov.hidden = true;
     if (fr_) { MG.img = null; MG.src = ""; try { fr_.contentWindow.location.hash = h; } catch (e) { fr_.src = "meteograms.html" + h; } }
-    MG.kind = "mg"; sel.value = "mg"; setMode("mg"); backSync(); window.__pfOpened = { name, hash: h }; };
+    MG.kind = "mg"; sel.value = "mg"; setMode("mg"); backSync(); window.__pfOpened = { name, hash: h, run: PF.run }; };
+  // Same chart studioPassChart draws for this pass and this run. pfOpen replaces __pfOpened, so the chart is attached after it.
+  window.__pfChart = async (name) => {
+    const run = (document.getElementById("pfrun") && document.getElementById("pfrun").value) || PF.run;
+    if (run) PF.run = run;
+    const chart = await window.studioPassChart(run, name, 1800, 960);
+    pfOpen(name);
+    window.__pfOpened = Object.assign({}, window.__pfOpened, { name, run, chart });
+    return chart;
+  };
   for (const k of ["v", "h"]) { const cv = F[k].cv; let dn = null;
     cv.addEventListener("pointermove", (e) => { if (!PASSM()) return; const i = REC.on ? -1 : pfRow(k, e); cv.style.cursor = i >= 0 ? "pointer" : (PASSM() ? "default" : ""); if (i >= 0 && e.pointerType === "mouse") hovAt(k, i); else hov.hidden = true; });
     cv.addEventListener("pointerleave", () => { hov.hidden = true; if (PASSM()) cv.style.cursor = ""; });
@@ -1570,6 +2015,6 @@ if (!CLEAN) {
   fitFrames();
 }
 // 11-04 (t2335u guard): read-only state for the refresh regression test (refresh_test.py): what each frame shows right now
-window.__studioQA = () => ({ mode: PASSM() ? "pass" : MG.on ? MG.kind : "map", mg: MG.kind === "mg" ? (MG.src.split("#")[1] || "") : "", alert: ALERTM() ? ((typeof Alerts !== "undefined" && Alerts.titleText && Alerts.titleText()) || "All Alerts") : "", pass: PF.run, passRows: PF.rows ? PF.rows.length : 0,
+window.__studioQA = () => ({ mode: PASSM() ? "pass" : MG.on ? MG.kind : "map", web: WEBM() ? WEB.url : "", cmp: CMPM() ? { l: CMP.L && CMP.L.run, r: CMP.R && CMP.R.run, title: cmpHeadTitle() } : null, mg: MG.kind === "mg" ? (MG.src.split("#")[1] || "") : "", alert: ALERTM() ? ((typeof Alerts !== "undefined" && Alerts.titleText && Alerts.titleText()) || "All Alerts") : "", pass: PF.run, passRows: PF.rows ? PF.rows.length : 0,
   pfL: F.h.pfL ? { x: F.h.pfL.x, y0: F.h.pfL.y0, w: F.h.pfL.w, rh: F.h.pfL.rh, names: F.h.pfL.names } : null, W: F.h.W, fr: { v: getFr("v"), h: getFr("h") } });
 })();
