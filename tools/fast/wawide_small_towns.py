@@ -31,7 +31,9 @@ def main():
         fig, slots = SV.town_slots(TM, SV.VID, layer_fig, i0, i1, j0, j1, MD.get("res", 0.25), passes=True)
         names = [s["name"] for s in slots]
         if names0 is None:
+            labs = getattr(fig, "_wx_labels", None) or FE.label_items(fig, fig.axes[0])
             fig.savefig(f"{a.out}/{PNG}", dpi=FE.DPI, transparent=True); fig.savefig(f"{a.out}/{PNG}".replace("/static/", "/static/x2/"), dpi=FE.DPI * FE.X2, transparent=True); names0 = names
+            if labs: FE.write_town_labels(f"{a.out}/" + PNG.replace("towns_", "labels_").replace(".png", ".json"), labs)
         elif names != names0: raise SystemExit(f"{m}: placement differs")
         plt.close(fig); out[m] = slots; print(m, len(slots), "slots", flush=True)
     for m, e in sv.items():   # models without their own entry here (same crop as a built one) copy it
