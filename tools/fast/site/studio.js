@@ -724,7 +724,9 @@ function cmpFitPanel() {
   const pnl = document.getElementById("mgp");
   if (!CMPM() || !pnl || !cmpFrame) return;
   const top = Math.max(0, pnl.getBoundingClientRect().top);
-  const maxH = Math.max(200, Math.min(window.innerHeight - top - 8, Math.round(window.innerHeight * 0.72)));
+  let maxH = Math.max(200, Math.min(window.innerHeight - top - 8, Math.round(window.innerHeight * 0.72)));
+  // 11-07 (Benjamin t2699u): on desktop keep fitFrames' cap so Compare's frames sit exactly where Map's do (the panel scrolls)
+  const fitCap = parseFloat(pnl.style.maxHeight); if (!CLEAN && innerWidth > 820 && fitCap > 0) maxH = Math.min(maxH, fitCap);
   pnl.style.setProperty("max-height", maxH + "px");
   pnl.style.setProperty("overflow-y", "auto");
   pnl.style.setProperty("overflow-x", "hidden");
