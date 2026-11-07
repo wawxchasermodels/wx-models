@@ -1724,7 +1724,7 @@ function fitFrames() {
   for (let it = 0; it < 5; it++) {
     const availW = st.clientWidth - padX - gap, sy = scrollY;
     const availV = innerHeight - (cvv.getBoundingClientRect().top + sy) - padB;
-    let under = 0; for (let e = cvh.nextElementSibling; e; e = e.nextElementSibling) under += e.offsetHeight + 6;   // hint, hour scrubber, request button
+    let under = 0; for (let e = cvh.nextElementSibling; e; e = e.nextElementSibling) if (!e.classList.contains("webov")) under += e.offsetHeight + 6;   // 11-07 t2698u: the Web overlay sits on the canvas (absolute), not under it   // hint, hour scrubber, request button
     const availH = innerHeight - (cvh.getBoundingClientRect().top + sy) - padB - under;
     const nv = Math.max(MINV * 9 / 16, Math.min(availV * 9 / 16, availW * 0.42));
     const nh = Math.max(240, Math.min(availW - nv, Math.max(MINV, availH) * 16 / 9));
