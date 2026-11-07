@@ -617,9 +617,11 @@ function webNormalize(raw) {
   if (!/^https?:\/\//i.test(s)) s = "https://" + s;
   try { const u = new URL(s); if (u.protocol !== "http:" && u.protocol !== "https:") return ""; return u.toString(); } catch (e) { return ""; }
 }
+// 11-07 (Benjamin t2692u): Interact | Frame. Interact lets clicks, scrolling and typing reach the page (frame drag off); Frame is drag-to-frame. Zoom bar works in both.
+function webMode(on) { document.body.classList.toggle("webint", !!on); const b = document.getElementById("webint"); if (b) { b.textContent = on ? "Interact" : "Frame"; b.title = on ? "Using the page. Click for Frame (drag to frame)" : "Dragging to frame. Click for Interact (use the page)"; b.setAttribute("aria-pressed", on ? "true" : "false"); } }
 function webHide() { for (const k of ["v", "h"]) if (F[k].web) F[k].web.hidden = true; }
 function webApply(url) {
-  WEB.url = url || ""; try { if (url) localStorage.setItem("studio:weburl", url); } catch (e) { /* private */ }
+  WEB.url = url || ""; if (url) webMode(true); try { if (url) localStorage.setItem("studio:weburl", url); } catch (e) { /* private */ }
   for (const k of ["v", "h"]) { const ifr = F[k].web && F[k].web.querySelector("iframe"); if (ifr && ifr.getAttribute("src") !== (url || "about:blank")) ifr.src = url || "about:blank"; }
   if (WEBM()) renderAll();
 }
@@ -1895,17 +1897,18 @@ if (!CLEAN) {   // Studio: Map | Meteogram switch (first in the menu bar) + the 
   const setMode = (mode) => {
     if (mode !== "web") webHide();
     if (mode !== "cmp" && CMP.play) { clearInterval(CMP.play); CMP.play = 0; const b = document.getElementById("play"); if (b && b.textContent === "Stop") b.textContent = "Play"; }
-    document.body.classList.remove("cmpmode", "webmode");
+    document.body.classList.remove("cmpmode", "webmode", "webint");
     if (mode === "web") {
       MG.on = true; MG.kind = "web"; MG.img = null; MG.msg = ""; saveMode("web"); clearInterval(poll); stopMainPlay();
       document.body.classList.remove("mgmode", "obsmode", "passmode", "alertmode", "wafcmode"); document.body.classList.add("webmode");
       if (typeof Obs !== "undefined" && Obs.hide) Obs.hide(); if (typeof Alerts !== "undefined" && Alerts.hide) Alerts.hide();
       PIN.show = false; PIN.mode = null;
       if (!document.getElementById("webp")) { const wp = document.createElement("div"); wp.id = "webp";
-        wp.innerHTML = `<label>Page <input id="weburl" type="url" inputmode="url" placeholder="https://example.com" spellcheck="false" autocomplete="url"></label><button type="button" id="webgo">Open</button><span class="mp-note">If this stays blank, the site probably doesn't allow embedding.</span>`;
+        wp.innerHTML = `<label>Page <input id="weburl" type="url" inputmode="url" placeholder="https://example.com" spellcheck="false" autocomplete="url"></label><button type="button" id="webgo">Open</button><button type="button" id="webint" aria-pressed="true">Interact</button><span class="mp-note">If this stays blank, the site probably doesn't allow embedding.</span>`;
         pnl.appendChild(wp);
         const go = () => { const inp = document.getElementById("weburl"), u = webNormalize(inp.value); if (!u) return; inp.value = u; webApply(u); };
         document.getElementById("webgo").onclick = go;
+        document.getElementById("webint").onclick = () => webMode(!document.body.classList.contains("webint"));
         document.getElementById("weburl").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); go(); } });
         document.getElementById("weburl").addEventListener("change", go);
         let saved = ""; try { saved = localStorage.getItem("studio:weburl") || ""; } catch (e) { /* private */ }
