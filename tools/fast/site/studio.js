@@ -577,8 +577,11 @@ function renderWeb(k, frO) {
   c.textAlign = "left"; placeWeb(k, fr); window.__studio = (window.__studio || 0) + 1; window.__studioWeb = { url: WEB.url, fr: { v: getFr("v"), h: getFr("h") } };
 }
 function cmpApi() { try { return cmpFrame && cmpFrame.contentWindow && cmpFrame.contentWindow.__cmp; } catch (e) { return null; } }
+// viewer.js keeps its state in a script binding (const S) and publishes it only as window.__S. A parent frame's
+// contentWindow.S is undefined; contentWindow.__S is the live object. Fall back to .S if a build ever assigns it.
+function cmpState(w) { return w && (w.__S || w.S) || null; }
 function cmpSteps() {
-  try { const w = cmpFrame.contentDocument.getElementById("R").contentWindow, run = w.S && w.S.run; return run && w.S.runs[run] && w.S.runs[run].steps; } catch (e) { return null; }
+  try { const S_ = cmpState(cmpFrame.contentDocument.getElementById("R").contentWindow), run = S_ && S_.run; return run && S_.runs[run] && S_.runs[run].steps; } catch (e) { return null; }
 }
 function cmpPickIdx(steps) {
   const a = +$s("mpa").value, b = +$s("mpb").value, e = +$s("mpe").value, out = []; if (!steps) return out;
@@ -592,12 +595,12 @@ function cmpGrab() {
   for (const id of ["L", "R"]) {
     let next = null;
     try {
-      const w = cmpFrame.contentDocument.getElementById(id).contentWindow, cv = w.document.getElementById("map"), cur = w.S && w.S.cur;
+      const w = cmpFrame.contentDocument.getElementById(id).contentWindow, S_ = cmpState(w), cv = w.document.getElementById("map"), cur = S_ && S_.cur;
       if (cv && cv.width && cur && cur.V && cur.V.panel) {
-        const m = String(cur.run || "").split("/")[0], step = w.S.runs[cur.run].steps[w.S.i];
+        const m = String(cur.run || "").split("/")[0], step = S_.runs[cur.run].steps[S_.i];
         const sig = [cur.run, cur.pid, step && step.f, cv.width, cv.height, w.__drawn || ""].join("|");
         next = { cv, panel: cur.V.panel, rs: cv._rs || 1, title: (cur.P && cur.P.title) || "", pid: cur.pid, run: cur.run, model: m,
-          site: (w.S.man && w.S.man.models[m] && w.S.man.models[m].site) || m, step, sig };
+          site: (S_.man && S_.man.models[m] && S_.man.models[m].site) || m, step, sig };
       }
     } catch (e) { next = null; }
     if ((CMP.view[id] && CMP.view[id].sig) !== (next && next.sig)) { CMP.view[id] = next; changed = true; }
