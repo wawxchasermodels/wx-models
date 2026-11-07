@@ -158,10 +158,11 @@ const ObsImg = (() => {
   function underT(L, t) { L = L || []; for (let i = L.length - 1; i >= 0; i--) if (Date.parse(L[i]) <= Date.parse(t) + 60e3) return L[i]; return L[0] || null; }
   const unders = (tile, t) => [["fd", underT(ST.fdT, t)], ...(tile === "detail" ? [["wide", underT(ST.wusT, t)]] : [])].filter((x) => x[1]);
   // 11-03 (t2248u) what is drawn under a frame so the whole map stays covered at every zoom / pan: water vapor = full disk (+ West US
-  // under PNW); GIBS Clean IR / GeoColor zoomed in = the wide box (same time) under the sharper detail box
-  const undersOf = (id, tile, t) => (SRC[id].kind === "star" ? unders(tile, t) : SRC[id].kind === "gibs" && tile === "detail" ? [["wide", wideT(id, t)]] : []);
-  // 11-04 (t2299u) the wide GIBS frame under a zoomed-in frame (only seen past the detail box edge) is ~1.1 MB and 6-10 s from GIBS:
-  // use one every 30 min (newest back), so a 4-hour loop loads 9 of them instead of 24
+  // under PNW); GIBS zoomed in = the wide box under the sharper detail box. Clean IR uses that wide box at the same time as the
+  // detail box. GeoColor still steps the wide box every 30 min (it is only seen past the detail edge).
+  const undersOf = (id, tile, t) => (SRC[id].kind === "star" ? unders(tile, t) : id === "ir" && tile === "detail" ? [["wide", t]] : SRC[id].kind === "gibs" && tile === "detail" ? [["wide", wideT(id, t)]] : []);
+  // 11-04 (t2299u) GeoColor's wide frame under a zoomed-in frame (only seen past the detail box edge) is ~1.1 MB and 6-10 s from GIBS:
+  // use one every 30 min (newest back), so a 4-hour loop loads 9 of them instead of 24. Clean IR does not use this.
   function wideT(id, t) { const f = ST.frames[id], i = f.indexOf(t); if (i < 0) return t; const L = f.length; return f[Math.max(0, L - 1 - 3 * Math.round((L - 1 - i) / 3))]; }
   // red / pink map-line pixels (STAR draws them pure red; JPEG blurs them into the background). Yellow / orange (dry air) is not a line.
   const lineAt = (d, i) => { const r = d[i], g = d[i + 1], b = d[i + 2]; return (r - g > 60 && g - b < 60) || (r - g > 12 && Math.abs(g - b) < 31); };
@@ -216,10 +217,29 @@ const ObsImg = (() => {
       raw.src = fname(sec, t); });
   }
 
-  /* ---- loading: newest frame first (shows at once), then the rest in the background ---- */
-  // 11-04 (t2299u) under frame not loaded (yet) or failed: use the nearest loaded one in time, so the map edges never blink empty
-  function underOk(id, tl, tu) { const r = ST.img.get(id + "|" + tl + "|" + tu); if (r && r.ok) return r; const T = Date.parse(tu); let best = null, bd = 1e15;
+  /* ---- loading: newest frame first (stays on screen), then the rest; the loop starts only once that window is loaded ---- */
+  // 11-04 (t2299u) GeoColor under frame not loaded (yet) or failed: use the nearest loaded one in time, so those map edges never blink empty.
+  // Clean IR does not: the wide ocean must be the same time as the detail center, or it is left out until that frame is ready.
+  function underOk(id, tl, tu) { const r = ST.img.get(id + "|" + tl + "|" + tu); if (r && r.ok) return r; if (id === "ir") return null; const T = Date.parse(tu); let best = null, bd = 1e15;
     for (const [k, q] of ST.img) if (q.ok && k.startsWith(id + "|" + tl + "|")) { const d = Math.abs(Date.parse(k.slice(id.length + tl.length + 2)) - T); if (d < bd) { bd = d; best = q; } } return best; }
+  // Layers a frame has to have before it can play. Clean IR always needs detail and wide at that same timestamp.
+  function needLayers(id, t) { return id === "ir" ? [["detail", t], ["wide", t]] : [[listTile(id), t]]; }
+  function dropFailed() {   // blank or retry-failed layers are already marked bad; drop that time so it cannot stall the loop
+    for (const id of on()) { let cut = false;
+      for (const t of [...ST.frames[id]]) if (needLayers(id, t).some(([tl, u]) => { const r = ST.img.get(id + "|" + tl + "|" + u); return r && r.bad && !r.ok; })) { ST.blank.add(id + "|" + t); cut = true; }
+      if (cut) pickFrames(id); }
+    if (ST.idx >= len()) ST.idx = Math.max(0, len() - 1);
+  }
+  function loopReady() {
+    const ids = on(); if (!ids.length) return false;
+    for (const id of ids) for (const t of ST.frames[id]) for (const [tl, u] of needLayers(id, t)) { const r = ST.img.get(id + "|" + tl + "|" + u); if (!r || !r.ok) return false; }
+    return true;
+  }
+  function loadNote() {
+    let n = 0, N = 0;
+    for (const id of on()) for (const t of ST.frames[id]) { N++; if (needLayers(id, t).every(([tl, u]) => { const r = ST.img.get(id + "|" + tl + "|" + u); return r && r.ok; })) n++; }
+    return N && n < N ? "Loading loop " + n + "/" + N : "";
+  }
   let loading = null;
   async function refresh() {
     if (loading) return loading;
@@ -230,19 +250,24 @@ const ObsImg = (() => {
         const fr = ST.frames[id]; if (!fr.length) { ST.msg = SRC[id].label + ": no recent frames"; continue; }
         const tile = listTile(id);
         for (let tries = 0; tries < 5 && ST.frames[id].length; tries++) { const f = ST.frames[id], t = f[f.length - 1];
-          const rm = getImg(id, tile, t); for (const [tl, u] of undersOf(id, tile, t)) getImg(id, tl, u);   // main frame first in the cleaning queue
-          if (await rm.p) break; if (id === "wv") { ST.blank.add(id + "|" + t); pickFrames(id); } }   // newest real frame first
+          const need = id === "ir" ? [["detail", t], ["wide", t]] : [[tile, t]];   // IR still waits for both layers of this time
+          if (id !== "ir") for (const [tl, u] of undersOf(id, tile, t)) getImg(id, tl, u);
+          const rs = need.map(([tl, u]) => getImg(id, tl, u));
+          if ((await Promise.all(rs.map((r) => r.p))).every(Boolean)) break;
+          if (id === "wv" || id === "ir") { ST.blank.add(id + "|" + t); pickFrames(id); } }   // newest real frame first; keep it on screen while the rest load
         if (id === "wv" && ST.wvMoved && !ST.frames.wv.some((t) => { const r = ST.img.get("wv|" + tile + "|" + t); return r && r.ok; })) ST.msg = "Water vapor paused: NOAA moved its image sector, so it would not line up with this map";
       }
       prune(); if (ST.idx < 0 || ST.idx >= len()) ST.idx = len() - 1;
-      ui(); bump(); Obs.redraw(); if (!ST.timer) tick();
+      ui(); bump(); Obs.redraw();   // newest still stays up; do not start the loop until the window below has loaded
       for (let pass = 0; pass < 2; pass++) {   // pass 2: frames that slid in after black ones dropped out
         // 11-04 (t2299u) every loop frame first (newest back), then the bigger frames drawn under them, so the loop fills in quickly
-        const todo = [], und = []; for (const id of on()) { const tile = listTile(id); for (const t of [...ST.frames[id]].reverse()) { todo.push([id, tile, t]); for (const [tl, u] of undersOf(id, tile, t)) und.push([id, tl, u, tile]); } }
+        // 11-07 Clean IR also queues the other box at the same time, so detail and wide stay paired
+        const todo = [], und = []; for (const id of on()) { const tile = listTile(id); for (const t of [...ST.frames[id]].reverse()) { todo.push([id, tile, t]); if (id === "ir") und.push([id, tile === "detail" ? "wide" : "detail", t, tile]); else for (const [tl, u] of undersOf(id, tile, t)) und.push([id, tl, u, tile]); } }
         todo.push(...und);
         await Promise.all([0, 1, 2, 3, 4, 5].map(async () => {   // 11-04 (t2299u) 6 at a time: GIBS builds each image on request (~3-10 s, never cached), so waiting on 3 left the loop half empty for a minute
-        while (todo.length) { const [id, tile, t, under_] = todo.shift(); if (on().includes(id) && (listTile(id) === (under_ || tile))) { const r = getImg(id, tile, t); await r.p; if (id === "wv" && !under_ && r.bad) { ST.blank.add(id + "|" + t); pickFrames(id); } } } }));
+        while (todo.length) { const [id, tile, t, under_] = todo.shift(); if (on().includes(id) && (id === "ir" || listTile(id) === (under_ || tile))) { const r = getImg(id, tile, t); await r.p; if (r.bad && (id === "ir" || (id === "wv" && !under_))) { ST.blank.add(id + "|" + t); pickFrames(id); } } } }));
       }
+      dropFailed(); if (ST.idx < 0 || ST.idx >= len()) ST.idx = Math.max(0, len() - 1);
       ui(); bump(); Obs.redraw();
     })().finally(() => { loading = null; });
     return loading;
@@ -257,9 +282,12 @@ const ObsImg = (() => {
   function tick() {
     clearTimeout(ST.timer); ST.timer = 0; if (!on().length || ST.hold) return;
     if (!ST.playing || !ST.obs || !ST.obs.shown || document.hidden) { ST.timer = setTimeout(tick, 600); return; }
-    const L = len(); if (L > 1) {
-      const ready = (i) => on().every((id) => { const r = ST.img.get(id + "|" + listTile(id) + "|" + tAt(id, i)); return r && r.ok; });
-      for (let s = 1; s <= L; s++) { const nxt = (ST.idx + s) % L; if (ready(nxt)) { if (nxt !== ST.idx) { ST.idx = nxt; bump(); Obs.redraw(); uiTime(); } break; } }
+    dropFailed(); const L = len(); if (ST.idx >= L) ST.idx = Math.max(0, L - 1);
+    if (!loopReady()) { uiTime(); ST.timer = setTimeout(tick, 300); return; }   // hold the newest valid still; do not skip frames that are still loading
+    if (L > 1) {
+      const nxt = (ST.idx + 1) % L;
+      const playable = on().every((id) => { const t = tAt(id, nxt); return t && needLayers(id, t).every(([tl, u]) => { const r = ST.img.get(id + "|" + tl + "|" + u); return r && r.ok; }); });
+      if (playable && nxt !== ST.idx) { ST.idx = nxt; bump(); Obs.redraw(); uiTime(); }
     }
     ST.timer = setTimeout(tick, Math.round((ST.idx === L - 1 ? 1600 : 380) / spd()));   // 11-04 (t2266u) loop speed slider   // dwell on the newest frame
   }
@@ -407,7 +435,8 @@ const ObsImg = (() => {
   function uiTime() {
     const el = $("oi-t"); if (!el) return;
     const parts = on().map((id) => { const t = (ST.shown && ST.shown[id]) || tAt(id, Math.max(0, ST.idx)); return t ? `${id === "radar" ? "Radar" : SRC[id].label} ${tf.format(new Date(t))}` : ""; }).filter(Boolean);
-    const txt = ST.glFail || ST.msg || (parts.length ? parts.join(" \u00b7 ") + " PT" : "loading\u2026");
+    const note = loadNote();
+    const txt = ST.glFail || ST.msg || (parts.length ? parts.join(" \u00b7 ") + " PT" + (note ? " \u00b7 " + note : "") : (note || "loading\u2026"));
     if (el.textContent !== txt) el.textContent = txt; const sl = $("oi-slide"); if (sl && document.activeElement !== sl) sl.value = String(Math.max(0, ST.idx));
   }
   function set(o) {
