@@ -64,12 +64,12 @@ assert.ok(enc.includes('return np.asarray(R.f("gust")[2], float) * 2.23694'));
 assert.ok(/model:\s*\[[^\]]*nbm/.test(yml));
 assert.ok(yml.includes("hrrr,rrfs,nbm,gfs,ifs,aifs"));
 
-// Studio: zoom slider stays visible for wafc; pass and alerts still hide theirs.
+// Studio: zoom slider stays visible for wafc; pass still hides its slider.
+// Production alerts has its own zoom controls; do not assert a base-branch-only hide-input selector.
 assert.ok(!/wafcmode \.shd input/.test(html));
 assert.ok(!/wafcmode \.shint/.test(html));
 assert.ok(/wafcmode \.shd button\[data-a="mp4"\]/.test(html));
 assert.ok(/passmode \.shd input/.test(html));
-assert.ok(/alertmode \.shd input/.test(html));
 assert.ok(html.includes("touch-action:manipulation"));
 assert.ok(studio.includes("2160x3840"));
 assert.ok(studio.includes("3840x2160"));
