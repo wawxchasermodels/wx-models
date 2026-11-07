@@ -180,6 +180,7 @@ function band(c, y0, y1, down) {
 const PSS = 2;
 const ctxS = (c) => (c.getTransform ? c.getTransform().a : 1) || 1;
 function ssFit(f, s) { if (f.cv.width !== f.W * s || f.cv.height !== f.H * s) { f.cv.width = f.W * s; f.cv.height = f.H * s; } f.ss = s; }
+function frameTx(c, f) { const z = (f && f.ss) || 1; c.setTransform(z, 0, 0, z, 0, 0); return z; }
 function sharpShadow(c, k) { const z = ctxS(c); c.shadowColor = "rgba(0,0,0,0.92)"; c.shadowBlur = 1.5 * z; c.shadowOffsetX = (k === "v" ? 3 : 2.5) * z; c.shadowOffsetY = (k === "v" ? 3 : 2.5) * z; }
 // 11-02 6:20 PM (Benjamin t2111u "drop shadow ... a little more pronounced with a bit of a fade so it doesn't look messy"): overlay text,
 // badges and bars are drawn (with the tight sharp core shadow above) into an off-screen layer, then that layer goes onto the frame once
@@ -375,7 +376,7 @@ function obsInfo() {
 }
 function renderObs(k, frO) {
   const f = F[k], c0 = f.cv.getContext("2d"), fr = frO || getFr(k); if (!frO) { f.zoom.min = "5"; f.zoom.max = "250"; f.zoom.value = obsZv(fr); }
-  c0.setTransform(1, 0, 0, 1, 0, 0); c0.clearRect(0, 0, f.W, f.H); c0.fillStyle = BG === "transparent" ? "#111316" : BG; c0.fillRect(0, 0, f.W, f.H);
+  frameTx(c0, f); c0.clearRect(0, 0, f.W, f.H); c0.fillStyle = BG === "transparent" ? "#111316" : BG; c0.fillRect(0, 0, f.W, f.H);
   const I = obsInfo();
   if (!MG.img || !I || !I.t) { c0.font = `700 ${k === "v" ? 40 : 34}px Montserrat`; c0.fillStyle = "#c9ced8"; c0.textAlign = "center"; c0.fillText(MG.msg || "Loading observations\u2026", f.W / 2, f.H / 2); c0.textAlign = "left"; return; }
   const r = crop(k, fr); c0.imageSmoothingEnabled = true; c0.imageSmoothingQuality = "high";
@@ -459,7 +460,7 @@ function renderAlert(k, frO) {
     fr.zoom = alertZ(fr.zoom || 1);
     f.zoom.value = String(Math.round(fr.zoom * 100));
   }
-  c0.setTransform(1, 0, 0, 1, 0, 0); c0.clearRect(0, 0, f.W, f.H);
+  frameTx(c0, f); c0.clearRect(0, 0, f.W, f.H);
   // Ocean fill so a <1x crop letterboxes in map-ocean, not a blank grey (t2559u).
   c0.fillStyle = BG === "transparent" ? "#030912" : (BG || "#030912"); c0.fillRect(0, 0, f.W, f.H);
   const I = alertInfo();
@@ -469,7 +470,7 @@ function renderAlert(k, frO) {
   // Towns, highways and boundary strokes in this frame's pixels (t2499u / t2504u). Each frame keeps its own camera.
   const settle = !!(frO && frO._alertSettle) || !!(window.__alertSettle && window.__alertSettle[k]);
   if (window.__alertSettle) window.__alertSettle[k] = 0;
-  if (typeof Alerts !== "undefined" && Alerts.paintFrameScene) Alerts.paintFrameScene(c0, { frame: k, dpr: (Alerts._state && Alerts._state.dpr) || 1, W: f.W, H: f.H, zoom: alertZ(fr.zoom || 1), cx: r.cx, cy: r.cy, kk: r.kk }, settle ? { settle: true } : null);
+  if (typeof Alerts !== "undefined" && Alerts.paintFrameScene) Alerts.paintFrameScene(c0, { frame: k, dpr: (Alerts._state && Alerts._state.dpr) || 1, W: f.W, H: f.H, zoom: alertZ(fr.zoom || 1), cx: r.cx, cy: r.cy, kk: r.kk, avoidTop: k === "v" ? 360 : 210, avoidBot: k === "v" ? f.H - 220 : f.H - 140 }, settle ? { settle: true } : null);
   // TOP LEFT title (alert mode): pill + title + time — no LIVE badge (Benjamin t2437u)
   const c = ovLayer(f), x = f.pad; let y = k === "v" ? 120 : 34;
   const by = y; // top-right anchor without a LIVE badge
@@ -630,7 +631,7 @@ function renderWeb(k, frO) {
   const f = F[k], c = f.cv.getContext("2d"), fr = frO || getFr(k);
   if (!frO) { f.zoom.min = "100"; f.zoom.value = String(Math.round((fr.zoom || 1) * 100));
     const r = crop(k, fr); fr.dx = (r.bx - r.cx) * r.kk; fr.dy = (r.by - r.cy) * r.kk; setFr(k, fr); }
-  c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, f.W, f.H); c.fillStyle = BG === "transparent" ? "#111316" : BG; c.fillRect(0, 0, f.W, f.H);
+  frameTx(c, f); c.clearRect(0, 0, f.W, f.H); c.fillStyle = BG === "transparent" ? "#111316" : BG; c.fillRect(0, 0, f.W, f.H);
   c.font = `600 ${k === "v" ? 28 : 24}px Montserrat`; c.fillStyle = "#c9ced8"; c.textAlign = "center";
   const msg = WEB.url ? "If this stays blank, the site probably doesn't allow embedding." : "Paste a page address above, then Open.";
   const words = msg.split(" "), maxW = f.W - 2 * f.pad, lines = []; let line = "";
@@ -771,7 +772,7 @@ function cmpDrawPanel(c, k, src, box) {
 }
 function renderCmp(k) {
   const f = F[k], c0 = f.cv.getContext("2d"); if (f.zoom) { f.zoom.min = "100"; f.zoom.value = "100"; }
-  c0.setTransform(1, 0, 0, 1, 0, 0); c0.clearRect(0, 0, f.W, f.H); c0.fillStyle = BG === "transparent" ? "#111316" : BG; c0.fillRect(0, 0, f.W, f.H);
+  frameTx(c0, f); c0.clearRect(0, 0, f.W, f.H); c0.fillStyle = BG === "transparent" ? "#111316" : BG; c0.fillRect(0, 0, f.W, f.H);
   const main = CMP.view.R || CMP.view.L, c = ovLayer(f), x = f.pad; let y = k === "v" ? 120 : 34;
   c.save(); sharpShadow(c, k);
   const sites = [CMP.view.L, CMP.view.R].map((v) => v && v.site).filter(Boolean);
@@ -814,7 +815,7 @@ function renderMg(k, frO) {
   if (OBSM()) return renderObs(k, frO);
   if (PASSM()) return renderPass(k);
   const f = F[k], c = f.cv.getContext("2d"), fr = frO || getFr(k); f.zoom.min = "100"; f.zoom.max = "250"; f.zoom.value = Math.round((fr.zoom || 1) * 100);
-  c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, f.W, f.H); c.fillStyle = BG === "transparent" ? "#111316" : BG; c.fillRect(0, 0, f.W, f.H);
+  frameTx(c, f); c.clearRect(0, 0, f.W, f.H); c.fillStyle = BG === "transparent" ? "#111316" : BG; c.fillRect(0, 0, f.W, f.H);
   if (!MG.img) { c.font = `700 ${k === "v" ? 40 : 34}px Montserrat`; c.fillStyle = "#c9ced8"; c.textAlign = "center"; c.fillText(MG.msg || "Loading the meteogram\u2026", f.W / 2, f.H / 2); c.textAlign = "left"; return; }
   const r = crop(k, fr); c.imageSmoothingEnabled = true; c.imageSmoothingQuality = "high";
   c.drawImage(MG.img, f.W / 2 - r.cx * r.kk, f.H / 2 - r.cy * r.kk, MG.img.naturalWidth * r.kk, MG.img.naturalHeight * r.kk);
@@ -824,8 +825,54 @@ function renderMg(k, frO) {
   const cnr = BR.corner && LOGOS[BR.logo] ? cornerBox(k, k === "v" ? 120 : 40, k === "v" ? 120 : 40, f.H - (k === "v" ? 140 : 80)) : null; if (cnr) cornerLogo(c, cnr);
   window.__studio = (window.__studio || 0) + 1; window.__studioMg = (window.__studioMg || 0) + 1;
 }
+// Town names are left off the shared map bitmap in Studio (two frames, two crops). Each frame draws them
+// at backing scale and drops or nudges any label that would sit in the title/date band, the footer, or past the frame edge.
+function paintStudioTowns(c, k, r, top, bot) {
+  const src = window.__studioTownSrc;
+  if (!src || !src.items || !src.items.length || !r || !r.sw || !r.rs) return;
+  const f = F[k], rs = r.rs, sc = f.W / r.sw, dpi = src.dpi || 100, kk = sc * rs;
+  const toF = (figX, figY) => [(figX * rs - r.sx) * sc, (figY * rs - r.sy) * (f.H / r.sh)];
+  const margin = 8, hits = (b) => b[0] < margin || b[1] < top || b[2] > f.W - margin || b[3] > bot;
+  const shifts = [[0, 0], [0, -18], [0, -36], [20, 0], [-20, 0], [0, 16], [32, -14], [-32, -14], [0, -54]];
+  c.save();
+  const placed = [], overlap = (b) => placed.some((a) => b[0] < a[2] + 2 && b[2] > a[0] - 2 && b[1] < a[3] + 2 && b[3] > a[1] - 2);
+  const kept = new Map();
+  for (const it of src.items) if (it.k === "t") {
+    const [x0, y0] = toF(it.x * src.LW, it.y * src.LH), fs = it.size * dpi / 72 * kk;
+    const font = `${it.style === "italic" ? "italic " : ""}${it.w || 600} ${fs}px Montserrat`;
+    c.font = font; const tw = c.measureText(it.t).width, hh = fs * 0.55, base = [x0, y0 - hh, x0 + tw, y0 + hh * 0.75];
+    let shift = null;
+    for (const [dx, dy] of shifts) { const b = [base[0] + dx, base[1] + dy, base[2] + dx, base[3] + dy]; if (hits(b) || overlap(b)) continue; shift = [dx, dy, b]; break; }
+    if (!shift) continue;
+    kept.set(it.t, shift); placed.push(shift[2]);
+    c.font = font; c.textAlign = "left"; c.textBaseline = "middle"; c.lineJoin = "round";
+    c.lineWidth = Math.max(1, (it.halo == null ? 2.6 : it.halo) * dpi / 72 * kk); c.strokeStyle = "#ffffff";
+    c.strokeText(it.t, x0 + shift[0], y0 + shift[1]); c.fillStyle = it.fill || "#1b1d22"; c.fillText(it.t, x0 + shift[0], y0 + shift[1]);
+  }
+  for (const it of src.items) if (it.k === "m") {
+    const [x, y] = toF(it.x * src.LW, it.y * src.LH);
+    if (x < margin || y < top || x > f.W - margin || y > bot) continue;
+    const rad = (it.ms || 3.6) / 2 * dpi / 72 * kk;
+    c.beginPath();
+    if (it.mk === "^") { const h = rad * 1.15; c.moveTo(x, y - h); c.lineTo(x + h * 0.95, y + h * 0.75); c.lineTo(x - h * 0.95, y + h * 0.75); c.closePath(); }
+    else c.arc(x, y, Math.max(1, rad), 0, 2 * Math.PI);
+    c.fillStyle = it.fill || "#1b1d22"; c.strokeStyle = it.stroke || "#ffffff"; c.lineWidth = (it.mew || 0) * dpi / 72 * kk;
+    if (it.mew) c.stroke(); c.fill();
+  }
+  for (const n of src.nums || []) {
+    if (src.items.some((t) => t.k === "t" && t.t === n.name) && !kept.has(n.name)) continue;
+    const sh = kept.get(n.name), [x0, y0] = toF(n.x * src.LW, n.y * src.LH), dx = sh ? sh[0] : 0, dy = sh ? sh[1] : 0;
+    const fs = n.size * dpi / 72 * kk; c.font = `800 ${fs}px Montserrat`;
+    const tw = c.measureText(n.text).width, hh = fs * 0.55, b = [x0 + dx, y0 + dy - hh, x0 + dx + tw, y0 + dy + hh * 0.75];
+    if (hits(b) || overlap(b)) continue;
+    placed.push(b); c.textAlign = "left"; c.textBaseline = "middle"; c.lineJoin = "round";
+    c.lineWidth = Math.max(1, 3 * dpi / 72 * kk); c.strokeStyle = "#ffffff"; c.strokeText(n.text, x0 + dx, y0 + dy);
+    c.fillStyle = n.color || "#0d0f13"; c.fillText(n.text, x0 + dx, y0 + dy);
+  }
+  c.restore();
+}
 async function render(k, frO) {   // frO: camera override (MP4 storm-track pan)
-  ssFit(F[k], (!MG.on || PASSM() || WAFCM()) ? (REC.flat ? 1 : PSS) : 1);   // model maps, Pass, and WA forecast: 2x backing so text is rasterized at the export size
+  ssFit(F[k], REC.flat ? 1 : PSS);   // every Studio frame is 2x so titles, keys, credits and labels rasterize at export size
   if (MG.on) return renderMg(k, frO);
   if (!last) return; const f = F[k], c0 = f.cv.getContext("2d"), fr = frO || getFr(k), { cv, cur, step } = last, P = cur.P, [m] = cur.run.split("/"); let c = c0;
   if (!frO) { f.zoom.min = "100"; f.zoom.max = "250"; f.zoom.value = Math.round((fr.zoom || 1) * 100); }
@@ -905,6 +952,7 @@ async function render(k, frO) {   // frO: camera override (MP4 storm-track pan)
   if (logo) { c.font = `800 ${k === "v" ? 34 : 28}px Montserrat`; c.fillStyle = "#fff"; c.textAlign = "right"; c.fillText(logo, f.W - f.pad, f.H - (k === "v" ? 70 : 60) - dUp); c.textAlign = "left"; }
   if (P.lows) { lowKey(c, f, k, cbY, cbS); strongestMember(c, f, k, cur, r, headBot, cbY); }
   c.restore();
+  paintStudioTowns(c0, k, r, headBot + 10, cbY - 16);
   c = c0; ovPut(c, f, k);
   if (cnr) cornerLogo(c, cnr);
   if (BR.lower) lowerThird(k, c);
@@ -1023,20 +1071,20 @@ for (const k of ["v", "h"]) {
     if (a.dataset.a === "reset") { if (ALERTM() && typeof Alerts !== "undefined") { if (Alerts.fitToSelection) Alerts.fitToSelection(); else if (Alerts._state) { Alerts._state.k = 1; Alerts.redraw(); } } if (OBSM() && typeof Obs !== "undefined" && Obs._state && OZ.sub < 1) { ozSync(); Obs._state.k = OZ.ref; OZ.sub = 1; Obs.redraw(); } setFr(k, { dx: 0, dy: 0, zoom: 1 }); if (ALERTM() && f.zoom) f.zoom.value = "100"; render(k); }
     if (a.dataset.a === "mp4" && (!MG.on || OBSM() || CMPM())) openMp4(k);
     if (a.dataset.a === "png" && ALERTM()) { if (!MG.img) return; const I = alertInfo(), st = I && I.t ? new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(I.t).replace(/[^0-9]/g, "") : "now";
-      const nm = `alerts_wa_${(I && I.title || "all").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}_${st}PT_${k === "v" ? "1080x1920" : "1920x1080"}.png`;
+      const nm = `alerts_wa_${(I && I.title || "all").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}_${st}PT_${F[k].cv.width}x${F[k].cv.height}.png`;
       F[k].cv.toBlob((b) => { if (!b) return; const a2 = document.createElement("a"); a2.href = URL.createObjectURL(b); a2.download = nm; a2.click(); setTimeout(() => URL.revokeObjectURL(a2.href), 4000); }, "image/png"); return; }
     if (a.dataset.a === "png" && OBSM()) { if (!MG.img) return; const I = obsInfo(), st = I && I.t ? new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(I.t).replace(/[^0-9]/g, "") : "now";
-      const nm = `obs_${I ? I.view : "pnw"}_${I ? I.on.map((l) => l[0]).join("-") : "plot"}_${st}_${k === "v" ? "1080x1920" : "1920x1080"}.png`;
+      const nm = `obs_${I ? I.view : "pnw"}_${I ? I.on.map((l) => l[0]).join("-") : "plot"}_${st}_${F[k].cv.width}x${F[k].cv.height}.png`;
       cv.toBlob((b) => { const u = URL.createObjectURL(b), l = document.createElement("a"); l.href = u; l.download = nm; l.click(); setTimeout(() => URL.revokeObjectURL(u), 4000); }, "image/png"); return; }
     if (a.dataset.a === "png" && WAFCM()) { if (!MG.img) return; const nm = `wa-forecast_${(MG.src || "map").replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "")}_${k === "v" ? "2160x3840" : "3840x2160"}.png`;
       cv.toBlob((b) => { const u = URL.createObjectURL(b), l = document.createElement("a"); l.href = u; l.download = nm; l.click(); setTimeout(() => URL.revokeObjectURL(u), 4000); }, "image/png"); return; }
     if (a.dataset.a === "png" && PASSM()) { if (!PF.rows) return; const nm = `pass-forecast_${PF.run.replace("/", "_")}Z_${k === "v" ? "2160x3840" : "3840x2160"}.png`;
       cv.toBlob((b) => { const u = URL.createObjectURL(b), l = document.createElement("a"); l.href = u; l.download = nm; l.click(); setTimeout(() => URL.revokeObjectURL(u), 4000); }, "image/png"); return; }
-    if (a.dataset.a === "png" && CMPM()) { const nm = `compare_${k === "v" ? "1080x1920" : "1920x1080"}.png`;
+    if (a.dataset.a === "png" && CMPM()) { const nm = `compare_${F[k].cv.width}x${F[k].cv.height}.png`;
       cv.toBlob((b) => { if (!b) return; const u = URL.createObjectURL(b), l = document.createElement("a"); l.href = u; l.download = nm; l.click(); setTimeout(() => URL.revokeObjectURL(u), 4000); }, "image/png"); return; }
-    if (a.dataset.a === "png" && WEBM()) { const nm = `web_${k === "v" ? "1080x1920" : "1920x1080"}.png`;
+    if (a.dataset.a === "png" && WEBM()) { const nm = `web_${F[k].cv.width}x${F[k].cv.height}.png`;
       cv.toBlob((b) => { if (!b) return; const u = URL.createObjectURL(b), l = document.createElement("a"); l.href = u; l.download = nm; l.click(); setTimeout(() => URL.revokeObjectURL(u), 4000); }, "image/png"); return; }
-    if (a.dataset.a === "png" && MG.on) { if (!MG.img) return; const nm = `meteogram_${(MG.src.split("#")[1] || "").replace(/[^a-z0-9=&_-]/gi, "").replace(/[=&]/g, "_")}_${k === "v" ? "1080x1920" : "1920x1080"}.png`;
+    if (a.dataset.a === "png" && MG.on) { if (!MG.img) return; const nm = `meteogram_${(MG.src.split("#")[1] || "").replace(/[^a-z0-9=&_-]/gi, "").replace(/[=&]/g, "_")}_${F[k].cv.width}x${F[k].cv.height}.png`;
       cv.toBlob((b) => { const u = URL.createObjectURL(b), l = document.createElement("a"); l.href = u; l.download = nm; l.click(); setTimeout(() => URL.revokeObjectURL(u), 4000); }, "image/png"); return; }
     if (MG.on && a.dataset.a !== "reset") return;   // MP4 / OBS: maps only
     if (a.dataset.a === "png") { const st = last.step, nm = `${last.cur.run.replace("/", "_")}_${last.cur.pid}_${S.view}_f${String(st.f).padStart(3, "0")}_${cv.width}x${cv.height}.png`;
@@ -1286,7 +1334,7 @@ async function makeCmpMp4() {
       for (; n < n1; n++) { if (!drawn || enc.realtime) { await render(k); drawn = true; } await enc.add(n + (enc.off || 0)); if (n % 6 === 0) pg.value = n / totN; }
     }
     pg.value = 1; mpSt("Finishing…"); const how = enc.how, blob = await enc.done(); enc = null;
-    const nm = `compare_F${steps[idx[0]].f}-F${steps[idx[idx.length - 1]].f}_${k === "v" ? "1080x1920" : "1920x1080"}.${blob.type.includes("mp4") ? "mp4" : "webm"}`;
+    const nm = `compare_F${steps[idx[0]].f}-F${steps[idx[idx.length - 1]].f}_${f.cv.width}x${f.cv.height}.${blob.type.includes("mp4") ? "mp4" : "webm"}`;
     const u = URL.createObjectURL(blob), v = $s("mpv"), dl = $s("mpdl"); if (v.dataset.u) URL.revokeObjectURL(v.dataset.u); v.dataset.u = u; v.src = u; dl.href = u; dl.download = nm;
     const file = new File([blob], nm, { type: blob.type }); $s("mpshare").hidden = !(navigator.canShare && navigator.canShare({ files: [file] })); $s("mpshare").onclick = () => navigator.share({ files: [file] }).catch(() => {});
     n += cardN; $s("mpout").hidden = false; window.__mp4 = { name: nm, bytes: blob.size, frames: n, seconds: n / FPS, how, ms: Math.round(performance.now() - t0), blob };
@@ -1382,7 +1430,7 @@ async function makeObsMp4() {
     }
     pg.value = 1; mpSt("Finishing\u2026"); const how = enc.how, blob = await enc.done(); enc = null;
     const stp = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(I.t).replace(/[^0-9]/g, "");
-    const nm = `obs_${I.view}_${I.on.map((l) => l[0]).join("-")}_${stp}_${k === "v" ? "1080x1920" : "1920x1080"}${pan ? "_AtoB" : ""}.${blob.type.includes("mp4") ? "mp4" : "webm"}`;
+    const nm = `obs_${I.view}_${I.on.map((l) => l[0]).join("-")}_${stp}_${f.cv.width}x${f.cv.height}${pan ? "_AtoB" : ""}.${blob.type.includes("mp4") ? "mp4" : "webm"}`;
     const u = URL.createObjectURL(blob), v = $s("mpv"), dl = $s("mpdl"); if (v.dataset.u) URL.revokeObjectURL(v.dataset.u); v.dataset.u = u; v.src = u; dl.href = u; dl.download = nm;
     const file = new File([blob], nm, { type: blob.type }); $s("mpshare").hidden = !(navigator.canShare && navigator.canShare({ files: [file] })); $s("mpshare").onclick = () => navigator.share({ files: [file] }).catch(() => {});
     const n = totN + off; $s("mpout").hidden = false; window.__mp4 = { name: nm, obs: true, pan: pan ? { a: pins.a, b: pins.b } : null, z0, z1, bytes: blob.size, frames: n, seconds: n / FPS, how, ms: Math.round(performance.now() - t0), blob };
@@ -2019,7 +2067,7 @@ if (!CLEAN) {
   fitFrames();
 }
 // 11-04 (t2335u guard): read-only state for the refresh regression test (refresh_test.py): what each frame shows right now
-window.__studioSharp = { PSS, ssFit, ovPut, sharpShadow, colorbar, ctxS, F };
+window.__studioSharp = { PSS, ssFit, ovPut, sharpShadow, colorbar, ctxS, F, paintStudioTowns, frameTx };
 window.__studioQA = () => ({ mode: PASSM() ? "pass" : MG.on ? MG.kind : "map", web: WEBM() ? WEB.url : "", cmp: CMPM() ? { l: CMP.L && CMP.L.run, r: CMP.R && CMP.R.run, title: cmpHeadTitle() } : null, mg: MG.kind === "mg" ? (MG.src.split("#")[1] || "") : "", alert: ALERTM() ? ((typeof Alerts !== "undefined" && Alerts.titleText && Alerts.titleText()) || "All Alerts") : "", pass: PF.run, passRows: PF.rows ? PF.rows.length : 0,
   pfL: F.h.pfL ? { x: F.h.pfL.x, y0: F.h.pfL.y0, w: F.h.pfL.w, rh: F.h.pfL.rh, names: F.h.pfL.names } : null, W: F.h.W, fr: { v: getFr("v"), h: getFr("h") } });
 })();
