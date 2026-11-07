@@ -41,8 +41,9 @@ const saveMode = (m) => { try { sessionStorage.setItem("studio:mode", m); } catc
 const MG_KINDS = ["obs", "pass", "wafc", "alert", "cmp", "web"];
 const MG = { on: !CLEAN && ["mg", ...MG_KINDS].includes(MODE0), kind: MG_KINDS.includes(MODE0) ? MODE0 : "mg", img: null, src: "" };
 // 11-04 (t2310u/t2311u "my fancy Washington forecast maps ... into studio view", own tab): MG.kind "wafc" = the WA Maps page (wamaps.html: the
-// posted-style NBM lows / highs, gusts (HRRR / ECMWF / ENS / NBM), precip, snow) in a small panel iframe; its finished map canvas is fitted whole
-// into each frame at 2x (PSS). The map carries its own title, scale, logo and credits, so Studio adds nothing on top.
+// posted-style NBM lows / highs, gusts, precip, snow) in a small panel iframe. Each frame crops that canvas with the same
+// framing as the other Studio products (getFr / setFr, separate portrait and landscape, zoom bar, drag, reset). Drawn at 2x (PSS)
+// so Save PNG stays 2160x3840 / 3840x2160. The map carries its own title, scale, logo and credits, so Studio adds nothing on top.
 const WAFCM = () => MG.on && MG.kind === "wafc";
 const PASSM = () => MG.on && MG.kind === "pass";
 const PF = { run: "", rows: null, msg: "" };
@@ -94,7 +95,9 @@ function stateRect(V, m) {   // Washington's box in the wide view's figure px: t
 }
 function mgBase(k) {   // meteogram: whole chart fitted inside the frame (9:16: centred a little above the middle)
   if (OBSM() || ALERTM()) { const f = F[k], iw = IW(MG.img), ih = IH(MG.img); return { cx: iw / 2, cy: ih / 2, k0: Math.max(f.W / iw, f.H / ih) }; }   // obs/alert: cover — map fills the frame
-  const f = F[k], im = MG.img, iw = im.naturalWidth, ih = im.naturalHeight, padX = f.pad * 0.5, top = k === "v" ? 200 : 60, bot = k === "v" ? 200 : 70;
+  const f = F[k], iw = IW(MG.img), ih = IH(MG.img);
+  if (WAFCM()) { const k0 = Math.min(f.W / iw, f.H / ih); return { cx: iw / 2, cy: ih / 2, k0 }; }   // WA forecast: whole map centred; zoom 1 is that fit
+  const padX = f.pad * 0.5, top = k === "v" ? 200 : 60, bot = k === "v" ? 200 : 70;
   const k0 = Math.min((f.W - 2 * padX) / iw, (f.H - top - bot) / ih);
   return { cx: iw / 2, cy: ih / 2 - ((top + (f.H - bot)) / 2 - f.H / 2) / k0, k0 };
 }
@@ -156,10 +159,10 @@ function crop(k, fr) {   // source rect (map bitmap px) for frame k: base camera
     const cx = cl(B.cx - (fr.dx || 0) / kk, hw, iw - hw), cy = cl(B.cy - (fr.dy || 0) / kk, hh, ih - hh);
     return { kk, cx, cy, bx: B.cx, by: B.cy, sx: 0, sy: 0, sw: F[k].W / kk, sh: F[k].H / kk, px: 0, py: 0, pw: iw, ph: ih, rs: 1 };
   }
-  if (MG.on && MG.img) {   // meteogram: pan freely while some of the chart stays in the frame
-    const B = base(k), kk = B.k0 * Math.max(1, fr.zoom || 1), im = MG.img, cl = (v, a, b) => Math.min(b, Math.max(a, v));
-    const cx = cl(B.cx - (fr.dx || 0) / kk, -F[k].W / kk / 2 + 40 / kk, im.naturalWidth + F[k].W / kk / 2 - 40 / kk), cy = cl(B.cy - (fr.dy || 0) / kk, -F[k].H / kk / 2 + 40 / kk, im.naturalHeight + F[k].H / kk / 2 - 40 / kk);
-    return { kk, cx, cy, bx: B.cx, by: B.cy, sx: 0, sy: 0, sw: F[k].W / kk, sh: F[k].H / kk, px: 0, py: 0, pw: im.naturalWidth, ph: im.naturalHeight, rs: 1 };
+  if (MG.on && MG.img) {   // meteogram / WA forecast: pan freely while some of the chart stays in the frame
+    const B = base(k), kk = B.k0 * Math.max(1, fr.zoom || 1), iw = IW(MG.img), ih = IH(MG.img), cl = (v, a, b) => Math.min(b, Math.max(a, v));
+    const cx = cl(B.cx - (fr.dx || 0) / kk, -F[k].W / kk / 2 + 40 / kk, iw + F[k].W / kk / 2 - 40 / kk), cy = cl(B.cy - (fr.dy || 0) / kk, -F[k].H / kk / 2 + 40 / kk, ih + F[k].H / kk / 2 - 40 / kk);
+    return { kk, cx, cy, bx: B.cx, by: B.cy, sx: 0, sy: 0, sw: F[k].W / kk, sh: F[k].H / kk, px: 0, py: 0, pw: iw, ph: ih, rs: 1 };
   }
   const f = F[k], { cv, cur } = last, rs = cv._rs || 1, [px, py, pw, ph] = cur.V.panel, B = base(k);
   const kk = B.k0 * Math.max(1, fr.zoom || 1), sw = f.W / kk, sh = f.H / kk;
@@ -599,12 +602,14 @@ function renderPass(k) {
   o.restore(); ovPut(c0, f, k); if (cnr) cornerLogo(c0, cnr);
   window.__studio = (window.__studio || 0) + 1; window.__studioPass = (window.__studioPass || 0) + 1;
 }
-function renderWafc(k) {
-  const f = F[k]; ssFit(f, PSS); const c = f.cv.getContext("2d"); f.zoom.min = "100"; f.zoom.max = "250"; f.zoom.value = "100";
+function renderWafc(k, frO) {
+  const f = F[k]; ssFit(f, PSS); const c = f.cv.getContext("2d"), fr = frO || getFr(k);   // portrait and landscape keep their own framing (studio:v:wafc / studio:h:wafc)
+  if (!frO) { f.zoom.min = "100"; f.zoom.max = "250"; f.zoom.value = Math.round((fr.zoom || 1) * 100); }
   c.setTransform(PSS, 0, 0, PSS, 0, 0); c.clearRect(0, 0, f.W, f.H); c.fillStyle = BG === "transparent" ? "#111316" : BG; c.fillRect(0, 0, f.W, f.H);
   const im = MG.img; if (!im) { c.font = `700 ${k === "v" ? 40 : 34}px Montserrat`; c.fillStyle = "#c9ced8"; c.textAlign = "center"; c.fillText(MG.msg || "Loading the WA forecast map\u2026", f.W / 2, f.H / 2); c.textAlign = "left"; return; }
-  const s = Math.min(f.W / im.width, f.H / im.height), w = im.width * s, h = im.height * s;   // whole map (title to credits), centered
-  c.imageSmoothingEnabled = true; c.imageSmoothingQuality = "high"; c.drawImage(im, (f.W - w) / 2, (f.H - h) / 2, w, h);
+  const r = crop(k, fr);   // same camera as the other products; zoom 1 still fits the whole map (mgBase)
+  c.imageSmoothingEnabled = true; c.imageSmoothingQuality = "high";
+  c.drawImage(im, f.W / 2 - r.cx * r.kk, f.H / 2 - r.cy * r.kk, IW(im) * r.kk, IH(im) * r.kk);
   window.__studio = (window.__studio || 0) + 1; window.__studioWafc = (window.__studioWafc || 0) + 1;
 }
 function webNormalize(raw) {
@@ -809,7 +814,7 @@ function renderCmp(k) {
 function renderMg(k, frO) {
   if (WEBM()) return renderWeb(k, frO);
   if (CMPM()) return renderCmp(k);
-  if (WAFCM()) return renderWafc(k);
+  if (WAFCM()) return renderWafc(k, frO);
   if (ALERTM()) return renderAlert(k, frO);
   if (OBSM()) return renderObs(k, frO);
   if (PASSM()) return renderPass(k);
@@ -961,7 +966,8 @@ for (const k of ["v", "h"]) {
     const hit = pinHit(k, cv, e); if (hit) { e.preventDefault(); cv.setPointerCapture(e.pointerId); PD = { k, n: hit, id: e.pointerId, off: pinOff(k, cv, e, hit) }; cv.classList.add("pindrag"); return; }
     if (e.pointerType === "touch" && (S.dragging || !e.isPrimary)) return;   // 11-03: a second finger, or a finger while the scrubber is held: no frame drag
     cv.setPointerCapture(e.pointerId); cv.focus({ preventScroll: true }); cv.classList.add("drag"); d = { x: e.clientX, y: e.clientY, fr: getFr(k), id: e.pointerId }; });
-  if (MG.on) cv.addEventListener("pointerdown", (e) => { if (!CLEAN && !last && MG.img) { cv.setPointerCapture(e.pointerId); cv.focus(); cv.classList.add("drag"); d = { x: e.clientX, y: e.clientY, fr: getFr(k) }; } });
+  const mgDragAtStart = MG.on;   // a mode opened later (WA forecast) still drags; modes that already dragged keep doing so
+  cv.addEventListener("pointerdown", (e) => { if (!CLEAN && !last && MG.img && (mgDragAtStart || WAFCM())) { cv.setPointerCapture(e.pointerId); cv.focus(); cv.classList.add("drag"); d = { x: e.clientX, y: e.clientY, fr: getFr(k), id: e.pointerId }; } });
   cv.addEventListener("pointermove", (e) => { if (PD && PD.k === k && PD.id === e.pointerId) { pinMove(k, cv, e); return; }
     if (!d && !PD && PIN.show && !PIN.mode && e.pointerType === "mouse") cv.style.cursor = pinHit(k, cv, e) ? "grab" : "";
     if (!d || pz || (d.id !== undefined && e.pointerId !== d.id)) return; const s = f.W / cv.clientWidth, fr = getFr(k);
@@ -990,7 +996,7 @@ for (const k of ["v", "h"]) {
     // screen (e.touches), so a finger on the hour scrubber (or the other frame, a button, ...) plus one resting on this frame was taken
     // as a pinch and zoomed the frame as the scrubber finger moved. Only a real two-finger pinch on this frame zooms it now
     // (targetTouches = fingers that started on this canvas, and no other finger on the screen).
-    if (CLEAN || REC.on || PIN.mode || CMPM() || (!last && !WEBM()) || e.targetTouches.length !== 2 || e.touches.length !== 2) { if (pz && e.targetTouches.length !== 2) pz = null; return; }
+    if (CLEAN || REC.on || PIN.mode || CMPM() || (!last && !WEBM() && !(WAFCM() && MG.img)) || e.targetTouches.length !== 2 || e.touches.length !== 2) { if (pz && e.targetTouches.length !== 2) pz = null; return; }
     cv._alertPinch = 1;
     e.preventDefault(); d = null;
     const [a, b] = [oxy(e.targetTouches[0]), oxy(e.targetTouches[1])], fr0 = getFr(k), r0 = crop(k, fr0), ox = (a[0] + b[0]) / 2, oy = (a[1] + b[1]) / 2;
@@ -1019,7 +1025,7 @@ for (const k of ["v", "h"]) {
   }, true);
   f.zoom.oninput = () => { const fr = getFr(k); if (CMPM()) { f.zoom.value = "100"; return; } if (OBSM()) obsZoom(k, fr, f.zoom.value / 100); else if (ALERTM()) { fr.zoom = alertZ(f.zoom.value / 100); } else { fr.zoom = Math.max(1, f.zoom.value / 100); } setFr(k, fr); render(k); };
   cv.parentNode.querySelector(".shd").addEventListener("click", async (e) => {
-    const a = e.target.closest("button[data-a]"); if (!a || (!last && !WEBM() && !CMPM())) return;
+    const a = e.target.closest("button[data-a]"); if (!a || (!last && !WEBM() && !CMPM() && !WAFCM())) return;
     if (a.dataset.a === "reset") { if (ALERTM() && typeof Alerts !== "undefined") { if (Alerts.fitToSelection) Alerts.fitToSelection(); else if (Alerts._state) { Alerts._state.k = 1; Alerts.redraw(); } } if (OBSM() && typeof Obs !== "undefined" && Obs._state && OZ.sub < 1) { ozSync(); Obs._state.k = OZ.ref; OZ.sub = 1; Obs.redraw(); } setFr(k, { dx: 0, dy: 0, zoom: 1 }); if (ALERTM() && f.zoom) f.zoom.value = "100"; render(k); }
     if (a.dataset.a === "mp4" && (!MG.on || OBSM() || CMPM())) openMp4(k);
     if (a.dataset.a === "png" && ALERTM()) { if (!MG.img) return; const I = alertInfo(), st = I && I.t ? new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(I.t).replace(/[^0-9]/g, "") : "now";
