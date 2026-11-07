@@ -617,11 +617,20 @@ function webNormalize(raw) {
   if (!/^https?:\/\//i.test(s)) s = "https://" + s;
   try { const u = new URL(s); if (u.protocol !== "http:" && u.protocol !== "https:") return ""; return u.toString(); } catch (e) { return ""; }
 }
-// 11-07 (Benjamin t2692u): Interact | Frame. Interact lets clicks, scrolling and typing reach the page (frame drag off); Frame is drag-to-frame. Zoom bar works in both.
-function webMode(on) { document.body.classList.toggle("webint", !!on); const b = document.getElementById("webint"); if (b) { b.textContent = on ? "Interact" : "Frame"; b.title = on ? "Using the page. Click for Frame (drag to frame)" : "Dragging to frame. Click for Interact (use the page)"; b.setAttribute("aria-pressed", on ? "true" : "false"); } }
+// 11-07 (Benjamin t2692u, t2693u): the page is always live (click, scroll, type); the grab bar on top of each web frame drags the framing
+// (same fr state as canvas drag). Pointer capture on the bar + iframe pointer-events off during the drag (body.webdrag) so it never loses the drag.
+function webGrip(k, bar) {
+  let d = null;
+  bar.addEventListener("pointerdown", (e) => { if (!WEBM() || REC.on) return; e.preventDefault(); bar.setPointerCapture(e.pointerId); document.body.classList.add("webdrag"); d = { x: e.clientX, y: e.clientY, fr: getFr(k), id: e.pointerId }; });
+  bar.addEventListener("pointermove", (e) => { if (!d || e.pointerId !== d.id) return; const f = F[k], s = f.W / (f.cv.clientWidth || 1), fr = getFr(k);
+    fr.dx = d.fr.dx + (e.clientX - d.x) * s; fr.dy = d.fr.dy + (e.clientY - d.y) * s;
+    const r = crop(k, fr); fr.dx = (r.bx - r.cx) * r.kk; fr.dy = (r.by - r.cy) * r.kk; setFr(k, fr); render(k); });
+  const up = () => { d = null; document.body.classList.remove("webdrag"); };
+  bar.addEventListener("pointerup", up); bar.addEventListener("pointercancel", up); bar.addEventListener("lostpointercapture", up);
+}
 function webHide() { for (const k of ["v", "h"]) if (F[k].web) F[k].web.hidden = true; }
 function webApply(url) {
-  WEB.url = url || ""; if (url) webMode(true); try { if (url) localStorage.setItem("studio:weburl", url); } catch (e) { /* private */ }
+  WEB.url = url || ""; try { if (url) localStorage.setItem("studio:weburl", url); } catch (e) { /* private */ }
   for (const k of ["v", "h"]) { const ifr = F[k].web && F[k].web.querySelector("iframe"); if (ifr && ifr.getAttribute("src") !== (url || "about:blank")) ifr.src = url || "about:blank"; }
   if (WEBM()) renderAll();
 }
@@ -1877,6 +1886,7 @@ if (!CLEAN) {   // Studio: Map | Meteogram switch (first in the menu bar) + the 
     else if (!dn && m_ && /Could not|No /.test(m_.textContent) && MG.msg !== m_.textContent) { MG.msg = m_.textContent; renderAll(); } } catch (e) { /* iframe loading */ } };
   for (const k of ["v", "h"]) { const ov = document.createElement("div"); ov.className = "webov"; ov.hidden = true;
     const ifr = document.createElement("iframe"); ifr.title = k === "v" ? "Web page, 9:16" : "Web page, 16:9"; ifr.setAttribute("referrerpolicy", "no-referrer"); ov.appendChild(ifr);
+    const bar = document.createElement("div"); bar.className = "webgrip"; bar.title = "Drag to move the page in the frame"; bar.textContent = "⠇⠇ drag to move"; ov.appendChild(bar); webGrip(k, bar);
     F[k].cv.parentNode.appendChild(ov); F[k].web = ov; }
   addEventListener("scroll", () => { if (WEBM()) { placeWeb("v"); placeWeb("h"); } }, true);
   const stopMainPlay = () => { if (S.timer) { clearInterval(S.timer); S.timer = null; const b = document.getElementById("play"); if (b) b.textContent = "Play"; } };
@@ -1897,18 +1907,17 @@ if (!CLEAN) {   // Studio: Map | Meteogram switch (first in the menu bar) + the 
   const setMode = (mode) => {
     if (mode !== "web") webHide();
     if (mode !== "cmp" && CMP.play) { clearInterval(CMP.play); CMP.play = 0; const b = document.getElementById("play"); if (b && b.textContent === "Stop") b.textContent = "Play"; }
-    document.body.classList.remove("cmpmode", "webmode", "webint");
+    document.body.classList.remove("cmpmode", "webmode", "webdrag");
     if (mode === "web") {
       MG.on = true; MG.kind = "web"; MG.img = null; MG.msg = ""; saveMode("web"); clearInterval(poll); stopMainPlay();
       document.body.classList.remove("mgmode", "obsmode", "passmode", "alertmode", "wafcmode"); document.body.classList.add("webmode");
       if (typeof Obs !== "undefined" && Obs.hide) Obs.hide(); if (typeof Alerts !== "undefined" && Alerts.hide) Alerts.hide();
       PIN.show = false; PIN.mode = null;
       if (!document.getElementById("webp")) { const wp = document.createElement("div"); wp.id = "webp";
-        wp.innerHTML = `<label>Page <input id="weburl" type="url" inputmode="url" placeholder="https://example.com" spellcheck="false" autocomplete="url"></label><button type="button" id="webgo">Open</button><button type="button" id="webint" aria-pressed="true">Interact</button><span class="mp-note">If this stays blank, the site probably doesn't allow embedding.</span>`;
+        wp.innerHTML = `<label>Page <input id="weburl" type="url" inputmode="url" placeholder="https://example.com" spellcheck="false" autocomplete="url"></label><button type="button" id="webgo">Open</button><span class="mp-note">If this stays blank, the site probably doesn't allow embedding.</span>`;
         pnl.appendChild(wp);
         const go = () => { const inp = document.getElementById("weburl"), u = webNormalize(inp.value); if (!u) return; inp.value = u; webApply(u); };
         document.getElementById("webgo").onclick = go;
-        document.getElementById("webint").onclick = () => webMode(!document.body.classList.contains("webint"));
         document.getElementById("weburl").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); go(); } });
         document.getElementById("weburl").addEventListener("change", go);
         let saved = ""; try { saved = localStorage.getItem("studio:weburl") || ""; } catch (e) { /* private */ }
