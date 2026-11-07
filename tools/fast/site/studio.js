@@ -189,7 +189,7 @@ function sharpShadow(c, k) { const z = ctxS(c); c.shadowColor = "rgba(0,0,0,0.92
 // with a soft short falloff shadow: sharp core + gentle fade, one pass, so overlapping glyph shadows never stack up into smudges.
 function ovLayer(f) { const o = f.ov || (f.ov = document.createElement("canvas")), z = f.ss || 1; if (o.width !== f.W * z || o.height !== f.H * z) { o.width = f.W * z; o.height = f.H * z; }
   const oc = o.getContext("2d"); oc.setTransform(z, 0, 0, z, 0, 0); oc.clearRect(0, 0, f.W, f.H); return oc; }
-function ovPut(c, f, k) { const z = ctxS(c); c.save(); c.shadowColor = "rgba(0,0,0,0.55)"; c.shadowBlur = (k === "v" ? 14 : 12) * z; c.shadowOffsetX = 0; c.shadowOffsetY = (k === "v" ? 2 : 1.5) * z;
+function ovPut(c, f, k) { const z = ctxS(c); c.save(); c.shadowColor = "rgba(0,0,0,0.55)"; c.shadowBlur = (k === "v" ? 4 : 3) * z; c.shadowOffsetX = 0; c.shadowOffsetY = (k === "v" ? 0.5 : 0.4) * z;
   c.drawImage(f.ov, 0, 0, f.W, f.H); c.restore(); }
 function noShadow(c) { c.shadowColor = "rgba(0,0,0,0)"; c.shadowBlur = 0; c.shadowOffsetX = 0; c.shadowOffsetY = 0; }
 function pill(c, x, y, txt, size, bg, fg) {
@@ -830,11 +830,11 @@ function renderMg(k, frO) {
   window.__studio = (window.__studio || 0) + 1; window.__studioMg = (window.__studioMg || 0) + 1;
 }
 async function render(k, frO) {   // frO: camera override (MP4 storm-track pan)
-  ssFit(F[k], PASSM() || WAFCM() ? PSS : 1);   // 11-04 (t2295u): Pass Forecaster draws at 2x; every other mode stays at native frame px
+  ssFit(F[k], (!MG.on || PASSM() || WAFCM()) ? (REC.flat ? 1 : PSS) : 1);   // model maps, Pass, and WA forecast: 2x backing so text is rasterized at the export size
   if (MG.on) return renderMg(k, frO);
   if (!last) return; const f = F[k], c0 = f.cv.getContext("2d"), fr = frO || getFr(k), { cv, cur, step } = last, P = cur.P, [m] = cur.run.split("/"); let c = c0;
   if (!frO) { f.zoom.min = "100"; f.zoom.max = "250"; f.zoom.value = Math.round((fr.zoom || 1) * 100); }
-  c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, f.W, f.H);
+  const z = f.ss || 1; c.setTransform(z, 0, 0, z, 0, 0); c.clearRect(0, 0, f.W, f.H);
   if (BG !== "transparent") { c.fillStyle = BG; c.fillRect(0, 0, f.W, f.H); }
   const r = crop(k, fr); c.imageSmoothingEnabled = true; c.imageSmoothingQuality = last.lite ? "low" : "high";   // lite: slider drag frame (RS 1 map)
   {   // only the map panel part of the source (the wide view can show past the panel's edges: background there)
@@ -1045,7 +1045,7 @@ for (const k of ["v", "h"]) {
     if (a.dataset.a === "png" && MG.on) { if (!MG.img) return; const nm = `meteogram_${(MG.src.split("#")[1] || "").replace(/[^a-z0-9=&_-]/gi, "").replace(/[=&]/g, "_")}_${k === "v" ? "1080x1920" : "1920x1080"}.png`;
       cv.toBlob((b) => { const u = URL.createObjectURL(b), l = document.createElement("a"); l.href = u; l.download = nm; l.click(); setTimeout(() => URL.revokeObjectURL(u), 4000); }, "image/png"); return; }
     if (MG.on && a.dataset.a !== "reset") return;   // MP4 / OBS: maps only
-    if (a.dataset.a === "png") { const st = last.step, nm = `${last.cur.run.replace("/", "_")}_${last.cur.pid}_${S.view}_f${String(st.f).padStart(3, "0")}_${k === "v" ? "1080x1920" : "1920x1080"}.png`;
+    if (a.dataset.a === "png") { const st = last.step, nm = `${last.cur.run.replace("/", "_")}_${last.cur.pid}_${S.view}_f${String(st.f).padStart(3, "0")}_${cv.width}x${cv.height}.png`;
       cv.toBlob((b) => { const u = URL.createObjectURL(b), l = document.createElement("a"); l.href = u; l.download = nm; l.click(); setTimeout(() => URL.revokeObjectURL(u), 4000); }, "image/png"); }
     if (a.dataset.a === "obs") { const fr = getFr(k), [m] = last.cur.run.split("/"), u = new URL("studio.html", location.href);
       u.search = new URLSearchParams({ clean: "1", out: k, model: m, prod: last.cur.pid, view: S.view, f: String(last.step.f), dx: fr.dx.toFixed(1), dy: fr.dy.toFixed(1), zoom: (fr.zoom || 1).toFixed(2), play: "1", dwell: "700", loop: "1" }).toString();
@@ -1059,7 +1059,7 @@ for (const k of ["v", "h"]) {
 // mp4-muxer (vendor/, MIT) at a constant 30 fps (each map is held for 30/speed frames). Browsers without WebCodecs fall back to
 // MediaRecorder on the frame canvas (real time; MP4 where the browser offers it, otherwise WebM). Track mode: pins A and B are
 // stored in map coordinates per view; the camera starts on A and eases (smoothstep) to B over the loop while the hours advance.
-const REC = { on: false, cancel: false }, PIN = { mode: null, show: false }, FPS = 30;
+const REC = { on: false, cancel: false, flat: false }, PIN = { mode: null, show: false }, FPS = 30;
 const TRK = { list: [], sel: -1, run: null, view: null };   // storm finder tracks (see findStorms)
 const $s = (id) => document.getElementById(id), sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const lerp = (a, b, t) => a + (b - a) * t, ease = (t) => t * t * (3 - 2 * t);
@@ -1225,9 +1225,11 @@ function mpMode() { if (CMPM() && $s("mpmode").value === "pan") $s("mpmode").val
 let muxP = null;
 const loadMuxer = () => muxP || (muxP = new Promise((res, rej) => { const sc = document.createElement("script"); sc.src = "vendor/mp4-muxer.js?v=522"; sc.onload = res; sc.onerror = () => { muxP = null; rej(new Error("could not load the MP4 writer")); }; document.head.appendChild(sc); }));
 async function makeEncoder(cv, W, H) {
+  W = (cv && cv.width) || W; H = (cv && cv.height) || H;
+  const big = W * H > 1080 * 1920 * 1.5;   // 2x model frames need H.264 level 5.1; keep the queue short so 8 MP frames don't pile up
   if (window.VideoEncoder && window.VideoFrame) {
-    for (const codec of ["avc1.640028", "avc1.4d0028", "avc1.42002a"]) {   // H.264 High / Main / Baseline, level 4.x (1080x1920 @ 30)
-      const cfg = { codec, width: W, height: H, bitrate: 10e6, framerate: FPS, avc: { format: "avc" } };
+    for (const codec of (big ? ["avc1.640033", "avc1.640034", "avc1.640028", "avc1.4d0028", "avc1.42002a"] : ["avc1.640028", "avc1.4d0028", "avc1.42002a"])) {
+      const cfg = { codec, width: W, height: H, bitrate: big ? 14e6 : 10e6, framerate: FPS, avc: { format: "avc" } };
       let ok = false; try { ok = (await VideoEncoder.isConfigSupported(cfg)).supported; } catch (e) { /* next */ }
       if (!ok) continue;
       await loadMuxer();
@@ -1235,7 +1237,7 @@ async function makeEncoder(cv, W, H) {
       let err = null; const ve = new VideoEncoder({ output: (ch, meta) => mux.addVideoChunk(ch, meta), error: (e) => { err = e; } });
       ve.configure(cfg);
       return { how: `H.264 (${codec}) via WebCodecs`, ext: "mp4",
-        async add(n) { if (err) throw err; while (ve.encodeQueueSize > 4) await sleep(4);
+        async add(n) { if (err) throw err; while (ve.encodeQueueSize > (big ? 2 : 4)) await sleep(4);
           const vf = new VideoFrame(cv, { timestamp: Math.round(n * 1e6 / FPS), duration: Math.round(1e6 / FPS) }); ve.encode(vf, { keyFrame: n % (2 * FPS) === 0 }); vf.close(); },
         async done() { await ve.flush(); if (err) throw err; ve.close(); mux.finalize(); return new Blob([mux.target.buffer], { type: "video/mp4" }); },
         abort() { try { ve.close(); } catch (e) { /* closed */ } } };
@@ -1325,7 +1327,9 @@ async function makeMp4() {
   const run = S.run, keep = S.i, t0 = performance.now(); let enc = null;
   REC.on = true; REC.cancel = false; PLAY.on = false; window.__vjNoJump = true;   // a video never repeats hours: missing hours keep the previous map $s("mpout").hidden = true; $s("mpgo").disabled = true; $s("mpstop").hidden = false; document.body.classList.add("rec");
   try {
-    enc = await makeEncoder(f.cv, f.W, f.H); const totN = Math.round(T[idx.length] * FPS) + holdN, pg = $s("mpprog"); pg.hidden = false; pg.value = 0;
+    try { enc = await makeEncoder(f.cv, f.cv.width, f.cv.height); }
+    catch (e) { if ((f.ss || 1) > 1) { REC.flat = true; ssFit(f, 1); await render(k); enc = await makeEncoder(f.cv, f.cv.width, f.cv.height); } else throw e; }
+    const totN = Math.round(T[idx.length] * FPS) + holdN, pg = $s("mpprog"); pg.hidden = false; pg.value = 0;
     S.i = idx[0]; $("step").value = idx[0]; await draw(); await sleep(500); await draw();   // let this view's sharp (x2) layers land first
     let n = 0, cardN = 0;
     if (BR.card) {   // title card: 1.5 s, fading out over the first map in the last 0.5 s (the loop timing starts after it)
@@ -1350,13 +1354,13 @@ async function makeMp4() {
       }
     }
     pg.value = 1; mpSt("Finishing\u2026"); const how = enc.how, blob = await enc.done(); enc = null;
-    const nm = `${run.replace("/", "_")}_${last.cur.pid}_${S.view}_F${steps[idx[0]].f}-F${steps[idx[idx.length - 1]].f}_${k === "v" ? "1080x1920" : "1920x1080"}${pan ? "_track" : ""}.${blob.type.includes("mp4") ? "mp4" : "webm"}`;
+    const nm = `${run.replace("/", "_")}_${last.cur.pid}_${S.view}_F${steps[idx[0]].f}-F${steps[idx[idx.length - 1]].f}_${f.cv.width}x${f.cv.height}${pan ? "_track" : ""}.${blob.type.includes("mp4") ? "mp4" : "webm"}`;
     const u = URL.createObjectURL(blob), v = $s("mpv"), dl = $s("mpdl"); if (v.dataset.u) URL.revokeObjectURL(v.dataset.u); v.dataset.u = u; v.src = u; dl.href = u; dl.download = nm;
     const file = new File([blob], nm, { type: blob.type }); $s("mpshare").hidden = !(navigator.canShare && navigator.canShare({ files: [file] })); $s("mpshare").onclick = () => navigator.share({ files: [file] }).catch(() => {});
     n += cardN; $s("mpout").hidden = false; window.__mp4 = { name: nm, pan: pan ? { follow: trk ? "track" : "pins", a: pins.a, b: pins.b } : null, bytes: blob.size, frames: n, seconds: n / FPS, branded: !!(BR.card || BR.lower), corner: !!(BR.corner && LOGOS[BR.logo]) ? BR.cpos : null, how, ms: Math.round(performance.now() - t0), blob };
     mpSt(`Done: ${(blob.size / 1e6).toFixed(1)} MB, ${(n / FPS).toFixed(1)} s, made in ${((performance.now() - t0) / 1000).toFixed(0)} s`);
   } catch (e) { if (enc) enc.abort(); mpSt(e.message === "stopped" ? "Stopped." : "Could not make the video: " + (e.message || e)); window.__mp4 = { error: String(e.message || e) }; }
-  finally { REC.on = false; window.__vjNoJump = false; $s("mpgo").disabled = false; $s("mpstop").hidden = true; $s("mpprog").hidden = true; document.body.classList.remove("rec"); if (S.run === run) { S.i = keep; $("step").value = keep; } draw(); }
+  finally { REC.on = false; REC.flat = false; window.__vjNoJump = false; $s("mpgo").disabled = false; $s("mpstop").hidden = true; $s("mpprog").hidden = true; document.body.classList.remove("rec"); if (S.run === run) { S.i = keep; $("step").value = keep; } draw(); }
 }
 // Observations MP4 (11-03, t2192u "A to B camera"): one live map, the camera eases pin A -> pin B (Pan mode) and / or Start -> End zoom
 // over the chosen length, then holds; same encoder, branding and 30 fps as the map loops
@@ -2021,6 +2025,7 @@ if (!CLEAN) {
   fitFrames();
 }
 // 11-04 (t2335u guard): read-only state for the refresh regression test (refresh_test.py): what each frame shows right now
+window.__studioSharp = { PSS, ssFit, ovPut, sharpShadow, colorbar, ctxS, F };
 window.__studioQA = () => ({ mode: PASSM() ? "pass" : MG.on ? MG.kind : "map", web: WEBM() ? WEB.url : "", cmp: CMPM() ? { l: CMP.L && CMP.L.run, r: CMP.R && CMP.R.run, title: cmpHeadTitle() } : null, mg: MG.kind === "mg" ? (MG.src.split("#")[1] || "") : "", alert: ALERTM() ? ((typeof Alerts !== "undefined" && Alerts.titleText && Alerts.titleText()) || "All Alerts") : "", pass: PF.run, passRows: PF.rows ? PF.rows.length : 0,
   pfL: F.h.pfL ? { x: F.h.pfL.x, y0: F.h.pfL.y0, w: F.h.pfL.w, rh: F.h.pfL.rh, names: F.h.pfL.names } : null, W: F.h.W, fr: { v: getFr("v"), h: getFr("h") } });
 })();
