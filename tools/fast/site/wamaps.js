@@ -8,7 +8,7 @@
 const DATA = window.WX_DATA || "data/", KIT = "wamaps/kit/", $ = id => document.getElementById(id), Q = new URLSearchParams(location.search);
 const WA = { man: null, runs: {}, fields: new Map(), kits: {}, imgs: {} };
 const VIEWS = [["full", "Washington"], ["west", "Western WA"], ["east", "Eastern WA"]];
-const KINDS = [["low", "Lows"], ["high", "Highs"], ["gust", "Wind gusts"], ["precip", "Precip total"], ["snow", "Snow total"]];
+const KINDS = [["low", "Lows"], ["high", "Highs"], ["gust", "Max gust"], ["precip", "Precip total"], ["snow", "Snow total"]];
 // WA Maps quick slice (10-31-26 12:35 PM, Benjamin: "add most recent European data, and hrrr", "precipitation totals, let me choose the time
 // frame in little boxes with dates and time in UT", snow, "go out like 7 days"): totals from NBM / ECMWF 9 km / ECMWF 0.25 / HRRR, window
 // picked in two UTC boxes, capped at 168 h. Lows / highs stay NBM. Kit extras from wamaps/build_totals_kit.py (per-model LUT + label points,
@@ -19,6 +19,8 @@ const SRC = { nbm: { tag: "[NBM 2.5 km]", name: "NBM", res: "NBM 2.5 km", kinds:
               ifs: { tag: "[ECMWF 0.25°]", name: "ECMWF 0.25°", res: "ECMWF IFS 0.25°", ec: 1, kinds: ["precip", "snow", "gust"] },
               eps: { tag: "[ECMWF ENS]", name: "ECMWF ENS mean", res: "ECMWF ENS mean 0.25°", ec: 1, lut: "ifs", kinds: ["gust"] },
               hrrr: { tag: "[HRRR 3 km]", name: "HRRR", res: "HRRR 3 km", kinds: ["precip", "snow", "gust"] } };
+// Western WA gusts: HRRR and the standard NBM 10 m gust only (both instantaneous at the valid hour, maxed over the
+// window below). No ensemble (EPS) and no IFS in that menu. Full state and Eastern WA keep their gust sources.
 const lutOf = m => (SRC[m] && SRC[m].lut) || m;
 const TOTALS = new Set(["precip", "snow", "gust"]), MAXH = 168;
 const PT = "America/Los_Angeles", DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -128,6 +130,18 @@ function totalTimes(R_, m, kind) {
   return out.map(f => ({ f, ms: t0 + f * 3600e3 }));
 }
 const ptHr = ms => { const h = +ptParts(ms).hour; return `${h % 12 || 12} ${h < 12 ? "AM" : "PM"}`; };
+// West view gust menu: only models in this list (HRRR, standard NBM). Other views keep every id passed in.
+function gustModels(view, ids) { return view === "west" ? ids.filter(m => m === "hrrr" || m === "nbm") : ids.slice(); }
+// Hours that enter a window max. instantaneous (HRRR GUST, NBM GUST:10 m): each encoded step whose valid hour is inside
+// [f0, f1]; a missing hour is skipped, never filled. Period max (IFS / EPS 10fg): keep a step when its interval starts at
+// or after f0 and ends by f1. No step inside the window (run still arriving): the next step at or after f1, else the last step.
+function gustSteps(st, f0, f1, instantaneous) {
+  const fs = [];
+  st.forEach((s, i) => { const prev = i ? st[i - 1].f : 0, hourly = s.f - prev <= 1; if (s.f <= f1 && (instantaneous || hourly ? s.f >= f0 : prev >= f0)) fs.push(s.f); });
+  if (!fs.length && st.length) { const nx = st.find(s => s.f >= f1) || st[st.length - 1]; fs.push(nx.f); }
+  return fs;
+}
+function gustWindowLabel(w) { return `Max gust over ${ptHr(w.ms0)} to ${ptHr(w.ms1)} ${w.day} ${w.md}`; }
 const ptLbl = ms => { const p = ptParts(ms); return `${p.weekday.slice(0, 3)} ${p.month}-${p.day} ${ptHr(ms)} PT`; };
 const utcLbl = ms => { const d = new Date(ms); return `${DAYS[d.getUTCDay()].slice(0, 3)} ${d.getUTCMonth() + 1}-${d.getUTCDate()} ${String(d.getUTCHours()).padStart(2, "0")}Z`; };
 async function totalField(m, c, kind, f0, f1) {
@@ -135,10 +149,8 @@ async function totalField(m, c, kind, f0, f1) {
   const p = (async () => {
     const rk = rkey(m, c), R_ = WA.runs[rk], fld = PRODUCTS[kind].field[m] || PRODUCTS[kind].field.def;
     if (!R_ || !R_.steps) throw new Error("run not loaded");
-    if (PRODUCTS[kind].max) {   // gusts: max over the steps whose period lies in the window (hourly: valid f0..f1; 3-hourly 3 h max: previous step >= f0), as gust_map.py
-      const st = R_.steps.filter(s => s.ranges[fld]), fs = [];
-      st.forEach((s, i) => { const prev = i ? st[i - 1].f : 0, hourly = s.f - prev <= 1; if (s.f <= f1 && (hourly ? s.f >= f0 : prev >= f0)) fs.push(s.f); });
-      if (!fs.length) { const nx = st.find(s => s.f >= f1) || st[st.length - 1]; fs.push(nx.f); }
+    if (PRODUCTS[kind].max) {   // gusts: max over the window (gustSteps). HRRR / NBM are instantaneous; IFS / EPS 10fg is a period max.
+      const st = R_.steps.filter(s => s.ranges[fld]), fs = gustSteps(st, f0, f1, m === "hrrr" || m === "nbm");
       const Fs = await Promise.all(fs.map(f => getField(rk, fld, f))), o = Float32Array.from(Fs[0].v);
       for (const F of Fs.slice(1)) for (let k = 0; k < o.length; k++) if (F.v[k] > o[k]) o[k] = F.v[k];
       return { v: o, w: Fs[0].w, h: Fs[0].h, n: fs.length, fs };
@@ -302,7 +314,7 @@ async function renderTotals(cv, m, c, kind, view, w) {
   const l1 = summaryLine1(K, rv, v => pal.fmt(v), pal.unit), [s2, s1] = K.summary;
   pilText(ctx, l2, s2.x, s2.y, "rs", ["", fitPx(l2, K.sum_px[1]), 800], 4, "#fff");
   pilText(ctx, l1, s1.x, s1.y, "rs", ["", fitPx(l1, K.sum_px[0]), 800], 4, "#fff");
-  const R_ = WA.runs[rkey(m, c)], ri = Date.parse(R_.init), rp = ptParts(ri), sub = P.max ? `Max gusts ${ptHr(w.ms0)} to ${ptHr(w.ms1)} ${w.day} ${w.md}`
+  const R_ = WA.runs[rkey(m, c)], ri = Date.parse(R_.init), rp = ptParts(ri), sub = P.max ? gustWindowLabel(w)
     : `${utcLbl(w.ms0)} to ${utcLbl(w.ms1)} UTC (${w.f1 - w.f0} h) · ${SRC[m].name} ${c.slice(8)}Z run`;
   const dt = K.date[0]; pilText(ctx, sub, dt.x, dt.y, "ls", dt.font, 4, "#fff");
   let up = 0;
@@ -341,9 +353,15 @@ function setTimes() {
   fillSel($("to"), T.slice(a + 1).map(t => [ymdh(t.ms), lb(t.ms)]), S.f1);
 }
 function runsOf(m) { return [...(WA.man.runs[m] || [])].reverse(); }
+function modelIds() {
+  let xs = MODELS_T.filter(x => (WA.man.runs[x] || []).length && (!isTot() || SRC[x].kinds.includes(S.kind)));
+  if (S.kind === "gust") xs = gustModels(S.view, xs);   // west: HRRR + standard NBM only (no EPS, no IFS)
+  return xs;
+}
 async function setRun() {   // model / kind changed: run list for the model (lows / highs: NBM only)
-  if (isTot() && !SRC[S.m].kinds.includes(S.kind)) { S.m = MODELS_T.find(x => SRC[x].kinds.includes(S.kind) && (WA.man.runs[x] || []).length) || "nbm"; S.c = null; }
-  fillSel($("model"), MODELS_T.filter(x => (WA.man.runs[x] || []).length && (!isTot() || SRC[x].kinds.includes(S.kind))).map(x => [x, SRC[x].name]), S.m);
+  const ids = modelIds();
+  if (isTot() && !ids.includes(S.m)) { S.m = (S.kind === "gust" && ids.includes("hrrr") ? "hrrr" : ids[0]) || "nbm"; S.c = null; }
+  fillSel($("model"), ids.map(x => [x, SRC[x].name]), S.m);
   const m = isTot() ? S.m : "nbm", rs = runsOf(m);
   if (!rs.includes(S.c)) S.c = rs.includes(Q.get("run")) ? Q.get("run") : rs[0];
   fillSel($("run"), rs.map(c => [c, `${SRC[m].name} ${c.slice(8)}Z ${c.slice(4, 6)}-${c.slice(6, 8)}`]), S.c);
@@ -362,7 +380,7 @@ async function draw() {
     const old = $("map"); cv.id = "map"; old.replaceWith(cv); S.info = info; fit();
     const R_ = WA.runs[rkey(tot ? S.m : "nbm", S.c)];
     if (!R_) { $("msg").textContent = "Loading run\u2026"; return; }
-    $("msg").textContent = `${R_.runline} · ${tot ? (S.kind === "gust" ? `max of ${info.n} gust steps` : S.m === "nbm" ? `sum of ${info.n} NBM 6 h amounts` : "run total at the end minus at the start") : S.kind === "low" ? "min of " + info.steps.length + " t2m steps" : "NBM 12 h max"} · ${Math.round(performance.now() - t0)} ms`;
+    $("msg").textContent = `${R_.runline} · ${tot ? (S.kind === "gust" ? `max gust over ${info.n} step${info.n === 1 ? "" : "s"}` : S.m === "nbm" ? `sum of ${info.n} NBM 6 h amounts` : "run total at the end minus at the start") : S.kind === "low" ? "min of " + info.steps.length + " t2m steps" : "NBM 12 h max"} · ${Math.round(performance.now() - t0)} ms`;
     const u = new URL(location); u.searchParams.set("kind", S.kind); u.searchParams.set("view", S.view); u.searchParams.set("run", S.c);
     for (const k of ["day", "model", "from", "to"]) u.searchParams.delete(k);
     if (tot) { u.searchParams.set("model", S.m); u.searchParams.set("from", S.f0); u.searchParams.set("to", S.f1); } else u.searchParams.set("day", S.day);
@@ -400,7 +418,7 @@ async function boot() {
   $("from").onchange = e => { S.f0 = e.target.value; S.want = null; setTimes(); draw(); };
   $("to").onchange = e => { S.f1 = e.target.value; S.want = null; draw(); };
   $("day").onchange = e => { S.day = e.target.value; draw(); };
-  $("view").onchange = e => { S.view = e.target.value; draw(); };
+  $("view").onchange = async e => { S.view = e.target.value; if (S.kind === "gust") await setRun(); draw(); };
   $("save").onclick = save;
   const mq = matchMedia("(max-width: 700px)"), ph = () => { document.body.classList.toggle("phone", mq.matches); fit(); };
   ph(); (mq.addEventListener ? mq.addEventListener("change", ph) : mq.addListener(ph)); addEventListener("resize", fit);
