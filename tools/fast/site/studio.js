@@ -181,14 +181,81 @@ const PSS = 2;
 const ctxS = (c) => (c.getTransform ? c.getTransform().a : 1) || 1;
 function ssFit(f, s) { if (f.cv.width !== f.W * s || f.cv.height !== f.H * s) { f.cv.width = f.W * s; f.cv.height = f.H * s; } f.ss = s; }
 function frameTx(c, f) { const z = (f && f.ss) || 1; c.setTransform(z, 0, 0, z, 0, 0); return z; }
+// Opaque samples on the bitmap itself. Width/height and __studioAlert can all be ready while every pixel is still transparent.
+function frameInk(cv, any) {
+  if (!cv || !cv.width || !cv.height) return 0;
+  const c = cv.getContext("2d");
+  if (!c || (c.isContextLost && c.isContextLost())) return 0;
+  const w = cv.width, h = cv.height;
+  try {
+    if (any) {
+      const sx = Math.max(1, (w / 24) | 0), sy = Math.max(1, (h / 24) | 0);
+      for (let y = sy >> 1; y < h; y += sy) for (let x = sx >> 1; x < w; x += sx) if (c.getImageData(x, y, 1, 1).data[3] > 8) return 1;
+      return 0;
+    }
+    const pts = [[1, 1], [w - 2, 1], [1, h - 2], [w - 2, h - 2], [w >> 1, h >> 1], [w >> 1, 6], [6, h >> 1]];
+    let n = 0;
+    for (const [x, y] of pts) if (c.getImageData(x, y, 1, 1).data[3] > 8) n++;
+    return n;
+  } catch (e) { return 0; }
+}
+function resetFrameCtx(cv) {
+  const w = cv.width, h = cv.height;
+  cv.width = w; cv.height = h;
+  const c = cv.getContext("2d");
+  c.globalAlpha = 1; c.globalCompositeOperation = "source-over";
+  c.shadowBlur = 0; c.shadowOffsetX = 0; c.shadowOffsetY = 0;
+  if (c.filter != null) c.filter = "none";
+  return c;
+}
 function sharpShadow(c, k) { const z = ctxS(c); c.shadowColor = "rgba(0,0,0,0.92)"; c.shadowBlur = 1.5 * z; c.shadowOffsetX = (k === "v" ? 3 : 2.5) * z; c.shadowOffsetY = (k === "v" ? 3 : 2.5) * z; }
 // 11-02 6:20 PM (Benjamin t2111u "drop shadow ... a little more pronounced with a bit of a fade so it doesn't look messy"): overlay text,
 // badges and bars are drawn (with the tight sharp core shadow above) into an off-screen layer, then that layer goes onto the frame once
 // with a soft short falloff shadow: sharp core + gentle fade, one pass, so overlapping glyph shadows never stack up into smudges.
 function ovLayer(f) { const o = f.ov || (f.ov = document.createElement("canvas")), z = f.ss || 1; if (o.width !== f.W * z || o.height !== f.H * z) { o.width = f.W * z; o.height = f.H * z; }
   const oc = o.getContext("2d"); oc.setTransform(z, 0, 0, z, 0, 0); oc.clearRect(0, 0, f.W, f.H); return oc; }
-function ovPut(c, f, k) { const z = ctxS(c); c.save(); c.shadowColor = "rgba(0,0,0,0.55)"; c.shadowBlur = (k === "v" ? 4 : 3) * z; c.shadowOffsetX = 0; c.shadowOffsetY = (k === "v" ? 0.5 : 0.4) * z;
-  c.drawImage(f.ov, 0, 0, f.W, f.H); c.restore(); }
+function ovPut(c, f, k, opt) {
+  const src = f.ov; if (!src || !src.width) return;
+  const bare = opt && opt.bare;
+  let drawn = src;
+  if (!bare) {
+    // Bake the soft halo onto a scratch canvas. A live shadowBlur on the frame's own drawImage
+    // has cleared the entire 2x backing store on some GPUs (Active Alerts came back fully transparent).
+    const z = (f && f.ss) || ctxS(c) || 1;
+    const scratch = f.ovSoft || (f.ovSoft = document.createElement("canvas"));
+    if (scratch.width !== src.width || scratch.height !== src.height) { scratch.width = src.width; scratch.height = src.height; }
+    const sc = scratch.getContext("2d");
+    sc.setTransform(1, 0, 0, 1, 0, 0); sc.globalAlpha = 1; sc.globalCompositeOperation = "source-over";
+    sc.clearRect(0, 0, scratch.width, scratch.height);
+    sc.shadowColor = "rgba(0,0,0,0.55)"; sc.shadowBlur = (k === "v" ? 4 : 3) * z; sc.shadowOffsetX = 0; sc.shadowOffsetY = (k === "v" ? 0.5 : 0.4) * z;
+    sc.drawImage(src, 0, 0);
+    sc.shadowColor = "rgba(0,0,0,0)"; sc.shadowBlur = 0; sc.shadowOffsetX = 0; sc.shadowOffsetY = 0;
+    if (frameInk(scratch, true)) drawn = scratch;
+  }
+  c.save(); c.shadowColor = "rgba(0,0,0,0)"; c.shadowBlur = 0; c.shadowOffsetX = 0; c.shadowOffsetY = 0;
+  c.drawImage(drawn, 0, 0, f.W, f.H); c.restore();
+}
+// The alert bitmap is 8192². One drawImage of that texture, with high smoothing and a 2x frame transform,
+// blanks the destination on GPUs whose texture edge is 4096. Fit it under that edge in small source tiles first.
+function drawAlertMap(c, img, dx, dy, dw, dh) {
+  const iw0 = IW(img), ih0 = IH(img);
+  if (!(iw0 > 0 && ih0 > 0 && dw > 0 && dh > 0)) return;
+  const cap = 4095, step = 2048;
+  let src = img;
+  if (iw0 > cap || ih0 > cap) {
+    const s = cap / Math.max(iw0, ih0);
+    const iw = Math.max(1, Math.round(iw0 * s)), ih = Math.max(1, Math.round(ih0 * s));
+    const fit = document.createElement("canvas"); fit.width = iw; fit.height = ih;
+    const g = fit.getContext("2d"); g.imageSmoothingEnabled = true; g.imageSmoothingQuality = "low";
+    for (let sy = 0; sy < ih0; sy += step) for (let sx = 0; sx < iw0; sx += step) {
+      const sw = Math.min(step, iw0 - sx), sh = Math.min(step, ih0 - sy);
+      g.drawImage(img, sx, sy, sw, sh, sx * s, sy * s, sw * s, sh * s);
+    }
+    src = fit;
+  }
+  c.imageSmoothingEnabled = true; c.imageSmoothingQuality = "low";
+  c.drawImage(src, dx, dy, dw, dh);
+}
 function noShadow(c) { c.shadowColor = "rgba(0,0,0,0)"; c.shadowBlur = 0; c.shadowOffsetX = 0; c.shadowOffsetY = 0; }
 function pill(c, x, y, txt, size, bg, fg) {
   c.font = `800 ${size}px Montserrat`; const w = c.measureText(txt).width + size * 0.9, h = size * 1.55;
@@ -452,21 +519,24 @@ function alertInfo() {
   const types = typeof Alerts.eventTypes === "function" ? Alerts.eventTypes() : [];
   return { title, when, t, types, n: (S_.alerts || []).length };
 }
-function renderAlert(k, frO) {
-  const f = F[k], c0 = f.cv.getContext("2d"), fr = frO || getFr(k);
+function renderAlert(k, frO, retry) {
+  const f = F[k], fr = frO || getFr(k);
+  let c0 = retry ? resetFrameCtx(f.cv) : f.cv.getContext("2d");
   if (!frO) {
     f.zoom.min = String(Math.round(ALERT_ZMIN * 100));
     f.zoom.max = String(Math.round(ALERT_ZMAX * 100));
     fr.zoom = alertZ(fr.zoom || 1);
     f.zoom.value = String(Math.round(fr.zoom * 100));
   }
-  frameTx(c0, f); c0.clearRect(0, 0, f.W, f.H);
-  // Ocean fill so a <1x crop letterboxes in map-ocean, not a blank grey (t2559u).
-  c0.fillStyle = BG === "transparent" ? "#030912" : (BG || "#030912"); c0.fillRect(0, 0, f.W, f.H);
+  c0.globalAlpha = 1; c0.globalCompositeOperation = "source-over"; c0.shadowBlur = 0; c0.shadowOffsetX = 0; c0.shadowOffsetY = 0;
+  // Device-pixel ocean first, so a transform that doesn't cover the backing store cannot leave it transparent.
+  const ocean = BG === "transparent" ? "#030912" : (BG || "#030912");
+  c0.setTransform(1, 0, 0, 1, 0, 0); c0.clearRect(0, 0, f.cv.width, f.cv.height); c0.fillStyle = ocean; c0.fillRect(0, 0, f.cv.width, f.cv.height);
+  frameTx(c0, f); c0.fillStyle = ocean; c0.fillRect(0, 0, f.W, f.H);
   const I = alertInfo();
   if (!MG.img || !I || !I.t) { c0.font = `700 ${k === "v" ? 40 : 34}px Montserrat`; c0.fillStyle = "#c9ced8"; c0.textAlign = "center"; c0.fillText(MG.msg || "Loading alerts\u2026", f.W / 2, f.H / 2); c0.textAlign = "left"; return; }
-  const r = crop(k, fr); c0.imageSmoothingEnabled = true; c0.imageSmoothingQuality = "high";
-  c0.drawImage(MG.img, f.W / 2 - r.cx * r.kk, f.H / 2 - r.cy * r.kk, IW(MG.img) * r.kk, IH(MG.img) * r.kk);
+  const r = crop(k, fr);
+  drawAlertMap(c0, MG.img, f.W / 2 - r.cx * r.kk, f.H / 2 - r.cy * r.kk, IW(MG.img) * r.kk, IH(MG.img) * r.kk);
   // Towns, highways and boundary strokes in this frame's pixels (t2499u / t2504u). Each frame keeps its own camera.
   const settle = !!(frO && frO._alertSettle) || !!(window.__alertSettle && window.__alertSettle[k]);
   if (window.__alertSettle) window.__alertSettle[k] = 0;
@@ -504,8 +574,17 @@ function renderAlert(k, frO) {
       for (const [t, x, w] of row) {
         noShadow(c); c.fillStyle = "rgba(17,19,22,0.78)"; c.beginPath(); c.roundRect ? c.roundRect(x, y, w, h, h / 2) : c.rect(x, y, w, h); c.fill(); sharpShadow(c, k);
         c.font = `800 ${lgS}px Montserrat`; c.fillStyle = t.color || "#ccc"; c.textBaseline = "middle"; c.fillText(t.event, x + lgS * 0.6, y + h / 2 + 1); c.textBaseline = "alphabetic"; } }); }
-  c.restore(); ovPut(c0, f, k);
+  c.restore(); ovPut(c0, f, k, retry ? { bare: true } : null);
   if (cnr) cornerLogo(c0, cnr);
+  // Read the bitmap back before publishing readiness. A counter alone has passed while both frames were still empty.
+  c0.setTransform(1, 0, 0, 1, 0, 0);
+  if (!frameInk(f.cv) && !retry) return renderAlert(k, frO, true);
+  noteAlertInk(k, f);
+}
+function noteAlertInk(k, f) {
+  const ink = frameInk(f.cv);
+  window.__studioFramePx = Object.assign({}, window.__studioFramePx, { [k]: ink });
+  if (!ink) return;
   window.__studio = (window.__studio || 0) + 1; window.__studioAlert = (window.__studioAlert || 0) + 1;
 }
 // ---- Pass Forecaster in Studio (11-04, t2292u). Same table as the map page's Pass Forecaster (viewer.js passTable), laid out per frame:
@@ -1986,7 +2065,7 @@ if (!CLEAN) {   // Studio: Map | Meteogram switch (first in the menu bar) + the 
       if (!document.getElementById("alertp")) { const ap = document.createElement("div"); ap.id = "alertp"; ap.innerHTML = `<div id="alert-root"></div>`; pnl.appendChild(ap); }
       window.__alertLoad = window.__alertLoad || new Promise((ok, bad) => {
         if (!document.querySelector('link[href^="alert/alert.css"]')) { const l = document.createElement("link"); l.rel = "stylesheet"; l.href = "alert/alert.css?v=20261106a4"; document.head.appendChild(l); }
-        const sc = document.createElement("script"); sc.src = "alert/alert.js?v=20261106a4"; sc.onload = ok; sc.onerror = bad; document.body.appendChild(sc); });
+        const sc = document.createElement("script"); sc.src = "alert/alert.js?v=20261107iralertcmp1"; sc.onload = ok; sc.onerror = bad; document.body.appendChild(sc); });
       MG.msg = "Loading alerts\u2026"; let asig = "";
       const agrab = () => { const S_ = typeof Alerts !== "undefined" && Alerts._state, cv_ = document.getElementById("al-canvas"); if (!S_ || !cv_ || !cv_.width) return;
         const sel = (S_.selectedTypes && S_.selectedTypes.size) ? [...S_.selectedTypes].sort().join(',') : 'ALL'; const sig = [S_.loaded, sel, S_.k, S_.cx, S_.cy, cv_.width, (S_.alerts || []).length, S_.sig || ""].join("|");
@@ -2005,7 +2084,7 @@ if (!CLEAN) {   // Studio: Map | Meteogram switch (first in the menu bar) + the 
         const l = document.createElement("link"); l.rel = "stylesheet"; l.href = "obs/obs.css"; document.head.appendChild(l);
         const sc = document.createElement("script"); sc.src = "obs/obs.js"; sc.onerror = bad; document.body.appendChild(sc);
         // 11-03: radar + GOES-West layers (obs/obsimg.js, off by default); the obs map still opens if it fails to load
-        sc.onload = () => { const s2 = document.createElement("script"); s2.src = "obs/obsimg.js?v=20261104c"; s2.onload = ok; s2.onerror = ok; document.body.appendChild(s2); }; });
+        sc.onload = () => { const s2 = document.createElement("script"); s2.src = "obs/obsimg.js?v=20261107iralertcmp1"; s2.onload = ok; s2.onerror = ok; document.body.appendChild(s2); }; });
       MG.msg = "Loading observations\u2026"; osig = "";
       obsLoad.then(() => { if (OBSM()) { Obs.show(); fitFrames(); } }, () => { obsLoad = null; MG.msg = "Observations could not load."; renderAll(); });
       poll = setInterval(ograb, 400);
@@ -2067,7 +2146,9 @@ if (!CLEAN) {
   fitFrames();
 }
 // 11-04 (t2335u guard): read-only state for the refresh regression test (refresh_test.py): what each frame shows right now
-window.__studioSharp = { PSS, ssFit, ovPut, sharpShadow, colorbar, ctxS, F, paintStudioTowns, frameTx };
+for (const k of ["v", "h"]) if (F[k].cv) { F[k].cv.addEventListener("contextlost", (e) => { e.preventDefault(); }); F[k].cv.addEventListener("contextrestored", () => { try { render(k); } catch (err) { /* redraw on restore */ } }); }
+window.__studioInk = () => ({ v: frameInk(F.v.cv), h: frameInk(F.h.cv) });
+window.__studioSharp = { PSS, ssFit, ovPut, sharpShadow, colorbar, ctxS, F, paintStudioTowns, frameTx, frameInk };
 window.__studioQA = () => ({ mode: PASSM() ? "pass" : MG.on ? MG.kind : "map", web: WEBM() ? WEB.url : "", cmp: CMPM() ? { l: CMP.L && CMP.L.run, r: CMP.R && CMP.R.run, title: cmpHeadTitle() } : null, mg: MG.kind === "mg" ? (MG.src.split("#")[1] || "") : "", alert: ALERTM() ? ((typeof Alerts !== "undefined" && Alerts.titleText && Alerts.titleText()) || "All Alerts") : "", pass: PF.run, passRows: PF.rows ? PF.rows.length : 0,
-  pfL: F.h.pfL ? { x: F.h.pfL.x, y0: F.h.pfL.y0, w: F.h.pfL.w, rh: F.h.pfL.rh, names: F.h.pfL.names } : null, W: F.h.W, fr: { v: getFr("v"), h: getFr("h") } });
+  pfL: F.h.pfL ? { x: F.h.pfL.x, y0: F.h.pfL.y0, w: F.h.pfL.w, rh: F.h.pfL.rh, names: F.h.pfL.names } : null, W: F.h.W, fr: { v: getFr("v"), h: getFr("h") }, px: window.__studioInk() });
 })();
