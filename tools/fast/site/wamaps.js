@@ -264,7 +264,8 @@ function wamCredit(ctx, K, m, up = 0) {
 async function render(cv, c, kind, view, d) {
   const P = PRODUCTS[kind], [K, VK, F] = await Promise.all([kindKit(kind, view), viewKit(view), fieldFor(c, kind, d)]);
   const [base, over, title] = await Promise.all([loadImg(KIT + view + "/base.png"), loadImg(KIT + view + "/" + kind + "_overlay.png"), loadImg(KIT + view + `/titles/${kind}_${d.day}.png`)]);
-  cv.width = K.W; cv.height = K.H; const ctx = cv.getContext("2d");
+  const SC = 2;   // backing pixels: titles, town values and credits rasterize at 2x (Studio frames sample this 1:1)
+  cv.width = K.W * SC; cv.height = K.H * SC; const ctx = cv.getContext("2d"); ctx.setTransform(SC, 0, 0, SC, 0, 0);
   ctx.drawImage(base, 0, 0); fillData(ctx, K, VK, F, P.pal); ctx.drawImage(over, 0, 0); ctx.drawImage(title, 0, 0);
   const vals = {}, pyr = P.pal.pyr;
   for (const L of K.labels) {
@@ -287,7 +288,8 @@ async function renderTotals(cv, m, c, kind, view, w) {
   const [K, VK, F, T, LB] = await Promise.all([kindKit("low", view), viewKit(view, lutOf(m)), totalField(m, c, kind, w.f0, w.f1),
     fetch(KIT + view + "/totals.json").then(r => r.json()), m === "nbm" ? null : fetch(KIT + view + `/lab_${lutOf(m)}.json`).then(r => r.json())]);
   const [base, over, title] = await Promise.all([loadImg(KIT + view + "/base.png"), loadImg(KIT + view + "/plain_overlay.png"), loadImg(KIT + view + `/titles/${P.timg ? P.timg(w) : kind}.png`)]);
-  cv.width = K.W; cv.height = K.H; const ctx = cv.getContext("2d");
+  const SC = 2;   // same 2x backing as the daily maps
+  cv.width = K.W * SC; cv.height = K.H * SC; const ctx = cv.getContext("2d"); ctx.setTransform(SC, 0, 0, SC, 0, 0);
   ctx.drawImage(base, 0, 0); fillData(ctx, K, VK, F, pal); ctx.drawImage(over, 0, 0); ctx.drawImage(title, 0, 0);
   // scale (same box as the temp scale it replaces) + [model] tag (nbm_map: Montserrat 700 32 px, stroke 4, right-aligned at W-34, y 30)
   const sc = T.scale, n = pal.cols.length, bw = (sc.x1 - sc.x0) / n, port = K.H > K.W, tp = port ? 24 : 22;

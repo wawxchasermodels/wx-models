@@ -86,6 +86,7 @@ function wantRS(LW, LH) {
   const cv = $("map"); if (!cv || !LW || Q.get("rs1")) return 1;
   if (window.__saveRS) return window.__saveRS;   // 11-03 zoomed "Save image": one sharp redraw at the save resolution
   if (Q.get("studio")) return Math.max(1, Math.min(3, Math.floor(Math.sqrt(16e6 / (LW * LH)) * 4) / 4));   // Studio: always sharp (crops are scaled up to 1920 px)
+  if (Q.get("embed")) return Math.max(1, Math.min(2, Math.floor(Math.sqrt(8e6 / (LW * LH)) * 4) / 4));   // Compare frames are scaled into a 2x Studio frame
   const shown = cv.offsetWidth || LW, want = shown * (window.devicePixelRatio || 1) * (Z.k || 1) / LW;
   const cap = Math.min(3, Math.sqrt(12e6 / (LW * LH)));
   return Math.max(1, Math.min(cap, Math.ceil(want * 4 - 0.2) / 4));
@@ -1068,10 +1069,23 @@ async function render(lite) {
   const WT = (WAVE_PIDS.test(pid) || VSRC(S.view) === "coast") && MD().grid === "ll" ? coastPlan(ctx, st, V, LW, LH) : null;   // wave maps + Coast (t2532u wwa towns)
   if (WT && WT.C && WT.C.allTowns) WT.plainNames = !WAVE_PIDS.test(pid);   // Coast non-wave: names only; wave: model values at the pin
   const haveTowns = !!(st.towns || townLive);
-  const drewTowns = townLive && tmode !== "none" && !(WT && WT.own) && drawTownLayer(ctx, st.labels, LW, LH, WT && WT.re, WT && WT.erase);
-  if (!drewTowns && st.towns && L2.towns && tmode !== "none" && !(WT && WT.own)) ctx.drawImage(WT && WT.erase.length ? erasedTowns(L2.towns, `${st.townsU}#${WT.vid}`, WT.erase, LW) : L2.towns, 0, 0, LW, LH);
+  // Studio has two crops. Names stay off this shared bitmap and each frame draws them inside its own title/footer (paintStudioTowns).
+  const studioHold = !!(Q.get("studio") && townLive && tmode !== "none" && !(WT && WT.own));
+  if (studioHold) {
+    const nums = [];
+    if (tmode === "numbers") for (const t of V.towns || []) {
+      if (WT && WT.re.has(t.name)) continue;
+      if (!(t.fi >= 0 && t.fj >= 0 && t.fi < D.h - 1 && t.fj < D.w - 1)) continue;
+      let v = sampleRC(D.fill, D.w, t.fi, t.fj); if (!isFinite(v)) continue;
+      if (pid === "t2m" && t.t2m_corr !== undefined) v += t.t2m_corr;
+      nums.push({ name: t.name, x: t.x, y: t.y, text: fmtVal(P, v), size: t.size, color: t.color });
+    }
+    window.__studioTownSrc = { items: st.labels, nums, LW, LH, dpi: S.man.dpi || 100 };
+  } else if (Q.get("studio")) window.__studioTownSrc = null;
+  const drewTowns = !studioHold && townLive && tmode !== "none" && !(WT && WT.own) && drawTownLayer(ctx, st.labels, LW, LH, WT && WT.re, WT && WT.erase);
+  if (!studioHold && !drewTowns && st.towns && L2.towns && tmode !== "none" && !(WT && WT.own)) ctx.drawImage(WT && WT.erase.length ? erasedTowns(L2.towns, `${st.townsU}#${WT.vid}`, WT.erase, LW) : L2.towns, 0, 0, LW, LH);
   // t2545u: own-label views (Coast) don't draw the static town layer, so its numbers would have no name (the stray '0' / '48'): skip them
-  if (haveTowns && tmode === "numbers" && !(WT && WT.own)) for (const t of V.towns) {
+  if (!studioHold && haveTowns && tmode === "numbers" && !(WT && WT.own)) for (const t of V.towns) {
     if (WT && WT.re.has(t.name)) continue;   // re-placed with the coast towns
     if (!(t.fi >= 0 && t.fj >= 0 && t.fi < D.h - 1 && t.fj < D.w - 1)) continue;
     let v = sampleRC(D.fill, D.w, t.fi, t.fj); if (!isFinite(v)) continue;   // HRRR: integer = nearest 3 km point; global: bilinear at the pin
