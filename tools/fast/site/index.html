@@ -1,6 +1,7 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>WX Models</title>
+<script>if(new URLSearchParams(location.search).get("cmpstudio"))document.documentElement.classList.add("cmpstudio")</script>
 <link rel="preload" href="fonts/Montserrat-sub.woff2" as="font" type="font/woff2" crossorigin>
 <style>
 @font-face{font-family:Montserrat;src:url(fonts/Montserrat-sub.woff2) format("woff2"),url(fonts/Montserrat.ttf) format("truetype");font-weight:100 900}
@@ -58,6 +59,12 @@ body.cslim #wrap{padding:0!important}body.cslim{min-height:0!important;height:au
 body.cslim.cshow #cgear{position:static;margin:4px 8px}
 /* 11-01 (t2021u): menus toggle in every compare frame; shown = "Hide menus" first in the bar, hidden = "Menus" button under the map */
 body.cmin #bar{display:none!important}
+/* Studio Compare (compare.html?studio=1): each map's menus stay in the panel; the map canvas draws in an off-screen box Studio crops */
+html.cmpstudio,html.cmpstudio body{height:auto!important;min-height:0!important;overflow:hidden!important;background:#1d2027}
+html.cmpstudio #wrap{position:fixed!important;left:-9000px!important;top:0!important;width:1800px!important;height:1200px!important;overflow:hidden!important;padding:0!important}
+html.cmpstudio #map{max-width:none!important;max-height:none!important}
+html.cmpstudio #cgear,html.cmpstudio #dock,html.cmpstudio .lic,html.cmpstudio #stepctl,html.cmpstudio #save,html.cmpstudio #mgbtn,html.cmpstudio #share{display:none!important}
+html.cmpstudio #bar{border-top:0;border-bottom:1px solid #2c3039}
 #bar #cgear{position:static;margin:0;background:#2f8cff2e;border-color:#2f8cff;font-weight:700;font-size:inherit;padding:4px 9px}
 /* 10-29 9:01 PM (Benjamin): on phones the hour slider + step buttons sit UNDER the map (thumb no longer covers it);
    the map hugs the slider at the bottom of the screen, menus stay on top. Desktop unchanged. viewer.js moves #stepctl. */
@@ -123,7 +130,7 @@ table.pf td small.el{color:#a7abb3;font-weight:500;font-size:11px}table.pf td.fz
 </div>
 <div id="wrap"><canvas id="map"></canvas><div id="tip" hidden></div></div>
 <div id="dock"></div>
-<script src="viewer.js?v=20261104s32"></script>
+<script src="viewer.js?v=20261107cmp1"></script>
 <script src="reqbox.js?v=20261103m"></script>
 <footer class="lic"><details><summary>Data: &copy; <span class="yr">2026</span> ECMWF (www.ecmwf.int), CC BY 4.0 &middot; Places: GeoNames, CC BY 4.0 &middot; NOAA (public domain) &middot; Natural Earth &middot; <u>Credits</u></summary>
 <p>Based on data and products of the European Centre for Medium-Range Weather Forecasts (ECMWF). Copyright &copy; <span class="yr">2026</span> ECMWF, <a href="https://www.ecmwf.int">www.ecmwf.int</a>. Licensed under CC BY 4.0 (<a href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a>). Maps are modified from the original data. ECMWF does not accept any liability whatsoever for any error or omission in the data, their availability, or for any loss or damage arising from their use.</p>

@@ -7,9 +7,13 @@ const Q = new URLSearchParams(location.search), $ = (id) => document.getElementB
 const ST = { L: null, R: null }, SYNC = { time: true, prod: true, view: true };
 try { Object.assign(SYNC, JSON.parse(localStorage.getItem("cmpSync") || "{}")); } catch (e) { /* defaults */ }
 for (const k of ["time", "prod", "view"]) { const b = $("s_" + k); b.checked = SYNC[k]; b.onchange = () => { SYNC[k] = b.checked; localStorage.setItem("cmpSync", JSON.stringify(SYNC)); if (b.checked) push("L"); }; }
-const SLIM = matchMedia("(max-width:820px)").matches;   // phones: menus folded in each map, maps sized to their frames
+// Studio Compare (?studio=1) reuses this page: same sync / swap / hour messages, menus in the panel, maps drawn off-screen
+// (cmpstudio) so Studio can place them in the 16:9 and 9:16 frames. No second compare implementation.
+const STUDIO = Q.get("studio") === "1";
+const SLIM = !STUDIO && matchMedia("(max-width:820px)").matches;   // phones: menus folded in each map, maps sized to their frames
 function src(id, run) {
   const u = new URLSearchParams({ embed: "compare", id }); if (SLIM) u.set("slim", "1");
+  if (STUDIO) u.set("cmpstudio", "1");
   if (run) u.set("run", run);
   for (const k of ["prod", "view"]) if (Q.get(k)) u.set(k, Q.get(k));
   return "./?" + u;
@@ -73,4 +77,9 @@ $("swap").onclick = () => {
   if (!ST.L || !ST.R) return; const a = ST.L, b = ST.R;
   frame("L").postMessage({ wx: "set", run: b.run, prod: b.prod, view: b.view, valid: b.valid }, "*");
   frame("R").postMessage({ wx: "set", run: a.run, prod: a.prod, view: a.view, valid: a.valid }, "*");
+};
+// Studio drives the shared hour (its own scrubber) and reads both maps back. setHour is the same path as this page's slider.
+window.__cmp = {
+  get L() { return ST.L; }, get R() { return ST.R; },
+  setHour: (i) => hset(i),
 };
