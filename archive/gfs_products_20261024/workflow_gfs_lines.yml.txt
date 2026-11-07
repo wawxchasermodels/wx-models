@@ -1,0 +1,13 @@
+# forecast-site.yml lines that set up GFS in the menu matrix or tier lists, before the trim (10-24-26):
+39:         description: "WA map models (ecmwf,nbm,gfs,eps,eps90,hrrr, 'default' = ECMWF, NBM for temps, or 'all'); hrrr = Rain 1h"
+42:         description: "Menu-map models (ifs,gfs,aifs,hrrr,rrfs)"
+43:         default: "ifs,gfs,aifs,hrrr,rrfs"
+107:           ms = [m for m in (os.environ.get("MENU_MODELS") or "ifs,gfs,aifs,hrrr,rrfs").split(",") if m]
+318:       TIER_A: gust10,peakgust,feels,t925,t700,t500,t300
+319:       TIER_B: mslp500,qpf,snowkuch,ivt,snow10,pwanom,frzr,w850,w250,mslpptype
+320:       TIER_C: snowk24,thick,td2m,pw,snowrate,tcc,ir,vis,fog
+354:             A) P="$TIER_A"; E=0 ;;
+355:             B) P="$TIER_B"; E=6 ;;
+356:             C) P="$TIER_C"; E=12 ;;
+359:             hrrr|rrfs) [ "$E" = 6 ] && E=3; [ "$E" = 12 ] && E=6; CY="" ;;
+363:           [ "${{ matrix.model }}" = gfs ] && CY=""

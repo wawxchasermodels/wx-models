@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>WX Models: Studio</title>
+<script>/* 11-04 (t2269u/t2283u): Studio opened with no map in the URL (bookmark, home-screen app, typed address) comes back on the last model / product / view / hour */try{var q0=new URLSearchParams(location.search),sv0=localStorage.getItem("studio:last");if(sv0&&!["run","model","prod","view","f","valid","make","clean","product"].some(function(k){return q0.has(k)})){var sm=q0.get("smode"),nq=new URLSearchParams(sv0);if(sm)nq.set("smode",sm);else nq.delete("smode");history.replaceState(null,"",location.pathname+"?"+nq.toString()+location.hash)}}catch(e){}</script>
+<script>if(!new URLSearchParams(location.search).has("studio"))history.replaceState(null,"",location.pathname+(location.search?location.search+"&":"?")+"studio=1"+location.hash)</script>
+<link rel="preload" href="fonts/Montserrat-sub.woff2" as="font" type="font/woff2" crossorigin>
+<style>
+@font-face{font-family:Montserrat;src:url(fonts/Montserrat-sub.woff2) format("woff2"),url(fonts/Montserrat.ttf) format("truetype");font-weight:100 900}
+html,body{margin:0;background:#15171c;color:#f4f2ee;font:14px Montserrat,system-ui,sans-serif}
+/* 10-29 7:10 PM: whole map + controls fit the window, no scrolling (Benjamin: "make the zoom on the images less") */
+html,body{height:100%;overflow:hidden}
+body{display:flex;flex-direction:column;height:100vh;height:100dvh}
+#bar{flex:0 0 auto;display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:8px 12px;background:#1d2027;border-bottom:1px solid #2c3039}
+#bar select,#bar button{background:#262931;color:#f4f2ee;border:1px solid #7d828c;border-radius:6px;padding:4px 8px;font:inherit}
+#bar input[type=range]{flex:1;min-width:200px}
+/* 10-29 8:45 PM slider fix: no page pan / rubber-band while dragging, bigger thumb, no tap delay on buttons */
+html,body{overscroll-behavior:none}
+#bar button,#bar select{touch-action:manipulation}
+#step{-webkit-appearance:none;appearance:none;background:transparent;height:32px;margin:0;touch-action:none;cursor:pointer}
+#step::-webkit-slider-runnable-track{height:8px;border-radius:4px;background:#3a3f4a}
+#step::-moz-range-track{height:8px;border-radius:4px;background:#3a3f4a}
+#step::-webkit-slider-thumb{-webkit-appearance:none;width:28px;height:28px;margin-top:-10px;border-radius:50%;background:#2f8cff;border:3px solid #f4f2ee;box-shadow:0 1px 4px #0008}
+#step::-moz-range-thumb{width:22px;height:22px;border-radius:50%;background:#2f8cff;border:3px solid #f4f2ee}
+#stat{color:#a7abb3;font-size:12px;min-width:260px}
+#loadnote{display:none;color:#ffd27a;font-size:12px;font-weight:600;white-space:nowrap;padding:3px 8px;border:1px solid #6b5a2e;border-radius:10px;background:#2a2416}
+#loadnote.on{display:inline-block}
+#loadnote{position:absolute;right:0;top:50%;transform:translateY(-50%);pointer-events:none;z-index:2}#stepctl{position:relative}#bar{position:relative}@media (max-width:820px){#bar{position:sticky}}/* 11-03: the loading note floats over the slider's end, so it never pushes the bar (and the frames) around */
+body.phone #loadnote{font-size:11px;padding:2px 6px;flex:0 0 auto}
+body.phone #dock #step{min-width:90px}
+#wrap{position:relative;flex:1 1 auto;min-height:0;display:flex;align-items:center;justify-content:center;padding:4px;box-sizing:border-box}
+/* 10-30 7:50 PM (Benjamin's iPhone screenshots: whole map blurry, buttons sharp): no will-change:transform on the map. Safari/WebKit
+   rasterizes a will-change:transform layer once at 1x and stretches it (3x on an iPhone), so the canvas showed at a third of its res. */
+canvas{display:block;width:auto;height:auto;max-width:100%;max-height:100%;touch-action:none}
+canvas.pindrag{cursor:grabbing!important}#pfhov{position:fixed;z-index:5;pointer-events:none;border:2px solid #5aa9ff;border-radius:6px;background:rgba(90,169,255,.10);box-shadow:0 0 0 1px rgba(0,0,0,.35)}#pfhov[hidden]{display:none}#pfback{background:#2f8cff;color:#fff;border:0;border-radius:6px;padding:5px 12px;font:inherit;font-size:13px;font-weight:700;cursor:pointer;margin:4px 8px 4px 0}#pfback[hidden]{display:none}
+#zreset{position:absolute;right:10px;top:10px;z-index:2;background:#262931ee;color:#f4f2ee;border:1px solid #7d828c;border-radius:6px;padding:5px 10px;font:inherit;font-size:13px;cursor:pointer}
+#tip{position:absolute;pointer-events:none;background:#1d2027ee;color:#fff;border:1px solid #7d828c;border-radius:6px;padding:3px 8px;font-weight:700;font-size:14px;white-space:nowrap}
+@media (max-width:1500px){#stat{display:none}}
+@media (max-width:700px){#wrap{align-items:flex-start}}
+@media (max-width:700px),(max-height:500px){#bar{gap:6px;padding:6px}#bar label{font-size:12px}#bar select{max-width:42vw}#bar button{padding:5px 10px}#wrap{padding:2px}}
+@media (max-width:700px){#bar input[type=range]{min-width:100%;order:9;height:28px}}
+@media (max-height:500px) and (min-width:701px){#bar label{font-size:0}#bar label select{font-size:12px}#bar input[type=range]{min-width:120px}}
+body.bare #bar{display:none}
+/* side-by-side frames (compare.html): no page-level extras, smaller bar */
+body.embed #share,body.embed #obsbtn,body.embed #stat,body.embed #pfbtn{display:none}
+body.embed #bar{gap:6px;padding:6px 8px}
+/* 10-29 9:01 PM (Benjamin): on phones the hour slider + step buttons sit UNDER the map (thumb no longer covers it);
+   the map hugs the slider at the bottom of the screen, menus stay on top. Desktop unchanged. viewer.js moves #stepctl. */
+#stepctl{display:contents}
+
+body.phone #dock{flex:0 0 auto;display:flex;gap:8px;align-items:center;padding:6px 10px calc(8px + env(safe-area-inset-bottom));background:#1d2027;border-top:1px solid #2c3039}
+body.phone #dock #stepctl{display:flex;gap:8px;align-items:center;flex:1;min-width:0}
+body.phone #dock button{background:#262931;color:#f4f2ee;border:1px solid #7d828c;border-radius:6px;padding:6px 12px;font:inherit;touch-action:manipulation}
+body.phone #dock #step{flex:1;min-width:0;order:0;height:36px}
+/* 10-29 9:16 PM: stack = menus, map, slider bar; leftover space at the bottom. viewer.js fitPhone() sizes the map. */
+body.phone #wrap{flex:0 0 auto;align-items:flex-start}
+body.phone canvas{max-height:none}
+#saveview{position:fixed;inset:0;z-index:20;background:#000e;display:flex;flex-direction:column}
+#saveview .sv-top{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:8px 12px;background:#1d2027;font-size:13px}
+#saveview .sv-top span{flex:1}
+#saveview a,#saveview button{background:#262931;color:#f4f2ee;border:1px solid #7d828c;border-radius:6px;padding:5px 10px;font:inherit;text-decoration:none}
+#saveview img{flex:1;min-height:0;width:100%;object-fit:contain;-webkit-touch-callout:default;user-select:auto}
+/* 10-30 stage 5: meteogram / Pass Forecaster overlay (map page underneath is unchanged) */
+#mg{position:fixed;inset:0;z-index:15;background:#15171c;display:flex;flex-direction:column}
+#mg .mg-top{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:8px 12px;background:#1d2027;border-bottom:1px solid #2c3039}
+#mg select,#mg button{background:#262931;color:#f4f2ee;border:1px solid #7d828c;border-radius:6px;padding:5px 8px;font:inherit;touch-action:manipulation}
+#mg #mgpage{margin-left:auto;color:#f4f2ee;background:#262931;border:1px solid #7d828c;border-radius:6px;padding:5px 8px;text-decoration:none;font-size:13px}#mg #mgpage+#mgx{margin-left:0}#mg #mgx{margin-left:auto}
+#obsov{position:fixed;inset:0;z-index:15;background:#15171c;display:flex;flex-direction:column}
+#obsov .mg-top{display:flex;gap:10px;align-items:center;padding:8px 12px;background:#1d2027;border-bottom:1px solid #2c3039}
+#obsov button{background:#262931;color:#f4f2ee;border:1px solid #7d828c;border-radius:6px;padding:5px 8px;font:inherit}
+#obsov #obsx{margin-left:auto}
+#obsov #obs-root{flex:1;min-height:0;position:relative}
+#obsov[hidden]{display:none}
+#pfbtn .sm,#mgpage .sm,#obsbtn .sm{display:none}@media (max-width:700px){#pfbtn .lg,#mgpage .lg,#obsbtn .lg{display:none}#pfbtn .sm,#mgpage .sm,#obsbtn .sm{display:inline}#mg #mgpage{padding:5px 6px}}
+#mgbody{flex:1;min-height:0;overflow:auto;padding:4px 8px calc(8px + env(safe-area-inset-bottom))}
+#mgbody canvas{display:block}
+.mg-msg{padding:20px;color:#a7abb3}.mg-note{color:#a7abb3;font-size:12px;padding:6px 4px}
+.mg-scroll{overflow-x:auto}
+table.pf{border-collapse:collapse;font-size:13px;min-width:100%}
+table.pf th{position:sticky;top:0;background:#1d2027;font-weight:700;padding:6px 8px;text-align:right;border-bottom:1px solid #2c3039;white-space:nowrap}
+table.pf th:first-child,table.pf td:first-child{text-align:left;position:sticky;left:0;background:#1d2027}
+table.pf td{padding:6px 8px;text-align:right;border-bottom:1px solid #262931;white-space:nowrap}
+table.pf tr[data-n]{cursor:pointer}table.pf tr[data-n]:hover td{background:#262931}
+table.pf td small.el{color:#a7abb3;font-weight:500;font-size:11px}table.pf td.fzb{background:#1e4f7a;font-weight:800}table.pf th small{font-weight:500;color:#a7abb3}table.pf td.s1{background:#1f3b5c}table.pf td.s2{background:#2a5d96}table.pf td.s3{background:#4a3a9a;font-weight:800}
+@media (max-width:700px){table.pf{font-size:12px}table.pf th,table.pf td{padding:5px 6px}#mg .mg-top{gap:6px;padding:6px}#mg .mg-top label{font-size:12px}#mg select{max-width:42vw}}
+/* 10-30 8 PM product tabs (Surface / Precip / Snow / Upper Air / Severe): pills before the Product menu; phones: own row, fits 390 px */
+#tabs{display:flex;gap:4px;flex:0 0 auto}
+#tabs button{background:#262931;color:#cfd3da;border:1px solid #4a4f5a;border-radius:15px;padding:4px 11px;font:inherit;font-size:13px;font-weight:600;white-space:nowrap;touch-action:manipulation;cursor:pointer}
+#tabs button.on{background:#2f8cff;border-color:#2f8cff;color:#fff}
+#tabs button.dim{opacity:.55;border-style:dashed}
+@media (max-width:700px){#tabs{flex:1 1 100%;gap:4px;overflow-x:auto;scrollbar-width:none}#tabs::-webkit-scrollbar{display:none}#tabs button{padding:5px 9px;font-size:12.5px}}
+
+/* Studio (10-31): the normal map is drawn off-screen (sharp, 2-3x) and cropped into two fixed video frames */
+html,body{overflow:auto}
+#wrap{position:absolute!important;left:-100000px;top:0;width:1600px;height:1050px;overflow:hidden}
+
+#studio{flex:1 1 auto;display:flex;gap:18px;padding:12px 14px;align-items:flex-start;min-height:0}
+.sfr{display:flex;flex-direction:column;gap:6px;min-width:0}
+.sfr .shd{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:13px;color:#cfd3da}
+.sfr .shd b{color:#f4f2ee}
+.sfr button,.sfr a{background:#262931;color:#f4f2ee;border:1px solid #7d828c;border-radius:6px;padding:3px 8px;font:inherit;font-size:12.5px;cursor:pointer;text-decoration:none}
+.sfr input[type=range]{width:110px;accent-color:#2f8cff}
+.sfr canvas{display:block;background:repeating-conic-gradient(#202329 0 25%,#191b20 0 50%) 0 0/24px 24px;outline:1px solid #3a3f49;cursor:grab;touch-action:none}
+.sfr canvas:focus{outline:2px solid #2f8cff}
+.sfr canvas.drag{cursor:grabbing}
+/* 10-31 7:25 PM (Benjamin: "make sure that the vertical window and horizontal video stay exactly the correct format size and don't
+   compress or get squished"): on desktop studio.js fitFrames() sizes both frames in px (exact 9:16 / 16:9, scaled down uniformly to fit
+   the window's width AND height); the global canvas{max-width/max-height:100%} rule used to squash them. These are only the pre-JS sizes. */
+#fv canvas{height:calc(100vh - 190px);height:calc(100dvh - 190px);width:auto;aspect-ratio:9/16}
+#fh{flex:1 1 auto}#fh canvas{width:100%;height:auto;aspect-ratio:16/9}
+@media (min-width:821px){.sfr canvas{max-width:none;max-height:none;flex:0 0 auto}}
+.shint{color:#8e939c;font-size:12px}
+@media (max-width:820px){body{display:block;height:auto}#studio{display:block}.sfr{margin-bottom:16px}#fv canvas{height:auto;width:100%}#fh canvas{max-height:none}#bar{position:sticky;bottom:0;z-index:5}}
+/* clean mode (OBS Browser Source): one frame at its real size, no UI */
+body.clean{background:var(--sbg,#111316);display:block;height:auto;overflow:hidden}
+body.clean #bar,body.clean #dock,body.clean .shd,body.clean .shint,body.clean #tip{display:none!important}
+body.clean #studio{padding:0;gap:0;display:block}
+body.clean .sfr{display:none}body.clean .sfr.on{display:block}
+/* MP4 loop panel (10-31) */
+#mp4p{position:fixed;left:14px;bottom:14px;z-index:12;width:min(560px,calc(100vw - 28px));max-height:calc(100dvh - 90px);overflow:auto;background:#1d2027f5;border:1px solid #4a4f5a;border-radius:10px;padding:10px 12px;box-shadow:0 6px 24px #000a;box-sizing:border-box}
+#mp4p[hidden],#pinhint[hidden],#mpout[hidden],#mppan[hidden],#mp4p [hidden]{display:none!important}
+#mp4p .mp-h{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;font-size:15px}
+#mp4p .mp-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:6px 0;font-size:13px}
+#mp4p select,#mp4p button,#mp4p a{background:#262931;color:#f4f2ee;border:1px solid #7d828c;border-radius:6px;padding:4px 8px;font:inherit;font-size:13px;text-decoration:none;touch-action:manipulation;cursor:pointer}
+#mp4p button.pri{background:#2f8cff;border-color:#2f8cff;font-weight:700}#mp4p button:disabled{opacity:.5}
+#mp4p .mp-note,#mppins,#mpst{color:#cfd3da}#mpst{font-weight:600}
+#mpv{display:block;max-width:100%;max-height:46vh;margin-top:6px;background:#000}
+#pinhint{position:fixed;left:50%;top:10px;transform:translateX(-50%);z-index:13;background:#2f8cff;color:#fff;font-weight:700;padding:8px 14px;border-radius:8px;box-shadow:0 4px 16px #0008;max-width:90vw;text-align:center}
+body.rec .sfr .shd button,body.rec #bar{pointer-events:none;opacity:.55}
+#mpsf{border-color:#ffd65a!important}#mpsfl{max-width:100%}#mpsfi{flex-basis:100%}#loopbar{position:fixed;right:14px;top:14px;z-index:20;background:#16a34a;color:#fff;font-weight:700;padding:10px 14px;border-radius:8px;box-shadow:0 4px 16px #0008}#loopbar a{color:#fff}
+#mpbr{border-top:1px solid #3a3e47;padding-top:6px}#mp4p input[type=text],#brtitle,#brstorm{background:#111316;color:#f4f2ee;border:1px solid #7d828c;border-radius:6px;padding:4px 6px;font:inherit;font-size:13px;width:150px}
+#mpbatch{border-top:1px solid #3a3e47;margin-top:6px;padding-top:6px;font-size:13px}#mpbatch summary{cursor:pointer;font-weight:700}.bx{margin:6px 0}.bx div{display:flex;flex-wrap:wrap;gap:3px 12px;max-height:110px;overflow:auto;background:#15171c;border:1px solid #3a3e47;border-radius:6px;padding:4px 6px;margin-top:2px}#bxout a{display:block;color:#9cc7ff;margin:3px 0}#bxzip{font-weight:800;color:#9fe3b0!important}
+@media (max-width:820px){#brtitle,#brstorm{width:44vw;font-size:16px}}
+#mpprog{width:120px;accent-color:#2f8cff}#mp4p .mp-h{cursor:move;user-select:none}#mpkeys{color:#8e939c!important;font-size:11.5px}
+#mp4p .mp-h{gap:8px}#mp4p .mp-hint{flex:1;color:#8e939c;font-size:11.5px}#mp4p.min > :not(.mp-h){display:none!important}#mp4p.min .mp-hint{display:none}
+#mps{width:170px;accent-color:#2f8cff}#mpsv{min-width:80px}
+/* loop range shown on the hour slider while the MP4 panel is open (thumb 28 px) */
+body.mprange #step::-webkit-slider-runnable-track{background:linear-gradient(90deg,#3a3f4a calc(14px + (100% - 28px) * var(--ra)),#2f8cffaa calc(14px + (100% - 28px) * var(--ra)),#2f8cffaa calc(14px + (100% - 28px) * var(--rb)),#3a3f4a calc(14px + (100% - 28px) * var(--rb)))}
+body.mprange #step::-moz-range-track{background:linear-gradient(90deg,#3a3f4a calc(11px + (100% - 22px) * var(--ra)),#2f8cffaa calc(11px + (100% - 22px) * var(--ra)),#2f8cffaa calc(11px + (100% - 22px) * var(--rb)),#3a3f4a calc(11px + (100% - 22px) * var(--rb)))}
+@media (max-width:820px){#mp4p{position:relative;left:auto;right:auto;bottom:auto;width:auto;margin:8px;max-height:none}#mp4p select{max-width:62vw}#mps{width:150px}#mp4p .mp-hint{flex-basis:100%;order:3}
+  #mp4p .mp-h{flex-wrap:wrap}
+  /* hour slider always on screen on phones (Benjamin: keep moving through the run while picking the loop) */
+  body.phone #dock{position:fixed;left:0;right:0;bottom:0;z-index:6}body.phone{padding-bottom:calc(60px + env(safe-area-inset-bottom))}}
+body.clean .sfr canvas,body.clean #fv canvas,body.clean #fh canvas{width:auto!important;height:auto!important;max-height:none!important;outline:0;background:none;cursor:default}
+@media (hover:none),(max-width:820px){#mpkeys{display:none!important}}   /* key hints only where there is a keyboard */
+/* 11-01 hour scrubber under the 16:9 frame, hover readout, request button slot (studio.js) */
+#scrub .sr{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+#scrub button{padding:3px 12px;font-size:16px;line-height:1.2}
+#scrub .sw{position:relative;flex:1 1 320px;min-width:200px;padding-bottom:16px}
+#hscrub{width:100%;margin:0;height:26px;accent-color:#2f8cff;cursor:pointer;touch-action:none}
+/* 11-03 (t2186u zoom lock): no browser double-tap page zoom on the scrubber row or the frame headers (iPhone / iPad Safari) */
+#scrub,#scrub button,.shd,.shd button,.shd input{touch-action:manipulation}
+#sticks{position:absolute;left:0;right:0;bottom:0;height:14px;font-size:10.5px;color:#8e939c;pointer-events:none}
+#sticks span{position:absolute;transform:translateX(-50%);white-space:nowrap}
+#shour{font-size:13px;color:#ffc24d;white-space:nowrap;min-width:150px}
+#stip{position:fixed;z-index:40;pointer-events:none;background:#1d2027ee;color:#fff;border:1px solid #7d828c;border-radius:6px;padding:3px 8px;font-weight:700;font-size:14px;white-space:nowrap}
+#stip[hidden]{display:none}
+#rqslot #rqb{position:static;box-shadow:none;opacity:1;align-self:flex-start}
+#rqslot{display:flex}
+@media (max-width:820px){#scrub .sw{flex:1 1 0;min-width:0}#shour{flex-basis:100%;width:auto;min-width:0!important;order:9}}
+body.clean #scrub,body.clean #rqslot,body.clean #stip{display:none!important}
+#mgp{display:none}body.mgmode #mgp{display:block;flex:0 0 auto;background:#1d2027;border-bottom:1px solid #2c3039}#mgf{display:block;width:100%;height:118px;border:0}
+body.mgmode #bar>:not(#smodel){display:none!important}body.mgmode #scrub,body.mgmode #pinhint,body.mgmode .shd button[data-a="mp4"],body.mgmode .shd button[data-a="obs"]{display:none!important}
+@media (max-width:820px){#mgf{height:190px}}
+/* 11-03 (t2192u): Studio > Observations: the obs module's region / layer chips + status in the panel, its map drawn off-screen */
+#mpdurr{display:none}body.obsmode #mpdurr{display:flex}
+body.obsmode #mgp{display:block;flex:0 0 auto;background:#1d2027;border-bottom:1px solid #2c3039;padding:6px 10px}#obsp{display:none}body.obsmode #obsp{display:block}body.obsmode #mgf{display:none}
+body.obsmode #bar>:not(#smodel){display:none!important}body.obsmode #scrub,body.obsmode #dock,body.obsmode .shd button[data-a="obs"]{display:none!important}body.phone.obsmode{padding-bottom:0}
+body.obsmode #mp4p .mp-row:has(#mpa),body.obsmode #mp4p .mp-row:has(#mpb),body.obsmode #mp4p label:has(#mpe),body.obsmode #mp4p .mp-row:has(#mps),body.obsmode #mpsfr,body.obsmode #mp4p .mp-row:has(#mppre){display:none!important}
+/* 11-04 (t2292u): Studio > Pass Forecaster: model picker in the panel; map controls, hour slider and MP4 / OBS hidden */
+body.passmode #mgp{display:block;flex:0 0 auto;background:#1d2027;border-bottom:1px solid #2c3039;padding:6px 10px}body.passmode #mgf,body.passmode #obsp{display:none}#pfp{display:none}body.passmode #pfp{display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+body.wafcmode #mgp{display:block;flex:0 0 auto;background:#1d2027;border-bottom:1px solid #2c3039}body.wafcmode #mgf,body.wafcmode #obsp,body.wafcmode #pfp{display:none}#wff{display:none}body.wafcmode #wff{display:block;width:100%;height:56px;border:0}
+@media (max-width:820px){body.wafcmode #wff{height:150px}}
+body.wafcmode #bar>:not(#smodel){display:none!important}body.wafcmode #scrub,body.wafcmode #pinhint,body.wafcmode #dock,body.wafcmode .shd button[data-a="mp4"],body.wafcmode .shd button[data-a="obs"],body.wafcmode .shd input,body.wafcmode .shint{display:none!important}
+#pfp select{background:#262931;color:#f4f2ee;border:1px solid #7d828c;border-radius:6px;padding:4px 8px;font:inherit}#pfp .mp-note{color:#a7abb3;font-size:12px}
+body.passmode #bar>:not(#smodel){display:none!important}body.passmode #scrub,body.passmode #pinhint,body.passmode #dock,body.passmode .shd button[data-a="mp4"],body.passmode .shd button[data-a="obs"],body.passmode .shd input,body.passmode .shint{display:none!important}
+#obsp .obs-root{display:flex;flex-wrap:wrap;align-items:center;gap:4px 14px;min-height:0;height:auto;background:none;position:static}
+#obsp #ostage{position:fixed!important;left:-20000px!important;top:0!important;width:1600px!important;height:1600px!important;flex:none!important;visibility:visible}
+#obsp .obs-zoom,#obsp #dl-obs,#obsp .obs-hint,#obsp #obs-tip,#obsp .obs-credit{display:none!important}
+
+/* 11-05: Studio > Active Alerts (WA preview) */
+body.alertmode #mgp{display:block;flex:0 0 auto;background:#1d2027;border-bottom:1px solid #2c3039;padding:6px 10px}
+#alertp{display:none}body.alertmode #alertp{display:block}body.alertmode #mgf,body.alertmode #obsp,body.alertmode #pfp,body.alertmode #wff{display:none}
+body.alertmode #bar>:not(#smodel){display:none!important}body.alertmode #scrub,body.alertmode #dock,body.alertmode #pinhint,body.alertmode .shd button[data-a="mp4"],body.alertmode .shd button[data-a="obs"]{display:none!important}
+body.phone.alertmode{padding-bottom:0}
+/* 11-07: Studio > Compare (compare.html in the panel; both maps drawn into the frames) and Studio > Web (a page in each frame) */
+body.cmpmode #mgp,body.webmode #mgp{display:block;flex:0 0 auto;background:#1d2027;border-bottom:1px solid #2c3039}
+body.cmpmode #mgp{padding:0}body.webmode #mgp{padding:6px 10px}
+#cmpf,#webp{display:none}body.cmpmode #cmpf{display:block;width:100%;height:320px;border:0;background:#1d2027}
+body.webmode #webp{display:flex;gap:8px 12px;align-items:center;flex-wrap:wrap}
+body.cmpmode #mgf,body.cmpmode #obsp,body.cmpmode #pfp,body.cmpmode #wff,body.cmpmode #alertp,body.cmpmode #webp,
+body.webmode #mgf,body.webmode #obsp,body.webmode #pfp,body.webmode #wff,body.webmode #alertp,body.webmode #cmpf{display:none!important}
+body.webmode #bar>:not(#smodel){display:none!important}
+body.webmode #scrub,body.webmode #dock,body.webmode #pinhint,body.webmode .shd button[data-a="mp4"],body.webmode .shd button[data-a="obs"]{display:none!important}
+body.cmpmode #bar>:not(#smodel):not(#scrub):not(#stepctl){display:none!important}
+body.cmpmode #pinhint,body.cmpmode .shd button[data-a="obs"],body.cmpmode #mpsfr{display:none!important}
+#weburl{width:min(420px,42vw);background:#111316;color:#f4f2ee;border:1px solid #7d828c;border-radius:6px;padding:4px 8px;font:inherit}
+#webp .mp-note{color:#a7abb3;font-size:12.5px}
+.sfr{position:relative}
+.webov{position:absolute;overflow:hidden;z-index:2;background:#111316;pointer-events:none}
+.webov[hidden]{display:none!important}
+.webov iframe{position:absolute;left:0;top:0;border:0;background:#fff;pointer-events:none}
+
+
+#memlab[hidden]{display:none!important}.memstep{background:#262931;color:#f4f2ee;border:1px solid #7d828c;border-radius:6px;padding:2px 8px;margin:0 2px;font:inherit;font-weight:700;cursor:pointer;line-height:1.2}.memstep:hover{background:#343844}#memlab.keep[hidden]{display:block!important;visibility:hidden}/* 11-03: Studio keeps the Member slot so the bar (and the frames under it) never move */
+#bar select,#bar button,#bar input[type=range],#bar label,#mem{box-sizing:border-box;height:30px}#bar label{display:inline-flex;align-items:center;gap:4px}#tabs button{height:26px}
+#shour{flex:0 0 212px;width:212px;min-width:212px!important;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
+@media (max-width:820px){#shour{flex:1 1 100%!important;width:auto!important;min-width:0!important}}#mem{background:#262931;color:#f4f2ee;border:1px solid #7d828c;border-radius:6px;padding:4px 6px;font:inherit}
+/* 11-04 (t2315u): long hour scrubber in the menu bar (desktop) in place of the short slider; never in exported frames (DOM only) */
+body.longscrub #step{visibility:hidden!important}#bar{position:relative}
+#scrub.inbar{position:absolute;z-index:30;left:var(--scrx,12px);top:var(--scry,90px);box-sizing:border-box;width:auto;background:transparent;padding:0;margin:0}
+#scrub.inbar .sr{display:flex;flex-wrap:nowrap;align-items:flex-start;gap:8px}#scrub.inbar #sprev,#scrub.inbar #snext{display:none}
+#scrub.inbar .sw{flex:0 0 var(--scrw,480px);width:var(--scrw,480px);padding-bottom:12px;margin-top:0}#bar #scrub.inbar input[type=range]{height:18px;width:100%}
+#scrub.inbar #shour{flex:0 0 auto;width:auto;min-width:0!important;white-space:nowrap;line-height:18px}#scrub.inbar #loadnote{top:9px}
+body.mprange #hscrub::-webkit-slider-runnable-track{background:linear-gradient(90deg,#3a3f4a calc(9px + (100% - 18px) * var(--ra)),#2f8cffaa calc(9px + (100% - 18px) * var(--ra)),#2f8cffaa calc(9px + (100% - 18px) * var(--rb)),#3a3f4a calc(9px + (100% - 18px) * var(--rb)))}
+/* 11-05 (t2444u): Studio action row: buttons left, hour scrubber right of them on the same line (flows, wraps gracefully) */
+#actrow{flex:1 0 100%;display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;min-width:0}
+body.actrow #stepctl #step{display:none}
+#scrub.inbar.inrow{position:relative;left:auto;top:auto;z-index:auto;flex:1 1 360px;min-width:260px;width:auto}
+#scrub.inbar.inrow .sr{flex-wrap:nowrap;align-items:center}
+#scrub.inbar.inrow .sw{flex:1 1 auto;width:auto;min-width:160px;padding-bottom:12px}
+#actrow #stat{min-width:0}
+/* 11-05 (t2449u): exactly two rows on desktop: compact first-row controls so Studio..Play fits on one line at 1512 */
+@media (min-width:1300px){body.actrow #bar{gap:6px;column-gap:6px}body.actrow #bar>label select,body.actrow #smodel select{max-width:150px;padding:4px 4px}body.actrow #run{max-width:150px}body.actrow #view{max-width:170px}body.actrow #prod{max-width:170px}body.actrow #tabs button{padding:3px 8px}body.actrow #tabs{gap:4px}body.actrow #bar>#stat{display:none}}
+</style></head>
+<body>
+<div id="bar">
+  <label>Runs <select id="run" aria-label="Runs"></select></label><label id="memlab" for="mem" hidden title="Ensemble member (1-50): only this member's maps load">Member <button id="memprev" type="button" class="memstep" aria-label="Previous member">&lsaquo;</button><input id="mem" type="number" min="1" max="50" step="1" inputmode="numeric" aria-label="Ensemble member" style="width:3.4em"><button id="memnext" type="button" class="memstep" aria-label="Next member">&rsaquo;</button></label>
+  <div id="tabs" role="tablist" aria-label="Product groups"></div>
+  <label>Product <select id="prod"></select></label>
+  <label>View <select id="view"></select></label>
+  <span id="stepctl"><button id="prev">&lsaquo;</button><button id="play">Play</button><button id="next">&rsaquo;</button>
+  <input id="step" type="range" min="0" max="0" value="0"><span id="loadnote" title="This run is still coming in; new hours appear here automatically"></span></span>
+  <button id="save" title="Save this map as a picture">Save image</button>
+  <button id="share">Share</button>
+  <button id="mgbtn" title="Hour-by-hour forecast for a town or pass">Meteogram</button>
+  <button id="pfbtn" title="Snow, temperature and wind for every mountain pass"><span class="lg">Pass Forecaster</span><span class="sm">Passes</span></button>
+  <button id="obsbtn" title="Live station observations (NWS / Environment Canada)"><span class="lg">Observations</span><span class="sm">Obs</span></button>
+  <span id="stat"></span>
+</div>
+<div id="wrap"><canvas id="map"></canvas><div id="tip" hidden></div></div>
+<div id="mp4p" hidden><div class="mp-h"><b>Save MP4 loop</b><span class="mp-hint">The hour slider, &lsaquo; &rsaquo;, arrow keys and Play still work while this is open</span><span><button type="button" data-m="min" id="mpmin" aria-label="Minimize" title="Minimize">&ndash;</button> <button type="button" data-m="x" aria-label="Close">&times;</button></span></div>
+  <div class="mp-row"><label>Preset <select id="mppre" title="Fill in the settings for a common loop"><option value="">choose&hellip;</option><option value="landfall">Landfall zoom-in (pan A &rarr; B, slows down)</option><option value="overview">Quick 5-day overview</option><option value="smooth">Smooth every-hour loop</option><option value="zoomin">Slow zoom-in on the framing</option><option value="storm">Auto storm track (finds the strongest low)</option></select></label>
+  <button type="button" data-m="pv" id="mppv" title="Play the camera move (pins / zoom) once on the frame, at the hour shown now. Nothing is saved.">Preview move</button></div>
+  <div class="mp-row" id="mpsfr"><button type="button" data-m="sf" id="mpsf" title="Find the strongest low in this view from this run's sea-level pressure, and fill in the hours, pins A / B and landfall for you">Find storm</button><select id="mpsfl" hidden title="Other storm tracks found, deepest first"></select><span id="mpsfi" class="mp-note"></span></div>
+  <div class="mp-row"><label>Frame <select id="mpk"><option value="v">9:16 (1080&times;1920)</option><option value="h">16:9 (1920&times;1080)</option></select></label>
+  <label>Mode <select id="mpmode"><option value="loop">Plain loop</option><option value="pan">Track storm (pan A &rarr; B)</option></select></label></div>
+  <div class="mp-row"><label>Start <select id="mpa"></select></label><button type="button" data-m="sa" title="Use the hour the map is on now">Start = now</button></div>
+  <div class="mp-row"><label>End <select id="mpb"></select></label><button type="button" data-m="sb" title="Use the hour the map is on now">End = now</button><span id="mpnow" class="mp-note"></span></div>
+  <div class="mp-row"><label>Every <select id="mpe"><option value="0">hour in the run</option><option value="3">3 h</option><option value="6">6 h</option><option value="12">12 h</option><option value="24">24 h</option></select></label>
+  <label>Hold end <select id="mph"><option value="0">0 s</option><option value="0.5">0.5 s</option><option value="1" selected>1 s</option><option value="2">2 s</option></select></label></div>
+  <div class="mp-row" id="mpdurr"><label>Length <select id="mpdur" title="How long the camera move takes (then Hold end)"><option value="4">4 s</option><option value="6" selected>6 s</option><option value="8">8 s</option><option value="10">10 s</option><option value="15">15 s</option></select></label><span class="mp-note">Observations: one live map, the camera moves</span></div>
+  <div class="mp-row"><label>Speed <input type="range" id="mps" min="0.5" max="15" step="0.5" value="4"></label><b id="mpsv">4 maps/s</b>
+  <label>End speed <select id="mps1"><option value="">same</option><option value="0.5">0.5</option><option value="1">1</option><option value="1.5">1.5</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="6">6</option><option value="8">8</option><option value="10">10</option><option value="12">12</option><option value="15">15</option></select></label></div>
+  <div class="mp-row"><label>Start zoom <select id="mpz0"><option value="f">as framed</option><option value="1">1&times;</option><option value="1.2">1.2&times;</option><option value="1.4">1.4&times;</option><option value="1.6">1.6&times;</option><option value="1.8">1.8&times;</option><option value="2">2&times;</option><option value="2.2">2.2&times;</option><option value="2.5">2.5&times;</option><option value="2.8">2.8&times;</option><option value="3">3&times;</option></select></label>
+  <label>End zoom <select id="mpz1"><option value="f">same as start</option><option value="1">1&times;</option><option value="1.2">1.2&times;</option><option value="1.4">1.4&times;</option><option value="1.6">1.6&times;</option><option value="1.8">1.8&times;</option><option value="2">2&times;</option><option value="2.2">2.2&times;</option><option value="2.5">2.5&times;</option><option value="2.8">2.8&times;</option><option value="3">3&times;</option></select></label></div>
+  <div class="mp-row" id="mppan" hidden><button type="button" data-m="a">Set pin A (start)</button><button type="button" data-m="b">Set pin B (end)</button><button type="button" data-m="c">Clear pins</button><span id="mppins"></span></div>
+  <div class="mp-row" id="mpbr"><b>Branding</b><label title="Just the logo, small, in a top corner under the F+ hour"><input type="checkbox" id="brcorner"> Corner logo</label><select id="brcpos" aria-label="Corner"><option value="br">bottom right</option><option value="bl">bottom left</option><option value="tr">top right</option><option value="tl">top left</option></select><label><input type="checkbox" id="brcard"> Title card</label><label><input type="checkbox" id="brlower"> Lower third</label>
+  <label>Logo <select id="brlogo"><option value="wa">WAWX Chasers</option><option value="usa">USAWX Chasers</option><option value="wawc">Washington Weather Chasers</option><option value="usawc">USA Weather Chasers</option><option value="none">none</option></select></label><button type="button" id="brcardpv" title="Show the title card on the frame for 2.5 s">Preview card</button></div>
+  <div class="mp-row"><label>Title <input id="brtitle" maxlength="80" placeholder="(the map's name)"></label><label>Storm name <input id="brstorm" maxlength="60" placeholder="optional"></label></div>
+  <div class="mp-row mp-note" id="mpkeys">Keys: Esc closes / cancels a pin &middot; Enter makes the MP4 &middot; drag the panel by its title bar (desktop)</div>
+  <div class="mp-row mp-note" id="mpinfo"></div>
+  <div class="mp-row"><button type="button" data-m="go" id="mpgo" class="pri">Make MP4</button><button type="button" data-m="stop" id="mpstop" hidden>Stop</button><progress id="mpprog" max="1" value="0" hidden></progress><span id="mpst"></span></div>
+  <div id="mpout" hidden><video id="mpv" controls loop muted playsinline></video><div class="mp-row"><a id="mpdl" download>Save MP4</a><button type="button" id="mpshare" hidden>Share / Save to Photos</button></div></div>
+  <details id="mpbatch"><summary>Batch export: several models / products / views at once</summary>
+  <div class="mp-note">Uses the settings above (hours, speed, zoom, mode, preset, branding). Pins are per view; &ldquo;Auto storm track&rdquo; finds the storm on each map.</div>
+  <div class="bx"><b>Models</b><div id="bxm"></div></div><div class="bx"><b>Products</b><div id="bxp"></div></div><div class="bx"><b>Views</b><div id="bxv"></div></div>
+  <div class="mp-row"><b>Frames</b><label><input type="checkbox" id="bxsv" checked> 9:16</label><label><input type="checkbox" id="bxsh" checked> 16:9</label><span id="bxn" class="mp-note"></span></div>
+  <div class="mp-row"><button type="button" id="bxgo" class="pri">Make all</button><button type="button" id="bxstop" hidden>Stop</button><span id="bxst" class="mp-note"></span></div><div id="bxout"></div></details>
+</div>
+<div id="studio">
+  <div class="sfr" id="fv"><div class="shd"><b>9:16</b> 1080&times;1920 &middot; zoom <input type="range" id="zv" min="100" max="250" value="100"> <button type="button" data-a="reset">Reset</button> <button type="button" data-a="png">Save PNG</button> <button type="button" data-a="mp4">Save MP4</button> <button type="button" data-a="obs">Copy OBS URL</button></div><canvas id="cv" width="1080" height="1920" tabindex="0"></canvas></div>
+  <div class="sfr" id="fh"><div class="shd"><b>16:9</b> 1920&times;1080 &middot; zoom <input type="range" id="zh" min="100" max="250" value="100"> <button type="button" data-a="reset">Reset</button> <button type="button" data-a="png">Save PNG</button> <button type="button" data-a="mp4">Save MP4</button> <button type="button" data-a="obs">Copy OBS URL</button></div><canvas id="ch" width="1920" height="1080" tabindex="0"></canvas>
+  <div class="shint">Drag a frame to line the map up (arrow keys 1 px, Shift 10 px, +/- zoom, 0 reset). Framing is saved per frame and view.</div></div>
+</div>
+<div id="pinhint" hidden></div>
+<div id="dock"></div>
+<script>
+// instant loop link (10-31): friendly names -> the viewer's own params, before viewer.js reads the address
+(() => { const q = new URLSearchParams(location.search); if (q.get("make") !== "loop") return;
+  const M = { ecmwf: "ifs", euro: "ifs", ifs: "ifs", ecmwf9: "ifs9", "ecmwf-9km": "ifs9", ifs9: "ifs9", gfs: "gfs", hrrr: "hrrr", rrfs: "rrfs", nbm: "nbm", aifs: "aifs", eps: "eps", aens: "aens" };
+  const P = { mslp: "mslpqpf", pressure: "slp", precip: "qpf6" };
+  if (q.get("model")) q.set("model", M[q.get("model").toLowerCase()] || q.get("model"));
+  if (q.get("product") && !q.get("prod")) q.set("prod", P[q.get("product")] || q.get("product"));
+  if (q.get("from") && !q.get("f")) q.set("f", q.get("from"));
+  history.replaceState(null, "", location.pathname + "?" + q.toString()); })();
+</script>
+<script src="viewer.js?v=20261107irsync1"></script>
+<script src="stormfind.js?v=20261031c"></script>
+<script src="studio.js?v=20261107irsync1"></script>
+<script src="reqbox.js?v=20261103m"></script>
+<footer class="lic"><details><summary>Data: &copy; <span class="yr">2026</span> ECMWF (www.ecmwf.int), CC BY 4.0 &middot; Places: GeoNames, CC BY 4.0 &middot; NOAA (public domain) &middot; Natural Earth &middot; <u>Credits</u></summary>
+<p>Based on data and products of the European Centre for Medium-Range Weather Forecasts (ECMWF). Copyright &copy; <span class="yr">2026</span> ECMWF, <a href="https://www.ecmwf.int">www.ecmwf.int</a>. Licensed under CC BY 4.0 (<a href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a>). Maps are modified from the original data. ECMWF does not accept any liability whatsoever for any error or omission in the data, their availability, or for any loss or damage arising from their use.</p>
+<p>Places: GeoNames (<a href="https://www.geonames.org">geonames.org</a>), CC BY 4.0. Precipitation normals: PRISM Group, Oregon State University, <a href="https://prism.oregonstate.edu">https://prism.oregonstate.edu</a> (accessed 30 Oct 2026); NOAA CPC Global Unified Gauge &amp; GPCP v2.3 via NOAA PSL. Climatology: NCEP/NCAR Reanalysis 1, NOAA PSL. NOAA HRRR, RRFS, NBM and GFS data are public domain (NOAA does not endorse this site). Basemap: Natural Earth (public domain); US Census Bureau boundaries (public domain). MP4 export: mp4-muxer (MIT).</p></details></footer>
+<style>.lic{flex:none;font:500 10.5px/1.4 Montserrat,system-ui,sans-serif;color:#a7abb3;padding:2px 10px calc(2px + env(safe-area-inset-bottom));border-top:1px solid #2a2d34;background:#15171c}
+.lic summary{cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;list-style:none}.lic summary::-webkit-details-marker{display:none}
+.lic details[open]{max-height:40vh;overflow:auto}.lic p{margin:4px 0}.lic a{color:#c9ccd2}</style>
+<script>document.querySelectorAll(".lic .yr").forEach(e=>e.textContent=new Date().getFullYear())</script>
+</body></html>

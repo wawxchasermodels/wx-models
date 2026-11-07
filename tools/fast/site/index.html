@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>WX Models</title>
+<script>if(new URLSearchParams(location.search).get("cmpstudio"))document.documentElement.classList.add("cmpstudio")</script>
+<link rel="preload" href="fonts/Montserrat-sub.woff2" as="font" type="font/woff2" crossorigin>
+<style>
+@font-face{font-family:Montserrat;src:url(fonts/Montserrat-sub.woff2) format("woff2"),url(fonts/Montserrat.ttf) format("truetype");font-weight:100 900}
+html,body{margin:0;background:#15171c;color:#f4f2ee;font:14px Montserrat,system-ui,sans-serif}
+/* 10-29 7:10 PM: whole map + controls fit the window, no scrolling (Benjamin: "make the zoom on the images less") */
+html,body{height:100%;overflow:hidden}
+body{display:flex;flex-direction:column;height:100vh;height:100dvh}
+#bar{flex:0 0 auto;display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:8px 12px;background:#1d2027;border-bottom:1px solid #2c3039}
+#bar select,#bar button{background:#262931;color:#f4f2ee;border:1px solid #7d828c;border-radius:6px;padding:4px 8px;font:inherit}
+#bar input[type=range]{flex:1;min-width:200px}
+/* 10-29 8:45 PM slider fix: no page pan / rubber-band while dragging, bigger thumb, no tap delay on buttons */
+html,body{overscroll-behavior:none}
+#bar button,#bar select{touch-action:manipulation}
+#step{-webkit-appearance:none;appearance:none;background:transparent;height:32px;margin:0;touch-action:none;cursor:pointer}
+#step::-webkit-slider-runnable-track{height:8px;border-radius:4px;background:#3a3f4a}
+#step::-moz-range-track{height:8px;border-radius:4px;background:#3a3f4a}
+#step::-webkit-slider-thumb{-webkit-appearance:none;width:28px;height:28px;margin-top:-10px;border-radius:50%;background:#2f8cff;border:3px solid #f4f2ee;box-shadow:0 1px 4px #0008}
+#step::-moz-range-thumb{width:22px;height:22px;border-radius:50%;background:#2f8cff;border:3px solid #f4f2ee}
+#stat{color:#a7abb3;font-size:12px;min-width:260px}
+#loadnote{display:none;color:#ffd27a;font-size:12px;font-weight:600;white-space:nowrap;padding:3px 8px;border:1px solid #6b5a2e;border-radius:10px;background:#2a2416}
+#loadnote.on{display:inline-block}
+body.phone #loadnote{font-size:11px;padding:2px 6px;flex:0 0 auto}
+body.phone #dock #step{min-width:90px}
+#wrap{position:relative;flex:1 1 auto;min-height:0;display:flex;align-items:center;justify-content:center;padding:4px;box-sizing:border-box}
+/* 10-30 7:50 PM (Benjamin's iPhone screenshots: whole map blurry, buttons sharp): no will-change:transform on the map. Safari/WebKit
+   rasterizes a will-change:transform layer once at 1x and stretches it (3x on an iPhone), so the canvas showed at a third of its res. */
+canvas{display:block;width:auto;height:auto;max-width:100%;max-height:100%;touch-action:none}
+#zreset{position:absolute;right:10px;top:10px;z-index:2;background:#262931ee;color:#f4f2ee;border:1px solid #7d828c;border-radius:6px;padding:5px 10px;font:inherit;font-size:13px;cursor:pointer}
+#jumpnote{position:absolute;left:50%;top:44px;transform:translateX(-50%);z-index:4;background:#1d2027f0;color:#ffd27a;border:1px solid #6b5a2e;border-radius:8px;padding:5px 12px;font-weight:700;font-size:13px;max-width:90%;text-align:center}
+#jumpnote[hidden]{display:none}#jumpnote button{margin-left:8px;background:#2f8cff;color:#fff;border:0;border-radius:6px;padding:3px 9px;font:inherit;cursor:pointer}
+#tip{position:absolute;pointer-events:none;background:#1d2027ee;color:#fff;border:1px solid #7d828c;border-radius:6px;padding:3px 8px;font-weight:700;font-size:14px;white-space:nowrap}
+@media (max-width:1500px){#stat{display:none}}
+@media (max-width:700px){#wrap{align-items:flex-start}}
+@media (max-width:700px),(max-height:500px){#bar{gap:6px;padding:6px}#bar label{font-size:12px}#bar select{max-width:42vw}#bar button{padding:5px 10px}#wrap{padding:2px}}
+@media (max-width:700px){#bar input[type=range]{min-width:100%;order:9;height:28px}}
+@media (max-height:500px) and (min-width:701px){#bar label{font-size:0}#bar label select{font-size:12px}#bar input[type=range]{min-width:120px}}
+body.bare #bar{display:none}
+/* side-by-side frames (compare.html): no page-level extras, smaller bar */
+body.embed #share,body.embed #obsbtn,body.embed #stat,body.embed #pfbtn{display:none}
+body.embed #bar{gap:6px;padding:6px 8px}
+/* 11-01 (Benjamin t2027u: "move the compare views directly under the slider ... menus drop down BELOW the views so the views never change
+   size or position"): in compare frames the map comes first, top-aligned, sized only by the frame width (capped to the frame height),
+   and the menus (and the Menus / Hide menus button) sit under it; the frame scrolls if the menus need more room */
+html:has(body.embed),body.embed{height:auto!important;min-height:100%;overflow-y:auto!important}
+body.embed{display:flex;flex-direction:column}
+body.embed #wrap{order:1;flex:0 0 auto!important;align-items:flex-start!important;padding:0!important}
+body.embed #map{max-height:calc(100vh - 2px)!important}body.embed.cslim #map{max-height:none!important}
+body.embed #bar{order:2;border-bottom:0;border-top:1px solid #2c3039}
+body.embed #cgear{order:3;position:static!important;margin:6px 8px;align-self:flex-start}
+body.embed #bar #cgear{margin:0}
+body.embed #dock{order:4}body.embed .lic{display:none}
+body.cslim #bar,body.cslim #dock,body.cslim #stepctl,body.cslim #loadnote{display:none!important}body.cslim.cshow #bar{display:flex!important}
+body.cslim #wrap{padding:0!important}body.cslim{min-height:0!important;height:auto!important}
+#cgear{position:fixed;right:6px;bottom:6px;z-index:20;background:#262931e0;color:#f4f2ee;border:1px solid #7d828c;border-radius:6px;padding:3px 8px;font:12px Montserrat,system-ui,sans-serif;cursor:pointer}
+body.cslim.cshow #cgear{position:static;margin:4px 8px}
+/* 11-01 (t2021u): menus toggle in every compare frame; shown = "Hide menus" first in the bar, hidden = "Menus" button under the map */
+body.cmin #bar{display:none!important}
+/* Studio Compare (compare.html?studio=1): each map's menus stay in the panel; the map canvas draws in an off-screen box Studio crops */
+html.cmpstudio,html.cmpstudio body{height:auto!important;min-height:0!important;overflow:hidden!important;background:#1d2027}
+html.cmpstudio #wrap{position:fixed!important;left:-9000px!important;top:0!important;width:1800px!important;height:1200px!important;overflow:hidden!important;padding:0!important}
+html.cmpstudio #map{max-width:none!important;max-height:none!important}
+html.cmpstudio #cgear,html.cmpstudio #dock,html.cmpstudio .lic,html.cmpstudio #stepctl,html.cmpstudio #save,html.cmpstudio #mgbtn,html.cmpstudio #share{display:none!important}
+html.cmpstudio #bar{border-top:0;border-bottom:1px solid #2c3039}
+#bar #cgear{position:static;margin:0;background:#2f8cff2e;border-color:#2f8cff;font-weight:700;font-size:inherit;padding:4px 9px}
+/* 10-29 9:01 PM (Benjamin): on phones the hour slider + step buttons sit UNDER the map (thumb no longer covers it);
+   the map hugs the slider at the bottom of the screen, menus stay on top. Desktop unchanged. viewer.js moves #stepctl. */
+#stepctl{display:contents}
+#dock{display:none}
+body.phone #dock{flex:0 0 auto;display:flex;gap:8px;align-items:center;padding:6px 10px calc(8px + env(safe-area-inset-bottom));background:#1d2027;border-top:1px solid #2c3039}
+body.phone #dock #stepctl{display:flex;gap:8px;align-items:center;flex:1;min-width:0}
+body.phone #dock button{background:#262931;color:#f4f2ee;border:1px solid #7d828c;border-radius:6px;padding:6px 12px;font:inherit;touch-action:manipulation}
+body.phone #dock #step{flex:1;min-width:0;order:0;height:36px}
+/* 10-29 9:16 PM: stack = menus, map, slider bar; leftover space at the bottom. viewer.js fitPhone() sizes the map. */
+body.phone #wrap{flex:0 0 auto;align-items:flex-start}
+body.phone canvas{max-height:none}
+#saveview{position:fixed;inset:0;z-index:20;background:#000e;display:flex;flex-direction:column}
+#saveview .sv-top{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:8px 12px;background:#1d2027;font-size:13px}
+#saveview .sv-top span{flex:1}
+#saveview a,#saveview button{background:#262931;color:#f4f2ee;border:1px solid #7d828c;border-radius:6px;padding:5px 10px;font:inherit;text-decoration:none}
+#saveview img{flex:1;min-height:0;width:100%;object-fit:contain;-webkit-touch-callout:default;user-select:auto}
+/* 10-30 stage 5: meteogram / Pass Forecaster overlay (map page underneath is unchanged) */
+#mg{position:fixed;inset:0;z-index:15;background:#15171c;display:flex;flex-direction:column}
+#mg .mg-top{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:8px 12px;background:#1d2027;border-bottom:1px solid #2c3039}
+#mg select,#mg button{background:#262931;color:#f4f2ee;border:1px solid #7d828c;border-radius:6px;padding:5px 8px;font:inherit;touch-action:manipulation}
+#mg #mgpage{margin-left:auto;color:#f4f2ee;background:#262931;border:1px solid #7d828c;border-radius:6px;padding:5px 8px;text-decoration:none;font-size:13px}#mg #mgpage+#mgx{margin-left:0}#mg #mgx{margin-left:auto}
+#obsov{position:fixed;inset:0;z-index:15;background:#15171c;display:flex;flex-direction:column}
+#obsov .mg-top{display:flex;gap:10px;align-items:center;padding:8px 12px;background:#1d2027;border-bottom:1px solid #2c3039}
+#obsov button{background:#262931;color:#f4f2ee;border:1px solid #7d828c;border-radius:6px;padding:5px 8px;font:inherit}
+#obsov #obsx{margin-left:auto}
+#obsov #obs-root{flex:1;min-height:0;position:relative;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;padding:0 0 calc(72px + env(safe-area-inset-bottom))}/* 11-03 t2226u: the whole Observations menu scrolls on phones (foot, notes and credits were cut off) */
+#obsov[hidden]{display:none}
+#pfbtn .sm,#mgpage .sm,#obsbtn .sm{display:none}@media (max-width:700px){#pfbtn .lg,#mgpage .lg,#obsbtn .lg{display:none}#pfbtn .sm,#mgpage .sm,#obsbtn .sm{display:inline}#mg #mgpage{padding:5px 6px}}
+#mgbody{flex:1;min-height:0;overflow:auto;padding:4px 8px calc(8px + env(safe-area-inset-bottom))}
+#mgbody canvas{display:block}
+.mg-msg{padding:20px;color:#a7abb3}.mg-note{color:#a7abb3;font-size:12px;padding:6px 4px}
+.mg-scroll{overflow-x:auto}
+table.pf{border-collapse:collapse;font-size:13px;min-width:100%}
+table.pf th{position:sticky;top:0;background:#1d2027;font-weight:700;padding:6px 8px;text-align:right;border-bottom:1px solid #2c3039;white-space:nowrap}
+table.pf th:first-child,table.pf td:first-child{text-align:left;position:sticky;left:0;background:#1d2027}
+table.pf td{padding:6px 8px;text-align:right;border-bottom:1px solid #262931;white-space:nowrap}
+table.pf tr[data-n]{cursor:pointer}table.pf tr[data-n]:hover td{background:#262931}
+table.pf td small.el{color:#a7abb3;font-weight:500;font-size:11px}table.pf td.fzb{background:#1e4f7a;font-weight:800}table.pf th small{font-weight:500;color:#a7abb3}table.pf td.s1{background:#1f3b5c}table.pf td.s2{background:#2a5d96}table.pf td.s3{background:#4a3a9a;font-weight:800}
+@media (max-width:700px){table.pf{font-size:12px}table.pf th,table.pf td{padding:5px 6px}#mg .mg-top{gap:6px;padding:6px}#mg .mg-top label{font-size:12px}#mg select{max-width:42vw}}
+/* 10-30 8 PM product tabs (Surface / Precip / Snow / Upper Air / Severe): pills before the Product menu; phones: own row, fits 390 px */
+#tabs{display:flex;gap:4px;flex:0 0 auto}
+#tabs button{background:#262931;color:#cfd3da;border:1px solid #4a4f5a;border-radius:15px;padding:4px 11px;font:inherit;font-size:13px;font-weight:600;white-space:nowrap;touch-action:manipulation;cursor:pointer}
+#tabs button.dim{opacity:.55;border-style:dashed}
+#tabs button.on{background:#2f8cff;border-color:#2f8cff;color:#fff}
+@media (max-width:700px){#tabs{flex:1 1 100%;gap:4px;overflow-x:auto;scrollbar-width:none}#tabs::-webkit-scrollbar{display:none}#tabs button{padding:5px 9px;font-size:12.5px}}
+#memlab[hidden]{display:none!important}.memstep{background:#262931;color:#f4f2ee;border:1px solid #7d828c;border-radius:6px;padding:2px 8px;margin:0 2px;font:inherit;font-weight:700;cursor:pointer;line-height:1.2}.memstep:hover{background:#343844}#mem{background:#262931;color:#f4f2ee;border:1px solid #7d828c;border-radius:6px;padding:4px 6px;font:inherit}
+</style></head>
+<body>
+<div id="bar">
+  <label>Runs <select id="run" aria-label="Runs"></select></label><label id="memlab" for="mem" hidden title="Ensemble member (1-50): only this member's maps load">Member <button id="memprev" type="button" class="memstep" aria-label="Previous member">&lsaquo;</button><input id="mem" type="number" min="1" max="50" step="1" inputmode="numeric" aria-label="Ensemble member" style="width:3.4em"><button id="memnext" type="button" class="memstep" aria-label="Next member">&rsaquo;</button></label>
+  <div id="tabs" role="tablist" aria-label="Product groups"></div>
+  <label>Product <select id="prod"></select></label>
+  <label>View <select id="view"></select></label>
+  <span id="stepctl"><button id="prev">&lsaquo;</button><button id="play">Play</button><button id="next">&rsaquo;</button>
+  <input id="step" type="range" min="0" max="0" value="0"><span id="loadnote" title="This run is still coming in; new hours appear here automatically"></span></span>
+  <button id="save" title="Save this map as a picture">Save image</button>
+  <button id="share">Share</button>
+  <button id="mgbtn" title="Hour-by-hour forecast for a town or pass">Meteogram</button>
+  <button id="pfbtn" title="Snow, temperature and wind for every mountain pass"><span class="lg">Pass Forecaster</span><span class="sm">Passes</span></button>
+  <button id="obsbtn" title="Live station observations (NWS / Environment Canada)"><span class="lg">Observations</span><span class="sm">Obs</span></button>
+  <span id="stat"></span>
+</div>
+<div id="wrap"><canvas id="map"></canvas><div id="tip" hidden></div></div>
+<div id="dock"></div>
+<script src="viewer.js?v=20261107irsync1"></script>
+<script src="reqbox.js?v=20261103m"></script>
+<footer class="lic"><details><summary>Data: &copy; <span class="yr">2026</span> ECMWF (www.ecmwf.int), CC BY 4.0 &middot; Places: GeoNames, CC BY 4.0 &middot; NOAA (public domain) &middot; Natural Earth &middot; <u>Credits</u></summary>
+<p>Based on data and products of the European Centre for Medium-Range Weather Forecasts (ECMWF). Copyright &copy; <span class="yr">2026</span> ECMWF, <a href="https://www.ecmwf.int">www.ecmwf.int</a>. Licensed under CC BY 4.0 (<a href="https://creativecommons.org/licenses/by/4.0/">https://creativecommons.org/licenses/by/4.0/</a>). Maps are modified from the original data. ECMWF does not accept any liability whatsoever for any error or omission in the data, their availability, or for any loss or damage arising from their use.</p>
+<p>Places: GeoNames (<a href="https://www.geonames.org">geonames.org</a>), CC BY 4.0. Precipitation normals: PRISM Group, Oregon State University, <a href="https://prism.oregonstate.edu">https://prism.oregonstate.edu</a> (accessed 30 Oct 2026); NOAA CPC Global Unified Gauge &amp; GPCP v2.3 via NOAA PSL. Climatology: NCEP/NCAR Reanalysis 1, NOAA PSL. NOAA HRRR, RRFS, NBM and GFS data are public domain (NOAA does not endorse this site). Basemap: Natural Earth (public domain); US Census Bureau boundaries (public domain). MP4 export: mp4-muxer (MIT).</p></details></footer>
+<style>.lic{flex:none;font:500 10.5px/1.4 Montserrat,system-ui,sans-serif;color:#a7abb3;padding:2px 10px calc(2px + env(safe-area-inset-bottom));border-top:1px solid #2a2d34;background:#15171c}
+.lic summary{cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;list-style:none}.lic summary::-webkit-details-marker{display:none}
+.lic details[open]{max-height:40vh;overflow:auto}.lic p{margin:4px 0}.lic a{color:#c9ccd2}</style>
+<script>document.querySelectorAll(".lic .yr").forEach(e=>e.textContent=new Date().getFullYear())</script>
+</body></html>

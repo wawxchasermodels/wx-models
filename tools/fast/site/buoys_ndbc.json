@@ -1,0 +1,398 @@
+{
+"source": "https://www.ndbc.noaa.gov/activestations.xml (fetched 2026-11-01 08:34 PST)",
+"note": "Fixed list of offshore wave buoys drawn on the ECMWF wave maps (waves, wavemax, wavemax24). Order = label priority. Values on the map are MODEL values at the buoy point, not live observations. Same list is inlined in viewer.js (BUOYS). Field 5: 'wa' = Washington offshore buoys (Benjamin t1989u: the ones he cares about most), placed first; 'wide' = the sparse set shown on the North America view.",
+"buoys": [
+[
+"46041",
+"Cape Elizabeth",
+47.351,
+-124.741,
+"wa"
+],
+[
+"46029",
+"Columbia River Bar",
+46.148,
+-124.508,
+"wa"
+],
+[
+"46087",
+"Neah Bay",
+48.493,
+-124.727,
+"wa"
+],
+[
+"46005",
+"West Washington",
+46.147,
+-131.077,
+"wa wide"
+],
+[
+"46089",
+"Tillamook",
+45.928,
+-125.815,
+"wa"
+],
+[
+"46050",
+"Stonewall Bank",
+44.679,
+-124.535,
+"wa"
+],
+[
+"46002",
+"West Oregon",
+42.56,
+-130.523,
+"wa wide"
+],
+[
+"46211",
+"Grays Harbor",
+46.857,
+-124.243,
+"wa"
+],
+[
+"46229",
+"Umpqua Offshore",
+43.772,
+-124.549,
+""
+],
+[
+"46015",
+"Port Orford",
+42.754,
+-124.839,
+""
+],
+[
+"46027",
+"St Georges",
+41.84,
+-124.382,
+""
+],
+[
+"46022",
+"Eel River",
+40.716,
+-124.54,
+""
+],
+[
+"46014",
+"Point Arena",
+39.225,
+-123.98,
+""
+],
+[
+"46013",
+"Bodega Bay",
+38.235,
+-123.317,
+""
+],
+[
+"46214",
+"Point Reyes",
+37.944,
+-123.466,
+""
+],
+[
+"46026",
+"San Francisco",
+37.75,
+-122.838,
+""
+],
+[
+"46042",
+"Monterey",
+36.787,
+-122.408,
+""
+],
+[
+"46028",
+"Cape San Martin",
+35.763,
+-121.9,
+""
+],
+[
+"46011",
+"Santa Maria",
+34.937,
+-120.999,
+""
+],
+[
+"46025",
+"Santa Monica Basin",
+33.765,
+-119.077,
+""
+],
+[
+"46047",
+"Tanner Bank",
+32.418,
+-119.535,
+""
+],
+[
+"46086",
+"San Clemente Basin",
+32.504,
+-118.029,
+""
+],
+[
+"46206",
+"La Perouse Bank",
+48.84,
+-126.0,
+""
+],
+[
+"46088",
+"New Dungeness",
+48.332,
+-123.179,
+""
+],
+[
+"46059",
+"West California",
+38.067,
+-129.895,
+"wide"
+],
+[
+"46006",
+"Southeast Papa",
+40.73,
+-137.42,
+"wide"
+],
+[
+"46036",
+"South Nomad",
+48.36,
+-133.94,
+"wide"
+],
+[
+"46004",
+"Middle Nomad",
+50.93,
+-136.1,
+""
+],
+[
+"46147",
+"South Moresby",
+51.83,
+-131.22,
+""
+],
+[
+"46208",
+"West Moresby",
+52.52,
+-132.69,
+""
+],
+[
+"46205",
+"West Dixon Entrance",
+54.18,
+-134.32,
+""
+],
+[
+"46184",
+"North Nomad",
+53.92,
+-138.85,
+"wide"
+],
+[
+"46246",
+"Station Papa",
+49.903,
+-145.246,
+""
+],
+[
+"46084",
+"Cape Edgecumbe",
+56.614,
+-136.04,
+""
+],
+[
+"46083",
+"Fairweather Ground",
+58.276,
+-138.024,
+""
+],
+[
+"46085",
+"Central Gulf of Alaska",
+55.84,
+-142.895,
+"wide"
+],
+[
+"46001",
+"Western Gulf of Alaska",
+56.296,
+-148.027,
+"wide"
+],
+[
+"46060",
+"West Orca Bay",
+60.571,
+-146.795,
+""
+],
+[
+"46078",
+"Albatross Bank",
+55.561,
+-152.599,
+""
+],
+[
+"46066",
+"South Kodiak",
+52.776,
+-154.992,
+"wide"
+],
+[
+"51001",
+"NW Hawaii",
+24.475,
+-162.03,
+"wide"
+],
+[
+"51000",
+"Northern Hawaii",
+23.534,
+-153.752,
+""
+],
+[
+"51003",
+"Western Hawaii",
+19.151,
+-160.617,
+""
+],
+[
+"51002",
+"SW Hawaii",
+17.07,
+-157.755,
+""
+],
+[
+"51004",
+"SE Hawaii",
+17.504,
+-152.197,
+"wide"
+],
+[
+"44025",
+"Long Island",
+40.258,
+-73.175,
+""
+],
+[
+"44008",
+"Nantucket",
+40.5,
+-69.254,
+""
+],
+[
+"44011",
+"Georges Bank",
+41.088,
+-66.546,
+"wide"
+],
+[
+"41001",
+"East Hatteras",
+34.738,
+-72.503,
+"wide"
+],
+[
+"41002",
+"South Hatteras",
+31.743,
+-74.955,
+""
+],
+[
+"41048",
+"West Bermuda",
+31.878,
+-69.722,
+"wide"
+],
+[
+"41010",
+"Canaveral East",
+28.86,
+-78.478,
+"wide"
+],
+[
+"41047",
+"NE Bahamas",
+27.557,
+-71.48,
+""
+],
+[
+"42002",
+"West Gulf",
+25.95,
+-93.78,
+"wide"
+],
+[
+"42001",
+"Mid Gulf",
+25.922,
+-89.638,
+"wide"
+],
+[
+"42003",
+"East Gulf",
+25.925,
+-85.616,
+""
+]
+]
+}

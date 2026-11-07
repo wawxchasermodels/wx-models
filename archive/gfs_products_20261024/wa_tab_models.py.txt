@@ -1,0 +1,4 @@
+# render_forecast_batch.py MODELS (Washington tabs) before the GFS trim, 10-24-26:
+MODELS = {"rain": ["ecmwf", "nbm", "gfs", "eps", "eps90", "hrrr"], "bcrain": ["ecmwf", "gfs", "eps", "eps90"],
+          "snow": ["ecmwf", "nbm", "gfs", "eps", "eps90"], "gusts": ["ecmwf", "nbm", "gfs", "eps"],
+          "lows": ["nbm", "gfs", "eps"], "highs": ["nbm", "gfs", "eps"], "waves": ["ecmwf"]}

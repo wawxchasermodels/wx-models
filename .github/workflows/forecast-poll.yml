@@ -1,0 +1,40 @@
+# Staged forecast builds: poller (10-25-26, Benjamin: "whatever the best option is to get me the data faster").
+# Every 10 min: if no Forecast site run is going, finds the first stage whose models have a newer complete 00Z/12Z run
+# than the one on the site (site-state artifact) and starts it (forecast-site.yml, stage=s1..s5, cycle=YYYYMMDDHH).
+#   s1 HRRR 00/06/12/18Z (HRRR f48 out about 01:48 / 07:47 / 13:47 / 19:47 UTC)        s2 RRFS + GFS (GFS f240 about 04:38 / 16:37 UTC)
+#   s3 AIFS (about 06:55 / 18:55 UTC)   s4 ECMWF IFS 0.25 deg (about 07:40 / 19:40 UTC; 0.1 deg until 10-26-26)
+#   s5 EPS/AIFS ENS maps + EPS/HRRR/RRFS meteograms: last, only after s4 of the same cycle (10-26-26, Benjamin 12:43 PM:
+#      main global and high-res runs before any ensemble or meteograms)
+# The backup crons in forecast-site.yml start a stage only if the poller has not published it.
+# AIFS 18Z (two-run model) needs no stage of its own: it rides along with the next stage run (stage_tools.py RIDERS), normally HRRR 00Z s1.
+# To stop: comment out the schedule below (or disable this workflow in the Actions tab). Rollback: web/forecast/README.md.
+name: Forecast poll
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "only report what would be started"
+        type: boolean
+        default: false
+  schedule:              # live 10-25-26 (Benjamin: "Switch it on"); every 10 min, starts nothing unless new data is out
+    - cron: "*/10 * * * *"
+
+concurrency:
+  group: forecast-poll
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: write   # start Forecast site runs (workflow_dispatch) and read the site-state artifact
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55   # scheduled polls keep checking for up to 45 min (GitHub runs the schedule late)
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start the next stage with new data
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/forecast/stage_tools.py poll --ref "${{ github.event.repository.default_branch }}" --wait-min ${{ github.event_name == 'schedule' && '45' || '0' }} ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}

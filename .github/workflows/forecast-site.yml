@@ -1,0 +1,1101 @@
+# Forecast maps + meteograms site (Washington forecast maps, AIFS upper air, ECMWF EPS / HRRR / RRFS town meteograms).
+# ON (10-25-26): full build once a day from the 12Z runs, 21:50 UTC (2:50 PM PDT / 1:50 PM PST), on the schedule below, plus manual runs (Actions > Forecast site > Run workflow).
+# To switch off, see web/forecast/README.md ("Turning it on").
+#
+# Job layout (every job stays well under the 6 h GitHub limit; timeouts are 300 min = 5 h):
+#   plan            picks the ECMWF cycle once, splits the WA map list into shards (auto: about 45 min of work each, max 20)
+#                   and plans the menu chunks + incremental skip list (tools/forecast/menu_plan.py, input menu_opts)
+#   wa-maps (N)     matrix, one job per shard: renders its share of the WA maps -> artifact wa-maps-<k>
+#   aifs            AIFS 500 mb anomaly (NA, PNW), MSLP and MSLP + 10 m wind (NA, PNW, PNW tight), every 6 h -> artifact aifs-maps
+#   gfs             the only GFS maps (10-24-26): 500 mb anomaly + sea-level pressure (NA, PNW, PNW tight), every 6 h -> gfs-maps
+#   mslp            ECMWF (IFS 0.25 deg) MSLP + precip (NA, PNW, WA), 3 h to 72 h then 6 h to 240 h -> artifact mslp-maps (only when 'mslp' is picked)
+#   hires-hrrr/rrfs HRRR 2 m + 850 mb temps (wave 1) / RRFS 2 m temp (wave 2), hourly -> hires-<model>-maps
+#   temps           2 m temp + anomaly (NA, PNW, PNW tight, WA) and 850 mb (NA, PNW, WA), ECMWF IFS and AIFS, every 6 h -> temp-maps
+#   menu-w3/menu-w4 menu maps (menu_maps.py), one job per model, tier and forecast-hour chunk (about 20 min each, max 20 at once);
+#                   IFS/AIFS every 6 h to 240 h, HRRR/RRFS hourly -> menu-<model>-<tier>-<chunk>. menu_opts chunk_min=0 = old layout
+#   menu-store      saves each freshly drawn model's menu maps to the Actions cache (menu-out-v1-<model>-<cycle>-...)
+#   menu-reuse      models whose latest cycle is already published (incremental=on): restores them from the cache
+#   menu-state      after a good deploy, records which cycle of each model is live (.menu_state cache)
+#   ens (2)         ensemble low centers + 500 mb heights, EPS and AIFS ENS, every 6 h to 240 h (00Z/12Z cycles) -> ens-<src>
+#   meteograms      EPS (6 h steps, 00Z/12Z only) / HRRR / RRFS town meteograms, meteo_suite.py, one job so made.json is
+#                   written once -> artifact meteograms
+#   start-w2..w4    tiny gate jobs: queue each priority wave's render jobs after the earlier wave's
+#   deploy-w1..w4   priority waves (forecast-deploy.yml): each republishes everything finished so far, so the key
+#                   products go live first and a slow job only holds back its own and later waves (menu_opts waves=off
+#                   = one deploy at the end). W1 GFS + ECMWF MSLP + HRRR temps; W2 RRFS/ECMWF temps, WA tabs, AIFS;
+#                   W3 menu precip/snow + gust/feels, ens, meteograms; W4 menu heavy extras. Meteogram split
+#                   (repo variable METEO_SPLIT=1): charts go to a second Pages project (deployed in the meteogram wave)
+#                   and the main site reaches them through its same-origin /m/ function; unset METEO_SPLIT = one site.
+name: Forecast site
+run-name: ${{ (inputs.stage && inputs.stage != 'all') && format('Forecast site {0} {1}{2}', inputs.stage, inputs.cycle, inputs.dry_run && ' (dry run)' || '') || (github.event_name == 'schedule' && format('Forecast site cron {0}', github.event.schedule)) || 'Forecast site' }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      products:
+        description: "Comma list: wa,aifs,gfs,temps,mslp,menu,ens,eps,hrrr,rrfs (eps/hrrr/rrfs = meteograms)"
+        default: "wa,aifs,gfs,temps,mslp,menu,ens,eps,hrrr,rrfs"
+      wa_tabs:
+        description: "WA map tabs (rain,bcrain,snow,gusts,waves,lows,highs)"
+        default: "rain,snow,gusts,lows,highs,waves,bcrain"
+      wa_periods:
+        description: "WA map periods (step,6h,12h,24h,48h,total,max6h,max12h,max24h,daily or all)"
+        default: "all"
+      wa_views:
+        description: "WA map views (full,west,east,... or all)"
+        default: "all"
+      wa_hours:
+        description: "WA map horizon in hours"
+        default: "240"
+      wa_models:
+        description: "WA map models (ecmwf,nbm,eps,eps90,hrrr, 'default' = ECMWF, NBM for temps, or 'all'); hrrr = Rain 1h"
+        default: "all"
+      menu_models:
+        description: "Menu-map models (ifs,aifs,hrrr,rrfs)"
+        default: "ifs,aifs,hrrr,rrfs"
+      menu_tiers:
+        description: "Menu frame tiers (A,B,C; see plan/menu_v2.md)"
+        default: "A,B,C"
+      wa_shards:
+        description: "WA render jobs: 'auto' (about 45 min of maps per job, up to 20) or a number 1-20"
+        default: "auto"
+      menu_opts:
+        description: "Run switches: incremental=on|off (skip menu models already published), chunk_min=20 (0 = one job per tier), waves=on|off (publish in 4 priority waves; off = one deploy at the end)"
+        default: "incremental=on,chunk_min=20,waves=on"
+      stage:
+        description: "all = full build (default, unchanged). s1 HRRR | s2 RRFS+GFS | s3 AIFS | s4 ECMWF IFS 0.25 deg | s5 ensembles + all meteograms (last): render only that stage, deploy the site with the other groups carried forward"
+        default: "all"
+      cycle:
+        description: "Stage runs: model cycle YYYYMMDDHH (00/12; s1 also 06/18); empty = newest complete run for that stage"
+        default: ""
+      seed_run:
+        description: "Stage runs: carry the other groups from this full-build run id instead of the saved site state (bootstrap)"
+        default: ""
+      dry_run:
+        description: "Stage runs: render and collect, check file counts, but do not deploy or save the site state"
+        type: boolean
+        default: false
+  # Full build once a day from the 12Z runs (Benjamin, 10-25-26 12:20 PM PT; replaces the 2:10 AM run). Cron is UTC:
+  # 21:50 UTC = 2:50 PM PDT, and 1:50 PM PST after the Nov 1 change (UTC cron does not shift; the data times are UTC too).
+  # 12Z data seen on the open-data servers (Last-Modified of the last file we read, 10-23 and 10-24): HRRR f48 13:47,
+  # RRFS f84 15:23-16:21, GFS f240 16:37, AIFS 18:55, AIFS ENS 19:20, EPS 19:40, ECMWF IFS 0.1 deg f240 21:34 UTC.
+  # IFS 0.1 deg (the 9 km maps) is last, so 21:50 leaves about 15 min margin (plus GitHub's usual schedule delay).
+  # 10-26-26 (Benjamin 12:53 PM): every ECMWF IFS product now reads the 0.25 deg open data (ifs/0p25/oper, f240 out about
+  # 07:40 / 19:40 UTC), so s4 no longer waits for the 0.1 deg set.
+  # Scheduled runs set WX_CYCLE_HOUR=12 so every model uses its 12Z cycle (otherwise HRRR/RRFS would pick 18Z, out by then).
+  # Manual runs (Actions > Forecast site > Run workflow, default inputs = the same full build) are not pinned: newest data.
+  # 5 deploys per run, about 155/month (+5 per manual run; < 500 Pages limit). The concurrency group keeps runs apart.
+  # To stop: comment out this block or disable the workflow in the Actions tab.
+  # Staged builds (10-25-26): forecast-poll.yml starts each stage as soon as its data is out (every 20 min check); these
+  # backup crons start a stage only if it was not published yet (plan job checks the site state). UTC; PDT = UTC-7, PST = UTC-8.
+  #   s1 HRRR 02:10/08:10/14:10/20:10 (7:10 PM / 1:10 AM / 7:10 AM / 1:10 PM PDT)  s2 RRFS+GFS 04:50/16:50 (9:50 PM / 9:50 AM)
+  #   s3 AIFS 08:00/20:00 (1:00 AM / 1:00 PM)  s4 ECMWF IFS 0.25 deg 08:30/20:30 (1:30 AM / 1:30 PM)
+  #   s5 ensembles + all meteograms 10:40/22:40 (3:40 AM / 3:40 PM)
+  # Order (10-26-26, Benjamin 12:43 PM): main global (GFS, AIFS, ECMWF) and high-res (HRRR, RRFS) deploy before any
+  # ensemble or meteogram work; s5 goes last (the poller starts it only after s4 of the same cycle). Still 14 deploys a day.
+  # Poller every 10 min (forecast-poll.yml). HRRR 06Z and 18Z are their own s1 runs (+1 deploy a day each, maps only); AIFS 18Z still rides along.
+  # Two-run HRRR + AIFS (10-25-26): the site keeps the 2 newest runs of each (run toggle). Their 18Z runs add no deploys and
+  # no crons: they ride along with the first stage run after their data is out (stage_tools.py RIDERS), normally
+  # HRRR 18Z (f48 about 19:47 UTC) with the 12Z s3 run (or s4 if s3 started first), AIFS 18Z (240 h about 00:55 UTC) with
+  # the 00Z s1 run. Deploys stay at about 434 a month.
+  # The 21:50 full build stays as a fallback until the first scheduled staged cycle completes, then it is removed. Until then
+  # it stands down by itself whenever the last deploy was a stage run in the last 36 h (stage_tools.py plan), so it can
+  # never redraw HRRR at 12Z over the 18Z run or reseed the site state under the staged builds.
+  schedule:
+    - cron: "50 21 * * *"
+    - cron: "10 2,8,14,20 * * *"   # STAGED BACKUP s1 HRRR 00/06/12/18Z (06Z added 10-26-26); each does nothing if already published
+    - cron: "50 4,16 * * *"      # s2 RRFS + GFS
+    - cron: "0 8,20 * * *"       # s3 AIFS (240 h about 06:55 / 18:55)
+    - cron: "30 8,20 * * *"      # s4 ECMWF IFS 0.25 deg (was 50 9,21 for 0.1 deg until 10-26-26)
+    - cron: "40 10,22 * * *"     # s5 EPS + AIFS ENS maps + EPS/HRRR/RRFS meteograms (last; 10-26-26)
+
+concurrency:   # one run at a time: a new (scheduled or manual) run waits until the running one finishes, never cancels it
+  group: forecast-site
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read   # staged builds: read the site-state artifact and download carried artifacts of earlier runs
+
+env:
+  WX_CYCLE_HOUR: ${{ github.event_name == 'schedule' && '12' || '' }}   # scheduled run: 12Z cycle for every model
+  PRODUCTS: ${{ github.event.inputs.products || 'wa,aifs,gfs,temps,mslp,menu,ens,eps,hrrr,rrfs' }}
+  WA_TABS: ${{ github.event.inputs.wa_tabs || 'rain,snow,gusts,lows,highs,waves,bcrain' }}
+  WA_PERIODS: ${{ github.event.inputs.wa_periods || 'all' }}
+  WA_VIEWS: ${{ github.event.inputs.wa_views || 'all' }}
+  WA_HOURS: ${{ github.event.inputs.wa_hours || '240' }}
+  WA_MODELS: ${{ github.event.inputs.wa_models || 'all' }}
+  WA_PARALLEL: "4"          # renders at once inside one 4-core runner (speed-v1: 3 -> 4, each render is single-threaded, ~1-2 GB)
+  WA_SEC_PER_MAP: "22"      # measured draw + fetch per map with the speed-v1 caches (10-25-26); used only to size the shards
+  WA_HOURS_PER_JOB: "0.75"  # target work per shard (speed-v1: 4 h -> 45 min, so the full WA list fills up to 20 shards)
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      cycle: ${{ steps.p.outputs.cycle }}
+      shards: ${{ steps.p.outputs.shards }}
+      menu: ${{ steps.mp.outputs.menu }}
+      menu_any: ${{ steps.mp.outputs.menu_any }}
+      menu_w3: ${{ steps.mp.outputs.menu_w3 }}
+      menu_w3_any: ${{ steps.mp.outputs.menu_w3_any }}
+      menu_w4: ${{ steps.mp.outputs.menu_w4 }}
+      menu_w4_any: ${{ steps.mp.outputs.menu_w4_any }}
+      waves: ${{ steps.mp.outputs.waves }}
+      menu_reuse: ${{ steps.mp.outputs.menu_reuse }}
+      menu_reuse_any: ${{ steps.mp.outputs.menu_reuse_any }}
+      menu_cycles: ${{ steps.mp.outputs.menu_cycles }}
+      menu_keys: ${{ steps.mp.outputs.menu_keys }}
+      menu_store: ${{ steps.mp.outputs.menu_store }}
+      count: ${{ steps.p.outputs.count }}
+      stage: ${{ steps.st.outputs.stage }}
+      go: ${{ steps.st.outputs.go }}
+      stage_cycle: ${{ steps.st.outputs.cycle }}
+      pin: ${{ steps.st.outputs.pin }}
+      products: ${{ steps.st.outputs.products }}
+      meteo_srcs: ${{ steps.st.outputs.meteo_srcs }}
+      carry: ${{ steps.st.outputs.carry }}
+      min_files: ${{ steps.st.outputs.min_files }}
+      prev_state: ${{ steps.st.outputs.prev_state }}
+      stage_patterns: ${{ steps.st.outputs.stage_patterns }}
+      riders: ${{ steps.st.outputs.riders }}
+      hrrr_cycle: ${{ steps.st.outputs.hrrr_cycle }}
+      aifs_cycle: ${{ steps.st.outputs.aifs_cycle }}
+      ifsx_cycle: ${{ steps.st.outputs.ifsx_cycle }}
+      meteo_deploy: ${{ steps.st.outputs.meteo_deploy }}
+    permissions:
+      contents: read
+      actions: read     # list the saved menu-map caches (incremental rendering); staged builds: read the site state
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Stage (all = full build; s1-s5 = staged build, tools/forecast/stage_tools.py)
+        id: st
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STAGE: ${{ github.event.inputs.stage }}
+          CYCLE_IN: ${{ github.event.inputs.cycle }}
+          SEED: ${{ github.event.inputs.seed_run }}
+          SCHED: ${{ github.event.schedule }}
+        run: python tools/forecast/stage_tools.py plan --stage "$STAGE" --cycle "$CYCLE_IN" --event "$GITHUB_EVENT_NAME" --schedule "$SCHED" --seed-run "$SEED"
+      - name: Restore the menu state file (which model cycle was last published)
+        uses: actions/cache/restore@v4
+        with:
+          path: .menu_state
+          key: menu-state-${{ github.run_id }}
+          restore-keys: menu-state-
+      - name: Cycle and WA shard list
+        id: p
+        if: steps.st.outputs.go == 'true'
+        env:
+          WX_CYCLE_HOUR: ${{ steps.st.outputs.pin }}
+          STAGE_CYCLE: ${{ steps.st.outputs.cycle }}
+          WANT: ${{ github.event.inputs.wa_shards || 'auto' }}
+          MENU_MODELS: ${{ github.event.inputs.menu_models }}
+          MENU_TIERS: ${{ github.event.inputs.menu_tiers }}
+        run: |
+          H=$(date -u +%H); D=$(date -u +%Y%m%d)
+          if [ "$H" -ge 21 ]; then C=${D}12; elif [ "$H" -ge 9 ]; then C=${D}00; else C=$(date -u -d yesterday +%Y%m%d)12; fi
+          if [ -n "$STAGE_CYCLE" ]; then C="$STAGE_CYCLE"; fi   # staged build: the stage's own 00Z/12Z cycle
+          N=$(python tools/forecast/render_forecast_batch.py --cycle "$C" --tabs "$WA_TABS" --periods "$WA_PERIODS" \
+                --views "$WA_VIEWS" --hours "$WA_HOURS" --models "$WA_MODELS" --dry-run | sed -nE '1s/.*: ([0-9]+) renders.*/\1/p')
+          python - "$N" "$WANT" >> "$GITHUB_OUTPUT" <<'PY'
+          import json, math, os, sys
+          n, want = int(sys.argv[1]), sys.argv[2]
+          per_job = float(os.environ["WA_HOURS_PER_JOB"]) * 3600 * int(os.environ["WA_PARALLEL"]) / float(os.environ["WA_SEC_PER_MAP"])
+          k = max(1, math.ceil(n / per_job)) if want == "auto" else int(want)
+          k = max(1, min(20, k, max(1, n)))
+          print("count=%d" % n)
+          print("shards=" + json.dumps(list(range(1, k + 1))))
+          PY
+          echo "cycle=$C" >> "$GITHUB_OUTPUT"
+          echo "Cycle $C, $N WA maps" >> "$GITHUB_STEP_SUMMARY"
+      - name: Menu-map chunks (forecast-hour ranges) and incremental skip list
+        id: mp
+        if: steps.st.outputs.go == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WX_CYCLE_HOUR: ${{ steps.st.outputs.pin }}
+          MENU_MODELS: ${{ steps.st.outputs.menu_models || github.event.inputs.menu_models }}
+          MENU_TIERS: ${{ github.event.inputs.menu_tiers }}
+          MENU_CYCLES: ${{ steps.st.outputs.menu_cycles }}   # 18Z riders (two-run HRRR/AIFS): their own cycle
+          MENU_OPTS: ${{ github.event.inputs.menu_opts || 'incremental=on,chunk_min=20,waves=on' }}
+          CYCLE: ${{ steps.p.outputs.cycle }}
+        run: |
+          WAVES=on
+          for kv in ${MENU_OPTS//,/ }; do case "$kv" in incremental=*) export MENU_INCREMENTAL="${kv#*=}" ;; chunk_min=*) export MENU_CHUNK_MIN="${kv#*=}" ;; waves=*) WAVES="${kv#*=}" ;; esac; done
+          echo "waves=$WAVES" >> "$GITHUB_OUTPUT"
+          C="$CYCLE"   # from the step above (each step has its own GITHUB_OUTPUT file)
+          [ -n "$C" ] || { echo "::error::no ECMWF cycle from the plan step"; exit 1; }
+          gh cache list --repo "$GITHUB_REPOSITORY" --key menu-out- --limit 200 --json key -q '.[].key' > .menu_have || : > .menu_have
+          python tools/forecast/menu_plan.py --models "${MENU_MODELS:-ifs,aifs,hrrr,rrfs}" --tiers "${MENU_TIERS:-A,B,C}" \
+            --global-cycle "$C" --state .menu_state/menu_state.json --have-caches .menu_have --speedup 5 >> "$GITHUB_OUTPUT"
+          grep -E '^menu_(cycles|reuse)=' "$GITHUB_OUTPUT" >> "$GITHUB_STEP_SUMMARY"
+
+  start-w2:
+    # priority waves (10-25-26): tiny gate jobs so each wave's render jobs are queued after the earlier wave's
+    # (GitHub starts queued jobs roughly first come, first served; at most 20 run at once)
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: echo "wave 2 queued after wave 1"
+
+  start-w3:
+    needs: start-w2
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: echo "wave 3 queued after wave 2"
+
+  start-w4:
+    needs: start-w3
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: echo "wave 4 queued after wave 3"
+
+  wa-maps:
+    needs: [plan, start-w2]
+    # WA map shards archived 10-25-26 (Benjamin): they run only when the repo variable WA_SHARDS is "on" (unset = off, on
+    # every run, scheduled and manual); the code stays in place. To bring them back: RESTORE_WA_SHARDS.md.
+    if: vars.WA_SHARDS == 'on' && needs.plan.outputs.stage == 'all' && contains(needs.plan.outputs.products, 'wa')
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      max-parallel: 10   # runner budget: GitHub runs 20 jobs at once; caps keep a runner free so each wave's deploy starts at once
+      matrix:
+        shard: ${{ fromJSON(needs.plan.outputs.shards) }}
+    env:
+      WX_CYCLE_HOUR: ${{ needs.plan.outputs.pin }}   # 12 on the 21:50 cron, the cycle hour on stage runs, else unpinned
+      WX_CACHE: ${{ github.workspace }}/.wx_cache
+      SITE_BATCH: ${{ github.workspace }}/.site_batch
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install Python packages (pinned, permissive licenses)
+        run: pip install -r tools/requirements.txt
+      - name: Title font (Impact from the Microsoft core fonts package; installed on the runner, never committed)
+        run: |
+          echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true" | sudo debconf-set-selections
+          sudo apt-get update -qq && sudo apt-get install -y -qq ttf-mscorefonts-installer libcairo2
+          test -f /usr/share/fonts/truetype/msttcorefonts/Impact.ttf
+      - name: Washington forecast maps, shard ${{ matrix.shard }} of ${{ strategy.job-total }}
+        run: |
+          python tools/forecast/render_forecast_batch.py --cycle "${{ needs.plan.outputs.cycle }}" --tabs "$WA_TABS" \
+            --periods "$WA_PERIODS" --views "$WA_VIEWS" --hours "$WA_HOURS" --models "$WA_MODELS" \
+            --shard "${{ matrix.shard }}/${{ strategy.job-total }}" --jobs "$WA_PARALLEL"
+      - name: Keep only the site files (final.jpg + site_frame.json + render.log)
+        run: find .site_batch -type f ! -name final.jpg ! -name site_frame.json ! -name render.log -delete
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wa-maps-${{ matrix.shard }}
+          path: .site_batch
+          include-hidden-files: true   # the batch folders start with a dot
+          retention-days: 3   # staged builds carry products forward from earlier runs
+          if-no-files-found: warn
+
+  aifs:
+    needs: [plan, start-w2]
+    if: needs.plan.outputs.go == 'true' && contains(needs.plan.outputs.products, 'aifs')
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    env:
+      WX_CYCLE_HOUR: ${{ needs.plan.outputs.pin }}   # 12 on the 21:50 cron, the cycle hour on stage runs, else unpinned
+      SITE_BATCH: ${{ github.workspace }}/.site_batch
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install Python packages (pinned, permissive licenses)
+        run: pip install -r tools/requirements.txt
+      - name: Restore climatology cache
+        uses: actions/cache@v4
+        with:
+          path: .clim
+          key: forecast-clim-v1
+      - name: Climatology (NCEP/NCAR Reanalysis 1991-2020 monthly mean, NOAA PSL)
+        run: |
+          mkdir -p .clim .site_batch/clim
+          if [ ! -f .clim/ncep_hgt500_mon_ltm_1991_2020.npz ]; then
+            pip install h5py
+            curl -sSfo /tmp/hgt.nc https://downloads.psl.noaa.gov/Datasets/ncep.reanalysis.derived/pressure/hgt.mon.ltm.1991-2020.nc
+            python tools/forecast/make_clim.py /tmp/hgt.nc .clim/ncep_hgt500_mon_ltm_1991_2020.npz
+          fi
+          cp .clim/ncep_hgt500_mon_ltm_1991_2020.npz .site_batch/clim/
+      - name: AIFS 500 mb anomaly, MSLP, MSLP + 10 m wind (every 6 h to 240 h; aifs_cycle = 18Z rider, else newest/pinned)
+        run: python tools/forecast/aifs_maps.py --cycle "${{ needs.plan.outputs.aifs_cycle }}" --hours 240 --every 6 --views na,pnw,pnwt
+      - name: Keep only the site files
+        run: rm -rf .site_batch/clim
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aifs-maps
+          path: .site_batch
+          include-hidden-files: true   # the batch folders start with a dot
+          retention-days: 3   # staged builds carry products forward from earlier runs
+          if-no-files-found: warn
+
+  gfs:
+    needs: plan
+    if: needs.plan.outputs.go == 'true' && contains(needs.plan.outputs.products, 'gfs')
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      WX_CYCLE_HOUR: ${{ needs.plan.outputs.pin }}   # 12 on the 21:50 cron, the cycle hour on stage runs, else unpinned
+      SITE_BATCH: ${{ github.workspace }}/.site_batch
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install Python packages (pinned, permissive licenses)
+        run: pip install -r tools/requirements.txt
+      - name: Restore climatology cache
+        uses: actions/cache@v4
+        with:
+          path: .clim
+          key: forecast-clim-v1
+      - name: Climatology (NCEP/NCAR Reanalysis 1991-2020 monthly mean 500 mb height, NOAA PSL; same file as the AIFS anomaly)
+        run: |
+          mkdir -p .clim .site_batch/clim
+          if [ ! -f .clim/ncep_hgt500_mon_ltm_1991_2020.npz ]; then
+            pip install h5py
+            curl -sSfo /tmp/hgt.nc https://downloads.psl.noaa.gov/Datasets/ncep.reanalysis.derived/pressure/hgt.mon.ltm.1991-2020.nc
+            python tools/forecast/make_clim.py /tmp/hgt.nc .clim/ncep_hgt500_mon_ltm_1991_2020.npz
+          fi
+          cp .clim/ncep_hgt500_mon_ltm_1991_2020.npz .site_batch/clim/
+      - name: Restore 850 mb climatology cache
+        uses: actions/cache@v4
+        with:
+          path: .clim_t850
+          key: forecast-clim-t850-v1
+      - name: 850 mb temperature climatology (NCEP/NCAR Reanalysis 1991-2020 monthly mean, NOAA PSL) for the 850 mb anomaly
+        run: |
+          mkdir -p .clim_t850 .site_batch/clim
+          if [ ! -f .clim_t850/ncep_t850_mon_ltm_1991_2020.npz ]; then
+            pip install h5py
+            curl -sSfo /tmp/air.nc https://downloads.psl.noaa.gov/Datasets/ncep.reanalysis.derived/pressure/air.mon.ltm.1991-2020.nc
+            python tools/forecast/make_clim_t850.py /tmp/air.nc .clim_t850/ncep_t850_mon_ltm_1991_2020.npz
+          fi
+          cp .clim_t850/ncep_t850_mon_ltm_1991_2020.npz .site_batch/clim/
+      - name: GFS 500 mb anomaly + sea-level pressure + 850 mb temp anomaly (latest 00Z/12Z run, every 6 h to 240 h)
+        run: python tools/forecast/gfs_maps.py --hours 240 --every 6 --views na,pnw,pnwt --products z500,mslp,t850anom
+      - name: Keep only the site files
+        run: rm -rf .site_batch/clim
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gfs-maps
+          path: .site_batch
+          include-hidden-files: true   # the batch folders start with a dot
+          retention-days: 3   # staged builds carry products forward from earlier runs
+          if-no-files-found: warn
+
+  mslp:
+    needs: plan
+    if: needs.plan.outputs.go == 'true' && contains(needs.plan.outputs.products, 'mslp')
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    env:
+      WX_CYCLE_HOUR: ${{ needs.plan.outputs.pin }}   # 12 on the 21:50 cron, the cycle hour on stage runs, else unpinned
+      SITE_BATCH: ${{ github.workspace }}/.site_batch
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install Python packages (pinned, permissive licenses)
+        run: pip install -r tools/requirements.txt
+      - name: Title font (Impact from the Microsoft core fonts package; installed on the runner, never committed)
+        run: |
+          echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true" | sudo debconf-set-selections
+          sudo apt-get update -qq && sudo apt-get install -y -qq ttf-mscorefonts-installer libcairo2
+          test -f /usr/share/fonts/truetype/msttcorefonts/Impact.ttf
+      - name: ECMWF 0.25 deg MSLP + precip (3 h to 72 h, then 6 h to 240 h)
+        run: python tools/forecast/ecmwf_mslp_precip.py --cycle "${{ needs.plan.outputs.cycle }}" --plan
+      - name: Restore climatology cache
+        uses: actions/cache@v4
+        with:
+          path: .clim
+          key: forecast-clim-v1
+      - name: Climatology (NCEP/NCAR Reanalysis 1991-2020 monthly mean 500 mb height, NOAA PSL) for the ECMWF 0.25 deg 500 mb anomaly
+        run: |
+          mkdir -p .clim .site_batch/clim
+          if [ ! -f .clim/ncep_hgt500_mon_ltm_1991_2020.npz ]; then
+            pip install h5py
+            curl -sSfo /tmp/hgt.nc https://downloads.psl.noaa.gov/Datasets/ncep.reanalysis.derived/pressure/hgt.mon.ltm.1991-2020.nc
+            python tools/forecast/make_clim.py /tmp/hgt.nc .clim/ncep_hgt500_mon_ltm_1991_2020.npz
+          fi
+          cp .clim/ncep_hgt500_mon_ltm_1991_2020.npz .site_batch/clim/
+      - name: ECMWF 0.25 deg 500 mb anomaly, sea-level pressure with H/L centers, MSLP + 10 m wind (every 6 h to 240 h)
+        run: python tools/forecast/gfs_maps.py --model ifs --cycle "${{ needs.plan.outputs.cycle }}" --hours 240 --every 6 --products z500,mslp,wind
+      - name: Keep only the site files
+        run: rm -rf .site_batch/clim
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mslp-maps
+          path: .site_batch
+          include-hidden-files: true   # the batch folders start with a dot
+          retention-days: 3   # staged builds carry products forward from earlier runs
+          if-no-files-found: warn
+
+  ifsx:
+    # 10-26-26 (Benjamin 6:59 AM): ECMWF 06Z/18Z run (0.25 deg since 12:53 PM) (to 144 h, every 6 h) as a second run on the toggle for five
+    # products only: 500 mb anomaly, MSLP + 10 m wind (NA, PNW, PNW tight), 850 mb temp/wind (NA, PNW, WA), 850 mb anomaly
+    # (NA, PNW), 10 m gusts to 90 h (NA, PNW, PNW tight, WA). Rides along with the next stage run after its data is out
+    # (stage_tools.py RIDERS "ifsx"; no extra deploy) -> artifact ifsx-maps. About 335 site files.
+    needs: plan
+    continue-on-error: true   # never blocks the stage's own deploy
+    if: needs.plan.outputs.go == 'true' && needs.plan.outputs.ifsx_cycle != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      SITE_BATCH: ${{ github.workspace }}/.site_batch
+      C: ${{ needs.plan.outputs.ifsx_cycle }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install Python packages (pinned, permissive licenses)
+        run: pip install -r tools/requirements.txt
+      - name: Title font (Impact from the Microsoft core fonts package; installed on the runner, never committed)
+        run: |
+          echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true" | sudo debconf-set-selections
+          sudo apt-get update -qq && sudo apt-get install -y -qq ttf-mscorefonts-installer libcairo2
+          test -f /usr/share/fonts/truetype/msttcorefonts/Impact.ttf
+      - name: Restore 500 mb climatology cache
+        uses: actions/cache@v4
+        with:
+          path: .clim
+          key: forecast-clim-v1
+      - name: Restore 850 mb climatology cache
+        uses: actions/cache@v4
+        with:
+          path: .clim_t850
+          key: forecast-clim-t850-v1
+      - name: Climatologies (NCEP/NCAR Reanalysis 1991-2020 monthly means, NOAA PSL)
+        run: |
+          mkdir -p .clim .clim_t850 .site_batch/clim
+          if [ ! -f .clim/ncep_hgt500_mon_ltm_1991_2020.npz ] || [ ! -f .clim_t850/ncep_t850_mon_ltm_1991_2020.npz ]; then pip install h5py; fi
+          if [ ! -f .clim/ncep_hgt500_mon_ltm_1991_2020.npz ]; then
+            curl -sSfo /tmp/hgt.nc https://downloads.psl.noaa.gov/Datasets/ncep.reanalysis.derived/pressure/hgt.mon.ltm.1991-2020.nc
+            python tools/forecast/make_clim.py /tmp/hgt.nc .clim/ncep_hgt500_mon_ltm_1991_2020.npz
+          fi
+          if [ ! -f .clim_t850/ncep_t850_mon_ltm_1991_2020.npz ]; then
+            curl -sSfo /tmp/air.nc https://downloads.psl.noaa.gov/Datasets/ncep.reanalysis.derived/pressure/air.mon.ltm.1991-2020.nc
+            python tools/forecast/make_clim_t850.py /tmp/air.nc .clim_t850/ncep_t850_mon_ltm_1991_2020.npz
+          fi
+          cp .clim/ncep_hgt500_mon_ltm_1991_2020.npz .clim_t850/ncep_t850_mon_ltm_1991_2020.npz .site_batch/clim/
+      - name: ECMWF 0.25 deg 500 mb anomaly + MSLP/10 m wind, 0-144 h every 6 h
+        run: python tools/forecast/gfs_maps.py --model ifs --cycle "$C" --hours 144 --every 6 --views na,pnw,pnwt --products z500,wind
+      - name: ECMWF 0.25 deg 850 mb temp/wind + 850 mb anomaly, 0-144 h every 6 h
+        run: python tools/forecast/temp_maps.py --model ifs --cycle "$C" --hours 144 --every 6 --views na,pnw,pnwt,wa --products t850,t850anom
+      - name: ECMWF 0.25 deg 10 m gusts, 6-90 h every 6 h
+        run: python tools/forecast/menu_maps.py --model ifs --cycle "$C" --steps "$(seq -s, 6 6 90)" --views na,pnw,pnwt,wa --products gust10   # 10 m gust (10fg) is published to 90 h only
+      - name: Keep only the site files
+        run: rm -rf .site_batch/clim
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ifsx-maps
+          path: .site_batch
+          include-hidden-files: true   # the batch folders start with a dot
+          retention-days: 3   # staged builds carry products forward from earlier runs
+          if-no-files-found: warn
+
+  temps:
+    needs: [plan, start-w2]
+    if: needs.plan.outputs.go == 'true' && contains(needs.plan.outputs.products, 'temps')
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    env:
+      WX_CYCLE_HOUR: ${{ needs.plan.outputs.pin }}   # 12 on the 21:50 cron, the cycle hour on stage runs, else unpinned
+      SITE_BATCH: ${{ github.workspace }}/.site_batch
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install Python packages (pinned, permissive licenses)
+        run: pip install -r tools/requirements.txt
+      - name: Title font (Impact from the Microsoft core fonts package; installed on the runner, never committed)
+        run: |
+          echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true" | sudo debconf-set-selections
+          sudo apt-get update -qq && sudo apt-get install -y -qq ttf-mscorefonts-installer libcairo2
+          test -f /usr/share/fonts/truetype/msttcorefonts/Impact.ttf
+      - name: Restore 2 m climatology cache
+        uses: actions/cache@v4
+        with:
+          path: .clim
+          key: forecast-clim-t2m-v1
+      - name: 2 m climatology (NCEP/NCAR Reanalysis 1991-2020 6-hourly mean, NOAA PSL)
+        run: |
+          mkdir -p .clim .site_batch/clim
+          if [ ! -f .clim/ncep_t2m_6h_ltm_1991_2020.npz ]; then
+            pip install h5py
+            P=https://downloads.psl.noaa.gov/Datasets/ncep.reanalysis.derived/surface_gauss
+            curl -sSfo /tmp/air2m.nc "$P/air.2m.gauss.4Xday.ltm.1991-2020.nc"
+            curl -sSfo /tmp/hgtsfc.nc "$P/hgt.sfc.gauss.nc"
+            python tools/forecast/make_clim_t2m.py /tmp/air2m.nc /tmp/hgtsfc.nc .clim/ncep_t2m_6h_ltm_1991_2020.npz
+          fi
+          cp .clim/ncep_t2m_6h_ltm_1991_2020.npz .site_batch/clim/
+      - name: Restore 850 mb climatology cache
+        uses: actions/cache@v4
+        with:
+          path: .clim_t850
+          key: forecast-clim-t850-v1
+      - name: 850 mb temperature climatology (NCEP/NCAR Reanalysis 1991-2020 monthly mean, NOAA PSL) for the 850 mb anomaly
+        run: |
+          mkdir -p .clim_t850 .site_batch/clim
+          if [ ! -f .clim_t850/ncep_t850_mon_ltm_1991_2020.npz ]; then
+            pip install h5py
+            curl -sSfo /tmp/air.nc https://downloads.psl.noaa.gov/Datasets/ncep.reanalysis.derived/pressure/air.mon.ltm.1991-2020.nc
+            python tools/forecast/make_clim_t850.py /tmp/air.nc .clim_t850/ncep_t850_mon_ltm_1991_2020.npz
+          fi
+          cp .clim_t850/ncep_t850_mon_ltm_1991_2020.npz .site_batch/clim/
+      - name: ECMWF IFS 2 m temp, 2 m anomaly, 850 mb temp/wind, 850 mb anomaly (every 6 h to 240 h)
+        if: needs.plan.outputs.stage == 'all' || needs.plan.outputs.stage == 's4'   # s3 and the AIFS 18Z rider = AIFS temps only
+        run: python tools/forecast/temp_maps.py --model ifs --cycle "${{ needs.plan.outputs.cycle }}" --hours 240 --every 6 --views na,pnw,pnwt,wa --products t2m,t2manom,t850,t850anom
+      - name: AIFS 2 m temp, 2 m anomaly, 850 mb temp/wind, 850 mb anomaly (every 6 h to 240 h)
+        if: needs.plan.outputs.stage == 'all' || needs.plan.outputs.stage == 's3' || needs.plan.outputs.aifs_cycle != ''
+        run: python tools/forecast/temp_maps.py --model aifs --cycle "${{ needs.plan.outputs.aifs_cycle || needs.plan.outputs.cycle }}" --hours 240 --every 6 --views na,pnw,pnwt,wa --products t2m,t2manom,t850,t850anom
+      - name: Keep only the site files
+        run: rm -rf .site_batch/clim
+      - uses: actions/upload-artifact@v4
+        with:
+          name: temp-maps
+          path: .site_batch
+          include-hidden-files: true   # the batch folders start with a dot
+          retention-days: 3   # staged builds carry products forward from earlier runs
+          if-no-files-found: warn
+
+  hires-hrrr:
+    needs: plan
+    # a NOAA bucket outage must not block the ECMWF deploy
+    continue-on-error: true
+    if: needs.plan.outputs.go == 'true' && contains(needs.plan.outputs.products, 'hrrr')
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      WX_CYCLE_HOUR: ${{ needs.plan.outputs.pin }}   # 12 on the 21:50 cron, the cycle hour on stage runs, else unpinned
+      SITE_BATCH: ${{ github.workspace }}/.site_batch
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install Python packages (pinned, permissive licenses)
+        run: pip install -r tools/requirements.txt
+      - name: Title font (Impact from the Microsoft core fonts package; installed on the runner, never committed)
+        run: |
+          echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true" | sudo debconf-set-selections
+          sudo apt-get update -qq && sudo apt-get install -y -qq ttf-mscorefonts-installer libcairo2
+          test -f /usr/share/fonts/truetype/msttcorefonts/Impact.ttf
+      - name: HRRR 2 m temp + 850 mb temp/wind (latest full 48 h run, hourly; hrrr_cycle = 18Z rider)
+        run: python tools/forecast/temp_maps.py --model hrrr --cycle "${{ needs.plan.outputs.hrrr_cycle }}" --hours 48 --every 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hires-hrrr-maps
+          path: .site_batch
+          include-hidden-files: true   # the batch folders start with a dot
+          retention-days: 3   # staged builds carry products forward from earlier runs
+          if-no-files-found: warn
+
+  hires-rrfs:
+    needs: [plan, start-w2]
+    # a NOAA bucket outage must not block the ECMWF deploy
+    continue-on-error: true
+    if: needs.plan.outputs.go == 'true' && contains(needs.plan.outputs.products, 'rrfs')
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      WX_CYCLE_HOUR: ${{ needs.plan.outputs.pin }}   # 12 on the 21:50 cron, the cycle hour on stage runs, else unpinned
+      SITE_BATCH: ${{ github.workspace }}/.site_batch
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install Python packages (pinned, permissive licenses)
+        run: pip install -r tools/requirements.txt
+      - name: Title font (Impact from the Microsoft core fonts package; installed on the runner, never committed)
+        run: |
+          echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true" | sudo debconf-set-selections
+          sudo apt-get update -qq && sudo apt-get install -y -qq ttf-mscorefonts-installer libcairo2
+          test -f /usr/share/fonts/truetype/msttcorefonts/Impact.ttf
+      - name: RRFS 2 m temp (latest 84 h run, hourly)
+        run: python tools/forecast/temp_maps.py --model rrfs --hours 84 --every 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hires-rrfs-maps
+          path: .site_batch
+          include-hidden-files: true   # the batch folders start with a dot
+          retention-days: 3   # staged builds carry products forward from earlier runs
+          if-no-files-found: warn
+
+  menu-w3:
+    name: menu-w3 (${{ matrix.model }} ${{ matrix.tier }} ${{ matrix.chunk }} F${{ matrix.first }}-${{ matrix.last }})
+    needs: [plan, start-w3]
+    # speed_build_v1: one job per model / tier / forecast-hour chunk (menu_plan.py), up to 20 at once (public repo limit);
+    # each chunk draws on all 4 cores while the next hours download in the background (menu_maps.py run loop).
+    if: needs.plan.outputs.go == 'true' && contains(needs.plan.outputs.products, 'menu') && needs.plan.outputs.menu_w3_any == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: 4   # runner budget: GitHub runs 20 jobs at once; caps keep a runner free so each wave's deploy starts at once
+      matrix: ${{ fromJSON(needs.plan.outputs.menu_w3) }}
+    env:
+      WX_CYCLE_HOUR: ${{ needs.plan.outputs.pin }}   # 12 on the 21:50 cron, the cycle hour on stage runs, else unpinned
+      SITE_BATCH: ${{ github.workspace }}/.site_batch
+      # products per job tier (plan/menu_v2.md ranking). 2 m temp / 850 / 2 m anomaly come from the temps job.
+      # Since 10-24-26 every tier uses the same frames: IFS/AIFS every 6 h to 240 h, HRRR/RRFS hourly. mslp500 dropped.
+      # 10-25-26 priority tiers: A = precip/snow/ice/p-type and B = gust/feels/dewpoint/temps aloft (wave 3),
+      # C = heavy extras: IVT, upper winds, PW, thickness, cloud, IR, vis, fog (wave 4, last)
+      TIER_A: qpf,snowkuch,snow10,snowk24,snowrate,frzr,mslpptype
+      TIER_B: gust10,peakgust,feels,td2m,t925,t700,t500,t300,aifswind
+      TIER_C: ivt,w850,w500,w250,pwanom,pw,thick,tcc,ir,vis,fog
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install Python packages (pinned, permissive licenses)
+        run: pip install -r tools/requirements.txt
+      - name: Title font (Impact from the Microsoft core fonts package; installed on the runner, never committed)
+        run: |
+          echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true" | sudo debconf-set-selections
+          sudo apt-get update -qq && sudo apt-get install -y -qq ttf-mscorefonts-installer libcairo2
+          test -f /usr/share/fonts/truetype/msttcorefonts/Impact.ttf
+      - name: Restore PW climatology cache
+        if: matrix.tier == 'C'
+        uses: actions/cache@v4
+        with:
+          path: .clim
+          key: forecast-clim-pw-v1
+      - name: PW climatology (NCEP/NCAR Reanalysis 1991-2020 daily mean PW, NOAA PSL) for the PW Anomaly maps
+        if: matrix.tier == 'C'
+        run: |
+          mkdir -p .clim .site_batch/clim
+          if [ ! -f .clim/ncep_pw_day_ltm_1991_2020.npz ]; then
+            pip install h5py
+            P=https://downloads.psl.noaa.gov/Datasets/ncep.reanalysis.derived
+            curl -sSfo /tmp/pw.nc "$P/surface/pr_wtr.eatm.day.ltm.1991-2020.nc"
+            curl -sSfo /tmp/hgtsfc.nc "$P/surface_gauss/hgt.sfc.gauss.nc"
+            python tools/forecast/make_clim_pw.py /tmp/pw.nc /tmp/hgtsfc.nc .clim/ncep_pw_day_ltm_1991_2020.npz
+          fi
+          cp .clim/ncep_pw_day_ltm_1991_2020.npz .site_batch/clim/
+      - name: Menu maps, ${{ matrix.model }} tier ${{ matrix.tier }}, hours ${{ matrix.first }}-${{ matrix.last }} (chunk ${{ matrix.chunk }})
+        run: |
+          case "${{ matrix.tier }}" in
+            A) P="$TIER_A" ;;
+            B) P="$TIER_B" ;;
+            C) P="$TIER_C" ;;
+          esac
+          # the plan job fixed the cycle for every chunk (HRRR/RRFS: newest complete long run), so the chunks always agree.
+          # Running totals (peak gust, snow, ice, precip) read the earlier hours' data without drawing them.
+          python tools/forecast/menu_maps.py --model "${{ matrix.model }}" --cycle "${{ matrix.cycle }}" --steps "${{ matrix.steps }}" \
+            --views na,pnw,pnwt,wa --products "$P"
+      - name: Keep only the site files
+        run: rm -rf .site_batch/clim
+      - uses: actions/upload-artifact@v4
+        with:
+          name: menu-${{ matrix.model }}-${{ matrix.tier }}-${{ matrix.chunk }}
+          path: .site_batch
+          include-hidden-files: true   # the batch folders start with a dot
+          retention-days: 3   # staged builds carry products forward from earlier runs
+          if-no-files-found: warn
+
+  menu-w4:
+    name: menu-w4 (${{ matrix.model }} ${{ matrix.tier }} ${{ matrix.chunk }} F${{ matrix.first }}-${{ matrix.last }})
+    needs: [plan, start-w4]
+    # speed_build_v1: one job per model / tier / forecast-hour chunk (menu_plan.py), up to 20 at once (public repo limit);
+    # each chunk draws on all 4 cores while the next hours download in the background (menu_maps.py run loop).
+    if: needs.plan.outputs.go == 'true' && contains(needs.plan.outputs.products, 'menu') && needs.plan.outputs.menu_w4_any == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: 2   # runner budget: GitHub runs 20 jobs at once; caps keep a runner free so each wave's deploy starts at once
+      matrix: ${{ fromJSON(needs.plan.outputs.menu_w4) }}
+    env:
+      WX_CYCLE_HOUR: ${{ needs.plan.outputs.pin }}   # 12 on the 21:50 cron, the cycle hour on stage runs, else unpinned
+      SITE_BATCH: ${{ github.workspace }}/.site_batch
+      # products per job tier (plan/menu_v2.md ranking). 2 m temp / 850 / 2 m anomaly come from the temps job.
+      # Since 10-24-26 every tier uses the same frames: IFS/AIFS every 6 h to 240 h, HRRR/RRFS hourly. mslp500 dropped.
+      # 10-25-26 priority tiers: A = precip/snow/ice/p-type and B = gust/feels/dewpoint/temps aloft (wave 3),
+      # C = heavy extras: IVT, upper winds, PW, thickness, cloud, IR, vis, fog (wave 4, last)
+      TIER_A: qpf,snowkuch,snow10,snowk24,snowrate,frzr,mslpptype
+      TIER_B: gust10,peakgust,feels,td2m,t925,t700,t500,t300,aifswind
+      TIER_C: ivt,w850,w500,w250,pwanom,pw,thick,tcc,ir,vis,fog
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install Python packages (pinned, permissive licenses)
+        run: pip install -r tools/requirements.txt
+      - name: Title font (Impact from the Microsoft core fonts package; installed on the runner, never committed)
+        run: |
+          echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true" | sudo debconf-set-selections
+          sudo apt-get update -qq && sudo apt-get install -y -qq ttf-mscorefonts-installer libcairo2
+          test -f /usr/share/fonts/truetype/msttcorefonts/Impact.ttf
+      - name: Restore PW climatology cache
+        if: matrix.tier == 'C'
+        uses: actions/cache@v4
+        with:
+          path: .clim
+          key: forecast-clim-pw-v1
+      - name: PW climatology (NCEP/NCAR Reanalysis 1991-2020 daily mean PW, NOAA PSL) for the PW Anomaly maps
+        if: matrix.tier == 'C'
+        run: |
+          mkdir -p .clim .site_batch/clim
+          if [ ! -f .clim/ncep_pw_day_ltm_1991_2020.npz ]; then
+            pip install h5py
+            P=https://downloads.psl.noaa.gov/Datasets/ncep.reanalysis.derived
+            curl -sSfo /tmp/pw.nc "$P/surface/pr_wtr.eatm.day.ltm.1991-2020.nc"
+            curl -sSfo /tmp/hgtsfc.nc "$P/surface_gauss/hgt.sfc.gauss.nc"
+            python tools/forecast/make_clim_pw.py /tmp/pw.nc /tmp/hgtsfc.nc .clim/ncep_pw_day_ltm_1991_2020.npz
+          fi
+          cp .clim/ncep_pw_day_ltm_1991_2020.npz .site_batch/clim/
+      - name: Menu maps, ${{ matrix.model }} tier ${{ matrix.tier }}, hours ${{ matrix.first }}-${{ matrix.last }} (chunk ${{ matrix.chunk }})
+        run: |
+          case "${{ matrix.tier }}" in
+            A) P="$TIER_A" ;;
+            B) P="$TIER_B" ;;
+            C) P="$TIER_C" ;;
+          esac
+          # the plan job fixed the cycle for every chunk (HRRR/RRFS: newest complete long run), so the chunks always agree.
+          # Running totals (peak gust, snow, ice, precip) read the earlier hours' data without drawing them.
+          python tools/forecast/menu_maps.py --model "${{ matrix.model }}" --cycle "${{ matrix.cycle }}" --steps "${{ matrix.steps }}" \
+            --views na,pnw,pnwt,wa --products "$P"
+      - name: Keep only the site files
+        run: rm -rf .site_batch/clim
+      - uses: actions/upload-artifact@v4
+        with:
+          name: menu-${{ matrix.model }}-${{ matrix.tier }}-${{ matrix.chunk }}
+          path: .site_batch
+          include-hidden-files: true   # the batch folders start with a dot
+          retention-days: 3   # staged builds carry products forward from earlier runs
+          if-no-files-found: warn
+
+  menu-store:
+    # incremental (speed_build_v1): keep each freshly rendered model's maps in the Actions cache, so the next run can reuse
+    # them when that model has no newer cycle. Only when every chunk of the run succeeded.
+    needs: [plan, menu-w3, menu-w4]
+    if: ${{ !cancelled() && !contains(needs.*.result, 'failure') && (needs.menu-w3.result == 'success' || needs.menu-w4.result == 'success') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        model: ${{ fromJSON(needs.plan.outputs.menu_store) }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: menu-${{ matrix.model }}-*
+          path: .menu_out
+          merge-multiple: true
+      - uses: actions/cache/save@v4
+        with:
+          path: .menu_out
+          key: ${{ fromJSON(needs.plan.outputs.menu_keys)[matrix.model] }}
+
+  menu-reuse:
+    # incremental: models whose newest cycle is already published are not redrawn; their saved maps go back into the deploy
+    needs: [plan, start-w3]
+    if: needs.plan.outputs.go == 'true' && contains(needs.plan.outputs.products, 'menu') && needs.plan.outputs.menu_reuse_any == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.menu_reuse) }}
+    steps:
+      - uses: actions/cache/restore@v4
+        with:
+          path: .menu_out
+          key: ${{ matrix.key }}
+          fail-on-cache-miss: true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: menu-reuse-${{ matrix.model }}
+          path: .menu_out
+          include-hidden-files: true
+          retention-days: 3   # staged builds carry products forward from earlier runs
+
+  ens:
+    needs: [plan, start-w3]
+    if: needs.plan.outputs.go == 'true' && contains(needs.plan.outputs.products, 'ens')
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      max-parallel: 2   # runner budget: GitHub runs 20 jobs at once; caps keep a runner free so each wave's deploy starts at once
+      matrix:
+        src: [eps, aifsens]
+    env:
+      WX_CYCLE_HOUR: ${{ needs.plan.outputs.pin }}   # 12 on the 21:50 cron, the cycle hour on stage runs, else unpinned
+      SITE_BATCH: ${{ github.workspace }}/.site_batch
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install Python packages (pinned, permissive licenses)
+        run: pip install -r tools/requirements.txt
+      - name: Title font (Impact from the Microsoft core fonts package; installed on the runner, never committed)
+        run: |
+          echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true" | sudo debconf-set-selections
+          sudo apt-get update -qq && sudo apt-get install -y -qq ttf-mscorefonts-installer libcairo2
+          test -f /usr/share/fonts/truetype/msttcorefonts/Impact.ttf
+      - name: Restore 850 mb climatology cache
+        uses: actions/cache@v4
+        with:
+          path: .clim_t850
+          key: forecast-clim-t850-v1
+      - name: 850 mb temperature climatology (NCEP/NCAR Reanalysis 1991-2020 monthly mean, NOAA PSL) for the 850 mb anomaly
+        run: |
+          mkdir -p .clim_t850 .site_batch/clim
+          if [ ! -f .clim_t850/ncep_t850_mon_ltm_1991_2020.npz ]; then
+            pip install h5py
+            curl -sSfo /tmp/air.nc https://downloads.psl.noaa.gov/Datasets/ncep.reanalysis.derived/pressure/air.mon.ltm.1991-2020.nc
+            python tools/forecast/make_clim_t850.py /tmp/air.nc .clim_t850/ncep_t850_mon_ltm_1991_2020.npz
+          fi
+          cp .clim_t850/ncep_t850_mon_ltm_1991_2020.npz .site_batch/clim/
+      - name: Ensemble low centers + 500 mb heights + mean 850 mb anomaly, ${{ matrix.src }} (every 6 h to 240 h; about 47 MB EPS / 72 MB AIFS ENS per step, +14 MB for 850 mb)
+        run: python tools/forecast/ens_maps.py "${{ matrix.src }}" --cycle "${{ needs.plan.outputs.cycle }}" --hours 240 --products elows,e500,t850anom
+      - name: Keep only the site files
+        run: rm -rf .site_batch/clim
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ens-${{ matrix.src }}
+          path: .site_batch
+          include-hidden-files: true   # the batch folders start with a dot
+          retention-days: 3   # staged builds carry products forward from earlier runs
+          if-no-files-found: warn
+
+  meteograms:
+    needs: [plan, start-w3]
+    if: needs.plan.outputs.stage == 'all' && needs.plan.outputs.go == 'true' && (contains(needs.plan.outputs.products, 'eps') || contains(needs.plan.outputs.products, 'hrrr') || contains(needs.plan.outputs.products, 'rrfs'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    env:
+      WX_CYCLE_HOUR: ${{ needs.plan.outputs.pin }}   # 12 on the 21:50 cron, the cycle hour on stage runs, else unpinned
+      METEO_CACHE: ${{ github.workspace }}/.meteo_cache
+      SITE_DIR: ${{ github.workspace }}/.meteo_site
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install Python packages (pinned, permissive licenses)
+        run: pip install -r tools/requirements.txt
+      - name: Restore multi-run point cache (values from earlier runs)
+        uses: actions/cache@v4
+        with:
+          path: .meteo_cache
+          key: forecast-meteo-${{ github.run_id }}
+          restore-keys: forecast-meteo-
+      - name: ECMWF EPS meteograms (6 h steps to 240 h; 00Z/12Z runs only; about 190 MB per step)
+        if: contains(env.PRODUCTS, 'eps')
+        run: |
+          C="${{ needs.plan.outputs.cycle }}"
+          case "${C:8:2}" in 00|12) python tools/forecast/meteo_suite.py eps --cycle "$C" --hours 240 --every 6 ;;
+            *) echo "EPS meteograms are made on 00Z/12Z runs only; cycle $C skipped" ;; esac
+      - name: HRRR meteograms (latest 48 h run, hourly)
+        if: contains(env.PRODUCTS, 'hrrr')
+        run: python tools/forecast/meteo_suite.py hrrr --hours 48
+      - name: RRFS meteograms (latest long run)
+        if: contains(env.PRODUCTS, 'rrfs')
+        run: python tools/forecast/meteo_suite.py rrfs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: meteograms
+          path: .meteo_site/meteograms
+          include-hidden-files: true   # the batch folders start with a dot
+          retention-days: 3   # staged builds carry products forward from earlier runs
+          if-no-files-found: warn
+
+  meteo-stage:
+    # staged builds: meteograms split by model (EPS, HRRR, RRFS; all in s5 since 10-26-26), each with its own point cache and its own
+    # made.json; forecast-deploy.yml merges the parts (newest per model) with the ones carried from earlier runs
+    needs: [plan, start-w3]
+    if: needs.plan.outputs.stage != 'all' && needs.plan.outputs.go == 'true' && needs.plan.outputs.meteo_srcs != '[]'
+    continue-on-error: true   # a failed part keeps the older charts of that model on the site
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        src: ${{ fromJSON(needs.plan.outputs.meteo_srcs) }}
+    env:
+      WX_CYCLE_HOUR: ${{ needs.plan.outputs.pin }}
+      METEO_CACHE: ${{ github.workspace }}/.meteo_cache
+      SITE_DIR: ${{ github.workspace }}/.meteo_site
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install Python packages (pinned, permissive licenses)
+        run: pip install -r tools/requirements.txt
+      - name: Restore multi-run point cache (per model; falls back to the full build's shared cache)
+        uses: actions/cache@v4
+        with:
+          path: .meteo_cache
+          key: forecast-meteo-${{ matrix.src }}-${{ github.run_id }}
+          restore-keys: |
+            forecast-meteo-${{ matrix.src }}-
+            forecast-meteo-
+      - name: ${{ matrix.src }} meteograms
+        run: |
+          C="${{ needs.plan.outputs.stage_cycle }}"
+          case "${{ matrix.src }}" in
+            eps) python tools/forecast/meteo_suite.py eps --cycle "$C" --hours 240 --every 6 ;;
+            hrrr) python tools/forecast/meteo_suite.py hrrr --cycle "$C" --hours 48 ;;
+            rrfs) python tools/forecast/meteo_suite.py rrfs --cycle "$C" ;;
+          esac
+      - uses: actions/upload-artifact@v4
+        with:
+          name: meteo-${{ matrix.src }}
+          path: .meteo_site/meteograms
+          include-hidden-files: true
+          retention-days: 3
+          if-no-files-found: error
+
+  # Deploy waves (10-25-26). Each wave republishes everything finished so far (Pages replaces the whole site on
+  # every deploy), so a slow job only holds back its own and later waves. 4 deploys per run (+1 meteogram project
+  # deploy in split mode): keep the 500/month Pages limit in mind before turning the schedule on (or use waves=off).
+  # Wave 1: GFS 500 mb anomaly + SLP, ECMWF MSLP (H/L centers) + precip, HRRR temps
+  # Wave 2: RRFS temps, ECMWF/AIFS temps, WA tabs, AIFS 500 mb / MSLP / wind
+  # Wave 3: menu precip/snow/ice + gust/feels/temps aloft, ensemble lows (EPS/AIFS ENS), meteograms
+  # Wave 4: menu heavy extras (IVT, upper winds, PW, thickness, cloud, IR, vis, fog)
+  deploy-w1:
+    needs: [plan, gfs, mslp, hires-hrrr]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.stage == 'all' && needs.plan.outputs.go == 'true' && needs.plan.outputs.waves == 'on' && (needs.gfs.result == 'success' || needs.mslp.result == 'success' || needs.hires-hrrr.result == 'success') }}
+    uses: ./.github/workflows/forecast-deploy.yml
+    secrets: inherit
+    with:
+      wave: "1"
+      patterns: "{gfs-maps,mslp-maps,hires-hrrr-maps}"
+      with_meteo: false
+      deploy_meteo: false
+
+  deploy-w2:
+    needs: [plan, deploy-w1, aifs, temps, hires-rrfs, wa-maps]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.stage == 'all' && needs.plan.outputs.go == 'true' && needs.plan.outputs.waves == 'on' && (needs.aifs.result == 'success' || needs.temps.result == 'success' || needs.hires-rrfs.result == 'success' || needs.wa-maps.result == 'success') }}
+    uses: ./.github/workflows/forecast-deploy.yml
+    secrets: inherit
+    with:
+      wave: "2"
+      patterns: "{gfs-maps,mslp-maps,hires-hrrr-maps,aifs-maps,temp-maps,hires-rrfs-maps,wa-maps-*}"
+      with_meteo: false
+      deploy_meteo: false
+
+  deploy-w3:
+    needs: [plan, deploy-w2, menu-w3, menu-reuse, ens, meteograms]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.stage == 'all' && needs.plan.outputs.go == 'true' && needs.plan.outputs.waves == 'on' && (needs.menu-w3.result == 'success' || needs.menu-reuse.result == 'success' || needs.ens.result == 'success' || needs.meteograms.result == 'success') }}
+    uses: ./.github/workflows/forecast-deploy.yml
+    secrets: inherit
+    with:
+      wave: "3"
+      patterns: "{gfs-maps,mslp-maps,hires-hrrr-maps,aifs-maps,temp-maps,hires-rrfs-maps,wa-maps-*,menu-*-A-*,menu-*-B-*,menu-reuse-*,ens-*}"
+      with_meteo: true
+      deploy_meteo: true
+
+  deploy-w4:
+    needs: [plan, deploy-w3, menu-w4]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.stage == 'all' && needs.plan.outputs.go == 'true' && (needs.plan.outputs.waves != 'on' || needs.menu-w4.result == 'success') }}
+    uses: ./.github/workflows/forecast-deploy.yml
+    secrets: inherit
+    with:
+      wave: "4"
+      patterns: "{gfs-maps,mslp-maps,hires-hrrr-maps,aifs-maps,temp-maps,hires-rrfs-maps,wa-maps-*,menu-*-A-*,menu-*-B-*,menu-reuse-*,ens-*,menu-*-C-*}"
+      with_meteo: true
+      deploy_meteo: ${{ needs.plan.outputs.waves != 'on' }}
+
+  deploy-stage:
+    # staged builds: one deploy per stage. The site = this stage's new products laid over every group carried forward
+    # from the runs that last built it (site-state artifact); stops if the main file count drops below 85% of the last.
+    needs: [plan, aifs, gfs, mslp, temps, ifsx, hires-hrrr, hires-rrfs, menu-w3, menu-w4, menu-reuse, ens, meteo-stage]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.stage != 'all' && needs.plan.outputs.go == 'true' }}
+    uses: ./.github/workflows/forecast-deploy.yml
+    secrets: inherit
+    with:
+      wave: ${{ needs.plan.outputs.stage }}
+      patterns: ${{ needs.plan.outputs.stage_patterns }}
+      with_meteo: false
+      deploy_meteo: ${{ needs.plan.outputs.meteo_deploy == 'true' }}   # meteogram-project deploy only in s5 (10-26-26)
+      carry: ${{ needs.plan.outputs.carry }}
+      meteo_parts: ${{ needs.plan.outputs.meteo_deploy == 'true' }}
+      min_files: ${{ needs.plan.outputs.min_files }}
+      dry_run: ${{ github.event.inputs.dry_run == 'true' }}
+
+  site-state:
+    # records which run now holds each product group (the next stage carries from these); stage runs and full builds
+    needs: [plan, deploy-stage, deploy-w4]
+    if: ${{ !cancelled() && github.event.inputs.dry_run != 'true' && (needs.deploy-stage.result == 'success' || needs.deploy-w4.result == 'success') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Write site-state.json
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREV: ${{ needs.plan.outputs.prev_state }}
+          STAGE: ${{ needs.plan.outputs.stage }}
+          CYCLE: ${{ needs.plan.outputs.stage != 'all' && needs.plan.outputs.stage_cycle || needs.plan.outputs.cycle }}
+          FILES_MAIN: ${{ needs.deploy-stage.outputs.files_main || needs.deploy-w4.outputs.files_main }}
+          FILES_METEO: ${{ needs.deploy-stage.outputs.files_meteo || needs.deploy-w4.outputs.files_meteo }}
+          RIDERS: ${{ needs.plan.outputs.riders }}
+        run: python3 tools/forecast/stage_tools.py state --stage "$STAGE" --cycle "$CYCLE" --prev-state "$PREV" --files-main "$FILES_MAIN" --files-meteo "$FILES_METEO" --riders "$RIDERS"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: site-state
+          path: site-state.json
+          retention-days: 30
+
+  menu-state:
+    # incremental: after a good deploy, record which cycle of each model is now on the site (small JSON in the Actions cache)
+    needs: [plan, menu-w3, menu-w4, menu-store, menu-reuse, deploy-w3, deploy-w4, deploy-stage]
+    # stage runs without menu maps (s5) leave the menu state alone
+    if: ${{ !cancelled() && github.event.inputs.dry_run != 'true' && (needs.plan.outputs.stage == 'all' || contains(needs.plan.outputs.products, 'menu')) && (needs.deploy-w4.result == 'success' || needs.deploy-stage.result == 'success' || (needs.deploy-w3.result == 'success' && needs.deploy-w4.result == 'skipped')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Restore the previous menu state (stage runs update only their own model)
+        uses: actions/cache/restore@v4
+        with:
+          path: .menu_state
+          key: menu-state-${{ github.run_id }}
+          restore-keys: menu-state-
+      - name: Write menu_state.json
+        env:
+          CYCLES: ${{ needs.plan.outputs.menu_cycles }}
+          KEYS: ${{ needs.plan.outputs.menu_keys }}
+          REUSED: ${{ needs.plan.outputs.menu_reuse }}
+          STORED: ${{ needs.menu-store.result }}
+        run: |
+          mkdir -p .menu_state
+          python3 - <<'PY'
+          import json, os, datetime as dt
+          cyc, keys = json.loads(os.environ["CYCLES"] or "{}"), json.loads(os.environ["KEYS"] or "{}")
+          reused = {r["model"] for r in json.loads(os.environ["REUSED"] or "[]") if r.get("model") != "none"}
+          ok = os.environ["STORED"] == "success"
+          try: st = json.load(open(".menu_state/menu_state.json"))   # keep models this run did not touch
+          except (OSError, ValueError): st = {}
+          st |= {m: {"cycle": cyc[m], "key": keys[m], "published_utc": dt.datetime.now(dt.timezone.utc).isoformat(timespec="minutes")}
+                for m in cyc if m in reused or ok}
+          json.dump(st, open(".menu_state/menu_state.json", "w"), indent=1); print(json.dumps(st))
+          PY
+      - uses: actions/cache/save@v4
+        with:
+          path: .menu_state
+          key: menu-state-${{ github.run_id }}
