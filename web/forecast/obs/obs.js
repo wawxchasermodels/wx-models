@@ -336,7 +336,15 @@ const Obs = (() => {
     if (!r.width) return false;
     const first = !S.w;
     setNumberScale();
-    S.w = r.width; S.h = r.height; S.dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+    S.w = r.width; S.h = r.height;
+    let dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+    // Studio cover-scales this canvas into a 2x frame. Match that backing size (capped) so city labels stay sharp.
+    if (/studio\.html$/.test(location.pathname) && r.width && r.height) {
+      const need = Math.max(3840 / r.height, 2160 / r.width);
+      const cap = Math.sqrt(16e6 / (r.width * r.height));
+      dpr = Math.min(cap, Math.max(dpr, need));
+    }
+    S.dpr = dpr;
     c.width = Math.round(S.w * S.dpr); c.height = Math.round(S.h * S.dpr);
     if (first || S.pending) applyView();
     return true;

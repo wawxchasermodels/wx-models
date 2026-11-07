@@ -343,14 +343,16 @@ const Alerts = (() => {
 
   // Towns are laid out in final frame pixels (t2499u). The shared alert bitmap has no labels, so each
   // frame's own zoom/pan keeps labels the same size and only spends the budget on towns inside that frame.
-  function layoutTowns(project, W, H, zoom, measure, prior) {
+  function layoutTowns(project, W, H, zoom, measure, prior, band) {
     const budget = townBudget(zoom);
     const style = townFrameStyle(Math.max(W, H));
     const fs = style.fs, gap = style.gap, pad = style.pad;
     const vis = visibleAlerts();
     const geoms = vis.map((a) => a._geom).filter(Boolean);
     const edge = style.dotR + style.dotStroke;
+    const topB = band && band.top || 0, botB = band && band.bot != null ? band.bot : H;
     const inView = (x, y) => x >= edge && y >= edge && x <= W - edge && y <= H - edge;
+    const inChrome = (b) => b && (b[1] < topB || b[3] > botB);
     const placed = [], items = [], seen = new Set();
     const hitsAny = (b) => placed.some((p) => townOverlaps(b, p));
     // Prior geo-anchored placements keep their side offsets (t2557u): pan must not reshuffle winners.
@@ -406,7 +408,7 @@ const Alerts = (() => {
       if (dotFree) {
         for (const a of anchors) {
           const b = a.b;
-          if (b[0] < 2 || b[1] < 2 || b[2] > W - 2 || b[3] > H - 2) continue;
+          if (b[0] < 2 || b[1] < 2 || b[2] > W - 2 || b[3] > H - 2 || inChrome(b)) continue;
           if (townOverlaps(b, dotBox) || hitsAny(b)) continue;
           spot = a; break;
         }
@@ -1083,16 +1085,18 @@ const Alerts = (() => {
         const tw = p.tw, ox = +p.ox || 0, oy = +p.oy || 0;
         const tx = sx + ox, ty = sy + oy;
         const dotBox = [sx - edge, sy - edge, sx + edge, sy + edge];
-        const label = !!p.label;
-        const b = label ? [tx - pad, ty - fs / 2 - pad, tx + tw + pad, ty + fs / 2 + pad] : null;
-        items.push({ n: p.n, lon: p.lon, lat: p.lat, sx, sy, tx, ty, tw, label, b, dotBox, ox, oy, tier: p.tier || 0, pri: p.pri || 0 });
+        let label = !!p.label;
+        let b = label ? [tx - pad, ty - fs / 2 - pad, tx + tw + pad, ty + fs / 2 + pad] : null;
+        const topB = cam.avoidTop || 0, botB = cam.avoidBot != null ? cam.avoidBot : cam.H;
+        if (label && b && (b[1] < topB || b[3] > botB || b[0] < 2 || b[2] > cam.W - 2)) { label = false; b = null; }
+        items.push({ n: p.n, lon: p.lon, lat: p.lat, sx, sy, tx: label ? tx : sx, ty: label ? ty : sy, tw, label, b, dotBox, ox: label ? ox : 0, oy: label ? oy : 0, tier: p.tier || 0, pri: p.pri || 0 });
       }
       towns = { style, items, labeled: items.filter((i) => i.label).length, dotted: items.length };
       roads = paintFrameRoads(ctx, cam, towns, priorShields, false);
     } else {
       // Zoom/data change, first paint, or settle-after-drag (additive).
       towns = S.towns.length
-        ? layoutTowns(project, cam.W, cam.H, cam.zoom || 1, measure, settle ? priorTowns : null)
+        ? layoutTowns(project, cam.W, cam.H, cam.zoom || 1, measure, settle ? priorTowns : null, { top: cam.avoidTop || 0, bot: cam.avoidBot != null ? cam.avoidBot : cam.H })
         : { items: [], style: townFrameStyle(Math.max(cam.W, cam.H)), labeled: 0 };
       roads = paintFrameRoads(ctx, cam, towns, settle ? priorShields : null, true);
       S.labCache[slot] = { key, towns: freezeTowns(towns.items), shields: freezeShields(roads && roads.shields) };
