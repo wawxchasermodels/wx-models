@@ -86,9 +86,37 @@ function wantRS(LW, LH) {
   const cv = $("map"); if (!cv || !LW || Q.get("rs1")) return 1;
   if (window.__saveRS) return window.__saveRS;   // 11-03 zoomed "Save image": one sharp redraw at the save resolution
   if (Q.get("studio")) return Math.max(1, Math.min(3, Math.floor(Math.sqrt(16e6 / (LW * LH)) * 4) / 4));   // Studio: always sharp (crops are scaled up to 1920 px)
+  if (Q.get("embed")) return Math.max(1, Math.min(2, Math.floor(Math.sqrt(8e6 / (LW * LH)) * 4) / 4));   // Compare frames are scaled into a 2x Studio frame
   const shown = cv.offsetWidth || LW, want = shown * (window.devicePixelRatio || 1) * (Z.k || 1) / LW;
   const cap = Math.min(3, Math.sqrt(12e6 / (LW * LH)));
   return Math.max(1, Math.min(cap, Math.ceil(want * 4 - 0.2) / 4));
+}
+// Zoom raises the display bitmap (wantRS, so titles / towns / the key rasterize at the on-screen size) without
+// re-binning the color fill at that size. fieldRS is the un-zoomed screen scale; the fill is cached there and scaled up.
+function fieldRS(LW, LH) {
+  const cv = $("map"); if (!cv || !LW || Q.get("rs1")) return 1;
+  if (window.__saveRS) return window.__saveRS;
+  if (Q.get("studio")) return wantRS(LW, LH);
+  const shown = cv.offsetWidth || LW, want = shown * (window.devicePixelRatio || 1) / LW;
+  const cap = Math.min(3, Math.sqrt(12e6 / (LW * LH)));
+  return Math.max(1, Math.min(cap, Math.ceil(want * 4 - 0.2) / 4));
+}
+function labelURLs(townsU) {
+  const path = String(townsU || "").split("?")[0], m = path.match(/towns_([^/?#]+)\.png$/);
+  if (!m) return [];
+  const name = "labels_" + m[1] + ".json", out = [];
+  if (path.includes("slayers/")) out.push(path.replace(/towns_[^/?#]+\.png$/, name));
+  out.push("static/" + name, "slayers/static/" + name);
+  if (typeof DATA === "string" && path.startsWith(DATA)) out.push(DATA + "static/" + name);
+  return [...new Set(out)];
+}
+function loadTownLabels(townsU) {
+  const urls = labelURLs(townsU);
+  const step = (i) => { if (i >= urls.length) return Promise.resolve(null);
+    return fetch(urls[i], { cache: "no-cache" }).then(r => r.ok ? r.json() : Promise.reject()).then(j => {
+      const items = j && (j.items || (Array.isArray(j) ? j : null)); return items && items.length ? items : step(i + 1);
+    }, () => step(i + 1)); };
+  return step(0);
 }
 // 10-30 7:30 PM (Benjamin: "images are still blurry on the phone view", "check the desktop versions too"): the soft parts were
 // the fixed layers (coast / borders / county lines, town names, color key + credit), 1600 px PNGs stretched to the RS bitmap
@@ -133,6 +161,50 @@ function schedSharp() {
 // frame is drawn once when the finger lifts.
 const STUDIO_DRAG_RS = 1;   // FINE_PTR: mouse / trackpad (a full Studio frame takes ~0.5-1 s on a phone CPU, so touch keeps the light frames)
 const FINE_PTR = !!(window.matchMedia && matchMedia("(hover: hover) and (pointer: fine)").matches);
+// Regular maps (t2511u): show the Coast view's 16:9 camera (studio_views fit = COAST_H), the same ocean-centered box Studio uses
+// for the wide frame, Westport included. fitV (the 9:16 box) stays Studio-only. The blit is 1:1 figure pixels, so the map is not stretched.
+// Header, color key and credit sit in bands outside that box. Studio never calls this; it still crops fit / fitV itself.
+function coastShown(V) {
+  if (Q.get("studio") || !V || !V.studioCoast || !V.fit) return null;
+  const x = +V.fit[0], y = +V.fit[1], w = +V.fit[2], h = +V.fit[3];
+  if (!(w > 40 && h > 40)) return null;
+  const head = Math.round(Math.min(78, Math.max(58, h * 0.07))), foot = Math.round(Math.min(120, Math.max(88, h * 0.11)));
+  return { x, y, w, h, head, foot, W: w, H: head + h + foot };
+}
+function coastKey(ctx, P, x, y, w, h) {
+  const L = P && P.levels, C = P && P.colors; if (!L || !C || L.length < 2 || !C.length) return false;
+  const n = Math.min(C.length, L.length - 1), span = (L[L.length - 1] - L[0]) || 1;
+  for (let i = 0; i < n; i++) { ctx.fillStyle = C[i]; ctx.fillRect(Math.floor(x + (i / n) * w), y, Math.ceil(w / n) + 1, h); }
+  ctx.strokeStyle = "rgba(255,255,255,0.55)"; ctx.lineWidth = 1; ctx.strokeRect(x, y, w, h);
+  ctx.fillStyle = "#e9ecf1"; ctx.font = "600 12px Montserrat"; ctx.textAlign = "center"; ctx.textBaseline = "top";
+  let last = -1e9; for (const t of (P.ticks || [])) { if (t < L[0] || t > L[L.length - 1]) continue; const tx = x + (t - L[0]) / span * w, s = String(t);
+    if (tx - 8 < last) continue; last = tx + 16; ctx.fillText(s, tx, y + h + 2); }
+  ctx.textAlign = "left"; ctx.textBaseline = "alphabetic"; ctx.font = "700 13px Montserrat"; if (P.key) ctx.fillText(P.key, x, y - 4);
+  return true;
+}
+function showCoast(cv, V, meta) {
+  const C = coastShown(V); if (!C || !cv) return false;
+  const rs = cv._rs || 1, src = document.createElement("canvas"); src.width = cv.width; src.height = cv.height;
+  src.getContext("2d").drawImage(cv, 0, 0);
+  cv.width = Math.max(1, Math.round(C.W * rs)); cv.height = Math.max(1, Math.round(C.H * rs)); cv._lw = C.W; cv._lh = C.H;
+  const ctx = cv.getContext("2d"); ctx.setTransform(rs, 0, 0, rs, 0, 0); ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
+  ctx.fillStyle = (S.man && S.man.style && S.man.style.BG) || "#111318"; ctx.fillRect(0, 0, C.W, C.H);
+  ctx.drawImage(src, C.x * rs, C.y * rs, C.w * rs, C.h * rs, 0, C.head, C.w, C.h);   // uniform scale: dest w/h equals source w/h
+  const m = meta || {}, ink = (S.man && S.man.style && S.man.style.INK) || "#f4f2ee", acc = (S.man && S.man.style && S.man.style.ACCENT) || "#ffc24d", muted = (S.man && S.man.style && S.man.style.MUTED) || "#a7abb3";
+  ctx.textAlign = "left"; ctx.textBaseline = "top"; ctx.fillStyle = ink; ctx.font = "800 22px Montserrat"; ctx.fillText(m.title || "", 14, 6);
+  ctx.fillStyle = acc; ctx.font = "700 15px Montserrat"; ctx.fillText(m.valid || "", 14, 30);
+  ctx.fillStyle = muted; ctx.font = "500 12px Montserrat"; ctx.fillText(m.sub || "", 14, 48);
+  if (m.badge) { ctx.textAlign = "right"; ctx.fillStyle = ink; ctx.font = "800 18px Montserrat"; ctx.fillText(m.badge[0] || "", C.W - 14, 8); ctx.fillStyle = muted; ctx.font = "600 11px Montserrat"; ctx.fillText(m.badge[1] || "", C.W - 14, 30); ctx.textAlign = "left"; }
+  const barY = C.head + C.h + 18, barH = 14, barW = Math.max(80, C.W - 28);
+  if (m.P) coastKey(ctx, m.P, 14, barY, barW, barH);
+  // t2531u: Studio-style max wave height, bottom-right above the color bar (only when maxv is set = wavemax products)
+  if (m.maxv != null && isFinite(m.maxv) && m.maxv >= 0) {
+    ctx.save(); ctx.font = "800 16px Montserrat"; ctx.fillStyle = ink; ctx.textAlign = "right"; ctx.textBaseline = "alphabetic";
+    ctx.fillText(`Max height: ${Math.round(m.maxv)} ft`, 14 + barW, barY - 6); ctx.restore();
+  }
+  if (m.pid && m.P) { const lines = creditLines(m.pid, m.P, m.towns !== false); ctx.fillStyle = muted; ctx.font = "500 11px Montserrat"; ctx.textBaseline = "bottom"; lines.forEach((l, i) => ctx.fillText(l, 14, C.H - 6 - (lines.length - 1 - i) * 14)); }
+  fitPhone(); return true;
+}
 function sizeMap(cv, V, keepRS) {   // bitmap = figure px x RS; context transform = RS, so all drawing stays in figure px
   const [LW, LH] = V.fig, rs = keepRS && Q.get("studio") && S.dragging ? STUDIO_DRAG_RS : keepRS && cv._lw === LW && cv._lh === LH ? (cv._rs || 1) : wantRS(LW, LH);
   const bw = Math.round(LW * rs), bh = Math.round(LH * rs), relayout = cv._lw !== LW || cv._lh !== LH;
@@ -189,22 +261,23 @@ const WAWIDE_PASSES_PNG = "@slayers/static/towns_wawide_p1.png";
 // 11-04 (t2314u "yes rebuild those too"): HRRR / RRFS / NBM wide view (pnwhr) too: wawide_s2.json models.{hrrr,rrfs,nbm} = {towns, towns_png}
 let WAWIDE_S2 = null; const WAWIDE_FS = 0.83;
 function addStudioViews(man, sv) {
-  if (!Q.get("studio")) return man;
   // 10-31 7:55 PM (Benjamin: "city labels on the new washington wide are way too big"): the global models now get a real view
   // made for Studio (tools/fast/studio_views.py -> static/studio_views.json, not in manifest.json): its own basemap and town layer
   // drawn at the size the Studio frames show it. Models without one (HRRR / RRFS / NBM) keep the high-res Pacific NW map as before.
+  // Washington (wide, for loops) stays Studio-only. Coast view does not: the regular map page lists it too (t2511u).
   const SVM = (sv && sv.models) || {};
-  for (const [m, M] of Object.entries(man.models || {})) { const V = M.views || {}, own = (SVM[m] || {}).wawide, src = V.pnwt ? "pnwt" : V.pnwhr ? "pnwhr" : null;
+  if (Q.get("studio")) for (const [m, M] of Object.entries(man.models || {})) { const V = M.views || {}, own = (SVM[m] || {}).wawide, src = V.pnwt ? "pnwt" : V.pnwhr ? "pnwhr" : null;
     if ((!own && !src) || !V.wa || V.wawide) continue; const out = {};
     for (const [k, v] of Object.entries(V)) { out[k] = v; if (k === "wa") out.wawide = own ? Object.assign({}, own, { studioWide: "wa", towns_png: WAWIDE_PASSES_PNG }, WAWIDE_S2 && WAWIDE_S2.models && WAWIDE_S2.models[m] ? { towns: WAWIDE_S2.models[m], towns_png: "@slayers/" + WAWIDE_S2.png } : {}) : Object.assign({}, V[src], { label: "Washington (wide, for loops)", src, studioWide: "wa" }, WAWIDE_S2 && WAWIDE_S2.models && WAWIDE_S2.models[m] && WAWIDE_S2.models[m].towns_png ? { towns: WAWIDE_S2.models[m].towns, towns_png: "@slayers/" + WAWIDE_S2.models[m].towns_png, townsOwn: true } : {}); }
     M.views = out; }
   // 11-04 (Benjamin t2289u "Make me a coastal view for studio that is a little bigger and wider, centered over the ocean, land in the right
-  // third. Call it 'coast view'"): Studio-only "Coast view" (studio_views.py STUDIO_VIEW=coast), right after the wide Washington view
-  // 11-04 t2300u ("a little tighter, a bit less Oregon, make sure Westport gets in there"): the tighter build is "coast_t" (its own
-  // base / towns / LUT files), shown under the same view id "coast"
+  // third. Call it 'coast view'"): "Coast view" (studio_views.py, view id coast). Studio keeps framing it with fit / fitV.
+  // 11-04 t2300u / t2311u: coast_s (30 mi south of coast_t), its own base / towns / LUT. A model with neither entry is not offered
+  // (HRRR / RRFS / NBM have no coast LUT). This is not the wave-only West Coast view (wave_views id wc).
+  // 11-05 (t2511u): the same coast entry is in the regular View menu. The map page shows the 16:9 camera box (fit), not fitV.
   for (const [m, M] of Object.entries(man.models || {})) { const V = M.views || {}, sv = SVM[m] || {}, ck = sv.coast_s ? "coast_s" : sv.coast_t ? "coast_t" : null, own = ck ? Object.assign({}, sv[ck], { base_png: `static/base_${ck}.png`, towns_png: sv[ck].towns_png || `static/towns_${ck}.png` }) : sv.coast;   // t2311u: coast_s = 30 mi south
-    if (!own || V.coast) continue; const out = {}; let put = false;
-    for (const [k, v] of Object.entries(V)) { out[k] = v; if (k === "wawide") { out.coast = Object.assign({}, own); put = true; } }
+    if (!own || V.coast) continue; const out = {}; let put = false; const anchor = Q.get("studio") ? "wawide" : "wa";
+    for (const [k, v] of Object.entries(V)) { out[k] = v; if (k === anchor) { out.coast = Object.assign({}, own); put = true; } }
     if (!put) out.coast = Object.assign({}, own); M.views = out; }
   return man;
 }
@@ -230,6 +303,7 @@ const runFile = (r) => XR.has(r) ? "run_x.json" : "run.json";
 async function boot() {
   if (Q.get("bare")) document.body.classList.add("bare");
   if (Q.get("embed")) { document.body.classList.add("embed"); addEventListener("message", onCompareMsg); }
+  if (Q.get("cmpstudio")) document.documentElement.classList.add("cmpstudio");   // Studio Compare: menus stay in the panel, the map draws off-screen for the frames
   // 10-31 3:17 PM slim compare (Benjamin: "a slimmer phone compare"): menus folded behind a small button, the compare page's shared
   // hour slider replaces this frame's own, the map is sized to the frame width (the page sizes the frame to the map)
   if (Q.get("slim")) document.body.classList.add("cslim");
@@ -246,8 +320,8 @@ async function boot() {
   // 10-29: manifest, fonts and the shown run's run.json in parallel; other runs load when picked
   PV = await fetch("pdata/manifest_pv.json", { cache: "no-cache" }).then(r => r.ok ? r.json() : null).catch(() => null);
   if (PV) PV.re = new RegExp(`^(runs/(${Object.keys(PV.models).join("|")})/|static/(x2/)?(lut|key)_(${Object.keys(PV.models).join("|")})_)`);
-  const [man, sv, vf, wv] = await Promise.all([fetch(DATA + "manifest.json", { cache: "no-cache" }).then(r => r.json()).then(pvMerge),
-                                   Q.get("studio") ? fetch(DATA + "static/studio_views.json", { cache: "no-cache" }).then(r => r.ok ? r.json() : null, () => null) : null,
+  const [man, sv, vf, wv] = await Promise.all([readJSON(DATA + "manifest.json", { cache: "no-cache" }).then(pvMerge),
+                                   fetch(DATA + "static/studio_views.json", { cache: "no-cache" }).then(r => r.ok ? r.json() : null, () => null),
                                    fetch(DATA + "static/view_fixes.json", { cache: "no-cache" }).then(r => r.ok ? r.json() : null, () => null),
                                    fetch(DATA + "static/wave_views.json", { cache: "no-cache" }).then(r => r.ok ? r.json() : null, () => null),
                                    document.fonts.load("800 20px Montserrat"), document.fonts.load("500 12px Montserrat"),
@@ -271,13 +345,27 @@ async function boot() {
   if (qr && !Q.get("embed") && !Q.get("id") && !Q.get("slim")) { const qm2 = qr.split("/")[0], cyc = qr.split("/")[1] || "", nw = all.find(r => r.startsWith(qm2 + "/")), f0q = +Q.get("f");
     if (nw && nw !== qr) { S.run = nw;
       if (/^\d{10}$/.test(cyc) && isFinite(f0q)) vKeep = Date.UTC(+cyc.slice(0, 4), +cyc.slice(4, 6) - 1, +cyc.slice(6, 8), +cyc.slice(8, 10)) + f0q * 3600e3; } }
-  await loadRun(S.run);
+  // A cycle can stay in manifest.runs after its run.json is gone (R2 lifecycle, or a publish that was not repeated).
+  // Try that cycle, then older cycles of the same model, then the run in the address, then any other listed run.
+  { const m0 = (S.run || qr || "").split("/")[0], newerFirst = m => [...(S.man.runs[m] || [])].reverse().map(c => m + "/" + c);
+    const cands = []; if (S.run) cands.push(S.run); for (const r of newerFirst(m0)) if (!cands.includes(r)) cands.push(r);
+    if (qr && !cands.includes(qr)) cands.push(qr); for (const r of all) if (!cands.includes(r)) cands.push(r);
+    const got = await loadListed(cands); if (got.run !== S.run) { S.run = got.run; vKeep = null; } }
   // 11-04 (Benjamin t2319u/t2336u "It refreshes into a different product"): a refresh moves to the model's newest run, but a run that is
   // still coming in (or lacks this product) used to drop the product back to the tab's first one. Now the newest run is used only when it
   // carries the product; otherwise the refresh stays on the run in the address (same product, same hour).
   if (qr && S.run !== qr && Q.get("prod")) { const P0 = PRODS()[Q.get("prod")], carries = r => P0 && P0.fields.every(f => new Set((S.runs[r] || {}).fields || []).has(f));
     if (P0 && !carries(S.run)) { const m0 = qr.split("/")[0], cand = [qr, ...all.filter(r => r.startsWith(m0 + "/") && r !== S.run && r !== qr)].filter(r => all.includes(r)).slice(0, 3);
       for (const r of cand) { try { await loadRun(r); } catch (e) { continue; } if (carries(r)) { if (r !== qr) { /* keep the valid time */ } else vKeep = null; S.run = r; break; } } } }
+  // 11-05 Coast refresh: the newest cycle can list the product and still only have the first few hours (screen was F+36, reload
+  // opened that partial run at F+3). Keep the run in the address when the newest one has neither this forecast hour nor a step
+  // within 3 h of that valid time.
+  if (qr && S.run !== qr && all.includes(qr)) {
+    const newest = S.run;
+    const known = (r) => (r === newest ? (S.runs[newest] || {}).steps : (S.runs[r] && S.runs[r].steps));
+    if (refreshKeepsRun(qr, newest, Q.get("f"), vKeep, known) === qr && !(S.runs[qr] && S.runs[qr].steps)) { try { await loadRun(qr); } catch (e) { /* newest stays */ } }
+    if (refreshKeepsRun(qr, newest, Q.get("f"), vKeep, r => (S.runs[r] || {}).steps) === qr) { S.run = qr; vKeep = null; }
+  }
   // "Runs" menu (Benjamin 10-29 7:10 PM): every available run, grouped by model, newest first; picking one keeps the valid time
   const runLabel = r => { const [m, c] = r.split("/"), p = ((S.man.progress || {})[m] || {})[c];
     if (m === "oisst") { const st = (S.runs[r] || {}).steps, d = x => { const v = new Date(x.valid); return `${v.getUTCMonth() + 1}-${v.getUTCDate()}`; };   // 11-03: daily analyses, not a run time
@@ -288,11 +376,11 @@ async function boot() {
   // 11-03 (Benjamin t2228u "Put these products under the waves tab"): the picker lists only the runs that belong to the open tab (runInTab)
   const runMenu = (ord0, al0) => { S._runs = [ord0, al0]; const al = al0.filter(r => r === S.run || runInTab(r, S.tab)), ord = ord0.filter(m => al.some(r => r.startsWith(m + "/")));
     $("run").innerHTML = ord.map(m => `<optgroup label="${S.man.models[m].site}${runNote(m) ? ` \u00b7 ${runNote(m)}` : ""}">` +
-    al.filter(r => r.startsWith(m + "/")).map(r => `<option value="${r}"${r === S.run ? " selected" : ""}>${runLabel(r)}</option>`).join("") + "</optgroup>").join(""); };
+    al.filter(r => r.startsWith(m + "/") && !(S._gone && S._gone.has(r))).map(r => `<option value="${r}"${r === S.run ? " selected" : ""}>${runLabel(r)}</option>`).join("") + "</optgroup>").join(""); };
   runMenu(order, all); S.runMenu = () => S._runs && runMenu(...S._runs);
   // 10-31 frame at a time: every 2 min re-read the manifest so a run that just started shows up in the Runs menu without a reload
   setInterval(async () => {
-    if (document.hidden) return; let M2; try { M2 = await (await fetch(DATA + "manifest.json", { cache: "no-cache" })).json(); } catch (e) { return; }
+    if (document.hidden) return; let M2; try { M2 = await readJSON(DATA + "manifest.json", { cache: "no-cache" }); } catch (e) { return; }
     mergeRunsX(pvMerge(M2)); if (JSON.stringify([M2.runs, M2.progress]) === JSON.stringify([S.man.runs, S.man.progress])) return;
     S.man.runs = M2.runs; S.man.progress = M2.progress; S.man.mgruns = M2.mgruns;
     const o2 = order.filter(m => (S.man.runs[m] || []).length), a2 = []; for (const m of o2) for (const c of [...S.man.runs[m]].reverse()) a2.push(`${m}/${c}`);
@@ -300,14 +388,26 @@ async function boot() {
     runMenu(o2, a2); loadNote();
   }, 120e3);
   setLists();
-  if (vKeep != null && !S.runs[S.run].steps.some(x => Math.abs(Date.parse(x.valid) - vKeep) <= 3 * 3600e3)) vKeep = null;
-  const f0 = vKeep != null ? null : Q.get("f"), steps = S.runs[S.run].steps; S.i = f0 ? Math.max(0, steps.findIndex(s => s.f == +f0)) : S.run.startsWith("oisst/") ? steps.length - 1 : 0;   // 11-03: daily analyses open on the newest day
+  if (vKeep != null && !(S.runs[S.run] && S.runs[S.run].steps || []).some(x => Math.abs(Date.parse(x.valid) - vKeep) <= 3 * 3600e3)) vKeep = null;
+  const f0 = vKeep != null ? null : Q.get("f"), steps = (S.runs[S.run] && S.runs[S.run].steps) || [], found = f0 ? steps.findIndex(s => s.f == +f0) : -1;
+  S.i = found >= 0 ? found : (String(S.run || "").startsWith("oisst/") ? Math.max(0, steps.length - 1) : 0);   // 11-03: daily analyses open on the newest day. A missing hour is not index 0 via findIndex -1.
   const vq = vKeep != null ? vKeep : Date.parse(Q.get("valid") || ""); if (!f0 && vq) { let b = 0; steps.forEach((x, k) => { if (Math.abs(Date.parse(x.valid) - vq) < Math.abs(Date.parse(steps[b].valid) - vq)) b = k; }); S.i = b; }   // old-site links
   $("step").value = S.i;
   $("run").onchange = async e => {   // keep the same valid time when switching runs/models (nearest step)
-    const vt = Date.parse(S.runs[S.run].steps[S.i].valid); S.run = e.target.value; await loadRun(S.run); setLists();
-    const st = S.runs[S.run].steps; let b = 0; st.forEach((x, k) => { if (Math.abs(Date.parse(x.valid) - vt) < Math.abs(Date.parse(st[b].valid) - vt)) b = k; });
-    S.i = b; $("step").value = b; memUI(); draw(); loadNote(); };
+    const prev = S.run, R0 = S.runs[prev]; if (!R0 || !R0.steps || !R0.steps[S.i]) return;
+    const vt = Date.parse(R0.steps[S.i].valid), next = e.target.value, m = next.split("/")[0];
+    const cands = [next, ...[...(S.man.runs[m] || [])].reverse().map(c => m + "/" + c).filter(r => r !== next)];
+    try {
+      const got = await loadListed(cands), R_ = got.data;
+      if (!R_ || !R_.steps || !R_.steps.length) throw new Error(next + ": run has no hours");
+      S.run = got.run; setLists();
+      const st = R_.steps; let b = 0; st.forEach((x, k) => { if (Math.abs(Date.parse(x.valid) - vt) < Math.abs(Date.parse(st[b].valid) - vt)) b = k; });
+      S.i = b; $("step").value = b; memUI(); draw(); loadNote();
+      if (got.run !== next) showErr(new Error(next + " is listed but its data is missing. Showing " + got.run + "."));
+    } catch (err) {
+      S.run = prev; if ($("run")) $("run").value = prev;
+      showErr(new Error("Could not load " + next + ". Still showing " + prev + ". " + (err && err.message || err)));
+    } };
   memUI();
   // phones: hour slider under the map (Benjamin 10-29 9:01 PM)
   const mq = matchMedia("(max-width: 700px), (max-height: 500px)"), placeSteps = () => {
@@ -357,7 +457,7 @@ function loadNote() {
 }
 async function refreshPartial() {
   const r = S.run, R_ = S.runs[r]; if (!R_ || R_.complete !== false || document.hidden) return;
-  let N; try { N = await (await fetch(`${DATA}runs/${r}/${runFile(r)}`, { cache: "no-cache" })).json(); } catch (e) { return; }
+  let N; try { N = await readJSON(`${DATA}runs/${r}/${runFile(r)}`, { cache: "no-cache" }); } catch (e) { return; }
   if (S.run !== r || !N || !N.steps || N.steps.length < R_.steps.length) return;
   const newF = N.fields.join() !== R_.fields.join();
   S.runs[r] = prepRun(N); if (newF) setLists(); $("step").max = N.steps.length - 1; $("step").value = S.i; loadNote();
@@ -406,7 +506,47 @@ async function onCompareMsg(e) {
     st.forEach((x, k) => { if (Math.abs(Date.parse(x.valid) - vt) < Math.abs(Date.parse(st[b].valid) - vt)) b = k; }); S.i = b; $("step").value = b; }
   cmpEcho = !lead; draw(); loadNote();
 }
-async function loadRun(r) { if (!S.runs[r]) S.runs[r] = prepRun(await (await fetch(`${DATA}runs/${r}/${runFile(r)}`, { cache: "no-cache" })).json()); return S.runs[r]; }
+async function readJSON(url, opts) {
+  const r = await fetch(url, opts), text = await r.text();
+  if (!r.ok) { const err = new Error(url + ": HTTP " + r.status + (text && text.length < 80 ? " " + JSON.stringify(text) : "")); err.status = r.status; err.url = url; throw err; }
+  try { return JSON.parse(text); }
+  catch (e) { const err = new Error(url + ": response is not JSON"); err.status = r.status; err.url = url; throw err; }
+}
+// Newest cycle vs the run in the address. A partial newest run (product listed, hour not published yet) does not replace a run that has the hour.
+function refreshKeepsRun(qr, newest, fQuery, vKeep, stepsOf) {
+  if (!qr || !newest || newest === qr) return newest || qr;
+  const f = +fQuery; if (!isFinite(f)) return newest;
+  const steps = (r) => stepsOf(r);
+  const hasF = (r) => Array.isArray(steps(r)) && steps(r).some(s => s.f == f);
+  const near = (r) => vKeep != null && Array.isArray(steps(r)) && steps(r).some(s => Math.abs(Date.parse(s.valid) - vKeep) <= 3 * 3600e3);
+  if (hasF(newest) || near(newest)) return newest;
+  if (!Array.isArray(steps(qr))) return qr;
+  if (hasF(qr)) return qr;
+  return newest;
+}
+window.refreshKeepsRun = refreshKeepsRun;
+async function loadRun(r) {
+  if (S.runs[r] && Array.isArray(S.runs[r].steps)) return S.runs[r];
+  const url = `${DATA}runs/${r}/${runFile(r)}`, N = await readJSON(url, { cache: "no-cache" });
+  if (!N || !Array.isArray(N.steps)) { const err = new Error(url + ": run has no hours"); err.url = url; throw err; }
+  // 11-06 NA west shift, simple cutover (t2643u): a run encoded on an older crop than the manifest's (old NA frame) is skipped like a
+  // missing run, so maps, land and labels never mix frames; old runs roll off in ~1 day. No-op while every run matches the crop.
+  { const M0 = S.man && S.man.models && S.man.models[r.split("/")[0]], cr = M0 && M0.crop;
+    if (cr && N.grid && N.grid.nx && N.grid.nx !== cr[3] - cr[2]) { const err = new Error(url + ": run is on the old map frame"); err.url = url; throw err; } }
+  S.runs[r] = prepRun(N); return S.runs[r];
+}
+// candidates: newest first. A listed cycle whose run.json 404s is skipped; the first one that loads is returned.
+async function loadListed(cands) {
+  let last = null;
+  for (const r of cands) {
+    if (!r || (S._gone && S._gone.has(r))) continue;
+    try { const data = await loadRun(r); return { run: r, data }; }
+    catch (e) { last = e; (S._gone || (S._gone = new Set())).add(r); }
+  }
+  if (last) throw last;
+  throw new Error("no forecast run is available");
+}
+window.loadListed = loadListed;
 const SV = () => (S.man.static_v ? `?v=${S.man.static_v}` : "");   // cache-buster for static layers (they are cached 1 day)
 const MD = () => S.man.models[S.run.split("/")[0]];
 // Severe tab (10-31): new products are published under the manifest's products_x (production's older viewer only reads "products")
@@ -524,6 +664,7 @@ async function viewStatic(vid) {
     // towns layer is not needed for the first paint: draw without it, redraw when it lands (10-29 first-map speedup)
     const tP = (own ? V0.towns_png : V.towns_png) || `static/towns_${vid}.png`, tU = (tP[0] === "@" ? tP.slice(1) : DATA + tP) + SV();
     const townsP = img(tU).then(im => { obj.towns = im; if (VSRC(S.view) === vid && window.__drawn) draw(); return im; }, () => null);
+    const labelsP = loadTownLabels(tU).then(items => { obj.labels = items; if (items && window.__drawn) draw(); return items; });
     // per-pixel source index + weights, made once per view from the coarse LUT (bilinear in panel px)
     const [px, py, pw, ph] = V.panel, x0 = Math.round(px), y0 = Math.round(py), W = Math.round(px + pw) - x0, H = Math.round(py + ph) - y0;
     const { nx, ny, stride } = V, G = S.runs[S.run].grid, gnx = G.nx, gny = G.ny;
@@ -542,7 +683,7 @@ async function viewStatic(vid) {
         idx[k] = r0 * gnx + c0; wy[k] = fi - r0; wx[k] = fj - c0;
       }
     }
-    const obj = { lut, base, towns: null, townsP, x0, y0, W, H, idx, wx, wy, gnx, baseU: DATA + (V.base_png || `static/base_${vid}.png`) + SV(), townsU: tU }; return obj;
+    const obj = { lut, base, towns: null, townsP, labels: null, labelsP, x0, y0, W, H, idx, wx, wy, gnx, baseU: DATA + (V.base_png || `static/base_${vid}.png`) + SV(), townsU: tU }; return obj;
   })();
   S.statics[sk] = p; return p;
 }
@@ -573,7 +714,9 @@ function getField(run, name, f) {
   const key = `${rk(run)}/${name}/${f}`;
   if (S.fields.has(key)) return S.fields.get(key);
   const p = (async () => {
-    const st = S.runs[run].steps.find(s => s.f === f);
+    const Rfield = S.runs[run];
+    if (!Rfield || !Rfield.steps) throw new Error(`nodata:${name}`);
+    const st = Rfield.steps.find(s => s.f === f);
     if (!st || !st.ranges[name]) throw new Error(`nodata:${name}`);
     const [url, ch0, tile] = fieldURL(run, name, f), I0 = await getPixels(url), T = S.runs[run].tiles || 1;
     const I = T > 1 ? { w: I0.w, h: I0.h / T, bytes: I0.bytes } : I0, ch = ch0 + tile * I.w * I.h * 4;   // tile k = rows k*h .. (k+1)*h-1
@@ -829,7 +972,9 @@ async function render(lite) {
   const seq = ++drawSeq, t0 = performance.now();
   const dir = lastKey === S.run && lastI !== null && S.i < lastI ? -1 : 1; lastI = S.i; lastKey = S.run;
   if ((VIEWS()[S.view] || {}).waveOnly && !WAVE_PIDS.test(S.prod)) setLists();   // wave-only view (West Coast) + another product
-  const run = S.run, vid = S.view, pid = S.prod, step = S.runs[run].steps[S.i], f = step.f;
+  const run = S.run, vid = S.view, pid = S.prod, Rrun = S.runs[run];
+  if (!Rrun || !Rrun.steps || !Rrun.steps[S.i]) { showErr(new Error("No forecast hours are available for " + (run || "this run") + ".")); return; }
+  const step = Rrun.steps[S.i], f = step.f;
   let st, D, key;
   try { [st, D, key] = await Promise.all([viewStatic(vid), productFields(run, pid, f), getKey(pid, vid)]); }
   catch (e) {
@@ -850,7 +995,9 @@ async function render(lite) {
     }
     const V = VIEWS()[vid], cv = $("map"), st2 = await viewStatic(vid);
     const ctx = sizeMap(cv, V, lite), [LW, LH] = V.fig; ctx.fillStyle = S.man.style.BG; ctx.fillRect(0, 0, LW, LH); ctx.drawImage(layer(st2.base, st2.baseU, cv._rs), 0, 0, LW, LH);
-    header(ctx, V, PRODS()[pid].title, step.valid_line, `${S.runs[run].runline}  \u00b7  ${V.label}  \u00b7  ${window.__vjNoJump || S.dragging ? "no map at this hour" : "not in this model run"}`, step.badge);
+    const miss = `${S.runs[run].runline}  \u00b7  ${V.label}  \u00b7  ${window.__vjNoJump || S.dragging ? "no map at this hour" : "not in this model run"}`;
+    if (!coastShown(V)) header(ctx, V, PRODS()[pid].title, step.valid_line, miss, step.badge);
+    showCoast(cv, V, { title: PRODS()[pid].title, valid: step.valid_line, sub: miss, badge: step.badge, P: PRODS()[pid], pid, towns: true });
     S.cur = null; window.__drawn = `${pid}/${vid}/${f}`; if (window.onStudioSkip) window.onStudioSkip();
     postCompare(run, pid, vid, step);   // 10-31: still report to the side-by-side page (else sync never starts when a frame opens on such an hour)
     return;
@@ -877,12 +1024,27 @@ async function render(lite) {
     let c; if (v < pal.L0) c = pal.under; else if (v >= pal.Lend) c = pal.over; else c = pal.cols[bin(pal, v)];
     if (!c) continue; const q = k * 4; o[q] = c[0]; o[q + 1] = c[1]; o[q + 2] = c[2]; o[q + 3] = 255;
   }
-  if (rs > 1 && !lite && !S.timer) fillSharp(ctx, st, vals, pal, mins, P.fill === "prt", rs);
+  const frs = fieldRS(LW, LH), zoomFill = !lite && !S.timer && rs > frs + 0.01;
+  if (zoomFill) {
+    const sig = `${rk(run)}/${pid}/${vid}/${f}@${frs}`;
+    if (!S.fillC || S.fillC.sig !== sig) {
+      const oc = document.createElement("canvas"); oc.width = Math.max(1, Math.round(LW * frs)); oc.height = Math.max(1, Math.round(LH * frs));
+      const ox = oc.getContext("2d"); ox.setTransform(frs, 0, 0, frs, 0, 0); ox.imageSmoothingEnabled = true; ox.imageSmoothingQuality = "high";
+      ox.fillStyle = S.man.style.BG; ox.fillRect(0, 0, LW, LH);
+      fillSharp(ox, st, vals, pal, mins, P.fill === "prt", frs);
+      S.fillC = { sig, cv: oc };
+    }
+    ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high"; ctx.drawImage(S.fillC.cv, 0, 0, LW, LH);
+  } else if (rs > 1 && !lite && !S.timer) fillSharp(ctx, st, vals, pal, mins, P.fill === "prt", rs);
   else { const tmp = new OffscreenCanvas(st.W, st.H); tmp.getContext("2d").putImageData(im, 0, 0); ctx.drawImage(tmp, st.x0, st.y0); }
   const t2 = performance.now();
-  // 2. borders/coast/frame + header box (static layer)
-  const kU = keyURL(pid, vid), L2 = { base: fitLayer(layer(st.base, st.baseU, rs), st.baseU, rs, LW, LH),
-    towns: fitLayer(layer(st.towns, st.townsU, rs), st.townsU, rs, LW, LH), key: fitLayer(layer(key, kU, rs), kU, rs, LW, LH) };
+  // 2. borders/coast/frame + header box (static layer). Town names and the color key are canvas text when their
+  // metadata is loaded (labels JSON / product levels); the raster PNG stays the fallback.
+  const kU = keyURL(pid, vid), keyBox = viewerKeyBox(V, P), keyLive = !!(keyBox && P.levels && P.colors && P.levels.length > 1);
+  const townLive = !!(st.labels && st.labels.length);
+  const L2 = { base: fitLayer(layer(st.base, st.baseU, rs), st.baseU, rs, LW, LH),
+    towns: townLive ? null : fitLayer(layer(st.towns, st.townsU, rs), st.townsU, rs, LW, LH),
+    key: keyLive ? null : fitLayer(layer(key, kU, rs), kU, rs, LW, LH) };
   window.__layers = Object.fromEntries(Object.entries(L2).map(([k, v]) => [k, v ? (v.naturalWidth || v.width) : 0]));
   ctx.drawImage(L2.base, 0, 0, LW, LH);
   // 3. product lines
@@ -904,9 +1066,26 @@ async function render(lite) {
   ctx.restore();
   // 4. towns (dots + names static) and live numbers
   const tmode = P.towns || "numbers";
-  const WT = WAVE_PIDS.test(pid) && MD().grid === "ll" ? coastPlan(ctx, st, V, LW, LH) : null;   // wave maps: coast towns (11-01 t1990u)
-  if (st.towns && tmode !== "none" && !(WT && WT.own)) ctx.drawImage(WT && WT.erase.length ? erasedTowns(L2.towns, `${st.townsU}#${WT.vid}`, WT.erase, LW) : L2.towns, 0, 0, LW, LH);
-  if (st.towns && tmode === "numbers") for (const t of V.towns) {
+  const WT = (WAVE_PIDS.test(pid) || VSRC(S.view) === "coast") && MD().grid === "ll" ? coastPlan(ctx, st, V, LW, LH) : null;   // wave maps + Coast (t2532u wwa towns)
+  if (WT && WT.C && WT.C.allTowns) WT.plainNames = !WAVE_PIDS.test(pid);   // Coast non-wave: names only; wave: model values at the pin
+  const haveTowns = !!(st.towns || townLive);
+  // Studio has two crops. Names stay off this shared bitmap and each frame draws them inside its own title/footer (paintStudioTowns).
+  const studioHold = !!(Q.get("studio") && townLive && tmode !== "none" && !(WT && WT.own));
+  if (studioHold) {
+    const nums = [];
+    if (tmode === "numbers") for (const t of V.towns || []) {
+      if (WT && WT.re.has(t.name)) continue;
+      if (!(t.fi >= 0 && t.fj >= 0 && t.fi < D.h - 1 && t.fj < D.w - 1)) continue;
+      let v = sampleRC(D.fill, D.w, t.fi, t.fj); if (!isFinite(v)) continue;
+      if (pid === "t2m" && t.t2m_corr !== undefined) v += t.t2m_corr;
+      nums.push({ name: t.name, x: t.x, y: t.y, text: fmtVal(P, v), size: t.size, color: t.color });
+    }
+    window.__studioTownSrc = { items: st.labels, nums, LW, LH, dpi: S.man.dpi || 100 };
+  } else if (Q.get("studio")) window.__studioTownSrc = null;
+  const drewTowns = !studioHold && townLive && tmode !== "none" && !(WT && WT.own) && drawTownLayer(ctx, st.labels, LW, LH, WT && WT.re, WT && WT.erase);
+  if (!studioHold && !drewTowns && st.towns && L2.towns && tmode !== "none" && !(WT && WT.own)) ctx.drawImage(WT && WT.erase.length ? erasedTowns(L2.towns, `${st.townsU}#${WT.vid}`, WT.erase, LW) : L2.towns, 0, 0, LW, LH);
+  // t2545u: own-label views (Coast) don't draw the static town layer, so its numbers would have no name (the stray '0' / '48'): skip them
+  if (!studioHold && haveTowns && tmode === "numbers" && !(WT && WT.own)) for (const t of V.towns) {
     if (WT && WT.re.has(t.name)) continue;   // re-placed with the coast towns
     if (!(t.fi >= 0 && t.fj >= 0 && t.fi < D.h - 1 && t.fj < D.w - 1)) continue;
     let v = sampleRC(D.fill, D.w, t.fi, t.fj); if (!isFinite(v)) continue;   // HRRR: integer = nearest 3 km point; global: bilinear at the pin
@@ -917,9 +1096,10 @@ async function render(lite) {
   // significant wave height"; t1988u: "Just make them look like the other locations in the map"): NDBC buoys on the ECMWF wave maps only
   if (WT) drawCoast(ctx, st, D, P, V, LW, LH, WT);
   if (P.lows && S.lowPanel && !Q.get("studio")) paintLowPanel(ctx, st, V, S.lowPanel);   // 11-02 (Benjamin t2115u): not in Studio frames (Studio has its own dot key); kept on the viewer
-  // 5. key + header text
-  if (!V.studioOnly) ctx.drawImage(L2.key, 0, 0, LW, LH);   // Studio-only view: Studio draws its own color bar (the key file is another view's)
-  if (!V.studioOnly) drawCredit(ctx, st, pid, P, LW, LH, st.towns && tmode !== "none");   // 11-01-26 legal audit: credit line redrawn over the key's baked one
+  else if (P.lows && S.lowPanel) paintStrongLow(ctx, st, S.lowPanel);   // 11-07: Studio frames still label the single strongest member low (the list and dot key stay off the frame)
+  // 5. key + header text (canvas text at the display backing scale; raster key only if the product has no level metadata)
+  if (!V.studioOnly) { if (!(keyLive && drawViewerKey(ctx, P, keyBox))) { if (L2.key) ctx.drawImage(L2.key, 0, 0, LW, LH); } }
+  if (!V.studioOnly) drawCredit(ctx, st, pid, P, LW, LH, haveTowns && tmode !== "none");   // 11-01-26 legal audit: credit line redrawn over the key's baked one
   const [r0, r1, c0, c1] = V.cut;                                            // same rows/cols temp_maps.cut() keeps
   if (!D.pct) D.pct = {};
   if (!D.pct[vid]) { const a = new Float32Array(Math.ceil((r1 - r0) / 2) * Math.ceil((c1 - c0) / 2)); let n = 0;   // every 2nd cell
@@ -928,7 +1108,8 @@ async function render(lite) {
   const pc = p => fin[Math.min(fin.length - 1, Math.max(0, Math.round(p / 100 * (fin.length - 1))))];
   let extra = (P.isobars && !D.iso && P.extra_noh ? P.extra_noh : P.extra).replace("{lo}", pc(P.pct[0]).toFixed(P.dec || 0)).replace("{hi}", pc(P.pct[1]).toFixed(P.dec || 0));
   if (pid === "gust10" && run.startsWith("eps/") && f <= 144 && f % 3 === 0) extra = extra.replace("in the 6 h ending", "in the 3 h ending");   // 10-31 EPS 3-hourly to F+144
-  header(ctx, V, P.title, step.valid_line, `${S.runs[run].runline}  \u00b7  ${V.label}  \u00b7  ${extra}`, step.badge);
+  const coastNow = coastShown(V);
+  if (!coastNow) header(ctx, V, P.title, step.valid_line, `${S.runs[run].runline}  \u00b7  ${V.label}  \u00b7  ${extra}`, step.badge);
   S.peak = GUST_PIDS.test(pid) ? drawPeak(ctx, st, vals) : null;
   // 11-01 7:43 AM (Benjamin: "Add a 'max height:80ft' just underneath the bottom right of the graphic"): max wave maps show the tallest
   // value in this frame and view (true grid max over the view's rows/cols, nearest whole ft), right-aligned under the map's bottom-right corner
@@ -937,25 +1118,28 @@ async function render(lite) {
     if (!D.mx) D.mx = {};
     if (D.mx[vid] === undefined) { let mx = -Infinity; for (let r = r0; r < r1; r++) for (let c = c0; c < c1; c++) { const v = D.fill[r * D.w + c]; if (v > mx) mx = v; } D.mx[vid] = mx; }
     if (isFinite(D.mx[vid]) && D.mx[vid] >= 0) {
-      maxv = D.mx[vid]; const yb = st.y0 + st.H, yc = yb + (LH - yb) * 0.5;
+      maxv = D.mx[vid]; if (!coastNow) { const yb = st.y0 + st.H, yc = yb + (LH - yb) * 0.5;
       ctx.save(); ctx.font = `800 ${pt(11)}px Montserrat`; ctx.fillStyle = S.man.style.INK; ctx.textAlign = "right"; ctx.textBaseline = "middle";
-      ctx.fillText(`Max height: ${Math.round(maxv)} ft`, st.x0 + st.W, yc); ctx.restore();
+      ctx.fillText(`Max height: ${Math.round(maxv)} ft`, st.x0 + st.W, yc); ctx.restore(); }
     }
   }
   const t3 = performance.now();
-  S.cur = { st, D, vals, P, pid, V, run, f, maxv };
+  S.cur = { st, D, vals, P, pid, V, run, f, maxv, memberLows: (P.lows && S.lowPanel && S.lowPanel.members) || [] };
   S.last = { data_ms: t1 - t0, fill_ms: t2 - t1, overlay_ms: t3 - t2, total_ms: t3 - t0 };
   $("stat").textContent = `F+${f}  data ${S.last.data_ms.toFixed(0)} ms · fill ${S.last.fill_ms.toFixed(0)} ms · lines/labels ${S.last.overlay_ms.toFixed(0)} ms`;
   window.__drawn = `${pid}/${vid}/${f}` + (lite ? "~" : ""); window.__rs = rs;
+  showCoast(cv, V, { title: P.title, valid: step.valid_line, sub: `${S.runs[run].runline}  \u00b7  ${V.label}  \u00b7  ${extra}`, badge: step.badge, P, pid, maxv, towns: !!(haveTowns && tmode !== "none") });
   postCompare(run, pid, vid, step);
   if (lite) { if (window.onStudioDraw && Q.get("studio")) window.onStudioDraw(cv_(), S.cur, step, true); return; }
   // iOS Safari throws after 100 history.replaceState calls in 10 s: update the URL once things settle
-  if (!Q.get("clean")) clearTimeout(urlTimer), urlTimer = setTimeout(() => { const u = new URL(location); u.searchParams.set("prod", pid); u.searchParams.set("view", vid);
+  // Write the hour into the address when the frame finishes, not 400 ms later. A water-vapor frame blocks the main
+  // thread in long chunks; a reload in that gap used to keep an older f (1920 obs water vapor: 36 on screen, 3 after reload).
+  if (!Q.get("clean")) { const u = new URL(location); u.searchParams.set("prod", pid); u.searchParams.set("view", vid);
     u.searchParams.set("f", f); u.searchParams.set("run", run); u.searchParams.delete("model");
     if (isMemRun(run)) u.searchParams.set("mem", S.mem); else u.searchParams.delete("mem");
     u.searchParams.delete("mg"); u.searchParams.delete("obs"); try { history.replaceState(null, "", u); } catch (e) {}
     // 11-04 (t2283u): last map kept so a bare studio.html / index.html open (bookmark, home-screen app) comes back on it (not compare / embeds)
-    if (!Q.get("embed") && !Q.get("id") && !Q.get("slim") && !Q.get("make")) try { localStorage.setItem(Q.get("studio") ? "studio:last" : "viewer:last", u.search); } catch (e) { /* private mode */ } }, 400);
+    if (!Q.get("embed") && !Q.get("id") && !Q.get("slim") && !Q.get("make")) try { localStorage.setItem(Q.get("studio") ? "studio:last" : "viewer:last", u.search); } catch (e) { /* private mode */ } }
   preload(run, pid, S.i);
   if (window.onStudioDraw) window.onStudioDraw(cv_(), S.cur, step);
 }
@@ -1013,7 +1197,7 @@ function fmtVal(P, v) {   // temp_maps fmt_int / fmt_vis
 const WAVE_PIDS = /^(waves|wavemax|wavemax24|swper|swellhs)$/;
 const WC_BUOYS = ["46041", "46029", "46050", "46006", "46005", "46002", "46059", "46022", "46014", "46013", "46026", "46042", "46028", "46011", "46054",
   "46025", "46047", "46086", "46087", "46089", "46027", "46015", "46229", "46036", "46214"];
-const LOCAL_VIEWS = new Set(["wa", "puget", "newa", "wwa"]), isWaB = (tag, loc) => tag === "wa" || (loc && /inner/.test(tag || ""));
+const LOCAL_VIEWS = new Set(["wa", "puget", "newa", "wwa", "coast"]), isWaB = (tag, loc) => tag === "wa" || (loc && /inner/.test(tag || ""));
 const BUOYS = [["46041","Cape Elizabeth",47.351,-124.741,"wa"],["46029","Columbia River Bar",46.148,-124.508,"wa"],["46087","Neah Bay",48.493,-124.727,"wa"],["46005","West Washington",46.147,-131.077,"wa wide"],["46089","Tillamook",45.928,-125.815,"wa"],["46050","Stonewall Bank",44.679,-124.535,"wa"],["46002","West Oregon",42.56,-130.523,"wa wide"],["46211","Grays Harbor",46.857,-124.243,"wa"],["46088","New Dungeness",48.332,-123.179,"inner any"],["46267","Angeles Point",48.171,-123.6,"inner"],["46303","Southern Georgia Strait",49.02,-123.43,"inner"],["46120","Point Wells",47.761,-122.397,"inner"],["46118","Bellingham Bay",48.724,-122.576,"inner"],["46146","Halibut Bank",49.34,-123.73,"sog"],["46054","West Santa Barbara",34.265,-120.477,""],["46229","Umpqua Offshore",43.772,-124.549,""],["46015","Port Orford",42.754,-124.839,""],["46027","St Georges",41.84,-124.382,""],["46022","Eel River",40.716,-124.54,""],["46014","Point Arena",39.225,-123.98,""],["46013","Bodega Bay",38.235,-123.317,""],["46214","Point Reyes",37.944,-123.466,""],["46026","San Francisco",37.75,-122.838,""],["46042","Monterey",36.787,-122.408,""],["46028","Cape San Martin",35.763,-121.9,""],["46011","Santa Maria",34.937,-120.999,""],["46025","Santa Monica Basin",33.765,-119.077,""],["46047","Tanner Bank",32.418,-119.535,""],["46086","San Clemente Basin",32.504,-118.029,""],["46206","La Perouse Bank",48.84,-126.0,""],["46059","West California",38.067,-129.895,"wide"],["46006","Southeast Papa",40.73,-137.42,"wide"],["46036","South Nomad",48.36,-133.94,"wide"],["46004","Middle Nomad",50.93,-136.1,""],["46147","South Moresby",51.83,-131.22,""],["46208","West Moresby",52.52,-132.69,""],["46205","West Dixon Entrance",54.18,-134.32,""],["46184","North Nomad",53.92,-138.85,"wide"],["46246","Station Papa",49.903,-145.246,""],["46084","Cape Edgecumbe",56.614,-136.04,""],["46083","Fairweather Ground",58.276,-138.024,""],["46085","Central Gulf of Alaska",55.84,-142.895,"wide"],["46001","Western Gulf of Alaska",56.296,-148.027,"wide"],["46060","West Orca Bay",60.571,-146.795,""],["46078","Albatross Bank",55.561,-152.599,""],["46066","South Kodiak",52.776,-154.992,"wide"],["51001","NW Hawaii",24.475,-162.03,"wide"],["51000","Northern Hawaii",23.534,-153.752,""],["51003","Western Hawaii",19.151,-160.617,""],["51002","SW Hawaii",17.07,-157.755,""],["51004","SE Hawaii",17.504,-152.197,"wide"],["44025","Long Island",40.258,-73.175,""],["44008","Nantucket",40.5,-69.254,""],["44011","Georges Bank",41.088,-66.546,"wide"],["41001","East Hatteras",34.738,-72.503,"wide"],["41002","South Hatteras",31.743,-74.955,""],["41048","West Bermuda",31.878,-69.722,"wide"],["41010","Canaveral East",28.86,-78.478,"wide"],["41047","NE Bahamas",27.557,-71.48,""],["42002","West Gulf",25.95,-93.78,"wide"],["42001","Mid Gulf",25.922,-89.638,"wide"],["42003","East Gulf",25.925,-85.616,""]];
 function drawBuoys(ctx, st, D, P, V, LW, LH, taken0) {
   const cr = MD().crop || [0, 0, 0, 0], X0 = st.x0, Y0 = st.y0, X1 = st.x0 + st.W, Y1 = st.y0 + st.H;
@@ -1090,9 +1274,12 @@ const COAST_VIEWS = {   // order = priority; buoys: "first" = WA buoys placed be
         "Santa Barbara", "Half Moon Bay", "Santa Cruz", "Morro Bay", "Fort Bragg", "Bodega Bay", "Cape Mendocino", "Malibu", "Westport", "Tatoosh Island",
         "Coos Bay", "Cannon Beach", "Long Beach", "Ocean Shores", "La Push"], buoys: "after", side: "r" },
   pnw: { style: "region", re: [], add: ["Ocean Shores", "Long Beach", "La Push", "Westport", "Tatoosh Island"], buoys: "after", side: "r" },
-  // Studio Coast view (t2289u / t2290u): like Pacific NW tight, coast towns + WA buoys first, water names last
-  coast: { style: "region", own: true, re: [], add: ["Ocean Shores", "Westport", "La Push", "Long Beach", "Tatoosh Island", "Astoria"], buoys: "first", big: ["Vancouver"], plainLast: true,
-    dotGap: 4, sides: { "Ocean Shores": "a", "Westport": "r" } } };   // t2300u: Westport always in (its dot sits ~5 pt below Ocean Shores': Ocean Shores above, Westport to the right);   // no other city labels here: town names go on the (empty) land side, buoy labels keep the ocean
+  // Coast view (t2289u / t2531u / t2532u): towns = Western Washington views.wwa (same source, stays in sync) + Tatoosh Island;
+  // out-of-frame labels skipped by placement. Buoys = same WA+inner set as wwa (coast in LOCAL_VIEWS).
+  coast: { style: "region", own: true, fromWwa: true, allTowns: true, re: [], add: ["Tatoosh Island"], buoys: "after",
+    big: ["Vancouver", "Seattle"], plainLast: true, dotGap: 4,
+    sides: { "Ocean Shores": "a", "Westport": "r", "Tatoosh Island": "l", "Neah Bay": "r", "Elliott Bay": "l" },
+    waveMust: ["Elliott Bay"], waveNum: ["Elliott Bay"] } };   // t2545u: Coast wave maps: Elliott Bay always placed, with its wave number (west-side marker, OFFSHORE)   // t2300u: Westport always in (its dot sits ~5 pt below Ocean Shores': Ocean Shores above, Westport to the right);   // no other city labels here: town names go on the (empty) land side, buoy labels keep the ocean
 const coastPx = (st, V) => (la, lo) => { const cr = MD().crop || [0, 0, 0, 0], k = `${la},${lo}`; if (!st.coastPx) st.coastPx = {};
   if (!(k in st.coastPx)) { const q = gridInv(V, st, (90 - la) / 0.25 - cr[0], ((lo + 360) % 360) / 0.25 - cr[2], null);
     st.coastPx[k] = q && q[0] >= 0 && q[1] >= 0 && q[0] <= st.W && q[1] <= st.H ? [st.x0 + q[0], st.y0 + q[1]] : null; } return st.coastPx[k]; };
@@ -1113,19 +1300,40 @@ const WAVE_RENAME = { "Oak Harbor": "Smith Island", "Neah Bay": "Tatoosh Island"
 // bay-head / inlet towns that don't help read waves are dropped on those two views (all wave products, viewer + Studio)
 const WAVE_DROP = { wwa: new Set(["Bremerton", "Poulsbo", "Coupeville", "Friday Harbor"]),
   puget: new Set(["Bremerton", "Poulsbo", "Port Orchard", "Port Ludlow"]),
-  coast: new Set(["Possession Sound", "Commencement Bay", "Elliott Bay"]) };   // t2300u: cut off at the 9:16 frame's right edge
+  coast: new Set(["Possession Sound", "Commencement Bay", "Bremerton"]) };   // t2545u: Bremerton off Coast wave maps; Elliott Bay back (waveMust)   // t2300u: cut off at the 9:16 frame's right edge
 const OWN_DEFAULT = { style: "wa", own: true, re: [], add: [], buoys: "after" };   // other views with a town layer (puget, wwa, ewa, passes, newa, lm, bc)
 function coastPlan(ctx, st, V, LW, LH) {
   const vid = VSRC(S.view), C = COAST_VIEWS[vid] || ((V.towns || []).length ? OWN_DEFAULT : null), cr = MD().crop || [0, 0, 0, 0];
   if (!C) return { vid, erase: [], re: new Set(), C: null };
   if (C.own) {   // 11-01 t1998u / t2001u: own labels only (static town layer not drawn): saltwater towns + the four Puget Sound cities as plain names
+    // t2532u/t2536u Coast: fromWwa reads models[m].views.wwa.towns (same source as wwa).
+    // Non-wave: all wwa towns + Tatoosh. Wave products: SAME filter as wwa (WAVE_RENAME + WAVE_KEEP water-only;
+    // Seattle/Everett/Tacoma/Olympia -> plain bay names; Neah Bay -> Tatoosh; inland dropped). Tatoosh always via C.add.
     const xt = {}, keep = [];
-    for (const t of V.towns || []) { const la = 90 - (t.fi + cr[0]) * 0.25, lo = (t.fj + cr[2]) * 0.25 - 360;
-      const nm = WAVE_RENAME[t.name] || t.name, k = WAVE_KEEP[nm]; if (!k || (WAVE_DROP[vid] && WAVE_DROP[vid].has(nm)) || (nm === "Vancouver" && !["lm", "bc", "pnwt"].includes(vid))) continue;
+    const m0 = ((typeof S !== "undefined" && S.run) || "").split("/")[0];
+    const src = C.fromWwa ? (((((S.man || {}).models || {})[m0] || {}).views || {}).wwa || {}).towns || [] : (V.towns || []);
+    const waveMode = WAVE_PIDS.test((typeof S !== "undefined" && S.prod) || "");
+    const useAll = !!(C.allTowns && !waveMode);   // full wwa list only off-wave
+    for (const t of src) { const la = 90 - (t.fi + cr[0]) * 0.25, lo = (t.fj + cr[2]) * 0.25 - 360;
+      // Wave: apply WAVE_RENAME like wwa. Non-wave Coast: keep city names (Neah Bay stays; Tatoosh is C.add).
+      const nm = (C.fromWwa && !waveMode) ? t.name : (WAVE_RENAME[t.name] || t.name);
+      if (useAll) {
+        if (WAVE_DROP[vid] && WAVE_DROP[vid].has(nm)) continue;
+        if (!COAST_TOWNS[nm]) xt[nm] = [la, lo, "r"]; keep.push(nm); continue;
+      }
+      const k = WAVE_KEEP[nm]; if (!k || (WAVE_DROP[vid] && WAVE_DROP[vid].has(nm)) || (nm === "Vancouver" && !["lm", "bc", "pnwt"].includes(vid))) continue;
       if (!COAST_TOWNS[nm]) xt[nm] = [la, lo, "r"]; keep.push(nm); }
-    const nn = keep.filter(n => WAVE_KEEP[n] === "n"), pp = keep.filter(n => WAVE_KEEP[n] === "p");
-    const pre = C.order || (C.plainLast ? nn : nn.concat(pp)), post = C.order ? [] : (C.add || []).filter(n => !pre.includes(n)).concat(C.plainLast ? pp : []);
-    return (window.__coast = { vid, C, own: true, xt, pre, post, erase: [], re: new Set((V.towns || []).map(t => t.name)), boxes: [], px: coastPx(st, V), log: [] }); }
+    const nn = keep.filter(n => useAll || WAVE_KEEP[n] === "n"), pp = keep.filter(n => !useAll && WAVE_KEEP[n] === "p");
+    let pre = C.order || (C.plainLast ? nn : nn.concat(pp)), post = C.order ? [] : (C.add || []).filter(n => !pre.includes(n)).concat(C.plainLast ? pp : []);
+    // Tatoosh first (must-place). Neah Bay must-place only on non-wave (on wave, rename already made it Tatoosh).
+    if (C.fromWwa) {
+      const add = (C.add || []).filter(n => n);
+      const head = (useAll ? add.concat(["Neah Bay"]) : add.concat(C.waveMust || [])).filter((n, i, a) => a.indexOf(n) === i);
+      pre = head.concat(pre.filter(n => !head.includes(n)));
+      post = post.filter(n => !head.includes(n));
+    }
+    const reNames = new Set(src.map(t => t.name));
+    return (window.__coast = { vid, C, own: true, xt, pre, post, erase: [], re: reNames, boxes: [], px: coastPx(st, V), log: [], plainNames: false }); }
   const wa = C.style === "wa", gap = pt(wa ? 3.5 : 3.0), hh = pt(6.5), erase = [], re = new Set(), boxes = [];
   const px = coastPx(st, V);
   ctx.save();
@@ -1156,7 +1364,7 @@ function erasedTowns(im, key, rects, LW) {   // town layer copy with the re-plac
 // nearest sea cell differs; no sea point near the marker -> the town point as before (logged).
 const OFFSHORE = { "Tatoosh Island": [48.392, -124.75], "La Push": [47.908, -124.648], "Ocean Shores": [46.974, -124.19], "Westport": [46.89, -124.142],
   "Long Beach": [46.35, -124.077], "Cannon Beach": [45.89, -123.975], "Port Angeles": [48.13, -123.43],
-  "Birch Bay": [48.91, -122.79], "Smith Island": [48.328, -122.831], "Admiralty Inlet": [48.135, -122.72], "Shore Acres": [43.326, -124.395],
+  "Elliott Bay": [47.60, -122.40] /* t2545u: west side of the bay */, "Birch Bay": [48.91, -122.79], "Smith Island": [48.328, -122.831], "Admiralty Inlet": [48.135, -122.72], "Shore Acres": [43.326, -124.395],
   "Coos Bay": [43.35, -124.36], "Eureka": [40.80, -124.20], "San Francisco": [37.76, -122.52], "San Diego": [32.745, -117.265],
   "Monterey": [36.61, -121.88], "Santa Barbara": [34.395, -119.69], "Los Angeles": [33.98, -118.50], "Crescent City": [41.74, -124.21] };
 const OFF_BRG = { "Anacortes": 0, "Coupeville": 0, "Friday Harbor": 90, "Bremerton": 180, "Poulsbo": 180, "Mukilteo": 315, "Edmonds": 270, "Kingston": 90,
@@ -1182,7 +1390,7 @@ function seaVal(D, la, lo) {   // model value at a coast town: bilinear when the
   return v;
 }
 function drawCoast(ctx, st, D, P, V, LW, LH, WT) {
-  const C = WT.C; if (!C) { WT.taken = WT.boxes = WT.boxes || []; drawBuoys(ctx, st, D, P, V, LW, LH, WT.taken); return; }
+  const C = WT.C; if (!C) { WT.taken = WT.boxes = WT.boxes || []; if (!WT.plainNames) drawBuoys(ctx, st, D, P, V, LW, LH, WT.taken); return; }
   const wa = C.style === "wa", fs = WT.vid === "wawide" ? WAWIDE_FS : 1, fName = `600 ${pt((wa ? 9.5 : 8.5) * fs)}px Montserrat`, fNum = `800 ${pt((wa ? 10.5 : 9.5) * fs)}px Montserrat`, gap = pt(wa ? 3.5 : 3.0), hh = pt(6.5);
   const X0 = st.x0, Y0 = st.y0, X1 = st.x0 + st.W, Y1 = st.y0 + st.H, taken = WT.boxes.slice(), dots = [], resv = []; WT.taken = taken;
   const hit = (b, g = pt(2.5)) => b[0] < X0 + 2 || b[1] < Y0 + 2 || b[2] > X1 - 2 || b[3] > Y1 - 2 || taken.concat(resv).some(a => b[0] < a[2] + g && b[2] > a[0] - g && b[1] < a[3] + g && b[3] > a[1] - g);
@@ -1198,12 +1406,13 @@ function drawCoast(ctx, st, D, P, V, LW, LH, WT) {
     if (!must && ((C.sides && C.sides[name] ? resv.some(a => dot[0] < a[2] && dot[2] > a[0] && dot[1] < a[3] && dot[3] > a[1]) : hit(dot, pt(1))) || dots.some(([a, b]) => (a - x) ** 2 + (b - y) ** 2 < pt(C.dotGap || (wa ? 9 : 11)) ** 2))) { WT.log.push(`${name}: dot blocked`); return; }
     const t0 = must && (V.towns || []).find(t => t.name === name);   // a re-placed city keeps its usual number (read at its pin, as before)
     const fN = big ? `700 ${pt(9.5 * fs)}px Montserrat` : fName;
-    const v = t0 && t0.fi >= 0 && t0.fj >= 0 && t0.fi < D.h - 1 && t0.fj < D.w - 1 ? sampleRC(D.fill, D.w, t0.fi, t0.fj) : offVal(D, name, T, WT), s_ = isFinite(v) && !(WT.own && WAVE_KEEP[name] === "p") ? fmtVal(P, v) : "";
+    const v = t0 && t0.fi >= 0 && t0.fj >= 0 && t0.fi < D.h - 1 && t0.fj < D.w - 1 ? sampleRC(D.fill, D.w, t0.fi, t0.fj) : offVal(D, name, T, WT), s_ = WT.plainNames ? "" : (isFinite(v) && !(WT.own && WAVE_KEEP[name] === "p" && !(C.waveNum || []).includes(name)) ? fmtVal(P, v) : "");
     ctx.font = fN; const nw = ctx.measureText(name).width; ctx.font = fNum; const vw = s_ ? ctx.measureText(s_).width : 0, W_ = nw + (s_ ? gap + vw : 0);
     const c = { r: [pt(5), 0], l: [-pt(5) - W_, 0], a: [-W_ / 2, -pt(9.5)], b: [-W_ / 2, pt(9.5)] };
     const sd = C.side || (C.sides && C.sides[name]) || T[2], cands = [c[sd], ...["r", "l", "a", "b"].filter(k => k !== sd).map(k => c[k]), [pt(5), -pt(6)], [pt(5), pt(6)], [-pt(5) - W_, -pt(6)], [-pt(5) - W_, pt(6)]];
     let at = null; for (const [gx, gy] of cands) { const b = [x + gx, y + gy - hh, x + gx + W_, y + gy + hh]; if (!hit(b)) { at = [gx, gy, b]; break; } }
     if (!at && must && C._old && C._old[name]) { const [ox, oy] = C._old[name]; at = [ox - x, oy - y, [ox, oy - hh, ox + W_, oy + hh]]; }   // never drop an existing city
+    if (!at && must) { const [gx, gy] = c[sd] || c.l || [pt(5), 0]; at = [gx, gy, [x + gx, y + gy - hh, x + gx + W_, y + gy + hh]]; }   // t2531u: forced side for must (Tatoosh)
     if (!at) { WT.log.push(`${name}: no room for the label`); return; }
     taken.push(dot, at[2]); dots.push(d); WT.log.push(`${name}: placed`);
     ctx.beginPath(); ctx.arc(x, y, pt(wa ? 1.8 : 1.6) + pt(wa ? 0.5 : 0.45), 0, 2 * Math.PI); ctx.fillStyle = "#ffffff"; ctx.fill();
@@ -1212,11 +1421,11 @@ function drawCoast(ctx, st, D, P, V, LW, LH, WT) {
     if (s_) haloText(ctx, s_, x + at[0] + nw + gap, y + at[1], fNum, "#0d0f13", pt(3.0), "left", "middle");
   };
   ctx.save();
-  if (WT.own) for (const n of WT.pre) place(n, false);
+  if (WT.own) for (const n of WT.pre) place(n, (C.add || []).includes(n) || (!WT.plainNames && (C.waveMust || []).includes(n)) || (C.fromWwa && n === "Neah Bay" && WT.plainNames));   // Tatoosh always; Neah Bay must on non-wave only
   else if (C.order) for (const n of C.order) { if (WT.re.has(n)) place(n, true); else if (C.add.includes(n)) place(n, false); }
   else { for (const n of C.re) if (WT.re.has(n)) place(n, true); if (C.buoys === "after") for (const n of C.add) place(n, false); }
   ctx.restore();
-  drawBuoys(ctx, st, D, P, V, LW, LH, taken);
+  if (!WT.plainNames) drawBuoys(ctx, st, D, P, V, LW, LH, taken);   // buoys on wave products only (same as wwa)
   ctx.save();
   if (WT.own) for (const n of WT.post) place(n, false);
   else if (C.buoys === "first") for (const n of C.add) place(n, false);
@@ -1484,6 +1693,76 @@ function drawPeak(ctx, st, vals) {
 function haloText(ctx, s, x, y, font, color, halo, align, base) {
   ctx.font = font; ctx.textAlign = align; ctx.textBaseline = base; ctx.lineJoin = "round";
   ctx.strokeStyle = "#ffffff"; ctx.lineWidth = halo; ctx.strokeText(s, x, y); ctx.fillStyle = color; ctx.fillText(s, x, y);
+}
+// Town names + dots / pass triangles from static/labels_<view>.json (fast_encode.label_items). Anchors are figure
+// fractions from the same placement that baked the towns PNG, drawn here at the canvas backing scale.
+function drawTownLayer(ctx, items, LW, LH, skip, erase) {
+  if (!items || !items.length) return false;
+  const skipT = skip || null;
+  const hitE = (x, y) => erase && erase.some(r => x >= r[0] && x <= r[2] && y >= r[1] && y <= r[3]);
+  ctx.save();
+  for (const it of items) if (it.k === "m") {
+    const x = it.x * LW, y = it.y * LH; if (hitE(x, y)) continue;
+    const rad = pt((it.ms || 3.6) / 2);
+    ctx.beginPath();
+    if (it.mk === "^") { const h = rad * 1.15; ctx.moveTo(x, y - h); ctx.lineTo(x + h * 0.95, y + h * 0.75); ctx.lineTo(x - h * 0.95, y + h * 0.75); ctx.closePath(); }
+    else ctx.arc(x, y, rad, 0, 2 * Math.PI);
+    ctx.fillStyle = it.fill || "#1b1d22"; ctx.strokeStyle = it.stroke || "#ffffff"; ctx.lineWidth = pt(it.mew || 0);
+    if (it.mew) ctx.stroke(); ctx.fill();
+  }
+  for (const it of items) if (it.k === "t" && !(skipT && skipT.has && skipT.has(it.t))) {
+    const font = `${it.style === "italic" ? "italic " : ""}${it.w || 600} ${pt(it.size)}px Montserrat`;
+    haloText(ctx, it.t, it.x * LW, it.y * LH, font, it.fill || "#1b1d22", pt(it.halo == null ? 2.6 : it.halo), "left", "middle");
+  }
+  ctx.restore(); return true;
+}
+// Color key band from house_style.hbar (under the header). Ticks follow Studio's colorbar: skip a label that would touch the previous one.
+function viewerKeyBox(V, P) {
+  if (!V || !V.fig) return null;
+  const [LW, LH] = V.fig, Hin = (V.size_in && V.size_in[1]) || LH / ((S.man && S.man.dpi) || 100);
+  if (!(Hin > 1)) return null;
+  const keyY = (0.985 - 1.16 / Hin) - 0.16 / Hin - 0.27 / Hin, hf = 0.27 / Hin, x1 = P && P.core ? 0.872 : 0.976;
+  return { x: 0.150 * LW, y: (1 - (keyY + hf)) * LH, w: (x1 - 0.150) * LW, h: hf * LH, titleX: 0.024 * LW, coreX: 0.888 * LW, coreW: 0.088 * LW, LW };
+}
+function keyTickText(v, P) {
+  if (P.ticklabels) { const i = (P.ticks || []).findIndex(t => Math.abs(t - v) < 1e-6); if (i >= 0 && P.ticklabels[i] != null) return String(P.ticklabels[i]); }
+  if (P.levels && P.levels[0] === 0.01 && [12, 18].includes(P.levels[P.levels.length - 1]) && Math.abs(v - Math.round(v)) < 1e-6) return String(Math.round(v));
+  const a = P.ticks || [], dec = a.some(t => Math.abs(t - Math.round(t)) > 1e-6) ? (a.some(t => Math.abs(t * 10 - Math.round(t * 10)) > 1e-6) ? 2 : 1) : 0;
+  return Number(v).toFixed(dec);
+}
+function drawViewerKey(ctx, P, box) {
+  const L = P && P.levels, C = P && P.colors; if (!box || !L || !C || L.length < 2) return false;
+  const n = L.length - 1, lo = L[0], hi = L[n];
+  const KW = Array.isArray(P.kw) && P.kw.length === n ? P.kw : null, CW = [0];
+  for (let i = 0; i < n; i++) CW.push(CW[i] + (KW ? KW[i] : 1));
+  const X = (v) => { let i = 0; while (i < n - 1 && v > L[i + 1]) i++; const fr = Math.min(1, Math.max(0, (v - L[i]) / ((L[i + 1] - L[i]) || 1)));
+    return box.x + (CW[i] + fr * (CW[i + 1] - CW[i])) / CW[n] * box.w; };
+  ctx.save();
+  for (let i = 0; i < C.length && i < n; i++) { ctx.fillStyle = C[i]; ctx.fillRect(Math.floor(X(L[i])), box.y, Math.ceil(X(L[i + 1]) - X(L[i])) + 1, box.h); }
+  ctx.strokeStyle = "rgba(255,255,255,0.7)"; ctx.lineWidth = Math.max(1, pt(0.9)); ctx.strokeRect(box.x, box.y, box.w, box.h);
+  const tickPt = P.tickpt || ((P.ticks || []).some(t => Math.abs(t - Math.round(t)) > 1e-6) ? 13 : 15);
+  const size = pt(tickPt), tgap = /^Max wave/.test(P.key || "") ? 0.3 : 0.55;
+  ctx.font = `700 ${size}px Montserrat`; ctx.fillStyle = (S.man.style && S.man.style.INK) || "#f4f2ee"; ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+  let lastR = -1e9;
+  (P.ticks || []).filter(t => t >= lo - 1e-9 && t <= hi + 1e-9).forEach(t => {
+    const tx = X(t), s = keyTickText(t, P), tw = ctx.measureText(s).width;
+    if (tx - tw / 2 < lastR + size * tgap) {
+      const lx = tx + size * 0.15; if (Math.abs(t - hi) > 1e-6 || lx < lastR + size * 0.25) return;
+      ctx.fillRect(tx - pt(0.4), box.y + box.h, pt(0.8), size * 0.28); ctx.textAlign = "left"; ctx.fillText(s, lx, box.y + box.h + size * 1.05); ctx.textAlign = "center"; lastR = lx + tw; return;
+    }
+    lastR = tx + tw / 2; ctx.fillRect(tx - pt(0.4), box.y + box.h, pt(0.8), size * 0.28); ctx.fillText(s, tx, box.y + box.h + size * 1.05);
+  });
+  const title = P.key || ""; let z = 13.5; const room = Math.max(20, box.x - box.titleX - pt(6));
+  ctx.textAlign = "left"; ctx.textBaseline = "middle"; ctx.fillStyle = (S.man.style && S.man.style.INK) || "#f4f2ee";
+  for (; z > 9.5; z -= 0.5) { ctx.font = `700 ${pt(z)}px Montserrat`; if (ctx.measureText(title).width <= room) break; }
+  ctx.fillText(title, box.titleX, box.y + box.h / 2);
+  if (P.core && P.core.color) {
+    ctx.fillStyle = P.core.color; ctx.fillRect(box.coreX, box.y, box.coreW, box.h);
+    ctx.strokeStyle = "rgba(255,255,255,0.7)"; ctx.strokeRect(box.coreX, box.y, box.coreW, box.h);
+    ctx.font = `700 ${pt(11)}px Montserrat`; ctx.fillStyle = (S.man.style && S.man.style.INK) || "#f4f2ee"; ctx.textAlign = "center"; ctx.textBaseline = "top";
+    ctx.fillText(`within ${P.core.km} km`, box.coreX + box.coreW / 2, box.y + box.h + pt(2));
+  }
+  ctx.restore(); return true;
 }
 
 function fitFont(ctx, s, weight, size, maxw, min) {
@@ -1827,8 +2106,12 @@ function lowGeom(st, D, P, V) {
   const inView = p => p && p[0] >= 0 && p[1] >= 0 && p[0] <= st.W && p[1] <= st.H;
   // member lows: pixel position, in view only (same rule as the old list: "in view")
   const L = [];
-  for (const [mem, fi, fj, mb] of E.lows) { const p = gridInv(V, st, fi, fj, null); if (!inView(p)) continue;
-    L.push({ mem: mem + 1, num: E.mnum ? E.mnum[mem] || null : null, fi, fj, mb, la: lat(fi), lo: lon(fj), x: st.x0 + p[0], y: st.y0 + p[1] }); }
+  for (const row of (Array.isArray(E.lows) ? E.lows : [])) {
+    if (!Array.isArray(row) || row.length < 4) continue;
+    const [mem, fi, fj, mb] = row;
+    if (![mem, fi, fj, mb].every(Number.isFinite) || mb < 800 || mb > 1100) continue;
+    const p = gridInv(V, st, fi, fj, null); if (!inView(p)) continue;
+    L.push({ mem: mem + 1, num: E.mnum ? E.mnum[mem] ?? null : null, fi, fj, mb, la: lat(fi), lo: lon(fj), x: st.x0 + p[0], y: st.y0 + p[1] }); }
   const dots = L.slice().sort((a, b) => b.mb - a.mb).map(o => [o.x, o.y, o.mb]);   // deepest drawn last (on top)
   // core: points where 5+ different members have a low within 25 km (old: contourf of that member count, navy)
   const C = P.core || { km: 25, min: 5 }, core = [], seen = new Set(), step = 0.05;
@@ -1878,8 +2161,30 @@ function lowGeom(st, D, P, V) {
   // does the same thing"; t2023u: likes the list on the right): the side used to be re-picked every hour (whichever side hid fewer dots),
   // so the list and the dot legend flipped left/right while scrubbing. Now always the right side (AIFS ENS + ECMWF EPS, every view).
   const side = "right"; void hid;
-  return { side, dots, core, means, top, hasNum: !!E.mnum, strong: strongL.slice(0, 10), weak: weakL.slice(0, 10), n: E.n || 50,
+  return { members: L, side, dots, core, means, top, hasNum: !!E.mnum, strong: strongL.slice(0, 10), weak: weakL.slice(0, 10), n: E.n || 50,
            meanVals: means.map(x => x[2]).sort((x, y) => x - y) };
+}
+// 11-07: the single strongest member low (lowest central pressure in view) keeps its ring, and the on-canvas label names that
+// member and its pressure. Older runs without a real member number (no ens "mnum") still get no label.
+function strongLowText(num, mb) { const p = Math.round(mb); return num ? `Strongest: member ${num}, ${p} mb` : `Strongest: ${p} mb`; }
+window.__strongLowText = strongLowText;
+function paintStrongLow(ctx, st, g, obs) {
+  const T = g.top; if (!(T && g.hasNum && T.num)) return;
+  ctx.beginPath(); ctx.arc(T.x, T.y, pt(6.2), 0, 2 * Math.PI); ctx.lineWidth = pt(1.6); ctx.strokeStyle = "#ffffff"; ctx.stroke();
+  ctx.lineWidth = pt(0.9); ctx.strokeStyle = "#0b0d12"; ctx.stroke();
+  const s = strongLowText(T.num, T.mb); ctx.font = `800 ${pt(10.5)}px Montserrat`; const w = ctx.measureText(s).width, gap = pt(9), hh = pt(7.5);
+  const obstacles = g.means.map(([mx, my, mv]) => hlBox(ctx, mx, my, mv)).concat(obs || []);
+  const ov = (a, b) => Math.max(0, Math.min(a[2], b[2]) - Math.max(a[0], b[0])) * Math.max(0, Math.min(a[3], b[3]) - Math.max(a[1], b[1]));
+  const pad = pt(2), cands = [];
+  for (const k of [1, 1.9, 2.8]) for (const [sx, dy] of [[1, -1], [-1, -1], [1, 1], [-1, 1], [1, 0], [-1, 0]]) {
+    const xa = sx > 0 ? T.x + gap * k : T.x - gap * k - w, yc = T.y + dy * pt(9) * k; cands.push([xa, yc]); }
+  let best = null;
+  for (const [xa, yc] of cands) { const R = [xa - pad, yc - hh - pad, xa + w + pad, yc + hh + pad];
+    const out = R[0] < st.x0 + pt(3) || R[2] > st.x0 + st.W - pt(3) || R[1] < st.y0 + pt(3) || R[3] > st.y0 + st.H - pt(3);
+    const cost = (out ? 1e9 : 0) + obstacles.reduce((a, b) => a + ov(R, b), 0);
+    if (!best || cost < best[2]) best = [xa, yc, cost, R]; if (cost === 0) break; }
+  window.__memLab = { s, rect: best[3], cost: best[2], means: g.means.length };   // QA hook (no effect on drawing)
+  haloText(ctx, s, best[0], best[1], `800 ${pt(10.5)}px Montserrat`, "#0b0d12", pt(2.6), "left", "middle");
 }
 function paintLowPanel(ctx, st, V, g) {   // ens_maps.low_panel, drawn inside the left edge of the map + the dot legend
   const [LW, LH] = V.fig, PW = Math.round(0.092 * LW), x0 = g.side === "right" ? st.x0 + st.W - PW - pt(3) : st.x0 + pt(3), y0 = st.y0 + pt(3), H = st.H - pt(6);
@@ -1908,27 +2213,11 @@ function paintLowPanel(ctx, st, V, g) {   // ens_maps.low_panel, drawn inside th
       ctx.textBaseline = "top"; y += lh; }
     y += lh * 0.5;
   }
-  // strongest member low in view: ring around its dot + "Mem N · 952" (side away from the list / map edge / red L)
-  const T = g.top; if (T && g.hasNum && T.num) {
-    ctx.beginPath(); ctx.arc(T.x, T.y, pt(6.2), 0, 2 * Math.PI); ctx.lineWidth = pt(1.6); ctx.strokeStyle = "#ffffff"; ctx.stroke();
-    ctx.lineWidth = pt(0.9); ctx.strokeStyle = "#0b0d12"; ctx.stroke();
-    const s = `Mem ${T.num} \u00b7 ${Math.round(T.mb)}`; ctx.font = `800 ${pt(10.5)}px Montserrat`; const w = ctx.measureText(s).width, gap = pt(9), hh = pt(7.5);
-    // 11-03 small fixes (EPS lows: "Mem 10 \u00b7 951" could sit on the mean red L): the label is a box tested against every mean L
-    // (letter + number, hlBox), the list box, the dot key and the map edge; it tries up-right, up-left, down-right, down-left, level,
-    // then further out, and if every spot touches something it takes the spot with the least overlap.
-    const lwK = pt(78), lhK = pt(11) * (DOT_LABELS.length + 1) + pt(8), kx = g.side === "right" ? x0 - lwK - pt(5) : x0 + PW + pt(5), ky = st.y0 + st.H - lhK - pt(5);
-    const obs = g.means.map(([mx, my, mv]) => hlBox(ctx, mx, my, mv)).concat([[x0, y0, x0 + PW, y0 + H], [kx, ky, kx + lwK, ky + lhK]]);
-    const ov = (a, b) => Math.max(0, Math.min(a[2], b[2]) - Math.max(a[0], b[0])) * Math.max(0, Math.min(a[3], b[3]) - Math.max(a[1], b[1]));
-    const pad = pt(2), cands = [];
-    for (const k of [1, 1.9, 2.8]) for (const [sx, dy] of [[1, -1], [-1, -1], [1, 1], [-1, 1], [1, 0], [-1, 0]]) {
-      const xa = sx > 0 ? T.x + gap * k : T.x - gap * k - w, yc = T.y + dy * pt(9) * k; cands.push([xa, yc]); }
-    let best = null;
-    for (const [xa, yc] of cands) { const R = [xa - pad, yc - hh - pad, xa + w + pad, yc + hh + pad];
-      const out = R[0] < st.x0 + pt(3) || R[2] > st.x0 + st.W - pt(3) || R[1] < st.y0 + pt(3) || R[3] > st.y0 + st.H - pt(3);
-      const cost = (out ? 1e9 : 0) + obs.reduce((a, b) => a + ov(R, b), 0);
-      if (!best || cost < best[2]) best = [xa, yc, cost, R]; if (cost === 0) break; }
-    window.__memLab = { s, rect: best[3], cost: best[2], means: g.means.length };   // QA hook (no effect on drawing)
-    haloText(ctx, s, best[0], best[1], `800 ${pt(10.5)}px Montserrat`, "#0b0d12", pt(2.6), "left", "middle"); }
+  // strongest member low in view: ring + "Strongest: member 23, 968 mb" (side away from the list / map edge / red L).
+  // 11-03 small fixes (EPS lows: the label could sit on the mean red L): the label is a box tested against every mean L
+  // (letter + number, hlBox), the list box, the dot key and the map edge.
+  const lwK = pt(78), lhK = pt(11) * (DOT_LABELS.length + 1) + pt(8), kx = g.side === "right" ? x0 - lwK - pt(5) : x0 + PW + pt(5), ky = st.y0 + st.H - lhK - pt(5);
+  paintStrongLow(ctx, st, g, [[x0, y0, x0 + PW, y0 + H], [kx, ky, kx + lwK, ky + lhK]]);
   // "Member low (mb)" legend, lower left of the map just right of the list (old: matplotlib legend, lower left)
   const lw = pt(78), rh = pt(11), lhgt = rh * (DOT_LABELS.length + 1) + pt(8), lx = g.side === "right" ? x0 - lw - pt(5) : x0 + PW + pt(5), ly = st.y0 + st.H - lhgt - pt(5);
   ctx.globalAlpha = 0.92; ctx.fillStyle = "#ffffff"; ctx.fillRect(lx, ly, lw, lhgt); ctx.globalAlpha = 1; ctx.strokeStyle = "#c9c4b8"; ctx.strokeRect(lx, ly, lw, lhgt);
@@ -1955,11 +2244,11 @@ async function mgSeries(r) {   // {points, steps:[{f, valid}], v: {field: [[town
     const R_ = await loadRun(r); if (!R_.points) return null;
     const st = R_.steps, out = new Array(st.length); let k = 0;
     if ((R_.agg || []).includes("pts")) try {   // complete runs: one aggregated file (single/pts_all.json) instead of ~50
-      const A = await (await fetch(`${DATA}runs/${r}/single/pts_all.json`)).json(), by = new Map(A.f.map((f, i) => [f, A.d[i]]));
+      const A = await readJSON(`${DATA}runs/${r}/single/pts_all.json`), by = new Map(A.f.map((f, i) => [f, A.d[i]]));
       st.forEach((s, i) => { out[i] = by.get(s.f) || null; });
     } catch (e) { out.fill(null); }
     const one = async () => { while (k < st.length) { const i = k++; if (out[i]) continue; const f = String(st[i].f).padStart(3, "0");
-      try { out[i] = await (await fetch(`${DATA}runs/${r}/single/pts_f${f}.json`)).json(); } catch (e) { out[i] = null; } } };
+      try { out[i] = await readJSON(`${DATA}runs/${r}/single/pts_f${f}.json`); } catch (e) { out[i] = null; } } };
     await Promise.all(Array.from({ length: 8 }, one));
     const ok = st.map((s, i) => [s, out[i]]).filter(x => x[1]);
     return { points: R_.points, steps: ok.map(x => x[0]), d: ok.map(x => x[1]) };
@@ -2016,11 +2305,13 @@ async function mgDraw() {
   const pg = $("mgpage"); if (pg) pg.href = `meteograms#s=${MG.run.split("/")[0]}&w=${encodeURIComponent(MG.town)}`;
   const T = mgTown(D, MG.town); body.innerHTML = `<canvas id="mgc"></canvas>`; mgChart($("mgc"), T, body);
 }
+const MG_FLOORS = window.MG_FLOORS = { passPrecipIn: 3, passSnow6In: 12 };
 function mgChart(cv, T, box) {
   const dpr = Math.min(2, devicePixelRatio || 1), W = box.clientWidth, sm0 = W < 600;
   // Benjamin 10-31 8:58 AM "A snowfall graph on the pass meteograms would be cool": passes with snow data get their own Snow panel
   // (bars = snow per 6 h, inches; line = running total, right axis); the precip panel then shows precip only. Towns unchanged.
   const snowPan = !!(T.P && T.P.k === "pass" && (T.snow || T.snow6));
+  let axisPcp = null, axisSnow = null, stepHours = T.f && T.f.length > 1 ? (T.f[1] - T.f[0] || 1) : 1;
   const npan = [T.t2m, T.wind || T.gust, T.pcp || T.snow || T.snow6 || T.pcp6, snowPan, T.tcc].filter(Boolean).length;   // each panel has its own time axis (Benjamin 10-30)
   const H = Math.max(sm0 ? 520 : 560, 52 + 40 * npan + (sm0 ? 52 : 60) * 8, box.clientHeight - 4);
   cv.width = W * dpr; cv.height = H * dpr; cv.style.width = W + "px"; cv.style.height = H + "px";
@@ -2099,8 +2390,10 @@ function mgChart(cv, T, box) {
       const hiP = Math.max(0.1, ...(pc || []).filter(v => v != null), ...(p6 || []).filter(v => v != null));
       const runS = sn ? sn.reduce((acc, v, k) => (acc.push((acc[k - 1] || 0) + (v || 0)), acc), []) : sn6 ? (() => { let q = 0; return sn6.map((v, k) => T.f[k] % 6 === 0 ? (q += v || 0) : null); })() : [];
       const anySnow = (sn || sn6 || []).some(v => v > 0.05), hiS = Math.max(1, ...runS.filter(v => v != null)), topS = niceStep(hiS) * Math.ceil(hiS / niceStep(hiS)), scS = scale(0, topS);
-      const pTop = Math.max(T.P && T.P.k === "pass" && pc && (T.f[1] - T.f[0] || 1) === 1 ? 3 : 0, niceStep(hiP) * Math.ceil(hiP / niceStep(hiP)));   /* t2305u: pass in per hour axis at least 3 in */ axis(0, pTop, scP, "\u2033", false, "#6fd38a");
-      const scP = scale(0, pTop);
+      stepHours = T.f && T.f.length > 1 ? (T.f[1] - T.f[0] || 1) : 1;
+      const pTop = Math.max(T.P && T.P.k === "pass" ? MG_FLOORS.passPrecipIn : 0, niceStep(hiP) * Math.ceil(hiP / niceStep(hiP)));   /* t2305u: pass precip axis at least 3 in, every model and every step length */
+      axisPcp = pTop;
+      const scP = scale(0, pTop); axis(0, pTop, scP, "\u2033", false, "#6fd38a");
       if (p6 && T.pcp) bars(p6.map((v, k) => T.f[k] % 6 === 0 && T.f[k] > 36 ? v : null), scP, "#3ea95888", 2.2);
       if (pc) bars(pc, scP, "#3ea958"); else if (p6) bars(p6.map((v, k) => T.f[k] % 6 === 0 ? v : null), scP, "#3ea958", 2.2);
       if (anySnow && !snowPan) { axis(0, topS, scS, "\u2033", true, "#d9ecff"); line(runS, scS, "#d9ecff", 2); }
@@ -2111,7 +2404,8 @@ function mgChart(cv, T, box) {
       const sn = T.snow || null, sn6 = T.snow6 || null;
       const s6 = T.f.map((f, k) => f % 6 !== 0 ? null : sn ? sumWin(T, sn, f - 6, f) : sn6[k]);
       let q = 0; const runS = sn ? sn.map(v => (q += v || 0)) : sn6.map((v, k) => T.f[k] % 6 === 0 ? (q += v || 0) : null), tot = q;
-      const hiB = Math.max(12, ...s6.filter(v => v != null))   /* t2305u: pass snow per 6 h axis at least 12 in */, topB = niceStep(hiB) * Math.ceil(hiB / niceStep(hiB)), scB = scale(0, topB);
+      const hiB = Math.max(MG_FLOORS.passSnow6In, ...s6.filter(v => v != null))   /* t2305u: pass snow per 6 h axis at least 12 in */, topB = niceStep(hiB) * Math.ceil(hiB / niceStep(hiB)), scB = scale(0, topB);
+      axisSnow = topB;
       const hiR = Math.max(1, ...runS.filter(v => v != null)), topR = niceStep(hiR) * Math.ceil(hiR / niceStep(hiR)), scR = scale(0, topR);
       axis(0, topB, scB, "\u2033", false, "#9fc8ff"); axis(0, topR, scR, "\u2033", true, "#f4f2ee");
       c.fillStyle = "#5b9dff"; const gap6 = Math.max(1, (X(T.t[n - 1]) - X(T.t[0])) / Math.max(1, (t1 - t0) / 216e5) * 0.12);
@@ -2130,8 +2424,27 @@ function mgChart(cv, T, box) {
     c.restore(); tAxis(y1 + 4);
   }
   c.textAlign = "left";
+  window.__mgAxisInfo = window.__mgAxisInfo || {};
+  window.__mgAxisInfo[cv.id || "chart"] = { panels: panels.map((p) => p[0]), want: ["temp", "wind", "pcp", "snow", "cloud"], pcp: axisPcp, snow: axisSnow, step: stepHours };
 }
 function niceStep(x) { const p = Math.pow(10, Math.floor(Math.log10(x || 1))), r = x / p; return (r <= 1 ? 1 : r <= 2 ? 2 : r <= 2.5 ? 2.5 : r <= 5 ? 5 : 10) * p; }
+// Same pass meteogram mgChart draws. Guard: studioPassChart(run, name, w, h) then __mgAxisInfo.studio_h.
+window.studioPassChart = async function (run, name, w, h) {
+  w = w || 1800; h = h || 960;
+  const D = await mgSeries(run);
+  if (!D) throw new Error(run + ": no town/pass points in this run");
+  const T = mgTown(D, name);
+  if (!T) throw new Error(run + ": no place named " + name);
+  const prevRun = MG.run, prevTown = MG.town;
+  MG.run = run; MG.town = name;
+  const box = document.createElement("div");
+  box.style.cssText = "position:absolute;left:0;top:0;width:" + w + "px;height:" + h + "px;visibility:hidden";
+  document.body.appendChild(box);
+  const cv = document.createElement("canvas"); cv.id = "studio_h"; box.appendChild(cv);
+  try { mgChart(cv, T, box); }
+  finally { MG.run = prevRun; MG.town = prevTown; }
+  return (window.__mgAxisInfo || {}).studio_h || null;
+};
 // Pass summit elevations, ft (WSDOT MountainPass feed, wsdot.com/Travel/Real-time/Service/api/MountainPass/Details/<id>, read
 // 10-30-26 8:15 PM; same as temp_maps.WA_PASSES, checked 10-24 against USGS 3DEP). BC: DriveBC summit heights (fast_encode).
 const PASS_ELEV = { Snoqualmie: 3022, Stevens: 4061, White: 4500, Chinook: 5430, Blewett: 4102, Sherman: 5575, Satus: 3107, Wauconda: 4310,
@@ -2185,9 +2498,10 @@ async function bench() {
   document.title = "BENCH " + JSON.stringify(out);
   const pre = document.createElement("pre"); pre.id = "bench"; pre.textContent = JSON.stringify(out); document.body.appendChild(pre);
 }
-function showErr(e) { const p = document.createElement("pre"); p.id = "err"; p.style.color = "#f88"; p.textContent = String(e && e.stack || e); document.body.appendChild(p); }
-addEventListener("error", e => showErr(e.error || e.message)); addEventListener("unhandledrejection", e => showErr(e.reason));
-boot();
+function showErr(e) { let p = document.getElementById("err"); if (!p) { p = document.createElement("pre"); p.id = "err"; p.style.cssText = "color:#f88;white-space:pre-wrap"; document.body.appendChild(p); } p.textContent = String(e && e.message || e); }
+addEventListener("error", e => { if (e.error) showErr(e.error); });
+addEventListener("unhandledrejection", e => { showErr(e.reason); });
+boot().catch((e) => showErr(e));
 
 // ---- Observations (old site's live obs module, unchanged: browser-drawn from NWS/IEM + Environment Canada, loaded on first open)
 let obsLoad = null;
@@ -2202,7 +2516,7 @@ function obsOpen() {
     const l = document.createElement("link"); l.rel = "stylesheet"; l.href = "obs/obs.css"; document.head.appendChild(l);
     const sc = document.createElement("script"); sc.src = "obs/obs.js"; sc.onerror = bad; document.body.appendChild(sc);
     // 11-03: radar + GOES-West layers (obs/obsimg.js, off by default); the obs map still opens if it fails to load
-    sc.onload = () => { const s2 = document.createElement("script"); s2.src = "obs/obsimg.js?v=20261104c"; s2.onload = ok; s2.onerror = ok; document.body.appendChild(s2); };
+    sc.onload = () => { const s2 = document.createElement("script"); s2.src = "obs/obsimg.js?v=20261107iralertcmp1"; s2.onload = ok; s2.onerror = ok; document.body.appendChild(s2); };
   });
   obsLoad.then(() => Obs.show(), () => { $("obs-root").textContent = "Observations could not load."; obsLoad = null; });
 }

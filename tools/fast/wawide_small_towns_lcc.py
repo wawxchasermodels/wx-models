@@ -60,6 +60,7 @@ def main():
             if kind == "pass" and oro is not None:
                 rr, cc = int(round(fi_)) + i0, int(round(fj_)) + j0; slot["t2m_corr"] = float(TM.LAPSE_T_F_PER_FT * (oro[rr, cc] - el))
             slots.append(slot); t.set_visible(False)
+        fig._wx_labels = FE.label_items(fig, ax)
         names = [s["name"] for s in slots]
         if a.check:
             ref = Mm["views"][VID]["towns"]; rn = [s["name"] for s in ref]
@@ -70,7 +71,9 @@ def main():
             if m == "hrrr": fig.savefig(f"{a.out}/check_towns_pnwhr.png", dpi=FE.DPI, transparent=True)
             plt.close(fig); continue
         if names0 is None:
+            labs = getattr(fig, "_wx_labels", None)
             fig.savefig(f"{a.out}/{PNG}", dpi=FE.DPI, transparent=True); fig.savefig(f"{a.out}/{PNG}".replace("/static/", "/static/x2/"), dpi=FE.DPI * FE.X2, transparent=True); names0 = names
+            if labs: FE.write_town_labels(f"{a.out}/" + PNG.replace("towns_", "labels_").replace(".png", ".json"), labs)
         elif names != names0: raise SystemExit(f"{m}: placement differs from the shared layer")
         plt.close(fig); doc["models"][m] = dict(towns=slots, towns_png=PNG); print(m, len(slots), "slots", flush=True)
     if a.check: sys.exit(1 if bad else 0)
