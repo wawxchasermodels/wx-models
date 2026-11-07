@@ -114,7 +114,10 @@ def build(models, man, out):
         bx = V["box"]; rr = np.where((crop_la >= bx[2]) & (crop_la <= bx[3]))[0]; cc = np.where((crop_lo >= bx[0] % 360) & (crop_lo <= bx[1] % 360))[0]
         cut = [int(rr.min()), int(rr.max() + 1), int(cc.min()), int(cc.max() + 1)]
         fig, slots = town_slots(TM, VID, layer_fig, i0, i1, j0, j1, rs_)
-        if not towns_png: sizes["towns"] = save(fig, f"{out}/static/towns_{VID}.png"); towns_png = [s["name"] for s in slots]
+        if not towns_png:
+            labs = getattr(fig, "_wx_labels", None)
+            sizes["towns"] = save(fig, f"{out}/static/towns_{VID}.png"); towns_png = [s["name"] for s in slots]
+            if labs: FE.write_town_labels(f"{out}/static/labels_{VID}.json", labs)
         else:
             plt.close(fig)
             if [s["name"] for s in slots] != towns_png: raise SystemExit(f"{m}: town placement differs from the shared towns layer")
@@ -155,6 +158,7 @@ def town_slots(TM, vid, layer_fig, i0, i1, j0, j1, rs_, passes=False):
         slots.append(dict(name=last, kind="town", x=bb.x0 / Wd, y=1 - (bb.y0 + bb.y1) / 2 / Hd, fi=float((90.0 - pla) / rs_ - i0),
                           fj=float(np.mod(plo, 360.0) / rs_ - j0), size=t.get_fontsize(), color=t.get_color()))
         t.set_visible(False)
+    fig._wx_labels = FE.label_items(fig, ax)
     return fig, slots
 
 # 11-02 (Benjamin t2105u "Passes need to be added to maps on Washington wide for loops"): the Washington view's mountain passes
@@ -209,7 +213,9 @@ def pnwt_fix(models, man, out):
         fig, slots = town_slots(TM, FIX_VID, layer_fig, i0, i1, j0, j1, MD.get("res", 0.25))
         names = [s_["name"] for s_ in slots]
         if names0 is None:
+            labs = getattr(fig, "_wx_labels", None)
             fig.savefig(f"{out}/{FIX_PNG}", dpi=FE.DPI, transparent=True); fig.savefig(f"{out}/{FIX_PNG}".replace("/static/", "/static/x2/"), dpi=FE.DPI * FE.X2, transparent=True)
+            if labs: FE.write_town_labels(f"{out}/" + FIX_PNG.replace("towns_", "labels_").replace(".png", ".json"), labs)
             names0 = names
         elif names != names0: raise SystemExit(f"{m}: town placement differs from the shared towns layer")
         plt.close(fig)

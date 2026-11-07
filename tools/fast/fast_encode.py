@@ -692,6 +692,85 @@ def clim_static(m, out, LA, LO, var="z500", oro_m=None):
     if var == "t2m": d["hours"] = [0, 6, 12, 18]
     return d
 
+def _mpl_hex(c, fallback="#1b1d22"):
+    from matplotlib.colors import to_hex
+    try: return to_hex(c, keep_alpha=False)
+    except Exception: return fallback
+
+
+def _font_weight(t):
+    # house_style.font() bakes the weight into Montserrat-wNNN.ttf and leaves FontProperties at its default,
+    # so get_fontweight() is "normal" even when the file is 600 / 700 / 800.
+    fp = t.get_fontproperties()
+    fname = fp.get_file() if hasattr(fp, "get_file") else ""
+    base = os.path.basename(fname or "")
+    if base.startswith("Montserrat-w") and base[12:15].isdigit(): return int(base[12:15])
+    w = t.get_fontweight()
+    if isinstance(w, (int, float)) and int(w) >= 200: return int(w)
+    return {"ultralight": 200, "light": 300, "normal": 400, "regular": 400, "medium": 500,
+            "semibold": 600, "demibold": 600, "bold": 700, "extrabold": 800, "black": 900}.get(str(w).lower(), 600)
+
+
+def _halo_pt(t):
+    for e in (t.get_path_effects() or []):
+        lw = getattr(e, "_linewidth", None)
+        if lw is None and isinstance(getattr(e, "_gc", None), dict): lw = e._gc.get("linewidth")
+        if lw: return float(lw)
+    return 2.6
+
+
+def label_items(fig, ax):
+    """Name labels and town / pass markers in figure fractions (same anchors as the towns PNG).
+
+    Number artists ("88") are omitted: the viewer still paints the live value at the manifest slot.
+    Placement and collision are whatever temp_maps already resolved; this only records the result.
+    """
+    fig.canvas.draw(); r = fig.canvas.get_renderer()
+    Wd, Hd = fig.get_size_inches() * fig.dpi
+    items = []
+    for ln in getattr(ax, "lines", []):
+        mk = ln.get_marker()
+        if mk is None or mk in ("None", " ", ""): continue
+        ms, mew = float(ln.get_markersize() or 0), float(ln.get_markeredgewidth() or 0)
+        fill, stroke = _mpl_hex(ln.get_markerfacecolor()), _mpl_hex(ln.get_markeredgecolor(), "#ffffff")
+        try: pts = ln.get_transform().transform(ln.get_xydata())
+        except Exception: continue
+        for x, y in pts:
+            items.append(dict(k="m", mk=str(mk), x=round(float(x) / Wd, 5), y=round(1 - float(y) / Hd, 5),
+                              ms=round(ms, 2), mew=round(mew, 2), fill=fill, stroke=stroke))
+    for t in list(getattr(ax, "texts", [])):
+        if not t.get_visible(): continue
+        s = t.get_text()
+        if not s or s == "88": continue
+        bb = t.get_window_extent(r)
+        items.append(dict(k="t", t=s, x=round(float(bb.x0) / Wd, 5), y=round(1 - (float(bb.y0) + float(bb.y1)) / 2 / Hd, 5),
+                          size=round(float(t.get_fontsize()), 2), w=_font_weight(t),
+                          style="italic" if t.get_fontstyle() == "italic" else "",
+                          fill=_mpl_hex(t.get_color()), halo=round(_halo_pt(t), 2)))
+    return items
+
+
+def write_town_labels(path, items):
+    if not items: return None
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    json.dump(dict(v=1, items=items), open(path, "w"), separators=(",", ":"))
+    return path
+
+
+def place_view_towns(TM, ax, vid, field):
+    """Site town placement for one view (static() and the label export). "88" stands in for the live number."""
+    f88 = lambda v: None if not np.isfinite(v) else "88"
+    if vid in WA_LIKE and vid != "wa":
+        l0, l1, a0, a1 = TM.VIEWS[vid]["ll"]; ins = lambda la_, lo_: a0 + 0.05 <= la_ <= a1 - 0.05 and l0 + 0.05 <= lo_ <= l1 - 0.05
+        keepT, keepP = TM.WA_TOWNS, TM.WA_PASSES
+        first = TOWN_SETS.get(vid, []); names = {t[0] for t in first}
+        TM.WA_TOWNS = [t for t in first + [t for t in keepT if t[0] not in names] + EXTRA_TOWNS.get(vid, []) if ins(t[1], t[2])]
+        TM.WA_PASSES = {k: v for k, v in {**keepP, **(BC_PASSES_FAST if vid in ("bc", "lm") else {})}.items() if ins(v[1], v[2])}
+        try: return TM.towns(ax, "wa", field, f88) or []
+        finally: TM.WA_TOWNS, TM.WA_PASSES = keepT, keepP
+    return TM.towns(ax, vid, field, f88) or []
+
+
 # ------------------------------------------------------------------------------------------------ static
 def extra_views(TM, ccrs):
     lcc = lambda lon: ccrs.LambertConformal(central_longitude=lon, central_latitude=47.3, standard_parallels=(45, 49))
@@ -872,15 +951,7 @@ def static(m, out, views_only=None, x2_only=False):
         fig.savefig(path.replace("/static/", "/static/x2/"), dpi=DPI * X2, transparent=True)
         plt.close(fig); return os.path.getsize(path)
     def town_call(ax, vid, field):
-        if vid in WA_LIKE and vid != "wa":   # zoomed Washington frames: the Washington town list, only places inside the frame
-            l0, l1, a0, a1 = TM.VIEWS[vid]["ll"]; ins = lambda la_, lo_: a0 + 0.05 <= la_ <= a1 - 0.05 and l0 + 0.05 <= lo_ <= l1 - 0.05
-            keepT, keepP = TM.WA_TOWNS, TM.WA_PASSES
-            first = TOWN_SETS.get(vid, []); names = {t[0] for t in first}
-            TM.WA_TOWNS = [t for t in first + [t for t in keepT if t[0] not in names] + EXTRA_TOWNS.get(vid, []) if ins(t[1], t[2])]
-            TM.WA_PASSES = {k: v for k, v in {**keepP, **(BC_PASSES_FAST if vid in ("bc", "lm") else {})}.items() if ins(v[1], v[2])}
-            try: return TM.towns(ax, "wa", field, lambda v: None if not np.isfinite(v) else "88") or []
-            finally: TM.WA_TOWNS, TM.WA_PASSES = keepT, keepP
-        return TM.towns(ax, vid, field, lambda v: None if not np.isfinite(v) else "88") or []
+        return place_view_towns(TM, ax, vid, field)
     crop_la, crop_lo = la[i0:i1, j0:j1], lo[i0:i1, j0:j1]
     if MD["grid"] == "ll":   # towns are all in the western hemisphere: sample on the part of the crop with lon 180..360 (-180..0, monotonic)
         wcols = np.where(crop_lo[0] >= 180)[0]; tw_la, tw_lo = crop_la[:, wcols], crop_lo[:, wcols] - 360
@@ -918,8 +989,11 @@ def static(m, out, views_only=None, x2_only=False):
                 rr, cc = int(round(fi_)) + i0, int(round(fj_)) + j0
                 slot["t2m_corr"] = float(TM.LAPSE_T_F_PER_FT * (oro[rr, cc] - el))
             slots.append(slot); t.set_visible(False)
+        lab_items = label_items(fig, ax)
+        lp = write_town_labels(f"{out}/static/labels_{vid}.json", lab_items)
         a_ = views[vid]["cut_abs"]; views[vid]["cut"] = [a_[0] - i0, a_[1] - i0, a_[2] - j0, a_[3] - j0]; del views[vid]["cut_abs"]
         views[vid]["towns"] = slots
+        if lp: views[vid]["labels"] = f"static/labels_{vid}.json"
         if not os.path.exists(f"{out}/static/towns_{vid}.png") or views_only: sizes[f"towns_{vid}"] = save(fig, f"{out}/static/towns_{vid}.png")
         else: plt.close(fig)
         print(f"{m} {vid}: {len(slots)} town numbers", flush=True)

@@ -90,6 +90,33 @@ function wantRS(LW, LH) {
   const cap = Math.min(3, Math.sqrt(12e6 / (LW * LH)));
   return Math.max(1, Math.min(cap, Math.ceil(want * 4 - 0.2) / 4));
 }
+// Zoom raises the display bitmap (wantRS, so titles / towns / the key rasterize at the on-screen size) without
+// re-binning the color fill at that size. fieldRS is the un-zoomed screen scale; the fill is cached there and scaled up.
+function fieldRS(LW, LH) {
+  const cv = $("map"); if (!cv || !LW || Q.get("rs1")) return 1;
+  if (window.__saveRS) return window.__saveRS;
+  if (Q.get("studio")) return wantRS(LW, LH);
+  const shown = cv.offsetWidth || LW, want = shown * (window.devicePixelRatio || 1) / LW;
+  const cap = Math.min(3, Math.sqrt(12e6 / (LW * LH)));
+  return Math.max(1, Math.min(cap, Math.ceil(want * 4 - 0.2) / 4));
+}
+function labelURLs(townsU) {
+  const path = String(townsU || "").split("?")[0], m = path.match(/towns_([^/?#]+)\.png$/);
+  if (!m) return [];
+  const name = "labels_" + m[1] + ".json", out = [];
+  if (path.includes("slayers/")) out.push(path.replace(/towns_[^/?#]+\.png$/, name));
+  out.push("static/" + name, "slayers/static/" + name);
+  if (typeof DATA === "string" && path.startsWith(DATA)) out.push(DATA + "static/" + name);
+  return [...new Set(out)];
+}
+function loadTownLabels(townsU) {
+  const urls = labelURLs(townsU);
+  const step = (i) => { if (i >= urls.length) return Promise.resolve(null);
+    return fetch(urls[i], { cache: "no-cache" }).then(r => r.ok ? r.json() : Promise.reject()).then(j => {
+      const items = j && (j.items || (Array.isArray(j) ? j : null)); return items && items.length ? items : step(i + 1);
+    }, () => step(i + 1)); };
+  return step(0);
+}
 // 10-30 7:30 PM (Benjamin: "images are still blurry on the phone view", "check the desktop versions too"): the soft parts were
 // the fixed layers (coast / borders / county lines, town names, color key + credit), 1600 px PNGs stretched to the RS bitmap
 // (2x on a zoomed phone, 1.5x on a retina laptop). The encoder now also saves them at 2x (static/x2/, same figure, same
@@ -636,6 +663,7 @@ async function viewStatic(vid) {
     // towns layer is not needed for the first paint: draw without it, redraw when it lands (10-29 first-map speedup)
     const tP = (own ? V0.towns_png : V.towns_png) || `static/towns_${vid}.png`, tU = (tP[0] === "@" ? tP.slice(1) : DATA + tP) + SV();
     const townsP = img(tU).then(im => { obj.towns = im; if (VSRC(S.view) === vid && window.__drawn) draw(); return im; }, () => null);
+    const labelsP = loadTownLabels(tU).then(items => { obj.labels = items; if (items && window.__drawn) draw(); return items; });
     // per-pixel source index + weights, made once per view from the coarse LUT (bilinear in panel px)
     const [px, py, pw, ph] = V.panel, x0 = Math.round(px), y0 = Math.round(py), W = Math.round(px + pw) - x0, H = Math.round(py + ph) - y0;
     const { nx, ny, stride } = V, G = S.runs[S.run].grid, gnx = G.nx, gny = G.ny;
@@ -654,7 +682,7 @@ async function viewStatic(vid) {
         idx[k] = r0 * gnx + c0; wy[k] = fi - r0; wx[k] = fj - c0;
       }
     }
-    const obj = { lut, base, towns: null, townsP, x0, y0, W, H, idx, wx, wy, gnx, baseU: DATA + (V.base_png || `static/base_${vid}.png`) + SV(), townsU: tU }; return obj;
+    const obj = { lut, base, towns: null, townsP, labels: null, labelsP, x0, y0, W, H, idx, wx, wy, gnx, baseU: DATA + (V.base_png || `static/base_${vid}.png`) + SV(), townsU: tU }; return obj;
   })();
   S.statics[sk] = p; return p;
 }
@@ -995,12 +1023,27 @@ async function render(lite) {
     let c; if (v < pal.L0) c = pal.under; else if (v >= pal.Lend) c = pal.over; else c = pal.cols[bin(pal, v)];
     if (!c) continue; const q = k * 4; o[q] = c[0]; o[q + 1] = c[1]; o[q + 2] = c[2]; o[q + 3] = 255;
   }
-  if (rs > 1 && !lite && !S.timer) fillSharp(ctx, st, vals, pal, mins, P.fill === "prt", rs);
+  const frs = fieldRS(LW, LH), zoomFill = !lite && !S.timer && rs > frs + 0.01;
+  if (zoomFill) {
+    const sig = `${rk(run)}/${pid}/${vid}/${f}@${frs}`;
+    if (!S.fillC || S.fillC.sig !== sig) {
+      const oc = document.createElement("canvas"); oc.width = Math.max(1, Math.round(LW * frs)); oc.height = Math.max(1, Math.round(LH * frs));
+      const ox = oc.getContext("2d"); ox.setTransform(frs, 0, 0, frs, 0, 0); ox.imageSmoothingEnabled = true; ox.imageSmoothingQuality = "high";
+      ox.fillStyle = S.man.style.BG; ox.fillRect(0, 0, LW, LH);
+      fillSharp(ox, st, vals, pal, mins, P.fill === "prt", frs);
+      S.fillC = { sig, cv: oc };
+    }
+    ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high"; ctx.drawImage(S.fillC.cv, 0, 0, LW, LH);
+  } else if (rs > 1 && !lite && !S.timer) fillSharp(ctx, st, vals, pal, mins, P.fill === "prt", rs);
   else { const tmp = new OffscreenCanvas(st.W, st.H); tmp.getContext("2d").putImageData(im, 0, 0); ctx.drawImage(tmp, st.x0, st.y0); }
   const t2 = performance.now();
-  // 2. borders/coast/frame + header box (static layer)
-  const kU = keyURL(pid, vid), L2 = { base: fitLayer(layer(st.base, st.baseU, rs), st.baseU, rs, LW, LH),
-    towns: fitLayer(layer(st.towns, st.townsU, rs), st.townsU, rs, LW, LH), key: fitLayer(layer(key, kU, rs), kU, rs, LW, LH) };
+  // 2. borders/coast/frame + header box (static layer). Town names and the color key are canvas text when their
+  // metadata is loaded (labels JSON / product levels); the raster PNG stays the fallback.
+  const kU = keyURL(pid, vid), keyBox = viewerKeyBox(V, P), keyLive = !!(keyBox && P.levels && P.colors && P.levels.length > 1);
+  const townLive = !!(st.labels && st.labels.length);
+  const L2 = { base: fitLayer(layer(st.base, st.baseU, rs), st.baseU, rs, LW, LH),
+    towns: townLive ? null : fitLayer(layer(st.towns, st.townsU, rs), st.townsU, rs, LW, LH),
+    key: keyLive ? null : fitLayer(layer(key, kU, rs), kU, rs, LW, LH) };
   window.__layers = Object.fromEntries(Object.entries(L2).map(([k, v]) => [k, v ? (v.naturalWidth || v.width) : 0]));
   ctx.drawImage(L2.base, 0, 0, LW, LH);
   // 3. product lines
@@ -1024,9 +1067,11 @@ async function render(lite) {
   const tmode = P.towns || "numbers";
   const WT = (WAVE_PIDS.test(pid) || VSRC(S.view) === "coast") && MD().grid === "ll" ? coastPlan(ctx, st, V, LW, LH) : null;   // wave maps + Coast (t2532u wwa towns)
   if (WT && WT.C && WT.C.allTowns) WT.plainNames = !WAVE_PIDS.test(pid);   // Coast non-wave: names only; wave: model values at the pin
-  if (st.towns && tmode !== "none" && !(WT && WT.own)) ctx.drawImage(WT && WT.erase.length ? erasedTowns(L2.towns, `${st.townsU}#${WT.vid}`, WT.erase, LW) : L2.towns, 0, 0, LW, LH);
+  const haveTowns = !!(st.towns || townLive);
+  const drewTowns = townLive && tmode !== "none" && !(WT && WT.own) && drawTownLayer(ctx, st.labels, LW, LH, WT && WT.re, WT && WT.erase);
+  if (!drewTowns && st.towns && L2.towns && tmode !== "none" && !(WT && WT.own)) ctx.drawImage(WT && WT.erase.length ? erasedTowns(L2.towns, `${st.townsU}#${WT.vid}`, WT.erase, LW) : L2.towns, 0, 0, LW, LH);
   // t2545u: own-label views (Coast) don't draw the static town layer, so its numbers would have no name (the stray '0' / '48'): skip them
-  if (st.towns && tmode === "numbers" && !(WT && WT.own)) for (const t of V.towns) {
+  if (haveTowns && tmode === "numbers" && !(WT && WT.own)) for (const t of V.towns) {
     if (WT && WT.re.has(t.name)) continue;   // re-placed with the coast towns
     if (!(t.fi >= 0 && t.fj >= 0 && t.fi < D.h - 1 && t.fj < D.w - 1)) continue;
     let v = sampleRC(D.fill, D.w, t.fi, t.fj); if (!isFinite(v)) continue;   // HRRR: integer = nearest 3 km point; global: bilinear at the pin
@@ -1038,9 +1083,9 @@ async function render(lite) {
   if (WT) drawCoast(ctx, st, D, P, V, LW, LH, WT);
   if (P.lows && S.lowPanel && !Q.get("studio")) paintLowPanel(ctx, st, V, S.lowPanel);   // 11-02 (Benjamin t2115u): not in Studio frames (Studio has its own dot key); kept on the viewer
   // t2772u: Studio frames label the strongest member themselves (studio.js strongestMember, per crop); drawing it here too gave two overlapping labels
-  // 5. key + header text
-  if (!V.studioOnly) ctx.drawImage(L2.key, 0, 0, LW, LH);   // Studio-only view: Studio draws its own color bar (the key file is another view's)
-  if (!V.studioOnly) drawCredit(ctx, st, pid, P, LW, LH, st.towns && tmode !== "none");   // 11-01-26 legal audit: credit line redrawn over the key's baked one
+  // 5. key + header text (canvas text at the display backing scale; raster key only if the product has no level metadata)
+  if (!V.studioOnly) { if (!(keyLive && drawViewerKey(ctx, P, keyBox))) { if (L2.key) ctx.drawImage(L2.key, 0, 0, LW, LH); } }
+  if (!V.studioOnly) drawCredit(ctx, st, pid, P, LW, LH, haveTowns && tmode !== "none");   // 11-01-26 legal audit: credit line redrawn over the key's baked one
   const [r0, r1, c0, c1] = V.cut;                                            // same rows/cols temp_maps.cut() keeps
   if (!D.pct) D.pct = {};
   if (!D.pct[vid]) { const a = new Float32Array(Math.ceil((r1 - r0) / 2) * Math.ceil((c1 - c0) / 2)); let n = 0;   // every 2nd cell
@@ -1069,7 +1114,7 @@ async function render(lite) {
   S.last = { data_ms: t1 - t0, fill_ms: t2 - t1, overlay_ms: t3 - t2, total_ms: t3 - t0 };
   $("stat").textContent = `F+${f}  data ${S.last.data_ms.toFixed(0)} ms · fill ${S.last.fill_ms.toFixed(0)} ms · lines/labels ${S.last.overlay_ms.toFixed(0)} ms`;
   window.__drawn = `${pid}/${vid}/${f}` + (lite ? "~" : ""); window.__rs = rs;
-  showCoast(cv, V, { title: P.title, valid: step.valid_line, sub: `${S.runs[run].runline}  \u00b7  ${V.label}  \u00b7  ${extra}`, badge: step.badge, P, pid, maxv, towns: !!(st.towns && tmode !== "none") });
+  showCoast(cv, V, { title: P.title, valid: step.valid_line, sub: `${S.runs[run].runline}  \u00b7  ${V.label}  \u00b7  ${extra}`, badge: step.badge, P, pid, maxv, towns: !!(haveTowns && tmode !== "none") });
   postCompare(run, pid, vid, step);
   if (lite) { if (window.onStudioDraw && Q.get("studio")) window.onStudioDraw(cv_(), S.cur, step, true); return; }
   // iOS Safari throws after 100 history.replaceState calls in 10 s: update the URL once things settle
@@ -1634,6 +1679,76 @@ function drawPeak(ctx, st, vals) {
 function haloText(ctx, s, x, y, font, color, halo, align, base) {
   ctx.font = font; ctx.textAlign = align; ctx.textBaseline = base; ctx.lineJoin = "round";
   ctx.strokeStyle = "#ffffff"; ctx.lineWidth = halo; ctx.strokeText(s, x, y); ctx.fillStyle = color; ctx.fillText(s, x, y);
+}
+// Town names + dots / pass triangles from static/labels_<view>.json (fast_encode.label_items). Anchors are figure
+// fractions from the same placement that baked the towns PNG, drawn here at the canvas backing scale.
+function drawTownLayer(ctx, items, LW, LH, skip, erase) {
+  if (!items || !items.length) return false;
+  const skipT = skip || null;
+  const hitE = (x, y) => erase && erase.some(r => x >= r[0] && x <= r[2] && y >= r[1] && y <= r[3]);
+  ctx.save();
+  for (const it of items) if (it.k === "m") {
+    const x = it.x * LW, y = it.y * LH; if (hitE(x, y)) continue;
+    const rad = pt((it.ms || 3.6) / 2);
+    ctx.beginPath();
+    if (it.mk === "^") { const h = rad * 1.15; ctx.moveTo(x, y - h); ctx.lineTo(x + h * 0.95, y + h * 0.75); ctx.lineTo(x - h * 0.95, y + h * 0.75); ctx.closePath(); }
+    else ctx.arc(x, y, rad, 0, 2 * Math.PI);
+    ctx.fillStyle = it.fill || "#1b1d22"; ctx.strokeStyle = it.stroke || "#ffffff"; ctx.lineWidth = pt(it.mew || 0);
+    if (it.mew) ctx.stroke(); ctx.fill();
+  }
+  for (const it of items) if (it.k === "t" && !(skipT && skipT.has && skipT.has(it.t))) {
+    const font = `${it.style === "italic" ? "italic " : ""}${it.w || 600} ${pt(it.size)}px Montserrat`;
+    haloText(ctx, it.t, it.x * LW, it.y * LH, font, it.fill || "#1b1d22", pt(it.halo == null ? 2.6 : it.halo), "left", "middle");
+  }
+  ctx.restore(); return true;
+}
+// Color key band from house_style.hbar (under the header). Ticks follow Studio's colorbar: skip a label that would touch the previous one.
+function viewerKeyBox(V, P) {
+  if (!V || !V.fig) return null;
+  const [LW, LH] = V.fig, Hin = (V.size_in && V.size_in[1]) || LH / ((S.man && S.man.dpi) || 100);
+  if (!(Hin > 1)) return null;
+  const keyY = (0.985 - 1.16 / Hin) - 0.16 / Hin - 0.27 / Hin, hf = 0.27 / Hin, x1 = P && P.core ? 0.872 : 0.976;
+  return { x: 0.150 * LW, y: (1 - (keyY + hf)) * LH, w: (x1 - 0.150) * LW, h: hf * LH, titleX: 0.024 * LW, coreX: 0.888 * LW, coreW: 0.088 * LW, LW };
+}
+function keyTickText(v, P) {
+  if (P.ticklabels) { const i = (P.ticks || []).findIndex(t => Math.abs(t - v) < 1e-6); if (i >= 0 && P.ticklabels[i] != null) return String(P.ticklabels[i]); }
+  if (P.levels && P.levels[0] === 0.01 && [12, 18].includes(P.levels[P.levels.length - 1]) && Math.abs(v - Math.round(v)) < 1e-6) return String(Math.round(v));
+  const a = P.ticks || [], dec = a.some(t => Math.abs(t - Math.round(t)) > 1e-6) ? (a.some(t => Math.abs(t * 10 - Math.round(t * 10)) > 1e-6) ? 2 : 1) : 0;
+  return Number(v).toFixed(dec);
+}
+function drawViewerKey(ctx, P, box) {
+  const L = P && P.levels, C = P && P.colors; if (!box || !L || !C || L.length < 2) return false;
+  const n = L.length - 1, lo = L[0], hi = L[n];
+  const KW = Array.isArray(P.kw) && P.kw.length === n ? P.kw : null, CW = [0];
+  for (let i = 0; i < n; i++) CW.push(CW[i] + (KW ? KW[i] : 1));
+  const X = (v) => { let i = 0; while (i < n - 1 && v > L[i + 1]) i++; const fr = Math.min(1, Math.max(0, (v - L[i]) / ((L[i + 1] - L[i]) || 1)));
+    return box.x + (CW[i] + fr * (CW[i + 1] - CW[i])) / CW[n] * box.w; };
+  ctx.save();
+  for (let i = 0; i < C.length && i < n; i++) { ctx.fillStyle = C[i]; ctx.fillRect(Math.floor(X(L[i])), box.y, Math.ceil(X(L[i + 1]) - X(L[i])) + 1, box.h); }
+  ctx.strokeStyle = "rgba(255,255,255,0.7)"; ctx.lineWidth = Math.max(1, pt(0.9)); ctx.strokeRect(box.x, box.y, box.w, box.h);
+  const tickPt = P.tickpt || ((P.ticks || []).some(t => Math.abs(t - Math.round(t)) > 1e-6) ? 13 : 15);
+  const size = pt(tickPt), tgap = /^Max wave/.test(P.key || "") ? 0.3 : 0.55;
+  ctx.font = `700 ${size}px Montserrat`; ctx.fillStyle = (S.man.style && S.man.style.INK) || "#f4f2ee"; ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+  let lastR = -1e9;
+  (P.ticks || []).filter(t => t >= lo - 1e-9 && t <= hi + 1e-9).forEach(t => {
+    const tx = X(t), s = keyTickText(t, P), tw = ctx.measureText(s).width;
+    if (tx - tw / 2 < lastR + size * tgap) {
+      const lx = tx + size * 0.15; if (Math.abs(t - hi) > 1e-6 || lx < lastR + size * 0.25) return;
+      ctx.fillRect(tx - pt(0.4), box.y + box.h, pt(0.8), size * 0.28); ctx.textAlign = "left"; ctx.fillText(s, lx, box.y + box.h + size * 1.05); ctx.textAlign = "center"; lastR = lx + tw; return;
+    }
+    lastR = tx + tw / 2; ctx.fillRect(tx - pt(0.4), box.y + box.h, pt(0.8), size * 0.28); ctx.fillText(s, tx, box.y + box.h + size * 1.05);
+  });
+  const title = P.key || ""; let z = 13.5; const room = Math.max(20, box.x - box.titleX - pt(6));
+  ctx.textAlign = "left"; ctx.textBaseline = "middle"; ctx.fillStyle = (S.man.style && S.man.style.INK) || "#f4f2ee";
+  for (; z > 9.5; z -= 0.5) { ctx.font = `700 ${pt(z)}px Montserrat`; if (ctx.measureText(title).width <= room) break; }
+  ctx.fillText(title, box.titleX, box.y + box.h / 2);
+  if (P.core && P.core.color) {
+    ctx.fillStyle = P.core.color; ctx.fillRect(box.coreX, box.y, box.coreW, box.h);
+    ctx.strokeStyle = "rgba(255,255,255,0.7)"; ctx.strokeRect(box.coreX, box.y, box.coreW, box.h);
+    ctx.font = `700 ${pt(11)}px Montserrat`; ctx.fillStyle = (S.man.style && S.man.style.INK) || "#f4f2ee"; ctx.textAlign = "center"; ctx.textBaseline = "top";
+    ctx.fillText(`within ${P.core.km} km`, box.coreX + box.coreW / 2, box.y + box.h + pt(2));
+  }
+  ctx.restore(); return true;
 }
 
 function fitFont(ctx, s, weight, size, maxw, min) {
