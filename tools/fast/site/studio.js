@@ -56,7 +56,7 @@ const CMPM = () => MG.on && MG.kind === "cmp";   // 11-07: Compare (compare.html
 const WEBM = () => MG.on && MG.kind === "web";   // 11-07: any page, framed with the same zoom bar and drag as the maps
 let cmpFrame = null;
 const CMP = { L: null, R: null, view: { L: null, R: null }, play: 0 };
-const WEB = { url: "" };
+const WEB = { url: "" , mir: null };   // mir: live tab capture showing the 16:9 page in the 9:16 frame (Mirror)
 const IW = (im) => im.naturalWidth || im.width, IH = (im) => im.naturalHeight || im.height;
 const key = (k) => `studio:${k}:${MG.on ? MG.kind : S.view}`;
 const getFr = (k) => {
@@ -628,6 +628,26 @@ function webGrip(k, bar) {
   const up = () => { d = null; document.body.classList.remove("webdrag"); };
   bar.addEventListener("pointerup", up); bar.addEventListener("pointercancel", up); bar.addEventListener("lostpointercapture", up);
 }
+// 11-07 (Benjamin): one page state in both frames. Two iframes can't share a cross-origin page, so Mirror captures this tab
+// (getDisplayMedia, Chrome asks once) and draws the live 16:9 page into the 9:16 canvas each frame, with the 9:16 frame's own zoom/drag.
+// Use the page in 16:9; the 9:16 frame follows clicks, scroll, navigation and typing. Stop or ending the share goes back to two pages.
+function webMirDraw() {
+  const m = WEB.mir, f = F.v, hov = F.h.web; if (!m || !hov || hov.hidden || !m.vid.videoWidth) return;
+  const c = f.cv.getContext("2d"), r = hov.getBoundingClientRect(), q = m.vid.videoWidth / innerWidth, g = 22;   // skip the grab bar
+  const sx = r.left * q, sy = (r.top + g) * q, sw = r.width * q, sh = (r.height - g) * q; if (sw < 2 || sh < 2) return;
+  const fr = getFr("v"), z = fr.zoom || 1, k_ = Math.max(f.W / sw, f.H / sh) * z;
+  c.setTransform(1, 0, 0, 1, 0, 0); c.fillStyle = "#111316"; c.fillRect(0, 0, f.W, f.H);
+  c.drawImage(m.vid, sx, sy, sw, sh, f.W / 2 - sw * k_ / 2 + (fr.dx || 0), f.H / 2 - sh * k_ / 2 + (fr.dy || 0), sw * k_, sh * k_);
+}
+function webMirStop() { const m = WEB.mir; if (!m) return; WEB.mir = null; cancelAnimationFrame(m.raf); m.stream.getTracks().forEach((t) => t.stop()); const b = document.getElementById("webmir"); if (b) b.textContent = "Mirror 16:9 into 9:16"; if (WEBM()) renderAll(); }
+async function webMirStart() {
+  if (WEB.mir) { webMirStop(); return; }
+  let stream; try { stream = await navigator.mediaDevices.getDisplayMedia({ video: { displaySurface: "browser", frameRate: 30 }, audio: false, preferCurrentTab: true, selfBrowserSurface: "include" }); } catch (e) { return; }
+  const vid = document.createElement("video"); vid.muted = true; vid.playsInline = true; vid.srcObject = stream; await vid.play().catch(() => {});
+  WEB.mir = { stream, vid, raf: 0 }; stream.getVideoTracks()[0].addEventListener("ended", webMirStop);
+  const b = document.getElementById("webmir"); if (b) b.textContent = "Stop mirror";
+  const tick = () => { if (!WEB.mir) return; if (WEBM()) webMirDraw(); WEB.mir.raf = requestAnimationFrame(tick); }; tick(); renderAll();
+}
 function webHide() { for (const k of ["v", "h"]) if (F[k].web) F[k].web.hidden = true; }
 function webApply(url) {
   WEB.url = url || ""; try { if (url) localStorage.setItem("studio:weburl", url); } catch (e) { /* private */ }
@@ -636,7 +656,7 @@ function webApply(url) {
 }
 function placeWeb(k, frO) {
   const f = F[k], ov = f.web; if (!ov) return;
-  if (!WEBM() || !WEB.url) { ov.hidden = true; return; }
+  if (!WEBM() || !WEB.url || (k === "v" && WEB.mir)) { ov.hidden = true; return; }
   const fr = frO || getFr(k), r = crop(k, fr), cv = f.cv;
   ov.hidden = false; ov.style.left = cv.offsetLeft + "px"; ov.style.top = cv.offsetTop + "px"; ov.style.width = cv.clientWidth + "px"; ov.style.height = cv.clientHeight + "px";
   const ifr = ov.querySelector("iframe"), s = (cv.clientWidth || 1) * r.kk / f.W, x0 = r.cx - f.W / (2 * r.kk), y0 = r.cy - f.H / (2 * r.kk);
@@ -652,7 +672,7 @@ function renderWeb(k, frO) {
   const words = msg.split(" "), maxW = f.W - 2 * f.pad, lines = []; let line = "";
   for (const w_ of words) { const t = line ? line + " " + w_ : w_; if (c.measureText(t).width > maxW && line) { lines.push(line); line = w_; } else line = t; } if (line) lines.push(line);
   lines.forEach((t, i) => c.fillText(t, f.W / 2, f.H / 2 + (i - (lines.length - 1) / 2) * (k === "v" ? 40 : 34)));
-  c.textAlign = "left"; placeWeb(k, fr); window.__studio = (window.__studio || 0) + 1; window.__studioWeb = { url: WEB.url, fr: { v: getFr("v"), h: getFr("h") } };
+  c.textAlign = "left"; if (k === "v" && WEB.mir) webMirDraw(); placeWeb(k, fr); window.__studio = (window.__studio || 0) + 1; window.__studioWeb = { url: WEB.url, fr: { v: getFr("v"), h: getFr("h") } };
 }
 function cmpApi() { try { return cmpFrame && cmpFrame.contentWindow && cmpFrame.contentWindow.__cmp; } catch (e) { return null; } }
 // viewer.js keeps its state in a script binding (const S) and publishes it only as window.__S. A parent frame's
@@ -1905,7 +1925,7 @@ if (!CLEAN) {   // Studio: Map | Meteogram switch (first in the menu bar) + the 
     if (e.key === "ArrowRight" || e.key === "ArrowLeft") { e.preventDefault(); e.stopPropagation(); cmpStep(e.key === "ArrowRight" ? 1 : -1); }
   }, true);
   const setMode = (mode) => {
-    if (mode !== "web") webHide();
+    if (mode !== "web") { webHide(); webMirStop(); }
     if (mode !== "cmp" && CMP.play) { clearInterval(CMP.play); CMP.play = 0; const b = document.getElementById("play"); if (b && b.textContent === "Stop") b.textContent = "Play"; }
     document.body.classList.remove("cmpmode", "webmode", "webdrag");
     if (mode === "web") {
@@ -1914,10 +1934,10 @@ if (!CLEAN) {   // Studio: Map | Meteogram switch (first in the menu bar) + the 
       if (typeof Obs !== "undefined" && Obs.hide) Obs.hide(); if (typeof Alerts !== "undefined" && Alerts.hide) Alerts.hide();
       PIN.show = false; PIN.mode = null;
       if (!document.getElementById("webp")) { const wp = document.createElement("div"); wp.id = "webp";
-        wp.innerHTML = `<label>Page <input id="weburl" type="url" inputmode="url" placeholder="https://example.com" spellcheck="false" autocomplete="url"></label><button type="button" id="webgo">Open</button><span class="mp-note">If this stays blank, the site probably doesn't allow embedding.</span>`;
+        wp.innerHTML = `<label>Page <input id="weburl" type="url" inputmode="url" placeholder="https://example.com" spellcheck="false" autocomplete="url"></label><button type="button" id="webgo">Open</button><button type="button" id="webmir" title="Show the live 16:9 page in the 9:16 frame too (Chrome asks to share this tab)">Mirror 16:9 into 9:16</button><span class="mp-note">If this stays blank, the site probably doesn't allow embedding.</span>`;
         pnl.appendChild(wp);
         const go = () => { const inp = document.getElementById("weburl"), u = webNormalize(inp.value); if (!u) return; inp.value = u; webApply(u); };
-        document.getElementById("webgo").onclick = go;
+        document.getElementById("webgo").onclick = go; document.getElementById("webmir").onclick = webMirStart;
         document.getElementById("weburl").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); go(); } });
         document.getElementById("weburl").addEventListener("change", go);
         let saved = ""; try { saved = localStorage.getItem("studio:weburl") || ""; } catch (e) { /* private */ }
