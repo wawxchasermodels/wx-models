@@ -182,34 +182,38 @@ function band(c, y0, y1, down) {
 // Canvas shadows ignore the transform, so shadow px are scaled by the context's own scale (1 on every other mode: unchanged).
 const PSS = 2;
 const ctxS = (c) => (c.getTransform ? c.getTransform().a : 1) || 1;
-function ssFit(f, s) { if (f.cv.width !== f.W * s || f.cv.height !== f.H * s) { f.cv.width = f.W * s; f.cv.height = f.H * s; } f.ss = s; }
+function ssFit(f, s) {
+  const cv = f.cv, w = f.W * s, h = f.H * s;
+  if (cv.width !== w || cv.height !== h) {
+    // Lock the on-screen box first. A 2160x3840 / 3840x2160 bitmap with width:auto
+    // becomes the flex min-content, overflows a 1920x1080 window, and the scrollbar
+    // resize starts another alert paint before the first one can finish.
+    if (cv.style && !cv.style.width) {
+      const bw = cv.clientWidth, bh = cv.clientHeight;
+      if (bw > 2 && bh > 2) { cv.style.width = bw + "px"; cv.style.height = bh + "px"; }
+    }
+    cv.width = w; cv.height = h;
+  }
+  f.ss = s;
+}
 function frameTx(c, f) { const z = (f && f.ss) || 1; c.setTransform(z, 0, 0, z, 0, 0); return z; }
 // Opaque samples on the bitmap itself. Width/height and __studioAlert can all be ready while every pixel is still transparent.
-function frameInk(cv, any) {
+function frameInk(cv) {
   if (!cv || !cv.width || !cv.height) return 0;
   const c = cv.getContext("2d");
   if (!c || (c.isContextLost && c.isContextLost())) return 0;
   const w = cv.width, h = cv.height;
+  // One read of a few pixels. A grid of getImageData calls on the 2x frame flushes
+  // the GPU once per sample; the refresh guard polls this and would stall the paint.
   try {
-    if (any) {
-      const sx = Math.max(1, (w / 24) | 0), sy = Math.max(1, (h / 24) | 0);
-      for (let y = sy >> 1; y < h; y += sy) for (let x = sx >> 1; x < w; x += sx) if (c.getImageData(x, y, 1, 1).data[3] > 8) return 1;
-      return 0;
-    }
-    const pts = [[1, 1], [w - 2, 1], [1, h - 2], [w - 2, h - 2], [w >> 1, h >> 1], [w >> 1, 6], [6, h >> 1]];
-    let n = 0;
-    for (const [x, y] of pts) if (c.getImageData(x, y, 1, 1).data[3] > 8) n++;
+    const img = c.getImageData(0, 0, Math.min(w, 8), Math.min(h, 8)).data;
+    let n = img[3] > 8 ? 1 : 0;
+    const mid = c.getImageData(w >> 1, h >> 1, 1, 1).data;
+    if (mid[3] > 8) n += 2;
+    const br = c.getImageData(Math.max(0, w - 2), Math.max(0, h - 2), 1, 1).data;
+    if (br[3] > 8) n += 4;
     return n;
   } catch (e) { return 0; }
-}
-function resetFrameCtx(cv) {
-  const w = cv.width, h = cv.height;
-  cv.width = w; cv.height = h;
-  const c = cv.getContext("2d");
-  c.globalAlpha = 1; c.globalCompositeOperation = "source-over";
-  c.shadowBlur = 0; c.shadowOffsetX = 0; c.shadowOffsetY = 0;
-  if (c.filter != null) c.filter = "none";
-  return c;
 }
 function sharpShadow(c, k) { const z = ctxS(c); c.shadowColor = "rgba(0,0,0,0.92)"; c.shadowBlur = 1.5 * z; c.shadowOffsetX = (k === "v" ? 3 : 2.5) * z; c.shadowOffsetY = (k === "v" ? 3 : 2.5) * z; }
 // 11-02 6:20 PM (Benjamin t2111u "drop shadow ... a little more pronounced with a bit of a fade so it doesn't look messy"): overlay text,
@@ -217,44 +221,49 @@ function sharpShadow(c, k) { const z = ctxS(c); c.shadowColor = "rgba(0,0,0,0.92
 // with a soft short falloff shadow: sharp core + gentle fade, one pass, so overlapping glyph shadows never stack up into smudges.
 function ovLayer(f) { const o = f.ov || (f.ov = document.createElement("canvas")), z = f.ss || 1; if (o.width !== f.W * z || o.height !== f.H * z) { o.width = f.W * z; o.height = f.H * z; }
   const oc = o.getContext("2d"); oc.setTransform(z, 0, 0, z, 0, 0); oc.clearRect(0, 0, f.W, f.H); return oc; }
-function ovPut(c, f, k, opt) {
+function ovPut(c, f, k) {
   const src = f.ov; if (!src || !src.width) return;
-  const bare = opt && opt.bare;
-  let drawn = src;
-  if (!bare) {
-    // Bake the soft halo onto a scratch canvas. A live shadowBlur on the frame's own drawImage
-    // has cleared the entire 2x backing store on some GPUs (Active Alerts came back fully transparent).
-    const z = (f && f.ss) || ctxS(c) || 1;
-    const scratch = f.ovSoft || (f.ovSoft = document.createElement("canvas"));
-    if (scratch.width !== src.width || scratch.height !== src.height) { scratch.width = src.width; scratch.height = src.height; }
-    const sc = scratch.getContext("2d");
-    sc.setTransform(1, 0, 0, 1, 0, 0); sc.globalAlpha = 1; sc.globalCompositeOperation = "source-over";
-    sc.clearRect(0, 0, scratch.width, scratch.height);
-    sc.shadowColor = "rgba(0,0,0,0.55)"; sc.shadowBlur = (k === "v" ? 4 : 3) * z; sc.shadowOffsetX = 0; sc.shadowOffsetY = (k === "v" ? 0.5 : 0.4) * z;
-    sc.drawImage(src, 0, 0);
-    sc.shadowColor = "rgba(0,0,0,0)"; sc.shadowBlur = 0; sc.shadowOffsetX = 0; sc.shadowOffsetY = 0;
-    if (frameInk(scratch, true)) drawn = scratch;
-  }
-  c.save(); c.shadowColor = "rgba(0,0,0,0)"; c.shadowBlur = 0; c.shadowOffsetX = 0; c.shadowOffsetY = 0;
-  c.drawImage(drawn, 0, 0, f.W, f.H); c.restore();
+  c.save();
+  c.shadowColor = "rgba(0,0,0,0)"; c.shadowBlur = 0; c.shadowOffsetX = 0; c.shadowOffsetY = 0;
+  // Soft halo at the logical frame size (1080x1920 / 1920x1080). Blurring the 2x backing
+  // store stalled Active Alerts past the refresh guard, and a live shadowBlur on that
+  // same draw cleared the store on some GPUs. The sharp text is the 2x overlay on top.
+  const halo = f.ovHalo || (f.ovHalo = document.createElement("canvas"));
+  if (halo.width !== f.W || halo.height !== f.H) { halo.width = f.W; halo.height = f.H; }
+  const hc = halo.getContext("2d");
+  hc.setTransform(1, 0, 0, 1, 0, 0); hc.globalAlpha = 1; hc.globalCompositeOperation = "source-over";
+  hc.clearRect(0, 0, f.W, f.H);
+  hc.shadowColor = "rgba(0,0,0,0.55)"; hc.shadowBlur = k === "v" ? 4 : 3; hc.shadowOffsetX = 0; hc.shadowOffsetY = k === "v" ? 0.5 : 0.4;
+  hc.drawImage(src, 0, 0, f.W, f.H);
+  hc.shadowColor = "rgba(0,0,0,0)"; hc.shadowBlur = 0; hc.shadowOffsetX = 0; hc.shadowOffsetY = 0;
+  c.drawImage(halo, 0, 0, f.W, f.H);
+  c.drawImage(src, 0, 0, f.W, f.H);
+  c.restore();
 }
-// The alert bitmap is 8192². One drawImage of that texture, with high smoothing and a 2x frame transform,
-// blanks the destination on GPUs whose texture edge is 4096. Fit it under that edge in small source tiles first.
+// The alert bitmap is 8192². One drawImage of that texture, under a 2x transform, blanks the
+// destination on GPUs whose texture edge is 4096. Downscale it once, in four tiles that stay
+// on that edge, and reuse the copy. Rebuilding it on every frame (and again on a retry)
+// kept the refresh paint from finishing.
 function drawAlertMap(c, img, dx, dy, dw, dh) {
   const iw0 = IW(img), ih0 = IH(img);
   if (!(iw0 > 0 && ih0 > 0 && dw > 0 && dh > 0)) return;
-  const cap = 4095, step = 2048;
+  const cap = 4096;
   let src = img;
   if (iw0 > cap || ih0 > cap) {
-    const s = cap / Math.max(iw0, ih0);
-    const iw = Math.max(1, Math.round(iw0 * s)), ih = Math.max(1, Math.round(ih0 * s));
-    const fit = document.createElement("canvas"); fit.width = iw; fit.height = ih;
-    const g = fit.getContext("2d"); g.imageSmoothingEnabled = true; g.imageSmoothingQuality = "low";
-    for (let sy = 0; sy < ih0; sy += step) for (let sx = 0; sx < iw0; sx += step) {
-      const sw = Math.min(step, iw0 - sx), sh = Math.min(step, ih0 - sy);
-      g.drawImage(img, sx, sy, sw, sh, sx * s, sy * s, sw * s, sh * s);
+    const key = iw0 + "x" + ih0;
+    if (!img._alertFit || img._alertFitKey !== key) {
+      const s = (cap - 1) / Math.max(iw0, ih0);
+      const iw = Math.max(1, Math.round(iw0 * s)), ih = Math.max(1, Math.round(ih0 * s));
+      const fit = document.createElement("canvas"); fit.width = iw; fit.height = ih;
+      const g = fit.getContext("2d"); g.imageSmoothingEnabled = true; g.imageSmoothingQuality = "low";
+      const step = 4096;
+      for (let sy = 0; sy < ih0; sy += step) for (let sx = 0; sx < iw0; sx += step) {
+        const sw = Math.min(step, iw0 - sx), sh = Math.min(step, ih0 - sy);
+        g.drawImage(img, sx, sy, sw, sh, sx * s, sy * s, Math.max(1, sw * s), Math.max(1, sh * s));
+      }
+      img._alertFit = fit; img._alertFitKey = key;
     }
-    src = fit;
+    src = img._alertFit;
   }
   c.imageSmoothingEnabled = true; c.imageSmoothingQuality = "low";
   c.drawImage(src, dx, dy, dw, dh);
@@ -510,7 +519,9 @@ function alertRefitForAspect() {
     if (typeof alertRefitForAspect === "function") alertRefitForAspect();
   });
   mo.observe(document.body, { attributes: true, attributeFilter: ["class"] });
-  addEventListener("resize", () => { if (ALERTM() && typeof alertRefitForAspect === "function") alertRefitForAspect(); });
+  // Do not refit on every window resize. At 1920x1080 a 2x bitmap that changes the
+  // scrollbar fires resize, and this used to restart the alert paint before it finished.
+  // The cover band only changes with the phone class, which the observer above watches.
 })();
 // ---- Active Alerts in Studio (11-05): header + credit style as Observations; no LIVE badge (t2437u)
 const ALERT_CREDIT = ["Places: GeoNames, CC BY 4.0.", "Basemap: US Census Bureau. Roads: Natural Earth."];  // alert mode only. Census boundaries are public domain; Natural Earth roads/BC context are public domain.
@@ -522,9 +533,9 @@ function alertInfo() {
   const types = typeof Alerts.eventTypes === "function" ? Alerts.eventTypes() : [];
   return { title, when, t, types, n: (S_.alerts || []).length };
 }
-function renderAlert(k, frO, retry) {
+function renderAlert(k, frO) {
   const f = F[k], fr = frO || getFr(k);
-  let c0 = retry ? resetFrameCtx(f.cv) : f.cv.getContext("2d");
+  const c0 = f.cv.getContext("2d");
   if (!frO) {
     f.zoom.min = String(Math.round(ALERT_ZMIN * 100));
     f.zoom.max = String(Math.round(ALERT_ZMAX * 100));
@@ -539,6 +550,8 @@ function renderAlert(k, frO, retry) {
   const I = alertInfo();
   if (!MG.img || !I || !I.t) { c0.font = `700 ${k === "v" ? 40 : 34}px Montserrat`; c0.fillStyle = "#c9ced8"; c0.textAlign = "center"; c0.fillText(MG.msg || "Loading alerts\u2026", f.W / 2, f.H / 2); c0.textAlign = "left"; return; }
   const r = crop(k, fr);
+  const sig = (typeof Alerts !== "undefined" && Alerts._state && Alerts._state.sig) || "";
+  if (MG.img._alertSrcSig !== sig) { MG.img._alertFit = null; MG.img._alertSrcSig = sig; }
   drawAlertMap(c0, MG.img, f.W / 2 - r.cx * r.kk, f.H / 2 - r.cy * r.kk, IW(MG.img) * r.kk, IH(MG.img) * r.kk);
   // Towns, highways and boundary strokes in this frame's pixels (t2499u / t2504u). Each frame keeps its own camera.
   const settle = !!(frO && frO._alertSettle) || !!(window.__alertSettle && window.__alertSettle[k]);
@@ -577,11 +590,11 @@ function renderAlert(k, frO, retry) {
       for (const [t, x, w] of row) {
         noShadow(c); c.fillStyle = "rgba(17,19,22,0.78)"; c.beginPath(); c.roundRect ? c.roundRect(x, y, w, h, h / 2) : c.rect(x, y, w, h); c.fill(); sharpShadow(c, k);
         c.font = `800 ${lgS}px Montserrat`; c.fillStyle = t.color || "#ccc"; c.textBaseline = "middle"; c.fillText(t.event, x + lgS * 0.6, y + h / 2 + 1); c.textBaseline = "alphabetic"; } }); }
-  c.restore(); ovPut(c0, f, k, retry ? { bare: true } : null);
+  c.restore(); ovPut(c0, f, k);
   if (cnr) cornerLogo(c0, cnr);
-  // Read the bitmap back before publishing readiness. A counter alone has passed while both frames were still empty.
+  // One sample after the paint. A miss does not clear the frame and paint it again:
+  // that retry allocated another 8192 downsample and kept the refresh guard waiting.
   c0.setTransform(1, 0, 0, 1, 0, 0);
-  if (!frameInk(f.cv) && !retry) return renderAlert(k, frO, true);
   noteAlertInk(k, f);
 }
 function noteAlertInk(k, f) {
@@ -2152,7 +2165,13 @@ if (!CLEAN) {
   fitFrames();
 }
 // 11-04 (t2335u guard): read-only state for the refresh regression test (refresh_test.py): what each frame shows right now
-for (const k of ["v", "h"]) if (F[k].cv) { F[k].cv.addEventListener("contextlost", (e) => { e.preventDefault(); }); F[k].cv.addEventListener("contextrestored", () => { try { render(k); } catch (err) { /* redraw on restore */ } }); }
+for (const k of ["v", "h"]) if (F[k].cv) {
+  F[k].cv.addEventListener("contextlost", (e) => { e.preventDefault(); });
+  F[k].cv.addEventListener("contextrestored", () => {
+    const cv = F[k].cv; if (cv._restoring) return; cv._restoring = 1;
+    requestAnimationFrame(() => { cv._restoring = 0; try { render(k); } catch (err) { /* redraw on restore */ } });
+  });
+}
 window.__studioInk = () => ({ v: frameInk(F.v.cv), h: frameInk(F.h.cv) });
 window.__studioSharp = { PSS, ssFit, ovPut, sharpShadow, colorbar, ctxS, F, paintStudioTowns, frameTx, frameInk };
 window.__studioQA = () => ({ mode: PASSM() ? "pass" : MG.on ? MG.kind : "map", web: WEBM() ? WEB.url : "", cmp: CMPM() ? { l: CMP.L && CMP.L.run, r: CMP.R && CMP.R.run, title: cmpHeadTitle() } : null, mg: MG.kind === "mg" ? (MG.src.split("#")[1] || "") : "", alert: ALERTM() ? ((typeof Alerts !== "undefined" && Alerts.titleText && Alerts.titleText()) || "All Alerts") : "", pass: PF.run, passRows: PF.rows ? PF.rows.length : 0,
