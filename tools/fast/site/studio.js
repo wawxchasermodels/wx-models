@@ -714,6 +714,7 @@ let shourW = 0, shourKey = "";
 function fixShourW(labels) {
   const lab = document.getElementById("shour"); if (!lab || !labels || !labels.length) return;
   const key = labels.length + "|" + labels[0] + "|" + labels[labels.length - 1]; if (key === shourKey) return; shourKey = key;
+  if (document.fonts && document.fonts.status !== "loaded") document.fonts.ready.then(() => { shourKey = ""; fixShourW(labels); });   // re-measure once Montserrat is in
   const cs = getComputedStyle(lab), c = fixShourW.c || (fixShourW.c = document.createElement("canvas").getContext("2d"));
   c.font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
   let w = 0; for (const t of labels) w = Math.max(w, c.measureText(t).width);
