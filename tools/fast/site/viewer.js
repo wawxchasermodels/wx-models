@@ -2166,13 +2166,13 @@ function lowGeom(st, D, P, V) {
 }
 // 11-07: the single strongest member low (lowest central pressure in view) keeps its ring, and the on-canvas label names that
 // member and its pressure. Older runs without a real member number (no ens "mnum") still get no label.
-function strongLowText(num, mb) { const p = Math.round(mb); return num ? `Strongest: member ${num}, ${p} mb` : `Strongest: ${p} mb`; }
+function strongLowText(num, mb) { const p = Math.round(mb); return num ? `${p} mb · Mem ${num}` : `${p} mb`; }
 window.__strongLowText = strongLowText;
 function paintStrongLow(ctx, st, g, obs) {
   const T = g.top; if (!(T && g.hasNum && T.num)) return;
   ctx.beginPath(); ctx.arc(T.x, T.y, pt(6.2), 0, 2 * Math.PI); ctx.lineWidth = pt(1.6); ctx.strokeStyle = "#ffffff"; ctx.stroke();
   ctx.lineWidth = pt(0.9); ctx.strokeStyle = "#0b0d12"; ctx.stroke();
-  const s = strongLowText(T.num, T.mb); ctx.font = `800 ${pt(10.5)}px Montserrat`; const w = ctx.measureText(s).width, gap = pt(9), hh = pt(7.5);
+  const s = strongLowText(T.num, T.mb); ctx.font = `700 ${pt(10.5)}px Montserrat`; const w = ctx.measureText(s).width, gap = pt(9), hh = pt(7.5);
   const obstacles = g.means.map(([mx, my, mv]) => hlBox(ctx, mx, my, mv)).concat(obs || []);
   const ov = (a, b) => Math.max(0, Math.min(a[2], b[2]) - Math.max(a[0], b[0])) * Math.max(0, Math.min(a[3], b[3]) - Math.max(a[1], b[1]));
   const pad = pt(2), cands = [];
@@ -2184,7 +2184,9 @@ function paintStrongLow(ctx, st, g, obs) {
     const cost = (out ? 1e9 : 0) + obstacles.reduce((a, b) => a + ov(R, b), 0);
     if (!best || cost < best[2]) best = [xa, yc, cost, R]; if (cost === 0) break; }
   window.__memLab = { s, rect: best[3], cost: best[2], means: g.means.length };   // QA hook (no effect on drawing)
-  haloText(ctx, s, best[0], best[1], `800 ${pt(10.5)}px Montserrat`, "#0b0d12", pt(2.6), "left", "middle");
+  ctx.font = `700 ${pt(10.5)}px Montserrat`; ctx.textAlign = "left"; ctx.textBaseline = "middle"; ctx.lineJoin = "round";
+  ctx.strokeStyle = "rgba(11,13,18,0.92)"; ctx.lineWidth = pt(2.4); ctx.strokeText(s, best[0], best[1]);
+  ctx.fillStyle = "#fff"; ctx.fillText(s, best[0], best[1]);
 }
 function paintLowPanel(ctx, st, V, g) {   // ens_maps.low_panel, drawn inside the left edge of the map + the dot legend
   const [LW, LH] = V.fig, PW = Math.round(0.092 * LW), x0 = g.side === "right" ? st.x0 + st.W - PW - pt(3) : st.x0 + pt(3), y0 = st.y0 + pt(3), H = st.H - pt(6);
@@ -2213,7 +2215,7 @@ function paintLowPanel(ctx, st, V, g) {   // ens_maps.low_panel, drawn inside th
       ctx.textBaseline = "top"; y += lh; }
     y += lh * 0.5;
   }
-  // strongest member low in view: ring + "Strongest: member 23, 968 mb" (side away from the list / map edge / red L).
+  // strongest member low in view: ring + "956 mb · Mem 13" (plain bold white, no bar; side away from the list / map edge / red L).
   // 11-03 small fixes (EPS lows: the label could sit on the mean red L): the label is a box tested against every mean L
   // (letter + number, hlBox), the list box, the dot key and the map edge.
   const lwK = pt(78), lhK = pt(11) * (DOT_LABELS.length + 1) + pt(8), kx = g.side === "right" ? x0 - lwK - pt(5) : x0 + PW + pt(5), ky = st.y0 + st.H - lhK - pt(5);
