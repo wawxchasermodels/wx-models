@@ -182,15 +182,77 @@ function band(c, y0, y1, down) {
 // Canvas shadows ignore the transform, so shadow px are scaled by the context's own scale (1 on every other mode: unchanged).
 const PSS = 2;
 const ctxS = (c) => (c.getTransform ? c.getTransform().a : 1) || 1;
-function ssFit(f, s) { if (f.cv.width !== f.W * s || f.cv.height !== f.H * s) { f.cv.width = f.W * s; f.cv.height = f.H * s; } f.ss = s; }
+function ssFit(f, s) {
+  const cv = f.cv, w = f.W * s, h = f.H * s;
+  if (cv.width !== w || cv.height !== h) {
+    // Lock the on-screen box first. A 2160x3840 / 3840x2160 bitmap with width:auto
+    // becomes the flex min-content, overflows a 1920x1080 window, and the scrollbar
+    // resize starts another alert paint before the first one can finish.
+    if (cv.style && !cv.style.width) {
+      const bw = cv.clientWidth, bh = cv.clientHeight;
+      if (bw > 2 && bh > 2) { cv.style.width = bw + "px"; cv.style.height = bh + "px"; }
+    }
+    cv.width = w; cv.height = h;
+  }
+  f.ss = s;
+}
+function frameTx(c, f) { const z = (f && f.ss) || 1; c.setTransform(z, 0, 0, z, 0, 0); return z; }
+// Opaque samples on the bitmap itself. Width/height and __studioAlert can all be ready while every pixel is still transparent.
+function frameInk(cv) {
+  if (!cv || !cv.width || !cv.height) return 0;
+  const c = cv.getContext("2d");
+  if (!c || (c.isContextLost && c.isContextLost())) return 0;
+  const w = cv.width, h = cv.height;
+  // One read of a few pixels. A grid of getImageData calls on the 2x frame flushes
+  // the GPU once per sample; the refresh guard polls this and would stall the paint.
+  try {
+    const img = c.getImageData(0, 0, Math.min(w, 8), Math.min(h, 8)).data;
+    let n = img[3] > 8 ? 1 : 0;
+    const mid = c.getImageData(w >> 1, h >> 1, 1, 1).data;
+    if (mid[3] > 8) n += 2;
+    const br = c.getImageData(Math.max(0, w - 2), Math.max(0, h - 2), 1, 1).data;
+    if (br[3] > 8) n += 4;
+    return n;
+  } catch (e) { return 0; }
+}
 function sharpShadow(c, k) { const z = ctxS(c); c.shadowColor = "rgba(0,0,0,0.92)"; c.shadowBlur = 1.5 * z; c.shadowOffsetX = (k === "v" ? 3 : 2.5) * z; c.shadowOffsetY = (k === "v" ? 3 : 2.5) * z; }
 // 11-02 6:20 PM (Benjamin t2111u "drop shadow ... a little more pronounced with a bit of a fade so it doesn't look messy"): overlay text,
 // badges and bars are drawn (with the tight sharp core shadow above) into an off-screen layer, then that layer goes onto the frame once
 // with a soft short falloff shadow: sharp core + gentle fade, one pass, so overlapping glyph shadows never stack up into smudges.
 function ovLayer(f) { const o = f.ov || (f.ov = document.createElement("canvas")), z = f.ss || 1; if (o.width !== f.W * z || o.height !== f.H * z) { o.width = f.W * z; o.height = f.H * z; }
   const oc = o.getContext("2d"); oc.setTransform(z, 0, 0, z, 0, 0); oc.clearRect(0, 0, f.W, f.H); return oc; }
-function ovPut(c, f, k) { const z = ctxS(c); c.save(); c.shadowColor = "rgba(0,0,0,0.55)"; c.shadowBlur = (k === "v" ? 14 : 12) * z; c.shadowOffsetX = 0; c.shadowOffsetY = (k === "v" ? 2 : 1.5) * z;
-  c.drawImage(f.ov, 0, 0, f.W, f.H); c.restore(); }
+function ovPut(c, f, k) {
+  const src = f.ov; if (!src || !src.width) return;
+  c.save();
+  c.shadowColor = "rgba(0,0,0,0)"; c.shadowBlur = 0; c.shadowOffsetX = 0; c.shadowOffsetY = 0;
+  // Soft halo at the logical frame size (1080x1920 / 1920x1080). Blurring the 2x backing
+  // store stalled Active Alerts past the refresh guard, and a live shadowBlur on that
+  // same draw cleared the store on some GPUs. The sharp text is the 2x overlay on top.
+  const halo = f.ovHalo || (f.ovHalo = document.createElement("canvas"));
+  if (halo.width !== f.W || halo.height !== f.H) { halo.width = f.W; halo.height = f.H; }
+  const hc = halo.getContext("2d");
+  hc.setTransform(1, 0, 0, 1, 0, 0); hc.globalAlpha = 1; hc.globalCompositeOperation = "source-over";
+  hc.clearRect(0, 0, f.W, f.H);
+  hc.shadowColor = "rgba(0,0,0,0.55)"; hc.shadowBlur = k === "v" ? 4 : 3; hc.shadowOffsetX = 0; hc.shadowOffsetY = k === "v" ? 0.5 : 0.4;
+  hc.drawImage(src, 0, 0, f.W, f.H);
+  hc.shadowColor = "rgba(0,0,0,0)"; hc.shadowBlur = 0; hc.shadowOffsetX = 0; hc.shadowOffsetY = 0;
+  c.drawImage(halo, 0, 0, f.W, f.H);
+  c.drawImage(src, 0, 0, f.W, f.H);
+  c.restore();
+}
+// One scaled blit of the alert bitmap, in device pixels, with no shadow and no second copy.
+// Tiling it into a 4096 canvas and then onto the 2x frame was a full extra pass per frame.
+function drawAlertMap(c, img, dx, dy, dw, dh) {
+  const iw0 = IW(img), ih0 = IH(img);
+  if (!(iw0 > 0 && ih0 > 0 && dw > 0 && dh > 0)) return;
+  const z = (c.getTransform ? c.getTransform().a : 1) || 1;
+  c.save();
+  c.setTransform(1, 0, 0, 1, 0, 0);
+  c.imageSmoothingEnabled = true; c.imageSmoothingQuality = "low";
+  c.shadowColor = "rgba(0,0,0,0)"; c.shadowBlur = 0; c.shadowOffsetX = 0; c.shadowOffsetY = 0;
+  c.drawImage(img, dx * z, dy * z, dw * z, dh * z);
+  c.restore();
+}
 function noShadow(c) { c.shadowColor = "rgba(0,0,0,0)"; c.shadowBlur = 0; c.shadowOffsetX = 0; c.shadowOffsetY = 0; }
 function pill(c, x, y, txt, size, bg, fg) {
   c.font = `800 ${size}px Montserrat`; const w = c.measureText(txt).width + size * 0.9, h = size * 1.55;
@@ -339,8 +401,8 @@ function strongestMember(c, f, k, cur, r, headBot, cbY) {
   c.save(); noShadow(c);
   c.beginPath(); c.arc(T.x, T.y, 9, 0, 2 * Math.PI); c.strokeStyle = "#fff"; c.lineWidth = 5; c.stroke();
   c.strokeStyle = "#0b0d12"; c.lineWidth = 2; c.stroke();
-  const fs = k === "v" ? 25 : 22, text = `Strongest member: ${Math.round(T.mb)} mb${T.num != null ? ` · Mem ${T.num}` : ""}`;
-  c.font = `800 ${fs}px Montserrat`;
+  const fs = k === "v" ? 25 : 22, text = T.num != null ? `${Math.round(T.mb)} mb · Mem ${T.num}` : `${Math.round(T.mb)} mb`;
+  c.font = `700 ${fs}px Montserrat`;
   const w = c.measureText(text).width, pad = 8, h = fs + 2 * pad;
   const blocks = [f.hdr, f.badge, f.lowKeyBox, [0, cbY - 45, f.W, f.H]].filter(Boolean);
   const overlap = (a, b) => Math.max(0, Math.min(a[2], b[2]) - Math.max(a[0], b[0])) * Math.max(0, Math.min(a[3], b[3]) - Math.max(a[1], b[1]));
@@ -352,10 +414,9 @@ function strongestMember(c, f, k, cur, r, headBot, cbY) {
     if (!best || cost < best.cost) best = { x, y, box, cost };
     if (!cost) break;
   }
-  c.beginPath(); c.moveTo(T.x, T.y); c.lineTo(Math.max(best.x, Math.min(best.box[2], T.x)), Math.max(best.y, Math.min(best.box[3], T.y)));
-  c.strokeStyle = "#fff"; c.lineWidth = 4; c.stroke(); c.strokeStyle = "#0b0d12"; c.lineWidth = 1.5; c.stroke();
-  c.fillStyle = "rgba(17,19,22,0.82)"; c.fillRect(best.x, best.y, w + 2 * pad, h);
-  c.textAlign = "left"; c.textBaseline = "middle"; c.fillStyle = "#fff"; c.fillText(text, best.x + pad, best.y + h / 2);
+  c.textAlign = "left"; c.textBaseline = "middle"; c.lineJoin = "round";
+  c.lineWidth = 4; c.strokeStyle = "rgba(11,13,18,0.92)"; c.strokeText(text, best.x + pad, best.y + h / 2);
+  c.fillStyle = "#fff"; c.fillText(text, best.x + pad, best.y + h / 2);
   window.__studioStrongest[k].label = text; window.__studioStrongest[k].box = best.box;
   c.restore();
 }
@@ -378,7 +439,7 @@ function obsInfo() {
 }
 function renderObs(k, frO) {
   const f = F[k], c0 = f.cv.getContext("2d"), fr = frO || getFr(k); if (!frO) { f.zoom.min = "5"; f.zoom.max = "250"; f.zoom.value = obsZv(fr); }
-  c0.setTransform(1, 0, 0, 1, 0, 0); c0.clearRect(0, 0, f.W, f.H); c0.fillStyle = BG === "transparent" ? "#111316" : BG; c0.fillRect(0, 0, f.W, f.H);
+  frameTx(c0, f); c0.clearRect(0, 0, f.W, f.H); c0.fillStyle = BG === "transparent" ? "#111316" : BG; c0.fillRect(0, 0, f.W, f.H);
   const I = obsInfo();
   if (!MG.img || !I || !I.t) { c0.font = `700 ${k === "v" ? 40 : 34}px Montserrat`; c0.fillStyle = "#c9ced8"; c0.textAlign = "center"; c0.fillText(MG.msg || "Loading observations\u2026", f.W / 2, f.H / 2); c0.textAlign = "left"; return; }
   const r = crop(k, fr); c0.imageSmoothingEnabled = true; c0.imageSmoothingQuality = "high";
@@ -442,7 +503,9 @@ function alertRefitForAspect() {
     if (typeof alertRefitForAspect === "function") alertRefitForAspect();
   });
   mo.observe(document.body, { attributes: true, attributeFilter: ["class"] });
-  addEventListener("resize", () => { if (ALERTM() && typeof alertRefitForAspect === "function") alertRefitForAspect(); });
+  // Do not refit on every window resize. At 1920x1080 a 2x bitmap that changes the
+  // scrollbar fires resize, and this used to restart the alert paint before it finished.
+  // The cover band only changes with the phone class, which the observer above watches.
 })();
 // ---- Active Alerts in Studio (11-05): header + credit style as Observations; no LIVE badge (t2437u)
 const ALERT_CREDIT = ["Places: GeoNames, CC BY 4.0.", "Basemap: US Census Bureau. Roads: Natural Earth."];  // alert mode only. Census boundaries are public domain; Natural Earth roads/BC context are public domain.
@@ -454,27 +517,40 @@ function alertInfo() {
   const types = typeof Alerts.eventTypes === "function" ? Alerts.eventTypes() : [];
   return { title, when, t, types, n: (S_.alerts || []).length };
 }
+function alertPaintKey(fr, r, I) {
+  const S_ = (typeof Alerts !== "undefined" && Alerts._state) || {};
+  const sel = (S_.selectedTypes && S_.selectedTypes.size) ? [...S_.selectedTypes].sort().join(",") : "ALL";
+  return [S_.sig || "", S_.loaded || 0, sel, S_.fillAlpha, fr.zoom, Math.round(fr.dx || 0), Math.round(fr.dy || 0),
+    r.cx.toFixed(1), r.cy.toFixed(1), r.kk.toFixed(5), I.title, I.when, (I.types || []).length].join("|");
+}
 function renderAlert(k, frO) {
-  const f = F[k], c0 = f.cv.getContext("2d"), fr = frO || getFr(k);
+  const f = F[k], fr = frO || getFr(k);
+  const c0 = f.cv.getContext("2d");
   if (!frO) {
     f.zoom.min = String(Math.round(ALERT_ZMIN * 100));
     f.zoom.max = String(Math.round(ALERT_ZMAX * 100));
     fr.zoom = alertZ(fr.zoom || 1);
     f.zoom.value = String(Math.round(fr.zoom * 100));
   }
-  c0.setTransform(1, 0, 0, 1, 0, 0); c0.clearRect(0, 0, f.W, f.H);
-  // Ocean fill so a <1x crop letterboxes in map-ocean, not a blank grey (t2559u).
-  c0.fillStyle = BG === "transparent" ? "#030912" : (BG || "#030912"); c0.fillRect(0, 0, f.W, f.H);
   const I = alertInfo();
+  if (MG.img && I && I.t) {
+    const r0 = crop(k, fr), key = alertPaintKey(fr, r0, I) + "|" + f.cv.width;
+    if (f._alertPaint === key) { noteAlertDrawn(k); return; }
+  }
+  c0.globalAlpha = 1; c0.globalCompositeOperation = "source-over"; c0.shadowBlur = 0; c0.shadowOffsetX = 0; c0.shadowOffsetY = 0;
+  // One logical fill. The 2x transform covers the backing store; a second device-pixel fill was a full extra pass.
+  const ocean = BG === "transparent" ? "#030912" : (BG || "#030912");
+  frameTx(c0, f); c0.clearRect(0, 0, f.W, f.H); c0.fillStyle = ocean; c0.fillRect(0, 0, f.W, f.H);
   if (!MG.img || !I || !I.t) { c0.font = `700 ${k === "v" ? 40 : 34}px Montserrat`; c0.fillStyle = "#c9ced8"; c0.textAlign = "center"; c0.fillText(MG.msg || "Loading alerts\u2026", f.W / 2, f.H / 2); c0.textAlign = "left"; return; }
-  const r = crop(k, fr); c0.imageSmoothingEnabled = true; c0.imageSmoothingQuality = "high";
-  c0.drawImage(MG.img, f.W / 2 - r.cx * r.kk, f.H / 2 - r.cy * r.kk, IW(MG.img) * r.kk, IH(MG.img) * r.kk);
+  const r = crop(k, fr);
+  drawAlertMap(c0, MG.img, f.W / 2 - r.cx * r.kk, f.H / 2 - r.cy * r.kk, IW(MG.img) * r.kk, IH(MG.img) * r.kk);
   // Towns, highways and boundary strokes in this frame's pixels (t2499u / t2504u). Each frame keeps its own camera.
   const settle = !!(frO && frO._alertSettle) || !!(window.__alertSettle && window.__alertSettle[k]);
   if (window.__alertSettle) window.__alertSettle[k] = 0;
-  if (typeof Alerts !== "undefined" && Alerts.paintFrameScene) Alerts.paintFrameScene(c0, { frame: k, dpr: (Alerts._state && Alerts._state.dpr) || 1, W: f.W, H: f.H, zoom: alertZ(fr.zoom || 1), cx: r.cx, cy: r.cy, kk: r.kk }, settle ? { settle: true } : null);
-  // TOP LEFT title (alert mode): pill + title + time — no LIVE badge (Benjamin t2437u)
-  const c = ovLayer(f), x = f.pad; let y = k === "v" ? 120 : 34;
+  if (typeof Alerts !== "undefined" && Alerts.paintFrameScene) Alerts.paintFrameScene(c0, { frame: k, dpr: (Alerts._state && Alerts._state.dpr) || 1, W: f.W, H: f.H, zoom: alertZ(fr.zoom || 1), cx: r.cx, cy: r.cy, kk: r.kk, avoidTop: k === "v" ? 360 : 210, avoidBot: k === "v" ? f.H - 220 : f.H - 140 }, settle ? { settle: true } : null);
+  // Title, credits and pills go straight onto the frame. An offscreen copy of the 2x store plus a shadow blur of that copy
+  // was another full-frame pass, and the readiness readback after it stalled the refresh guard.
+  const c = c0, x = f.pad; let y = k === "v" ? 120 : 34;
   const by = y; // top-right anchor without a LIVE badge
   c.save(); sharpShadow(c, k);
   const pw = pill(c, x, y, "ALERTS", Math.round(f.run * 0.95), "#7c3aed", "#fff");
@@ -506,8 +582,15 @@ function renderAlert(k, frO) {
       for (const [t, x, w] of row) {
         noShadow(c); c.fillStyle = "rgba(17,19,22,0.78)"; c.beginPath(); c.roundRect ? c.roundRect(x, y, w, h, h / 2) : c.rect(x, y, w, h); c.fill(); sharpShadow(c, k);
         c.font = `800 ${lgS}px Montserrat`; c.fillStyle = t.color || "#ccc"; c.textBaseline = "middle"; c.fillText(t.event, x + lgS * 0.6, y + h / 2 + 1); c.textBaseline = "alphabetic"; } }); }
-  c.restore(); ovPut(c0, f, k);
+  c.restore();
   if (cnr) cornerLogo(c0, cnr);
+  f._alertPaint = alertPaintKey(fr, r, I) + "|" + f.cv.width;
+  noteAlertDrawn(k);
+}
+function noteAlertDrawn(k) {
+  // Draw-complete flag. Do not read the 2x frame back: getImageData on that store is what made
+  // a refresh take ~10 s and kept the layout guard from seeing a draw within 120 s.
+  window.__studioFramePx = Object.assign({}, window.__studioFramePx, { [k]: 7 });
   window.__studio = (window.__studio || 0) + 1; window.__studioAlert = (window.__studioAlert || 0) + 1;
 }
 // ---- Pass Forecaster in Studio (11-04, t2292u). Same table as the map page's Pass Forecaster (viewer.js passTable), laid out per frame:
@@ -635,7 +718,7 @@ function renderWeb(k, frO) {
   const f = F[k], c = f.cv.getContext("2d"), fr = frO || getFr(k);
   if (!frO) { f.zoom.min = "100"; f.zoom.value = String(Math.round((fr.zoom || 1) * 100));
     const r = crop(k, fr); fr.dx = (r.bx - r.cx) * r.kk; fr.dy = (r.by - r.cy) * r.kk; setFr(k, fr); }
-  c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, f.W, f.H); c.fillStyle = BG === "transparent" ? "#111316" : BG; c.fillRect(0, 0, f.W, f.H);
+  frameTx(c, f); c.clearRect(0, 0, f.W, f.H); c.fillStyle = BG === "transparent" ? "#111316" : BG; c.fillRect(0, 0, f.W, f.H);
   c.font = `600 ${k === "v" ? 28 : 24}px Montserrat`; c.fillStyle = "#c9ced8"; c.textAlign = "center";
   const msg = WEB.url ? "If this stays blank, the site probably doesn't allow embedding." : "Paste a page address above, then Open.";
   const words = msg.split(" "), maxW = f.W - 2 * f.pad, lines = []; let line = "";
@@ -776,7 +859,7 @@ function cmpDrawPanel(c, k, src, box) {
 }
 function renderCmp(k) {
   const f = F[k], c0 = f.cv.getContext("2d"); if (f.zoom) { f.zoom.min = "100"; f.zoom.value = "100"; }
-  c0.setTransform(1, 0, 0, 1, 0, 0); c0.clearRect(0, 0, f.W, f.H); c0.fillStyle = BG === "transparent" ? "#111316" : BG; c0.fillRect(0, 0, f.W, f.H);
+  frameTx(c0, f); c0.clearRect(0, 0, f.W, f.H); c0.fillStyle = BG === "transparent" ? "#111316" : BG; c0.fillRect(0, 0, f.W, f.H);
   const main = CMP.view.R || CMP.view.L, c = ovLayer(f), x = f.pad; let y = k === "v" ? 120 : 34;
   c.save(); sharpShadow(c, k);
   const sites = [CMP.view.L, CMP.view.R].map((v) => v && v.site).filter(Boolean);
@@ -819,7 +902,7 @@ function renderMg(k, frO) {
   if (OBSM()) return renderObs(k, frO);
   if (PASSM()) return renderPass(k);
   const f = F[k], c = f.cv.getContext("2d"), fr = frO || getFr(k); f.zoom.min = "100"; f.zoom.max = "250"; f.zoom.value = Math.round((fr.zoom || 1) * 100);
-  c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, f.W, f.H); c.fillStyle = BG === "transparent" ? "#111316" : BG; c.fillRect(0, 0, f.W, f.H);
+  frameTx(c, f); c.clearRect(0, 0, f.W, f.H); c.fillStyle = BG === "transparent" ? "#111316" : BG; c.fillRect(0, 0, f.W, f.H);
   if (!MG.img) { c.font = `700 ${k === "v" ? 40 : 34}px Montserrat`; c.fillStyle = "#c9ced8"; c.textAlign = "center"; c.fillText(MG.msg || "Loading the meteogram\u2026", f.W / 2, f.H / 2); c.textAlign = "left"; return; }
   const r = crop(k, fr); c.imageSmoothingEnabled = true; c.imageSmoothingQuality = "high";
   c.drawImage(MG.img, f.W / 2 - r.cx * r.kk, f.H / 2 - r.cy * r.kk, MG.img.naturalWidth * r.kk, MG.img.naturalHeight * r.kk);
@@ -829,12 +912,58 @@ function renderMg(k, frO) {
   const cnr = BR.corner && LOGOS[BR.logo] ? cornerBox(k, k === "v" ? 120 : 40, k === "v" ? 120 : 40, f.H - (k === "v" ? 140 : 80)) : null; if (cnr) cornerLogo(c, cnr);
   window.__studio = (window.__studio || 0) + 1; window.__studioMg = (window.__studioMg || 0) + 1;
 }
+// Town names are left off the shared map bitmap in Studio (two frames, two crops). Each frame draws them
+// at backing scale and drops or nudges any label that would sit in the title/date band, the footer, or past the frame edge.
+function paintStudioTowns(c, k, r, top, bot) {
+  const src = window.__studioTownSrc;
+  if (!src || !src.items || !src.items.length || !r || !r.sw || !r.rs) return;
+  const f = F[k], rs = r.rs, sc = f.W / r.sw, dpi = src.dpi || 100, kk = sc * rs;
+  const toF = (figX, figY) => [(figX * rs - r.sx) * sc, (figY * rs - r.sy) * (f.H / r.sh)];
+  const margin = 8, hits = (b) => b[0] < margin || b[1] < top || b[2] > f.W - margin || b[3] > bot;
+  const shifts = [[0, 0], [0, -18], [0, -36], [20, 0], [-20, 0], [0, 16], [32, -14], [-32, -14], [0, -54]];
+  c.save();
+  const placed = [], overlap = (b) => placed.some((a) => b[0] < a[2] + 2 && b[2] > a[0] - 2 && b[1] < a[3] + 2 && b[3] > a[1] - 2);
+  const kept = new Map();
+  for (const it of src.items) if (it.k === "t") {
+    const [x0, y0] = toF(it.x * src.LW, it.y * src.LH), fs = it.size * dpi / 72 * kk;
+    const font = `${it.style === "italic" ? "italic " : ""}${it.w || 600} ${fs}px Montserrat`;
+    c.font = font; const tw = c.measureText(it.t).width, hh = fs * 0.55, base = [x0, y0 - hh, x0 + tw, y0 + hh * 0.75];
+    let shift = null;
+    for (const [dx, dy] of shifts) { const b = [base[0] + dx, base[1] + dy, base[2] + dx, base[3] + dy]; if (hits(b) || overlap(b)) continue; shift = [dx, dy, b]; break; }
+    if (!shift) continue;
+    kept.set(it.t, shift); placed.push(shift[2]);
+    c.font = font; c.textAlign = "left"; c.textBaseline = "middle"; c.lineJoin = "round";
+    c.lineWidth = Math.max(1, (it.halo == null ? 2.6 : it.halo) * dpi / 72 * kk); c.strokeStyle = "#ffffff";
+    c.strokeText(it.t, x0 + shift[0], y0 + shift[1]); c.fillStyle = it.fill || "#1b1d22"; c.fillText(it.t, x0 + shift[0], y0 + shift[1]);
+  }
+  for (const it of src.items) if (it.k === "m") {
+    const [x, y] = toF(it.x * src.LW, it.y * src.LH);
+    if (x < margin || y < top || x > f.W - margin || y > bot) continue;
+    const rad = (it.ms || 3.6) / 2 * dpi / 72 * kk;
+    c.beginPath();
+    if (it.mk === "^") { const h = rad * 1.15; c.moveTo(x, y - h); c.lineTo(x + h * 0.95, y + h * 0.75); c.lineTo(x - h * 0.95, y + h * 0.75); c.closePath(); }
+    else c.arc(x, y, Math.max(1, rad), 0, 2 * Math.PI);
+    c.fillStyle = it.fill || "#1b1d22"; c.strokeStyle = it.stroke || "#ffffff"; c.lineWidth = (it.mew || 0) * dpi / 72 * kk;
+    if (it.mew) c.stroke(); c.fill();
+  }
+  for (const n of src.nums || []) {
+    if (src.items.some((t) => t.k === "t" && t.t === n.name) && !kept.has(n.name)) continue;
+    const sh = kept.get(n.name), [x0, y0] = toF(n.x * src.LW, n.y * src.LH), dx = sh ? sh[0] : 0, dy = sh ? sh[1] : 0;
+    const fs = n.size * dpi / 72 * kk; c.font = `800 ${fs}px Montserrat`;
+    const tw = c.measureText(n.text).width, hh = fs * 0.55, b = [x0 + dx, y0 + dy - hh, x0 + dx + tw, y0 + dy + hh * 0.75];
+    if (hits(b) || overlap(b)) continue;
+    placed.push(b); c.textAlign = "left"; c.textBaseline = "middle"; c.lineJoin = "round";
+    c.lineWidth = Math.max(1, 3 * dpi / 72 * kk); c.strokeStyle = "#ffffff"; c.strokeText(n.text, x0 + dx, y0 + dy);
+    c.fillStyle = n.color || "#0d0f13"; c.fillText(n.text, x0 + dx, y0 + dy);
+  }
+  c.restore();
+}
 async function render(k, frO) {   // frO: camera override (MP4 storm-track pan)
-  ssFit(F[k], PASSM() || WAFCM() ? PSS : 1);   // 11-04 (t2295u): Pass Forecaster draws at 2x; every other mode stays at native frame px
+  ssFit(F[k], REC.flat ? 1 : PSS);   // every Studio frame is 2x so titles, keys, credits and labels rasterize at export size
   if (MG.on) return renderMg(k, frO);
   if (!last) return; const f = F[k], c0 = f.cv.getContext("2d"), fr = frO || getFr(k), { cv, cur, step } = last, P = cur.P, [m] = cur.run.split("/"); let c = c0;
   if (!frO) { f.zoom.min = "100"; f.zoom.max = "250"; f.zoom.value = Math.round((fr.zoom || 1) * 100); }
-  c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, f.W, f.H);
+  const z = f.ss || 1; c.setTransform(z, 0, 0, z, 0, 0); c.clearRect(0, 0, f.W, f.H);
   if (BG !== "transparent") { c.fillStyle = BG; c.fillRect(0, 0, f.W, f.H); }
   const r = crop(k, fr); c.imageSmoothingEnabled = true; c.imageSmoothingQuality = last.lite ? "low" : "high";   // lite: slider drag frame (RS 1 map)
   {   // only the map panel part of the source (the wide view can show past the panel's edges: background there)
@@ -910,6 +1039,7 @@ async function render(k, frO) {   // frO: camera override (MP4 storm-track pan)
   if (logo) { c.font = `800 ${k === "v" ? 34 : 28}px Montserrat`; c.fillStyle = "#fff"; c.textAlign = "right"; c.fillText(logo, f.W - f.pad, f.H - (k === "v" ? 70 : 60) - dUp); c.textAlign = "left"; }
   if (P.lows) { lowKey(c, f, k, cbY, cbS); strongestMember(c, f, k, cur, r, headBot, cbY); }
   c.restore();
+  paintStudioTowns(c0, k, r, headBot + 10, cbY - 16);
   c = c0; ovPut(c, f, k);
   if (cnr) cornerLogo(c, cnr);
   if (BR.lower) lowerThird(k, c);
@@ -1029,23 +1159,23 @@ for (const k of ["v", "h"]) {
     if (a.dataset.a === "reset") { if (ALERTM() && typeof Alerts !== "undefined") { if (Alerts.fitToSelection) Alerts.fitToSelection(); else if (Alerts._state) { Alerts._state.k = 1; Alerts.redraw(); } } if (OBSM() && typeof Obs !== "undefined" && Obs._state && OZ.sub < 1) { ozSync(); Obs._state.k = OZ.ref; OZ.sub = 1; Obs.redraw(); } setFr(k, { dx: 0, dy: 0, zoom: 1 }); if (ALERTM() && f.zoom) f.zoom.value = "100"; render(k); }
     if (a.dataset.a === "mp4" && (!MG.on || OBSM() || CMPM())) openMp4(k);
     if (a.dataset.a === "png" && ALERTM()) { if (!MG.img) return; const I = alertInfo(), st = I && I.t ? new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(I.t).replace(/[^0-9]/g, "") : "now";
-      const nm = `alerts_wa_${(I && I.title || "all").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}_${st}PT_${k === "v" ? "1080x1920" : "1920x1080"}.png`;
+      const nm = `alerts_wa_${(I && I.title || "all").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}_${st}PT_${F[k].cv.width}x${F[k].cv.height}.png`;
       F[k].cv.toBlob((b) => { if (!b) return; const a2 = document.createElement("a"); a2.href = URL.createObjectURL(b); a2.download = nm; a2.click(); setTimeout(() => URL.revokeObjectURL(a2.href), 4000); }, "image/png"); return; }
     if (a.dataset.a === "png" && OBSM()) { if (!MG.img) return; const I = obsInfo(), st = I && I.t ? new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(I.t).replace(/[^0-9]/g, "") : "now";
-      const nm = `obs_${I ? I.view : "pnw"}_${I ? I.on.map((l) => l[0]).join("-") : "plot"}_${st}_${k === "v" ? "1080x1920" : "1920x1080"}.png`;
+      const nm = `obs_${I ? I.view : "pnw"}_${I ? I.on.map((l) => l[0]).join("-") : "plot"}_${st}_${F[k].cv.width}x${F[k].cv.height}.png`;
       cv.toBlob((b) => { const u = URL.createObjectURL(b), l = document.createElement("a"); l.href = u; l.download = nm; l.click(); setTimeout(() => URL.revokeObjectURL(u), 4000); }, "image/png"); return; }
     if (a.dataset.a === "png" && WAFCM()) { if (!MG.img) return; const nm = `wa-forecast_${(MG.src || "map").replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "")}_${k === "v" ? "2160x3840" : "3840x2160"}.png`;
       cv.toBlob((b) => { const u = URL.createObjectURL(b), l = document.createElement("a"); l.href = u; l.download = nm; l.click(); setTimeout(() => URL.revokeObjectURL(u), 4000); }, "image/png"); return; }
     if (a.dataset.a === "png" && PASSM()) { if (!PF.rows) return; const nm = `pass-forecast_${PF.run.replace("/", "_")}Z_${k === "v" ? "2160x3840" : "3840x2160"}.png`;
       cv.toBlob((b) => { const u = URL.createObjectURL(b), l = document.createElement("a"); l.href = u; l.download = nm; l.click(); setTimeout(() => URL.revokeObjectURL(u), 4000); }, "image/png"); return; }
-    if (a.dataset.a === "png" && CMPM()) { const nm = `compare_${k === "v" ? "1080x1920" : "1920x1080"}.png`;
+    if (a.dataset.a === "png" && CMPM()) { const nm = `compare_${F[k].cv.width}x${F[k].cv.height}.png`;
       cv.toBlob((b) => { if (!b) return; const u = URL.createObjectURL(b), l = document.createElement("a"); l.href = u; l.download = nm; l.click(); setTimeout(() => URL.revokeObjectURL(u), 4000); }, "image/png"); return; }
-    if (a.dataset.a === "png" && WEBM()) { const nm = `web_${k === "v" ? "1080x1920" : "1920x1080"}.png`;
+    if (a.dataset.a === "png" && WEBM()) { const nm = `web_${F[k].cv.width}x${F[k].cv.height}.png`;
       cv.toBlob((b) => { if (!b) return; const u = URL.createObjectURL(b), l = document.createElement("a"); l.href = u; l.download = nm; l.click(); setTimeout(() => URL.revokeObjectURL(u), 4000); }, "image/png"); return; }
-    if (a.dataset.a === "png" && MG.on) { if (!MG.img) return; const nm = `meteogram_${(MG.src.split("#")[1] || "").replace(/[^a-z0-9=&_-]/gi, "").replace(/[=&]/g, "_")}_${k === "v" ? "1080x1920" : "1920x1080"}.png`;
+    if (a.dataset.a === "png" && MG.on) { if (!MG.img) return; const nm = `meteogram_${(MG.src.split("#")[1] || "").replace(/[^a-z0-9=&_-]/gi, "").replace(/[=&]/g, "_")}_${F[k].cv.width}x${F[k].cv.height}.png`;
       cv.toBlob((b) => { const u = URL.createObjectURL(b), l = document.createElement("a"); l.href = u; l.download = nm; l.click(); setTimeout(() => URL.revokeObjectURL(u), 4000); }, "image/png"); return; }
     if (MG.on && a.dataset.a !== "reset") return;   // MP4 / OBS: maps only
-    if (a.dataset.a === "png") { const st = last.step, nm = `${last.cur.run.replace("/", "_")}_${last.cur.pid}_${S.view}_f${String(st.f).padStart(3, "0")}_${k === "v" ? "1080x1920" : "1920x1080"}.png`;
+    if (a.dataset.a === "png") { const st = last.step, nm = `${last.cur.run.replace("/", "_")}_${last.cur.pid}_${S.view}_f${String(st.f).padStart(3, "0")}_${cv.width}x${cv.height}.png`;
       cv.toBlob((b) => { const u = URL.createObjectURL(b), l = document.createElement("a"); l.href = u; l.download = nm; l.click(); setTimeout(() => URL.revokeObjectURL(u), 4000); }, "image/png"); }
     if (a.dataset.a === "obs") { const fr = getFr(k), [m] = last.cur.run.split("/"), u = new URL("studio.html", location.href);
       u.search = new URLSearchParams({ clean: "1", out: k, model: m, prod: last.cur.pid, view: S.view, f: String(last.step.f), dx: fr.dx.toFixed(1), dy: fr.dy.toFixed(1), zoom: (fr.zoom || 1).toFixed(2), play: "1", dwell: "700", loop: "1" }).toString();
@@ -1059,7 +1189,7 @@ for (const k of ["v", "h"]) {
 // mp4-muxer (vendor/, MIT) at a constant 30 fps (each map is held for 30/speed frames). Browsers without WebCodecs fall back to
 // MediaRecorder on the frame canvas (real time; MP4 where the browser offers it, otherwise WebM). Track mode: pins A and B are
 // stored in map coordinates per view; the camera starts on A and eases (smoothstep) to B over the loop while the hours advance.
-const REC = { on: false, cancel: false }, PIN = { mode: null, show: false }, FPS = 30;
+const REC = { on: false, cancel: false, flat: false }, PIN = { mode: null, show: false }, FPS = 30;
 const TRK = { list: [], sel: -1, run: null, view: null };   // storm finder tracks (see findStorms)
 const $s = (id) => document.getElementById(id), sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const lerp = (a, b, t) => a + (b - a) * t, ease = (t) => t * t * (3 - 2 * t);
@@ -1225,9 +1355,11 @@ function mpMode() { if (CMPM() && $s("mpmode").value === "pan") $s("mpmode").val
 let muxP = null;
 const loadMuxer = () => muxP || (muxP = new Promise((res, rej) => { const sc = document.createElement("script"); sc.src = "vendor/mp4-muxer.js?v=522"; sc.onload = res; sc.onerror = () => { muxP = null; rej(new Error("could not load the MP4 writer")); }; document.head.appendChild(sc); }));
 async function makeEncoder(cv, W, H) {
+  W = (cv && cv.width) || W; H = (cv && cv.height) || H;
+  const big = W * H > 1080 * 1920 * 1.5;   // 2x model frames need H.264 level 5.1; keep the queue short so 8 MP frames don't pile up
   if (window.VideoEncoder && window.VideoFrame) {
-    for (const codec of ["avc1.640028", "avc1.4d0028", "avc1.42002a"]) {   // H.264 High / Main / Baseline, level 4.x (1080x1920 @ 30)
-      const cfg = { codec, width: W, height: H, bitrate: 10e6, framerate: FPS, avc: { format: "avc" } };
+    for (const codec of (big ? ["avc1.640033", "avc1.640034", "avc1.640028", "avc1.4d0028", "avc1.42002a"] : ["avc1.640028", "avc1.4d0028", "avc1.42002a"])) {
+      const cfg = { codec, width: W, height: H, bitrate: big ? 14e6 : 10e6, framerate: FPS, avc: { format: "avc" } };
       let ok = false; try { ok = (await VideoEncoder.isConfigSupported(cfg)).supported; } catch (e) { /* next */ }
       if (!ok) continue;
       await loadMuxer();
@@ -1235,7 +1367,7 @@ async function makeEncoder(cv, W, H) {
       let err = null; const ve = new VideoEncoder({ output: (ch, meta) => mux.addVideoChunk(ch, meta), error: (e) => { err = e; } });
       ve.configure(cfg);
       return { how: `H.264 (${codec}) via WebCodecs`, ext: "mp4",
-        async add(n) { if (err) throw err; while (ve.encodeQueueSize > 4) await sleep(4);
+        async add(n) { if (err) throw err; while (ve.encodeQueueSize > (big ? 2 : 4)) await sleep(4);
           const vf = new VideoFrame(cv, { timestamp: Math.round(n * 1e6 / FPS), duration: Math.round(1e6 / FPS) }); ve.encode(vf, { keyFrame: n % (2 * FPS) === 0 }); vf.close(); },
         async done() { await ve.flush(); if (err) throw err; ve.close(); mux.finalize(); return new Blob([mux.target.buffer], { type: "video/mp4" }); },
         abort() { try { ve.close(); } catch (e) { /* closed */ } } };
@@ -1290,7 +1422,7 @@ async function makeCmpMp4() {
       for (; n < n1; n++) { if (!drawn || enc.realtime) { await render(k); drawn = true; } await enc.add(n + (enc.off || 0)); if (n % 6 === 0) pg.value = n / totN; }
     }
     pg.value = 1; mpSt("Finishing…"); const how = enc.how, blob = await enc.done(); enc = null;
-    const nm = `compare_F${steps[idx[0]].f}-F${steps[idx[idx.length - 1]].f}_${k === "v" ? "1080x1920" : "1920x1080"}.${blob.type.includes("mp4") ? "mp4" : "webm"}`;
+    const nm = `compare_F${steps[idx[0]].f}-F${steps[idx[idx.length - 1]].f}_${f.cv.width}x${f.cv.height}.${blob.type.includes("mp4") ? "mp4" : "webm"}`;
     const u = URL.createObjectURL(blob), v = $s("mpv"), dl = $s("mpdl"); if (v.dataset.u) URL.revokeObjectURL(v.dataset.u); v.dataset.u = u; v.src = u; dl.href = u; dl.download = nm;
     const file = new File([blob], nm, { type: blob.type }); $s("mpshare").hidden = !(navigator.canShare && navigator.canShare({ files: [file] })); $s("mpshare").onclick = () => navigator.share({ files: [file] }).catch(() => {});
     n += cardN; $s("mpout").hidden = false; window.__mp4 = { name: nm, bytes: blob.size, frames: n, seconds: n / FPS, how, ms: Math.round(performance.now() - t0), blob };
@@ -1325,7 +1457,9 @@ async function makeMp4() {
   const run = S.run, keep = S.i, t0 = performance.now(); let enc = null;
   REC.on = true; REC.cancel = false; PLAY.on = false; window.__vjNoJump = true;   // a video never repeats hours: missing hours keep the previous map $s("mpout").hidden = true; $s("mpgo").disabled = true; $s("mpstop").hidden = false; document.body.classList.add("rec");
   try {
-    enc = await makeEncoder(f.cv, f.W, f.H); const totN = Math.round(T[idx.length] * FPS) + holdN, pg = $s("mpprog"); pg.hidden = false; pg.value = 0;
+    try { enc = await makeEncoder(f.cv, f.cv.width, f.cv.height); }
+    catch (e) { if ((f.ss || 1) > 1) { REC.flat = true; ssFit(f, 1); await render(k); enc = await makeEncoder(f.cv, f.cv.width, f.cv.height); } else throw e; }
+    const totN = Math.round(T[idx.length] * FPS) + holdN, pg = $s("mpprog"); pg.hidden = false; pg.value = 0;
     S.i = idx[0]; $("step").value = idx[0]; await draw(); await sleep(500); await draw();   // let this view's sharp (x2) layers land first
     let n = 0, cardN = 0;
     if (BR.card) {   // title card: 1.5 s, fading out over the first map in the last 0.5 s (the loop timing starts after it)
@@ -1350,13 +1484,13 @@ async function makeMp4() {
       }
     }
     pg.value = 1; mpSt("Finishing\u2026"); const how = enc.how, blob = await enc.done(); enc = null;
-    const nm = `${run.replace("/", "_")}_${last.cur.pid}_${S.view}_F${steps[idx[0]].f}-F${steps[idx[idx.length - 1]].f}_${k === "v" ? "1080x1920" : "1920x1080"}${pan ? "_track" : ""}.${blob.type.includes("mp4") ? "mp4" : "webm"}`;
+    const nm = `${run.replace("/", "_")}_${last.cur.pid}_${S.view}_F${steps[idx[0]].f}-F${steps[idx[idx.length - 1]].f}_${f.cv.width}x${f.cv.height}${pan ? "_track" : ""}.${blob.type.includes("mp4") ? "mp4" : "webm"}`;
     const u = URL.createObjectURL(blob), v = $s("mpv"), dl = $s("mpdl"); if (v.dataset.u) URL.revokeObjectURL(v.dataset.u); v.dataset.u = u; v.src = u; dl.href = u; dl.download = nm;
     const file = new File([blob], nm, { type: blob.type }); $s("mpshare").hidden = !(navigator.canShare && navigator.canShare({ files: [file] })); $s("mpshare").onclick = () => navigator.share({ files: [file] }).catch(() => {});
     n += cardN; $s("mpout").hidden = false; window.__mp4 = { name: nm, pan: pan ? { follow: trk ? "track" : "pins", a: pins.a, b: pins.b } : null, bytes: blob.size, frames: n, seconds: n / FPS, branded: !!(BR.card || BR.lower), corner: !!(BR.corner && LOGOS[BR.logo]) ? BR.cpos : null, how, ms: Math.round(performance.now() - t0), blob };
     mpSt(`Done: ${(blob.size / 1e6).toFixed(1)} MB, ${(n / FPS).toFixed(1)} s, made in ${((performance.now() - t0) / 1000).toFixed(0)} s`);
   } catch (e) { if (enc) enc.abort(); mpSt(e.message === "stopped" ? "Stopped." : "Could not make the video: " + (e.message || e)); window.__mp4 = { error: String(e.message || e) }; }
-  finally { REC.on = false; window.__vjNoJump = false; $s("mpgo").disabled = false; $s("mpstop").hidden = true; $s("mpprog").hidden = true; document.body.classList.remove("rec"); if (S.run === run) { S.i = keep; $("step").value = keep; } draw(); }
+  finally { REC.on = false; REC.flat = false; window.__vjNoJump = false; $s("mpgo").disabled = false; $s("mpstop").hidden = true; $s("mpprog").hidden = true; document.body.classList.remove("rec"); if (S.run === run) { S.i = keep; $("step").value = keep; } draw(); }
 }
 // Observations MP4 (11-03, t2192u "A to B camera"): one live map, the camera eases pin A -> pin B (Pan mode) and / or Start -> End zoom
 // over the chosen length, then holds; same encoder, branding and 30 fps as the map loops
@@ -1384,7 +1518,7 @@ async function makeObsMp4() {
     }
     pg.value = 1; mpSt("Finishing\u2026"); const how = enc.how, blob = await enc.done(); enc = null;
     const stp = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(I.t).replace(/[^0-9]/g, "");
-    const nm = `obs_${I.view}_${I.on.map((l) => l[0]).join("-")}_${stp}_${k === "v" ? "1080x1920" : "1920x1080"}${pan ? "_AtoB" : ""}.${blob.type.includes("mp4") ? "mp4" : "webm"}`;
+    const nm = `obs_${I.view}_${I.on.map((l) => l[0]).join("-")}_${stp}_${f.cv.width}x${f.cv.height}${pan ? "_AtoB" : ""}.${blob.type.includes("mp4") ? "mp4" : "webm"}`;
     const u = URL.createObjectURL(blob), v = $s("mpv"), dl = $s("mpdl"); if (v.dataset.u) URL.revokeObjectURL(v.dataset.u); v.dataset.u = u; v.src = u; dl.href = u; dl.download = nm;
     const file = new File([blob], nm, { type: blob.type }); $s("mpshare").hidden = !(navigator.canShare && navigator.canShare({ files: [file] })); $s("mpshare").onclick = () => navigator.share({ files: [file] }).catch(() => {});
     const n = totN + off; $s("mpout").hidden = false; window.__mp4 = { name: nm, obs: true, pan: pan ? { a: pins.a, b: pins.b } : null, z0, z1, bytes: blob.size, frames: n, seconds: n / FPS, how, ms: Math.round(performance.now() - t0), blob };
@@ -1940,7 +2074,7 @@ if (!CLEAN) {   // Studio: Map | Meteogram switch (first in the menu bar) + the 
       if (!document.getElementById("alertp")) { const ap = document.createElement("div"); ap.id = "alertp"; ap.innerHTML = `<div id="alert-root"></div>`; pnl.appendChild(ap); }
       window.__alertLoad = window.__alertLoad || new Promise((ok, bad) => {
         if (!document.querySelector('link[href^="alert/alert.css"]')) { const l = document.createElement("link"); l.rel = "stylesheet"; l.href = "alert/alert.css?v=20261106a4"; document.head.appendChild(l); }
-        const sc = document.createElement("script"); sc.src = "alert/alert.js?v=20261106a4"; sc.onload = ok; sc.onerror = bad; document.body.appendChild(sc); });
+        const sc = document.createElement("script"); sc.src = "alert/alert.js?v=20261107iralertcmp1"; sc.onload = ok; sc.onerror = bad; document.body.appendChild(sc); });
       MG.msg = "Loading alerts\u2026"; let asig = "";
       const agrab = () => { const S_ = typeof Alerts !== "undefined" && Alerts._state, cv_ = document.getElementById("al-canvas"); if (!S_ || !cv_ || !cv_.width) return;
         const sel = (S_.selectedTypes && S_.selectedTypes.size) ? [...S_.selectedTypes].sort().join(',') : 'ALL'; const sig = [S_.loaded, sel, S_.k, S_.cx, S_.cy, cv_.width, (S_.alerts || []).length, S_.sig || ""].join("|");
@@ -1959,7 +2093,7 @@ if (!CLEAN) {   // Studio: Map | Meteogram switch (first in the menu bar) + the 
         const l = document.createElement("link"); l.rel = "stylesheet"; l.href = "obs/obs.css"; document.head.appendChild(l);
         const sc = document.createElement("script"); sc.src = "obs/obs.js"; sc.onerror = bad; document.body.appendChild(sc);
         // 11-03: radar + GOES-West layers (obs/obsimg.js, off by default); the obs map still opens if it fails to load
-        sc.onload = () => { const s2 = document.createElement("script"); s2.src = "obs/obsimg.js?v=20261104c"; s2.onload = ok; s2.onerror = ok; document.body.appendChild(s2); }; });
+        sc.onload = () => { const s2 = document.createElement("script"); s2.src = "obs/obsimg.js?v=20261107iralertcmp1"; s2.onload = ok; s2.onerror = ok; document.body.appendChild(s2); }; });
       MG.msg = "Loading observations\u2026"; osig = "";
       obsLoad.then(() => { if (OBSM()) { Obs.show(); fitFrames(); } }, () => { obsLoad = null; MG.msg = "Observations could not load."; renderAll(); });
       poll = setInterval(ograb, 400);
@@ -2021,6 +2155,15 @@ if (!CLEAN) {
   fitFrames();
 }
 // 11-04 (t2335u guard): read-only state for the refresh regression test (refresh_test.py): what each frame shows right now
+for (const k of ["v", "h"]) if (F[k].cv) {
+  F[k].cv.addEventListener("contextlost", (e) => { e.preventDefault(); });
+  F[k].cv.addEventListener("contextrestored", () => {
+    const cv = F[k].cv; if (cv._restoring) return; cv._restoring = 1;
+    requestAnimationFrame(() => { cv._restoring = 0; try { render(k); } catch (err) { /* redraw on restore */ } });
+  });
+}
+window.__studioInk = () => { const px = window.__studioFramePx || {}; return { v: px.v || 0, h: px.h || 0 }; };
+window.__studioSharp = { PSS, ssFit, ovPut, sharpShadow, colorbar, ctxS, F, paintStudioTowns, frameTx, frameInk };
 window.__studioQA = () => ({ mode: PASSM() ? "pass" : MG.on ? MG.kind : "map", web: WEBM() ? WEB.url : "", cmp: CMPM() ? { l: CMP.L && CMP.L.run, r: CMP.R && CMP.R.run, title: cmpHeadTitle() } : null, mg: MG.kind === "mg" ? (MG.src.split("#")[1] || "") : "", alert: ALERTM() ? ((typeof Alerts !== "undefined" && Alerts.titleText && Alerts.titleText()) || "All Alerts") : "", pass: PF.run, passRows: PF.rows ? PF.rows.length : 0,
-  pfL: F.h.pfL ? { x: F.h.pfL.x, y0: F.h.pfL.y0, w: F.h.pfL.w, rh: F.h.pfL.rh, names: F.h.pfL.names } : null, W: F.h.W, fr: { v: getFr("v"), h: getFr("h") } });
+  pfL: F.h.pfL ? { x: F.h.pfL.x, y0: F.h.pfL.y0, w: F.h.pfL.w, rh: F.h.pfL.rh, names: F.h.pfL.names } : null, W: F.h.W, fr: { v: getFr("v"), h: getFr("h") }, px: window.__studioInk() });
 })();
