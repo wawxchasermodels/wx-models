@@ -707,6 +707,19 @@ function cmpGrab() {
   try { const u = new URL(cmpFrame.contentWindow.location.href); if (u.searchParams.get("l")) { u.searchParams.set("studio", "1"); sessionStorage.setItem("studio:cmpq", "?" + u.searchParams.toString()); } } catch (e) { /* iframe loading */ }
   if (CMPM()) { if (changed && !REC.on) renderAll(); cmpScrub(); }
 }
+// t2775u (Benjamin: glitchy jump while scrubbing): the hour readout's width followed its text, so the scrub bar and the slider
+// changed width by a few px every hour and the thumb slid out from under the pointer. The readout now gets one fixed width per run:
+// the widest label of that run (tabular numbers, measured once), so the bar and slider stay the same size while dragging.
+let shourW = 0, shourKey = "";
+function fixShourW(labels) {
+  const lab = document.getElementById("shour"); if (!lab || !labels || !labels.length) return;
+  const key = labels.length + "|" + labels[0] + "|" + labels[labels.length - 1]; if (key === shourKey) return; shourKey = key;
+  const cs = getComputedStyle(lab), c = fixShourW.c || (fixShourW.c = document.createElement("canvas").getContext("2d"));
+  c.font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+  let w = 0; for (const t of labels) w = Math.max(w, c.measureText(t).width);
+  w = Math.ceil(w * 1.04 + 6); if (Math.abs(w - shourW) < 1) return; shourW = w;
+  lab.style.setProperty("--shw", w + "px");
+}
 function cmpScrub() {
   const r = CMP.R || CMP.L; if (!r || !r.n) return;
   const sl = document.getElementById("hscrub"), lab = document.getElementById("shour"), step = document.getElementById("step");
@@ -714,6 +727,7 @@ function cmpScrub() {
   if (step && CMPM()) { step.max = String(r.n - 1); if (document.activeElement !== step) step.value = String(r.i); }
   if (lab) lab.textContent = `F+${r.f}` + (r.vline ? `  \u00b7  ${String(r.vline).replace(/^Valid /, "")}` : "");
   const tk = document.getElementById("sticks"), steps = cmpSteps();
+  if (steps && steps.length) fixShourW(steps.map(x => `F+${x.f}` + (x.vline || x.valid_line ? `  \u00b7  ${String(x.vline || x.valid_line).replace(/^Valid /, "")}` : "")));   // t2775u
   if (tk && steps && steps.length) { const key = (r.run || "") + ":" + steps.length; if (tk.dataset.key !== key) { tk.dataset.key = key; const n = steps.length;
     tk.innerHTML = steps.map((x, i) => x.f % 24 === 0 && (x.f % 48 === 0 || steps[n - 1].f <= 168) ? `<span style="left:calc(9px + (100% - 18px) * ${n > 1 ? i / (n - 1) : 0})">${x.f}</span>` : "").join(""); } }
 }
@@ -1810,6 +1824,7 @@ if (!CLEAN) {
     sl.max = Math.max(0, n - 1); sl.value = S.i;
     lab.textContent = `F+${s.f}` + (s.valid_line ? `  \u00b7  ${s.valid_line.replace(/^Valid /, "")}` : "");
     const key = S.run + ":" + n; if (key === tkKey) return; tkKey = key;   // tick labels every 24 h (by forecast hour), rebuilt per run / new hours
+    fixShourW(st.map(x => `F+${x.f}` + (x.valid_line ? `  \u00b7  ${x.valid_line.replace(/^Valid /, "")}` : "")));   // t2775u: fixed readout width per run
     tk.innerHTML = st.map((x, i) => x.f % 24 === 0 && (x.f % 48 === 0 || st[n - 1].f <= 168) ? `<span style="left:calc(9px + (100% - 18px) * ${n > 1 ? i / (n - 1) : 0})">${x.f}</span>` : "").join("");
   };
   // 11-05 t2486u: Active Alerts hover — show alert type(s) under the cursor on Studio frames
