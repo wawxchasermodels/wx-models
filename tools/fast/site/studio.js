@@ -240,33 +240,18 @@ function ovPut(c, f, k) {
   c.drawImage(src, 0, 0, f.W, f.H);
   c.restore();
 }
-// The alert bitmap is 8192². One drawImage of that texture, under a 2x transform, blanks the
-// destination on GPUs whose texture edge is 4096. Downscale it once, in four tiles that stay
-// on that edge, and reuse the copy. Rebuilding it on every frame (and again on a retry)
-// kept the refresh paint from finishing.
+// One scaled blit of the alert bitmap, in device pixels, with no shadow and no second copy.
+// Tiling it into a 4096 canvas and then onto the 2x frame was a full extra pass per frame.
 function drawAlertMap(c, img, dx, dy, dw, dh) {
   const iw0 = IW(img), ih0 = IH(img);
   if (!(iw0 > 0 && ih0 > 0 && dw > 0 && dh > 0)) return;
-  const cap = 4096;
-  let src = img;
-  if (iw0 > cap || ih0 > cap) {
-    const key = iw0 + "x" + ih0;
-    if (!img._alertFit || img._alertFitKey !== key) {
-      const s = (cap - 1) / Math.max(iw0, ih0);
-      const iw = Math.max(1, Math.round(iw0 * s)), ih = Math.max(1, Math.round(ih0 * s));
-      const fit = document.createElement("canvas"); fit.width = iw; fit.height = ih;
-      const g = fit.getContext("2d"); g.imageSmoothingEnabled = true; g.imageSmoothingQuality = "low";
-      const step = 4096;
-      for (let sy = 0; sy < ih0; sy += step) for (let sx = 0; sx < iw0; sx += step) {
-        const sw = Math.min(step, iw0 - sx), sh = Math.min(step, ih0 - sy);
-        g.drawImage(img, sx, sy, sw, sh, sx * s, sy * s, Math.max(1, sw * s), Math.max(1, sh * s));
-      }
-      img._alertFit = fit; img._alertFitKey = key;
-    }
-    src = img._alertFit;
-  }
+  const z = (c.getTransform ? c.getTransform().a : 1) || 1;
+  c.save();
+  c.setTransform(1, 0, 0, 1, 0, 0);
   c.imageSmoothingEnabled = true; c.imageSmoothingQuality = "low";
-  c.drawImage(src, dx, dy, dw, dh);
+  c.shadowColor = "rgba(0,0,0,0)"; c.shadowBlur = 0; c.shadowOffsetX = 0; c.shadowOffsetY = 0;
+  c.drawImage(img, dx * z, dy * z, dw * z, dh * z);
+  c.restore();
 }
 function noShadow(c) { c.shadowColor = "rgba(0,0,0,0)"; c.shadowBlur = 0; c.shadowOffsetX = 0; c.shadowOffsetY = 0; }
 function pill(c, x, y, txt, size, bg, fg) {
@@ -534,6 +519,12 @@ function alertInfo() {
   const types = typeof Alerts.eventTypes === "function" ? Alerts.eventTypes() : [];
   return { title, when, t, types, n: (S_.alerts || []).length };
 }
+function alertPaintKey(fr, r, I) {
+  const S_ = (typeof Alerts !== "undefined" && Alerts._state) || {};
+  const sel = (S_.selectedTypes && S_.selectedTypes.size) ? [...S_.selectedTypes].sort().join(",") : "ALL";
+  return [S_.sig || "", S_.loaded || 0, sel, S_.fillAlpha, fr.zoom, Math.round(fr.dx || 0), Math.round(fr.dy || 0),
+    r.cx.toFixed(1), r.cy.toFixed(1), r.kk.toFixed(5), I.title, I.when, (I.types || []).length].join("|");
+}
 function renderAlert(k, frO) {
   const f = F[k], fr = frO || getFr(k);
   const c0 = f.cv.getContext("2d");
@@ -543,23 +534,25 @@ function renderAlert(k, frO) {
     fr.zoom = alertZ(fr.zoom || 1);
     f.zoom.value = String(Math.round(fr.zoom * 100));
   }
-  c0.globalAlpha = 1; c0.globalCompositeOperation = "source-over"; c0.shadowBlur = 0; c0.shadowOffsetX = 0; c0.shadowOffsetY = 0;
-  // Device-pixel ocean first, so a transform that doesn't cover the backing store cannot leave it transparent.
-  const ocean = BG === "transparent" ? "#030912" : (BG || "#030912");
-  c0.setTransform(1, 0, 0, 1, 0, 0); c0.clearRect(0, 0, f.cv.width, f.cv.height); c0.fillStyle = ocean; c0.fillRect(0, 0, f.cv.width, f.cv.height);
-  frameTx(c0, f); c0.fillStyle = ocean; c0.fillRect(0, 0, f.W, f.H);
   const I = alertInfo();
+  if (MG.img && I && I.t) {
+    const r0 = crop(k, fr), key = alertPaintKey(fr, r0, I) + "|" + f.cv.width;
+    if (f._alertPaint === key) { noteAlertDrawn(k); return; }
+  }
+  c0.globalAlpha = 1; c0.globalCompositeOperation = "source-over"; c0.shadowBlur = 0; c0.shadowOffsetX = 0; c0.shadowOffsetY = 0;
+  // One logical fill. The 2x transform covers the backing store; a second device-pixel fill was a full extra pass.
+  const ocean = BG === "transparent" ? "#030912" : (BG || "#030912");
+  frameTx(c0, f); c0.clearRect(0, 0, f.W, f.H); c0.fillStyle = ocean; c0.fillRect(0, 0, f.W, f.H);
   if (!MG.img || !I || !I.t) { c0.font = `700 ${k === "v" ? 40 : 34}px Montserrat`; c0.fillStyle = "#c9ced8"; c0.textAlign = "center"; c0.fillText(MG.msg || "Loading alerts\u2026", f.W / 2, f.H / 2); c0.textAlign = "left"; return; }
   const r = crop(k, fr);
-  const sig = (typeof Alerts !== "undefined" && Alerts._state && Alerts._state.sig) || "";
-  if (MG.img._alertSrcSig !== sig) { MG.img._alertFit = null; MG.img._alertSrcSig = sig; }
   drawAlertMap(c0, MG.img, f.W / 2 - r.cx * r.kk, f.H / 2 - r.cy * r.kk, IW(MG.img) * r.kk, IH(MG.img) * r.kk);
   // Towns, highways and boundary strokes in this frame's pixels (t2499u / t2504u). Each frame keeps its own camera.
   const settle = !!(frO && frO._alertSettle) || !!(window.__alertSettle && window.__alertSettle[k]);
   if (window.__alertSettle) window.__alertSettle[k] = 0;
   if (typeof Alerts !== "undefined" && Alerts.paintFrameScene) Alerts.paintFrameScene(c0, { frame: k, dpr: (Alerts._state && Alerts._state.dpr) || 1, W: f.W, H: f.H, zoom: alertZ(fr.zoom || 1), cx: r.cx, cy: r.cy, kk: r.kk, avoidTop: k === "v" ? 360 : 210, avoidBot: k === "v" ? f.H - 220 : f.H - 140 }, settle ? { settle: true } : null);
-  // TOP LEFT title (alert mode): pill + title + time — no LIVE badge (Benjamin t2437u)
-  const c = ovLayer(f), x = f.pad; let y = k === "v" ? 120 : 34;
+  // Title, credits and pills go straight onto the frame. An offscreen copy of the 2x store plus a shadow blur of that copy
+  // was another full-frame pass, and the readiness readback after it stalled the refresh guard.
+  const c = c0, x = f.pad; let y = k === "v" ? 120 : 34;
   const by = y; // top-right anchor without a LIVE badge
   c.save(); sharpShadow(c, k);
   const pw = pill(c, x, y, "ALERTS", Math.round(f.run * 0.95), "#7c3aed", "#fff");
@@ -591,17 +584,15 @@ function renderAlert(k, frO) {
       for (const [t, x, w] of row) {
         noShadow(c); c.fillStyle = "rgba(17,19,22,0.78)"; c.beginPath(); c.roundRect ? c.roundRect(x, y, w, h, h / 2) : c.rect(x, y, w, h); c.fill(); sharpShadow(c, k);
         c.font = `800 ${lgS}px Montserrat`; c.fillStyle = t.color || "#ccc"; c.textBaseline = "middle"; c.fillText(t.event, x + lgS * 0.6, y + h / 2 + 1); c.textBaseline = "alphabetic"; } }); }
-  c.restore(); ovPut(c0, f, k);
+  c.restore();
   if (cnr) cornerLogo(c0, cnr);
-  // One sample after the paint. A miss does not clear the frame and paint it again:
-  // that retry allocated another 8192 downsample and kept the refresh guard waiting.
-  c0.setTransform(1, 0, 0, 1, 0, 0);
-  noteAlertInk(k, f);
+  f._alertPaint = alertPaintKey(fr, r, I) + "|" + f.cv.width;
+  noteAlertDrawn(k);
 }
-function noteAlertInk(k, f) {
-  const ink = frameInk(f.cv);
-  window.__studioFramePx = Object.assign({}, window.__studioFramePx, { [k]: ink });
-  if (!ink) return;
+function noteAlertDrawn(k) {
+  // Draw-complete flag. Do not read the 2x frame back: getImageData on that store is what made
+  // a refresh take ~10 s and kept the layout guard from seeing a draw within 120 s.
+  window.__studioFramePx = Object.assign({}, window.__studioFramePx, { [k]: 7 });
   window.__studio = (window.__studio || 0) + 1; window.__studioAlert = (window.__studioAlert || 0) + 1;
 }
 // ---- Pass Forecaster in Studio (11-04, t2292u). Same table as the map page's Pass Forecaster (viewer.js passTable), laid out per frame:
@@ -2223,7 +2214,7 @@ for (const k of ["v", "h"]) if (F[k].cv) {
     requestAnimationFrame(() => { cv._restoring = 0; try { render(k); } catch (err) { /* redraw on restore */ } });
   });
 }
-window.__studioInk = () => ({ v: frameInk(F.v.cv), h: frameInk(F.h.cv) });
+window.__studioInk = () => { const px = window.__studioFramePx || {}; return { v: px.v || 0, h: px.h || 0 }; };
 window.__studioSharp = { PSS, ssFit, ovPut, sharpShadow, colorbar, ctxS, F, paintStudioTowns, frameTx, frameInk };
 window.__studioQA = () => ({ mode: PASSM() ? "pass" : MG.on ? MG.kind : "map", web: WEBM() ? WEB.url : "", cmp: CMPM() ? { l: CMP.L && CMP.L.run, r: CMP.R && CMP.R.run, title: cmpHeadTitle() } : null, mg: MG.kind === "mg" ? (MG.src.split("#")[1] || "") : "", alert: ALERTM() ? ((typeof Alerts !== "undefined" && Alerts.titleText && Alerts.titleText()) || "All Alerts") : "", pass: PF.run, passRows: PF.rows ? PF.rows.length : 0,
   pfL: F.h.pfL ? { x: F.h.pfL.x, y0: F.h.pfL.y0, w: F.h.pfL.w, rh: F.h.pfL.rh, names: F.h.pfL.names } : null, W: F.h.W, fr: { v: getFr("v"), h: getFr("h") }, px: window.__studioInk() });

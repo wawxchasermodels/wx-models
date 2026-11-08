@@ -2172,7 +2172,7 @@ function paintStrongLow(ctx, st, g, obs) {
   const T = g.top; if (!(T && g.hasNum && T.num)) return;
   ctx.beginPath(); ctx.arc(T.x, T.y, pt(6.2), 0, 2 * Math.PI); ctx.lineWidth = pt(1.6); ctx.strokeStyle = "#ffffff"; ctx.stroke();
   ctx.lineWidth = pt(0.9); ctx.strokeStyle = "#0b0d12"; ctx.stroke();
-  const s = strongLowText(T.num, T.mb); ctx.font = `800 ${pt(10.5)}px Montserrat`; const w = ctx.measureText(s).width, gap = pt(9), hh = pt(7.5);
+  const s = strongLowText(T.num, T.mb); ctx.font = `700 ${pt(10.5)}px Montserrat`; const w = ctx.measureText(s).width, gap = pt(9), hh = pt(7.5);
   const obstacles = g.means.map(([mx, my, mv]) => hlBox(ctx, mx, my, mv)).concat(obs || []);
   const ov = (a, b) => Math.max(0, Math.min(a[2], b[2]) - Math.max(a[0], b[0])) * Math.max(0, Math.min(a[3], b[3]) - Math.max(a[1], b[1]));
   const pad = pt(2), cands = [];
@@ -2214,7 +2214,7 @@ function paintLowPanel(ctx, st, V, g) {   // ens_maps.low_panel, drawn inside th
       ctx.textBaseline = "top"; y += lh; }
     y += lh * 0.5;
   }
-  // strongest member low in view: ring + "Strongest: member 23, 968 mb" (side away from the list / map edge / red L).
+  // strongest member low in view: ring + "956 mb · Mem 13" (plain bold white, no bar; side away from the list / map edge / red L).
   // 11-03 small fixes (EPS lows: the label could sit on the mean red L): the label is a box tested against every mean L
   // (letter + number, hlBox), the list box, the dot key and the map edge.
   const lwK = pt(78), lhK = pt(11) * (DOT_LABELS.length + 1) + pt(8), kx = g.side === "right" ? x0 - lwK - pt(5) : x0 + PW + pt(5), ky = st.y0 + st.H - lhK - pt(5);
