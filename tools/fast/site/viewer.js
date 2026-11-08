@@ -2037,7 +2037,7 @@ function lowGeom(st, D, P, V) {
 }
 // 11-07: the single strongest member low (lowest central pressure in view) keeps its ring, and the on-canvas label names that
 // member and its pressure. Older runs without a real member number (no ens "mnum") still get no label.
-function strongLowText(num, mb) { const p = Math.round(mb); return num ? `Strongest: member ${num}, ${p} mb` : `Strongest: ${p} mb`; }
+function strongLowText(num, mb) { const p = Math.round(mb); return num ? `${p} mb \u00b7 Mem ${num}` : `${p} mb`; }   // t2767u: "956 mb · Mem 13"
 window.__strongLowText = strongLowText;
 function paintStrongLow(ctx, st, g, obs) {
   const T = g.top; if (!(T && g.hasNum && T.num)) return;
@@ -2055,7 +2055,8 @@ function paintStrongLow(ctx, st, g, obs) {
     const cost = (out ? 1e9 : 0) + obstacles.reduce((a, b) => a + ov(R, b), 0);
     if (!best || cost < best[2]) best = [xa, yc, cost, R]; if (cost === 0) break; }
   window.__memLab = { s, rect: best[3], cost: best[2], means: g.means.length };   // QA hook (no effect on drawing)
-  haloText(ctx, s, best[0], best[1], `800 ${pt(10.5)}px Montserrat`, "#0b0d12", pt(2.6), "left", "middle");
+  ctx.save(); ctx.font = `800 ${pt(10.5)}px Montserrat`; ctx.textAlign = "left"; ctx.textBaseline = "middle"; ctx.lineJoin = "round";   // t2767u: white text, dark halo
+  ctx.strokeStyle = "#0b0d12"; ctx.lineWidth = pt(2.6); ctx.strokeText(s, best[0], best[1]); ctx.fillStyle = "#ffffff"; ctx.fillText(s, best[0], best[1]); ctx.restore();
 }
 function paintLowPanel(ctx, st, V, g) {   // ens_maps.low_panel, drawn inside the left edge of the map + the dot legend
   const [LW, LH] = V.fig, PW = Math.round(0.092 * LW), x0 = g.side === "right" ? st.x0 + st.W - PW - pt(3) : st.x0 + pt(3), y0 = st.y0 + pt(3), H = st.H - pt(6);

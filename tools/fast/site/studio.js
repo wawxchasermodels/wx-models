@@ -339,7 +339,7 @@ function strongestMember(c, f, k, cur, r, headBot, cbY) {
   c.save(); noShadow(c);
   c.beginPath(); c.arc(T.x, T.y, 9, 0, 2 * Math.PI); c.strokeStyle = "#fff"; c.lineWidth = 5; c.stroke();
   c.strokeStyle = "#0b0d12"; c.lineWidth = 2; c.stroke();
-  const fs = k === "v" ? 25 : 22, text = `Strongest member: ${Math.round(T.mb)} mb${T.num != null ? ` · Mem ${T.num}` : ""}`;
+  const fs = k === "v" ? 25 : 22, text = `${Math.round(T.mb)} mb${T.num != null ? ` · Mem ${T.num}` : ""}`;   // t2767u: no prefix, no bar
   c.font = `800 ${fs}px Montserrat`;
   const w = c.measureText(text).width, pad = 8, h = fs + 2 * pad;
   const blocks = [f.hdr, f.badge, f.lowKeyBox, [0, cbY - 45, f.W, f.H]].filter(Boolean);
@@ -354,8 +354,9 @@ function strongestMember(c, f, k, cur, r, headBot, cbY) {
   }
   c.beginPath(); c.moveTo(T.x, T.y); c.lineTo(Math.max(best.x, Math.min(best.box[2], T.x)), Math.max(best.y, Math.min(best.box[3], T.y)));
   c.strokeStyle = "#fff"; c.lineWidth = 4; c.stroke(); c.strokeStyle = "#0b0d12"; c.lineWidth = 1.5; c.stroke();
-  c.fillStyle = "rgba(17,19,22,0.82)"; c.fillRect(best.x, best.y, w + 2 * pad, h);
-  c.textAlign = "left"; c.textBaseline = "middle"; c.fillStyle = "#fff"; c.fillText(text, best.x + pad, best.y + h / 2);
+  // t2767u (Benjamin): no black bar; bold white text with a dark halo like the other map labels (ring marker + leader kept)
+  c.textAlign = "left"; c.textBaseline = "middle"; c.lineJoin = "round"; c.strokeStyle = "#0b0d12"; c.lineWidth = Math.round(fs * 0.28);
+  c.strokeText(text, best.x + pad, best.y + h / 2); c.fillStyle = "#fff"; c.fillText(text, best.x + pad, best.y + h / 2);
   window.__studioStrongest[k].label = text; window.__studioStrongest[k].box = best.box;
   c.restore();
 }
