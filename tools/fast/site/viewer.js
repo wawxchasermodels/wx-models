@@ -1037,7 +1037,7 @@ async function render(lite) {
   // significant wave height"; t1988u: "Just make them look like the other locations in the map"): NDBC buoys on the ECMWF wave maps only
   if (WT) drawCoast(ctx, st, D, P, V, LW, LH, WT);
   if (P.lows && S.lowPanel && !Q.get("studio")) paintLowPanel(ctx, st, V, S.lowPanel);   // 11-02 (Benjamin t2115u): not in Studio frames (Studio has its own dot key); kept on the viewer
-  else if (P.lows && S.lowPanel) paintStrongLow(ctx, st, S.lowPanel);   // 11-07: Studio frames still label the single strongest member low (the list and dot key stay off the frame)
+  // t2772u: Studio frames label the strongest member themselves (studio.js strongestMember, per crop); drawing it here too gave two overlapping labels
   // 5. key + header text
   if (!V.studioOnly) ctx.drawImage(L2.key, 0, 0, LW, LH);   // Studio-only view: Studio draws its own color bar (the key file is another view's)
   if (!V.studioOnly) drawCredit(ctx, st, pid, P, LW, LH, st.towns && tmode !== "none");   // 11-01-26 legal audit: credit line redrawn over the key's baked one
