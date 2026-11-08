@@ -55,7 +55,7 @@ def main():
     import cartopy.crs as ccrs
     import house_style as HS, temp_maps as TM
     HS.use_for_plots(); FE.extra_views(TM, ccrs)
-    static = os.path.join(a.site, "static"); slayers = os.path.join(a.site, "slayers", "static")
+    static = os.path.join(a.site, "slayers", "static"); slayers = os.path.join(a.site, "slayers", "static")
     os.makedirs(static, exist_ok=True); os.makedirs(slayers, exist_ok=True)
     pnwt_items = None
     for vid in VIEWS:

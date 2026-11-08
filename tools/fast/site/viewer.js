@@ -101,17 +101,18 @@ function fieldRS(LW, LH) {
   const cap = Math.min(3, Math.sqrt(12e6 / (LW * LH)));
   return Math.max(1, Math.min(cap, Math.ceil(want * 4 - 0.2) / 4));
 }
-function labelURLs(townsU) {
-  const path = String(townsU || "").split("?")[0], m = path.match(/towns_([^/?#]+)\.png$/);
-  if (!m) return [];
-  const name = "labels_" + m[1] + ".json", out = [];
-  if (path.includes("slayers/")) out.push(path.replace(/towns_[^/?#]+\.png$/, name));
-  out.push("static/" + name, "slayers/static/" + name);
-  if (typeof DATA === "string" && path.startsWith(DATA)) out.push(DATA + "static/" + name);
+// Town label placements (crisp text). Only URLs that exist are fetched, so a view never logs 404s: the encoder's own file when the
+// manifest names one (views[vid].labels, written by fast_encode next to the towns PNG), else the copy shipped with the site in
+// slayers/static/ (SITE_LABELS lists them), else none (the baked towns PNG is drawn as before).
+const SITE_LABELS = new Set(["bc", "ewa", "lm", "newa", "passes", "pnwhr", "pnwhr_s2", "pnwt", "pnwt_v2", "puget", "wa", "wawide_s2", "wwa"]);
+function labelURLs(townsU, man) {
+  const path = String(townsU || "").split("?")[0], m = path.match(/towns_([^/?#]+)\.png$/), out = [];
+  if (man && typeof DATA === "string") out.push(DATA + man);
+  if (m && SITE_LABELS.has(m[1])) out.push("slayers/static/labels_" + m[1] + ".json");
   return [...new Set(out)];
 }
-function loadTownLabels(townsU) {
-  const urls = labelURLs(townsU);
+function loadTownLabels(townsU, man) {
+  const urls = labelURLs(townsU, man);
   const step = (i) => { if (i >= urls.length) return Promise.resolve(null);
     return fetch(urls[i], { cache: "no-cache" }).then(r => r.ok ? r.json() : Promise.reject()).then(j => {
       const items = j && (j.items || (Array.isArray(j) ? j : null)); return items && items.length ? items : step(i + 1);
@@ -664,7 +665,7 @@ async function viewStatic(vid) {
     // towns layer is not needed for the first paint: draw without it, redraw when it lands (10-29 first-map speedup)
     const tP = (own ? V0.towns_png : V.towns_png) || `static/towns_${vid}.png`, tU = (tP[0] === "@" ? tP.slice(1) : DATA + tP) + SV();
     const townsP = img(tU).then(im => { obj.towns = im; if (VSRC(S.view) === vid && window.__drawn) draw(); return im; }, () => null);
-    const labelsP = loadTownLabels(tU).then(items => { obj.labels = items; if (items && window.__drawn) draw(); return items; });
+    const labelsP = loadTownLabels(tU, own ? V0.labels : V.labels).then(items => { obj.labels = items; if (items && window.__drawn) draw(); return items; });
     // per-pixel source index + weights, made once per view from the coarse LUT (bilinear in panel px)
     const [px, py, pw, ph] = V.panel, x0 = Math.round(px), y0 = Math.round(py), W = Math.round(px + pw) - x0, H = Math.round(py + ph) - y0;
     const { nx, ny, stride } = V, G = S.runs[S.run].grid, gnx = G.nx, gny = G.ny;
