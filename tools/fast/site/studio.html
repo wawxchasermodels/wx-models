@@ -221,7 +221,7 @@ body.actrow #stepctl #step{display:none}
 #scrub.inbar.inrow{position:relative;left:auto;top:auto;z-index:auto;flex:1 1 360px;min-width:260px;width:auto}
 #scrub.inbar.inrow .sr{flex-wrap:nowrap;align-items:center}
 #scrub.inbar.inrow .sw{flex:1 1 auto;width:auto;min-width:160px;padding-bottom:12px}
-#actrow #stat{min-width:0}
+#actrow #stat{min-width:0;flex:0 0 290px;width:290px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-variant-numeric:tabular-nums}/* t2775u: the timing readout next to the scrubber changed width every frame and resized the scrub bar */
 /* 11-05 (t2449u): exactly two rows on desktop: compact first-row controls so Studio..Play fits on one line at 1512 */
 @media (min-width:1300px){body.actrow #bar{gap:6px;column-gap:6px}body.actrow #bar>label select,body.actrow #smodel select{max-width:150px;padding:4px 4px}body.actrow #run{max-width:150px}body.actrow #view{max-width:170px}body.actrow #prod{max-width:170px}body.actrow #tabs button{padding:3px 8px}body.actrow #tabs{gap:4px}body.actrow #bar>#stat{display:none}}
 </style></head>
