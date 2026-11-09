@@ -261,6 +261,7 @@ const WAWIDE_PASSES_PNG = "@slayers/static/towns_wawide_p1.png";
 // wide view (studio_views wawide_small_towns.py: towns_wawide_s2.png + its number slots, shipped with the site); wave maps' coast labels too
 // 11-04 (t2314u "yes rebuild those too"): HRRR / RRFS / NBM wide view (pnwhr) too: wawide_s2.json models.{hrrr,rrfs,nbm} = {towns, towns_png}
 let WAWIDE_S2 = null; const WAWIDE_FS = 0.83;
+const PNWT_FS = 0.83;   // Pacific NW tight only: town names + numbers ~17% smaller (still crisp canvas text)
 function addStudioViews(man, sv) {
   // 10-31 7:55 PM (Benjamin: "city labels on the new washington wide are way too big"): the global models now get a real view
   // made for Studio (tools/fast/studio_views.py -> static/studio_views.json, not in manifest.json): its own basemap and town layer
@@ -1079,9 +1080,9 @@ async function render(lite) {
       if (!(t.fi >= 0 && t.fj >= 0 && t.fi < D.h - 1 && t.fj < D.w - 1)) continue;
       let v = sampleRC(D.fill, D.w, t.fi, t.fj); if (!isFinite(v)) continue;
       if (pid === "t2m" && t.t2m_corr !== undefined) v += t.t2m_corr;
-      nums.push({ name: t.name, x: t.x, y: t.y, text: fmtVal(P, v), size: t.size, color: t.color });
+      nums.push({ name: t.name, x: t.x, y: t.y, text: fmtVal(P, v), size: t.size * (S.view === "pnwt" ? PNWT_FS : 1), color: t.color });
     }
-    window.__studioTownSrc = { items: st.labels, nums, LW, LH, dpi: S.man.dpi || 100 };
+    window.__studioTownSrc = { items: S.view === "pnwt" ? (st.labels || []).map(it => it.k === "t" ? Object.assign({}, it, { size: it.size * PNWT_FS }) : it) : st.labels, nums, LW, LH, dpi: S.man.dpi || 100 };
   } else if (Q.get("studio")) window.__studioTownSrc = null;
   const drewTowns = !studioHold && townLive && tmode !== "none" && !(WT && WT.own) && drawTownLayer(ctx, st.labels, LW, LH, WT && WT.re, WT && WT.erase);
   if (!studioHold && !drewTowns && st.towns && L2.towns && tmode !== "none" && !(WT && WT.own)) ctx.drawImage(WT && WT.erase.length ? erasedTowns(L2.towns, `${st.townsU}#${WT.vid}`, WT.erase, LW) : L2.towns, 0, 0, LW, LH);
@@ -1091,7 +1092,7 @@ async function render(lite) {
     if (!(t.fi >= 0 && t.fj >= 0 && t.fi < D.h - 1 && t.fj < D.w - 1)) continue;
     let v = sampleRC(D.fill, D.w, t.fi, t.fj); if (!isFinite(v)) continue;   // HRRR: integer = nearest 3 km point; global: bilinear at the pin
     if (pid === "t2m" && t.t2m_corr !== undefined) v += t.t2m_corr;          // pass summit height correction (temp_maps)
-    haloText(ctx, fmtVal(P, v), t.x * LW, t.y * LH, `800 ${pt(t.size)}px Montserrat`, t.color, pt(3.0), "left", "middle");
+    haloText(ctx, fmtVal(P, v), t.x * LW, t.y * LH, `800 ${pt(t.size * (S.view === "pnwt" ? PNWT_FS : 1))}px Montserrat`, t.color, pt(3.0), "left", "middle");
   }
   // 11-01 8:32 AM (Benjamin t1987u: "Include known buoy locations off the coast, and have them show the wave height numbers, do the same for
   // significant wave height"; t1988u: "Just make them look like the other locations in the map"): NDBC buoys on the ECMWF wave maps only
@@ -1711,8 +1712,9 @@ function drawTownLayer(ctx, items, LW, LH, skip, erase) {
     ctx.fillStyle = it.fill || "#1b1d22"; ctx.strokeStyle = it.stroke || "#ffffff"; ctx.lineWidth = pt(it.mew || 0);
     if (it.mew) ctx.stroke(); ctx.fill();
   }
+  const nameSc = (typeof S !== "undefined" && S.view === "pnwt") ? PNWT_FS : 1;
   for (const it of items) if (it.k === "t" && !(skipT && skipT.has && skipT.has(it.t))) {
-    const font = `${it.style === "italic" ? "italic " : ""}${it.w || 600} ${pt(it.size)}px Montserrat`;
+    const font = `${it.style === "italic" ? "italic " : ""}${it.w || 600} ${pt(it.size * nameSc)}px Montserrat`;
     haloText(ctx, it.t, it.x * LW, it.y * LH, font, it.fill || "#1b1d22", pt(it.halo == null ? 2.6 : it.halo), "left", "middle");
   }
   ctx.restore(); return true;
