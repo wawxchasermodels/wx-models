@@ -170,4 +170,32 @@ frame.MG.kind = "wafc";
 frame.MG.img = { width: 1600, height: 2400 };
 assert.strictEqual(frame.crop("v", { dx: 0, dy: 0, zoom: 1 }).pw, 1600);
 
+
+// 11-09 HRRR extras on WA forecast maps (queue A): present, HRRR-only, titles on disk.
+assert.ok(wamaps.includes('["wind", "12 h max wind"]'));
+assert.ok(wamaps.includes('["tmin24", "24 h min temp"]'));
+assert.ok(wamaps.includes('["tmax24", "24 h max temp"]'));
+assert.ok(wamaps.includes('["snod", "Snow depth from 0\\""]'));
+assert.ok(wamaps.includes('["kuchera", "Kuchera snow"]'));
+assert.ok(wamaps.includes('kinds: ["precip", "snow", "gust", "wind", "tmin24", "tmax24", "snod", "kuchera"]'));
+assert.ok(wamaps.includes('const TOTALS = new Set(["precip", "snow", "gust", "wind", "tmin24", "tmax24", "snod", "kuchera"])'));
+assert.ok(wamaps.includes("wind: 1"));
+assert.ok(wamaps.includes('tminmax: "min"'));
+assert.ok(wamaps.includes('tminmax: "max"'));
+assert.ok(wamaps.includes("dsnod: 1"));
+assert.ok(wamaps.includes("suminc: 1"));
+assert.ok(wamaps.includes("KT2MPH = 1.150779448"));
+assert.ok(wamaps.includes("P.clip0 === 0"));
+assert.ok(wamaps.includes("const SNOD"));
+assert.ok(!wamaps.includes('nbm: { tag: "[NBM 2.5 km]", name: "NBM", res: "NBM 2.5 km", kinds: ["precip", "snow", "gust", "wind"'));
+const kit = path.join(ROOT, "site/wamaps/kit");
+for (const view of ["full", "west", "east"]) {
+  for (const kind of ["wind", "tmin24", "tmax24", "snod", "kuchera"]) {
+    const f = path.join(kit, view, "titles", kind + ".png");
+    assert.ok(fs.existsSync(f), "missing title " + f);
+    assert.ok(fs.statSync(f).size > 1000, "tiny title " + f);
+  }
+}
+
 console.log("wafc gusts + framing: ok");
+
