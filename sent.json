@@ -20,55 +20,55 @@
    }
   },
   "pass_snapshot": {
-   "at": "2026-11-08T20:17:04.466863+00:00",
+   "at": "2026-11-09T12:17:26.047366+00:00",
    "passes": {
     "Blewett Pass US 97": {
      "avalanche_closure": false,
-     "displayDate": "2026-11-08T15:43:50.14Z",
+     "displayDate": "2026-11-09T10:56:05.253Z",
      "endMP": 168.87,
      "restrictions": {
       "Northbound": "No restrictions",
       "Southbound": "No restrictions"
      },
-     "roadCondition": "Bare and wet.",
+     "roadCondition": "Bare and dry",
      "route": "097",
      "snow_on_road": false,
      "startMP": 158.87,
      "status": "open",
-     "temperature": 40.0,
-     "weather": "Raining"
+     "temperature": 25.0,
+     "weather": "Cloudy"
     },
     "Cayuse Pass SR 123": {
      "avalanche_closure": false,
-     "displayDate": "2026-11-08T15:53:45.733Z",
+     "displayDate": "2026-11-09T11:33:42.413Z",
      "endMP": 16.34,
      "restrictions": {
-      "Northbound": "Traction Tires Advised, Oversize Vehicles Prohibited.",
-      "Southbound": "Traction Tires Advised, Oversize Vehicles Prohibited."
+      "Northbound": "No restrictions",
+      "Southbound": "No restrictions"
      },
      "roadCondition": "Bare and wet",
      "route": "123",
      "snow_on_road": false,
      "startMP": 2.0,
      "status": "open",
-     "temperature": 38.0,
-     "weather": "No weather reported"
+     "temperature": 32.0,
+     "weather": "Overcast"
     },
     "Chinook Pass SR 410": {
      "avalanche_closure": false,
-     "displayDate": "2026-11-08T19:52:12.95Z",
+     "displayDate": "2026-11-09T12:16:48.823Z",
      "endMP": 74.5,
      "restrictions": {
       "Eastbound": "Refer to conditions and weather column for current restriction information",
       "Westbound": "Refer to conditions and weather column for current restriction information"
      },
-     "roadCondition": "Compact snow and ice. Traction tires required on passenger vehicles. Commercial vehicles are not permitted through Mount Rainier National Park.",
+     "roadCondition": "Ice in places. Traction tires required on passenger vehicles. Commercial vehicles are not permitted through Mount Rainier National Park.",
      "route": "410",
-     "snow_on_road": true,
+     "snow_on_road": false,
      "startMP": 57.0,
      "status": "open",
      "temperature": null,
-     "weather": "Sowing"
+     "weather": "Overcast skies"
     },
     "Crystal to Greenwater SR 410": {
      "avalanche_closure": false,
@@ -88,39 +88,39 @@
     },
     "Disautel Pass SR 155": {
      "avalanche_closure": false,
-     "displayDate": "2026-11-08T14:28:00.54Z",
+     "displayDate": "2026-11-09T04:22:41.353Z",
      "endMP": 62.6,
      "restrictions": {
       "Northbound": "No restrictions",
       "Southbound": "No restrictions"
      },
-     "roadCondition": "",
+     "roadCondition": "Bare and dry",
      "route": "155",
      "snow_on_road": false,
      "startMP": 52.6,
      "status": "open",
-     "temperature": 44.0,
-     "weather": "Partly Cloudy"
+     "temperature": 33.0,
+     "weather": "Clear skies"
     },
     "Loup Loup Pass SR 20": {
      "avalanche_closure": false,
-     "displayDate": "2026-11-08T14:39:05.777Z",
+     "displayDate": "2026-11-09T04:18:24.58Z",
      "endMP": 219.47,
      "restrictions": {
       "Eastbound": "No restrictions",
       "Westbound": "No restrictions"
      },
-     "roadCondition": "Bare and wet.",
+     "roadCondition": "Bare and dry",
      "route": "020",
      "snow_on_road": false,
      "startMP": 209.47,
      "status": "open",
-     "temperature": 35.0,
-     "weather": "Overcast and windy."
+     "temperature": 32.0,
+     "weather": "Clear skies"
     },
     "Manastash Ridge I-82": {
      "avalanche_closure": false,
-     "displayDate": "2026-11-08T14:11:30.657Z",
+     "displayDate": "2026-11-09T11:11:01.273Z",
      "endMP": 27.0,
      "restrictions": {
       "Eastbound": "No restrictions",
@@ -132,7 +132,7 @@
      "startMP": 1.0,
      "status": "open",
      "temperature": null,
-     "weather": "Overcast skies"
+     "weather": "Clear skies"
     },
     "Mt. Baker Hwy SR 542": {
      "avalanche_closure": false,
@@ -152,15 +152,15 @@
     },
     "North Cascade Hwy SR 20": {
      "avalanche_closure": false,
-     "displayDate": "2026-11-08T17:22:03.51Z",
+     "displayDate": "2026-11-09T09:46:15.05Z",
      "endMP": 170.6,
      "restrictions": {
       "Eastbound": "No restrictions",
       "Westbound": "No restrictions"
      },
-     "roadCondition": "Compact snow with slush in places.",
+     "roadCondition": "Bare and wet with slush in places",
      "route": "020",
-     "snow_on_road": true,
+     "snow_on_road": false,
      "startMP": 134.0,
      "status": "open",
      "temperature": 33.0,
@@ -200,23 +200,23 @@
     },
     "Snoqualmie Pass I-90": {
      "avalanche_closure": false,
-     "displayDate": "2026-11-08T19:00:26.43Z",
+     "displayDate": "2026-11-09T11:11:01.273Z",
      "endMP": 136.0,
      "restrictions": {
       "Eastbound": "No restrictions",
       "Westbound": "No restrictions"
      },
-     "roadCondition": "Bare and wet, with areas of standing water.",
+     "roadCondition": "Bare and dry, wet in places",
      "route": "090",
      "snow_on_road": false,
      "startMP": 34.0,
      "status": "open",
      "temperature": null,
-     "weather": "Raining"
+     "weather": "Overcast skies"
     },
     "Stevens Pass US 2": {
      "avalanche_closure": false,
-     "displayDate": "2026-11-08T19:08:00.663Z",
+     "displayDate": "2026-11-09T10:57:04.133Z",
      "endMP": 69.57,
      "restrictions": {
       "Eastbound": "No restrictions",
@@ -227,8 +227,8 @@
      "snow_on_road": false,
      "startMP": 59.57,
      "status": "open",
-     "temperature": 38.0,
-     "weather": "Partly Cloudy"
+     "temperature": 35.0,
+     "weather": "Overcast"
     },
     "Tiger Mountain SR18": {
      "avalanche_closure": false,
@@ -248,23 +248,23 @@
     },
     "Wauconda Pass SR 20": {
      "avalanche_closure": false,
-     "displayDate": "2026-11-08T14:25:19.95Z",
+     "displayDate": "2026-11-09T04:04:55.767Z",
      "endMP": 293.89,
      "restrictions": {
       "Eastbound": "No restrictions",
       "Westbound": "No restrictions"
      },
-     "roadCondition": "Bare and wet.",
+     "roadCondition": "Bare and Dry",
      "route": "020",
      "snow_on_road": false,
      "startMP": 283.89,
      "status": "open",
-     "temperature": 37.0,
-     "weather": "Partly Cloudy"
+     "temperature": 30.0,
+     "weather": "Cloudy"
     },
     "White Pass US 12": {
      "avalanche_closure": false,
-     "displayDate": "2026-11-08T19:50:11.54Z",
+     "displayDate": "2026-11-09T12:13:08.69Z",
      "endMP": 166.0,
      "restrictions": {
       "Eastbound": "No restrictions",
@@ -276,7 +276,7 @@
      "startMP": 138.0,
      "status": "open",
      "temperature": null,
-     "weather": "Raining, occasionally mixed with snow."
+     "weather": "Overcast skies"
     }
    }
   },
@@ -341,7 +341,8 @@
    "q-9f1a6af893565914",
    "q-ce9a07003a014d37",
    "q-744f99f4bd9d84a1",
-   "q-08ef0111ea717eda"
+   "q-08ef0111ea717eda",
+   "q-0e53eb5424a4b84f"
   ],
   "quakes": {},
   "seen": {
@@ -351,6 +352,7 @@
    "urn:oid:2.49.0.1.840.0.1d9a13932cad6fd60de71e0d7314bc794419a41a.002.1|USA": "2026-11-08T10:06:29.937063+00:00",
    "urn:oid:2.49.0.1.840.0.1d9a13932cad6fd60de71e0d7314bc794419a41a.003.1|USA": "2026-11-08T10:06:29.937063+00:00",
    "urn:oid:2.49.0.1.840.0.34152a97e432212f5bf023a783a0ede13ab7c511.001.1|USA": "2026-11-07T11:04:22.680114+00:00",
+   "urn:oid:2.49.0.1.840.0.35010bfad1cb7288821b6355cc4aa2b906f10b0f.002.2|USA": "2026-11-09T12:17:26.047366+00:00",
    "urn:oid:2.49.0.1.840.0.41ef7891ef4d95a35773c5fe1f5c5f06bc2e2b46.001.2|USA": "2026-11-07T11:04:22.680114+00:00",
    "urn:oid:2.49.0.1.840.0.41ef7891ef4d95a35773c5fe1f5c5f06bc2e2b46.002.1|USA": "2026-11-07T11:04:22.680114+00:00",
    "urn:oid:2.49.0.1.840.0.5175aa4931aacec66267e1258346e7874b5d00d4.001.1|USA": "2026-11-02T23:58:38.413250+00:00",
@@ -562,31 +564,16 @@
    }
   }
  },
- "updated": "2026-11-08T22:24:15.907696+00:00",
+ "updated": "2026-11-09T12:17:26.049939+00:00",
  "urgent": {
   "keys": {
-   "urn:oid:2.49.0.1.840.0.2a3a4ae58685bf6f5472a3416741f8a7a8256967.001.1": "2026-11-02T10:32:35.563769+00:00",
-   "urn:oid:2.49.0.1.840.0.397f69de2d6c89b7d84b4026f48ae9bdcca74eaa.001.1|L1": "2026-11-02T10:32:35.563769+00:00",
-   "urn:oid:2.49.0.1.840.0.42681225c943079697bc245ef30aeb2f9806e8b2.001.1": "2026-11-02T05:29:14.970050+00:00",
-   "urn:oid:2.49.0.1.840.0.42681225c943079697bc245ef30aeb2f9806e8b2.001.1|L1": "2026-11-02T05:29:14.970050+00:00",
-   "urn:oid:2.49.0.1.840.0.539099f80baea5919b4fec368e02443e2370b616.001.1": "2026-11-02T00:08:59.407611+00:00",
-   "urn:oid:2.49.0.1.840.0.5e8f0c9c6229550548d793597d2181a2fe6a9634.001.1|L1": "2026-11-02T05:29:14.970050+00:00",
-   "urn:oid:2.49.0.1.840.0.616c4025c42723c2fe6d8b10282486a4525dd113.001.1": "2026-11-01T23:12:35.274040+00:00",
-   "urn:oid:2.49.0.1.840.0.616c4025c42723c2fe6d8b10282486a4525dd113.001.1|L1": "2026-11-01T23:12:35.274040+00:00",
-   "urn:oid:2.49.0.1.840.0.7e10a26e45f9891046f9e37d480c03b18226209c.001.1|L1": "2026-11-02T00:08:59.407611+00:00",
    "urn:oid:2.49.0.1.840.0.89bcf371cc80d4686ebf034dfb617f23d925a01b.001.1|L1": "2026-11-02T15:16:17.596742+00:00",
    "urn:oid:2.49.0.1.840.0.9bc71fd7e92dcaebc56fd1243526b0e3dc4ee022.001.1": "2026-11-02T13:11:55.433004+00:00",
    "urn:oid:2.49.0.1.840.0.9bc71fd7e92dcaebc56fd1243526b0e3dc4ee022.001.1|L3": "2026-11-02T13:11:55.433004+00:00",
    "urn:oid:2.49.0.1.840.0.a845a2d258aab537261348f1ace22f83c7749823.001.1": "2026-11-02T13:11:55.433004+00:00",
    "urn:oid:2.49.0.1.840.0.a845a2d258aab537261348f1ace22f83c7749823.001.1|L1": "2026-11-02T13:11:55.433004+00:00",
-   "urn:oid:2.49.0.1.840.0.ac4edcc622571ad723ac7506845dfae2776c3025.001.1": "2026-11-02T05:29:14.970050+00:00",
    "urn:oid:2.49.0.1.840.0.ec317b9486e571e57082f1a859faa28220b37152.001.1": "2026-11-02T15:16:17.596742+00:00",
-   "vtec:KABQ.FL.W.0019|L1": "2026-11-02T10:32:35.563769+00:00",
-   "vtec:KABQ.FL.W.0021|L1": "2026-11-02T05:29:14.970050+00:00",
    "vtec:KFGZ.FA.W.0025|L1": "2026-11-02T13:11:55.433004+00:00",
-   "vtec:KFGZ.FA.W.0028|L1": "2026-11-02T00:08:59.407611+00:00",
-   "vtec:KFGZ.FA.W.0038|L1": "2026-11-02T05:29:14.970050+00:00",
-   "vtec:KGJT.FA.W.0029|L1": "2026-11-01T23:12:35.274040+00:00",
    "vtec:KMLB.FL.W.0003|L1": "2026-11-02T15:16:17.596742+00:00"
   },
   "payload_ids": [
