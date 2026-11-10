@@ -5,6 +5,7 @@ const fs = require("fs");
 const path = require("path");
 const vm = require("vm");
 const assert = require("assert");
+const { spawnSync } = require("child_process");
 
 const ROOT = __dirname;
 const wamaps = fs.readFileSync(path.join(ROOT, "site/wamaps.js"), "utf8");
@@ -218,8 +219,14 @@ const kitPy = fs.readFileSync(path.join(ROOT, "wamaps/build_totals_kit.py"), "ut
 assert.ok(kitPy.includes("[8, 356, 557, 1421]") || kitPy.includes("/ 0.25 - 557"), "IFS crop fallback is j0=557");
 assert.ok(!kitPy.includes("/ 0.25 - 600") && !kitPy.includes("[8, 356, 600,"), "IFS crop must not hardcode old j0=600");
 assert.ok(kitPy.includes("_crop") && kitPy.includes("WX_MANIFEST"), "IFS crop derived from manifest when available");
-assert.ok(wamaps.includes('const vy = (kind === "precip" || kind === "snow" || kind === "snod" || kind === "kuchera")'), "decimal totals share a tighter label Y");
-assert.ok(wamaps.includes("L.y - Math.round((L.font[1] || 32) * 0.5)"));
+assert.ok(wamaps.includes("const DEC_TOTALS"), "decimal totals use measured name metrics");
+assert.ok(wamaps.includes("function scanNameBoxes"));
+assert.ok(wamaps.includes("function decimalValueY"));
+assert.ok(wamaps.includes("function labelGap"));
+assert.ok(wamaps.includes("function resolveDecimalTotals"));
+assert.ok(!wamaps.includes("L.y - Math.round((L.font[1] || 32) * 0.5)"), "stale font-fraction shift must be gone");
+const overlap = spawnSync("python3", [path.join(ROOT, "test_wafc_label_overlap.py")], { encoding: "utf8" });
+assert.strictEqual(overlap.status, 0, (overlap.stdout || "") + (overlap.stderr || ""));
 
 console.log("wafc gusts + framing: ok");
 

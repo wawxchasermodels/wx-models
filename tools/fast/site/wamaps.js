@@ -228,7 +228,7 @@ const loadImg = u => WA.imgs[u] || (WA.imgs[u] = new Promise((ok, no) => { const
 async function viewKit(view, mdl = "nbm") {
   const kk = view + "@" + mdl; if (WA.kits[kk]) return WA.kits[kk];
   return (WA.kits[kk] = (async () => {
-    const [lut, mask] = await Promise.all([fetch(KIT + view + (mdl === "nbm" ? "/lut.bin" : `/lut_${mdl}.bin`) + "?v=20261109snugtot", { cache: "no-cache" }).then(r => { if (!r.ok) throw new Error("lut " + r.status); return r.arrayBuffer(); }).then(b => new Float32Array(b)),
+    const [lut, mask] = await Promise.all([fetch(KIT + view + (mdl === "nbm" ? "/lut.bin" : `/lut_${mdl}.bin`) + "?v=20261109close", { cache: "no-cache" }).then(r => { if (!r.ok) throw new Error("lut " + r.status); return r.arrayBuffer(); }).then(b => new Float32Array(b)),
                                            loadImg(KIT + view + "/mask.png")]);
     const oc = new OffscreenCanvas(mask.width, mask.height), cx = oc.getContext("2d", { willReadFrequently: true }); cx.drawImage(mask, 0, 0);
     const md = cx.getImageData(0, 0, mask.width, mask.height).data, m = new Uint8Array(mask.width * mask.height); for (let k = 0; k < m.length; k++) m[k] = md[k * 4];
@@ -266,6 +266,121 @@ function fillData(ctx, K, VK, F, pal) {
   }
   const oc = new OffscreenCanvas(W, H); oc.getContext("2d").putImageData(im, 0, 0); ctx.drawImage(oc, 0, 0);
 }
+// Decimal totals (precip / snow / snod / kuchera): sit each value just under its
+// overlay town name using measured ink, not a fixed font-fraction shift (11-09 t2813u).
+// Name bottom = overlay letterform band (incl. descenders + stroke/halo). Value top =
+// that bottom + a ~2.5 CSS-px gap at a 1920-wide fitted view (kit units: 2.5 / fit).
+const DEC_TOTALS = new Set(["precip", "snow", "snod", "kuchera"]);
+const MS_ASC = 0.968;   // Montserrat typoAscender / em; keep in sync with pilText
+function labelGap(K) {
+  const wr = typeof document !== "undefined" && document.getElementById("wrap");
+  let fit = 0;
+  if (wr) { const r = wr.getBoundingClientRect(); if (r.width > 0 && r.height > 0) fit = Math.min(r.width / K.W, r.height / K.H); }
+  if (!(fit > 0)) fit = Math.min(1920 / K.W, (1080 - 48) / K.H);
+  const dpr = (typeof window !== "undefined" && window.devicePixelRatio) || 1;
+  // ~2.5 CSS px at a 1920-wide fitted view (2–3 px). CSS px already map to device
+  // pixels via DPR, so the visual gap stays 2.5 px and backing-store px scale with DPR.
+  return (2.5 * dpr) / (fit * dpr);
+}
+function scanNameBoxes(data, W, H, labels) {   // overlay RGBA → [{x0,y0,x1,y1}|null] per label
+  const at = (x, y) => { const i = (y * W + x) * 4; return [data[i], data[i + 3]]; };
+  return labels.map((L) => {
+    const fs = L.font[1], name = L.name, nameSw = Math.max(0, (L.sw || 0) - 1);
+    const nw = 0.62 * fs * Math.max(1, name.length) + 2 * nameSw + 8;
+    let x0 = Math.floor(L.x - nw / 2), x1 = Math.ceil(L.x + nw / 2);
+    let y0 = Math.floor(L.y - fs * 1.7), y1 = Math.ceil(L.y + Math.max(8, 0.32 * fs));
+    x0 = Math.max(0, x0); y0 = Math.max(0, y0); x1 = Math.min(W, x1); y1 = Math.min(H, y1);
+    const h = y1 - y0, w = x1 - x0; if (h <= 0 || w <= 0) return null;
+    const counts = new Int32Array(h), white = new Uint8Array(h * w);
+    for (let y = y0; y < y1; y++) { let n = 0; for (let x = x0; x < x1; x++) { const p = at(x, y); if (p[0] > 180 && p[1] > 160) { white[(y - y0) * w + (x - x0)] = 1; n++; } } counts[y - y0] = n; }
+    const thresh = Math.max(10, (w * 0.12) | 0); let rows = [];
+    for (let i = 0; i < h; i++) if (counts[i] >= thresh) rows.push(i);
+    if (!rows.length) { const t2 = Math.max(4, thresh >> 1); for (let i = 0; i < h; i++) if (counts[i] >= t2) rows.push(i); }
+    if (!rows.length) return null;
+    const runs = []; let rs = rows[0], rp = rows[0];
+    for (let k = 1; k < rows.length; k++) { const r = rows[k]; if (r > rp + 2) { runs.push([rs, rp]); rs = r; } rp = r; }
+    runs.push([rs, rp]);
+    const ey = (L.y - 0.5 * fs) - y0;
+    runs.sort((A, B) => { const sc = (R) => { const cy = (R[0] + R[1]) / 2, hh = R[1] - R[0] + 1; return Math.abs(cy - ey) + (hh >= 0.4 * fs && hh <= 1.45 * fs ? 0 : 40); }; return sc(A) - sc(B); });
+    let r0 = runs[0][0], r1 = runs[0][1];
+    if (/[gjpqy]/.test(name)) { const lim = Math.min(h - 1, r1 + Math.round(0.38 * fs));
+      for (let r = r1 + 1; r <= lim; r++) { if (counts[r] >= 2) r1 = r; else if (counts[r] === 0 && r + 1 <= lim && counts[r + 1] >= 2) continue; else break; } }
+    let c0 = w, c1 = -1;
+    for (let y = r0; y <= r1; y++) for (let x = 0; x < w; x++) if (white[y * w + x]) { if (x < c0) c0 = x; if (x > c1) c1 = x; }
+    if (c1 < 0) return null;
+    let bx0 = x0 + c0 - nameSw, by0 = y0 + r0 - nameSw, bx1 = x0 + c1 + nameSw, by1 = y0 + r1 + nameSw;
+    bx0 = Math.max(0, Math.floor(bx0)); by0 = Math.max(0, Math.floor(by0));
+    bx1 = Math.min(W - 1, Math.ceil(bx1)); by1 = Math.min(H - 1, Math.ceil(by1));
+    const bw = bx1 - bx0 + 1, ink = new Uint8Array(bw * (by1 - by0 + 1));
+    for (let y = by0; y <= by1; y++) for (let x = bx0; x <= bx1; x++) { const p = (y * W + x) * 4; if (data[p] > 180 && data[p + 3] > 160) ink[(y - by0) * bw + (x - bx0)] = 1; }
+    return { x0: bx0, y0: by0, x1: bx1, y1: by1, w: bw, ink };
+  });
+}
+const _nameBoxCache = new WeakMap();
+function nameBoxesFor(over, labels) {
+  let hit = _nameBoxCache.get(over); if (hit) return hit;
+  const c = typeof OffscreenCanvas !== "undefined" ? new OffscreenCanvas(over.width, over.height) : document.createElement("canvas");
+  c.width = over.width; c.height = over.height;
+  const x = c.getContext("2d", { willReadFrequently: true }); x.drawImage(over, 0, 0);
+  const im = x.getImageData(0, 0, c.width, c.height);
+  hit = scanNameBoxes(im.data, c.width, c.height, labels); _nameBoxCache.set(over, hit); return hit;
+}
+function textInk(ctx, txt, font, sw) {   // stroked glyph metrics relative to the alignment point / baseline
+  const [, size, wg] = font; ctx.font = `${wg || 800} ${size}px Montserrat`;
+  const m = ctx.measureText(txt), pad = sw || 0;
+  return { ascent: (m.actualBoundingBoxAscent || 0.70 * size) + pad, descent: (m.actualBoundingBoxDescent || 0) + pad,
+           left: ((m.actualBoundingBoxLeft != null) ? m.actualBoundingBoxLeft : m.width / 2) + pad,
+           right: ((m.actualBoundingBoxRight != null) ? m.actualBoundingBoxRight : m.width / 2) + pad };
+}
+function decimalValueY(L, nameBottom, gap, ink) { return nameBottom + gap + ink.ascent - MS_ASC * L.font[1]; }
+function valueBox(L, vy, ink) {
+  const yb = vy + MS_ASC * L.font[1];
+  return { x0: L.x - ink.left, y0: yb - ink.ascent, x1: L.x + ink.right, y1: yb + ink.descent };
+}
+function boxesHit(a, b) { return a.x0 < b.x1 && a.x1 > b.x0 && a.y0 < b.y1 && a.y1 > b.y0; }
+const OTHER_INK = 8;   // ignore 1–2 px anti-aliased fringe against a neighbour
+function countValueNameInk(L, vy, txt, inkM, nb) {
+  if (!nb || !nb.ink) return 0;
+  const vb = valueBox(L, vy, inkM); if (!boxesHit(vb, nb)) return 0;
+  const ox = Math.floor(vb.x0), oy = Math.floor(vb.y0);
+  const vw = Math.max(1, Math.ceil(vb.x1) - ox), vh = Math.max(1, Math.ceil(vb.y1) - oy);
+  const cv = typeof OffscreenCanvas !== "undefined" ? new OffscreenCanvas(vw, vh) : document.createElement("canvas");
+  cv.width = vw; cv.height = vh;
+  const c = cv.getContext("2d");
+  const size = L.font[1], sw = L.sw || 0, yb = vy + MS_ASC * size - oy;
+  c.font = `${(L.font[2] || 800)} ${size}px Montserrat`;
+  c.textAlign = "center"; c.textBaseline = "alphabetic"; c.lineJoin = "round";
+  if (sw) { c.lineWidth = 2 * sw; c.strokeStyle = "#000"; c.strokeText(txt, L.x - ox, yb); }
+  c.fillStyle = "#fff"; c.fillText(txt, L.x - ox, yb);
+  const pix = c.getImageData(0, 0, vw, vh).data, bw = nb.w || (nb.x1 - nb.x0 + 1);
+  const ix0 = Math.max(ox, nb.x0), iy0 = Math.max(oy, nb.y0);
+  const ix1 = Math.min(ox + vw - 1, nb.x1), iy1 = Math.min(oy + vh - 1, nb.y1);
+  let n = 0;
+  for (let y = iy0; y <= iy1; y++) for (let x = ix0; x <= ix1; x++) {
+    if (!nb.ink[(y - nb.y0) * bw + (x - nb.x0)]) continue;
+    if (pix[((y - oy) * vw + (x - ox)) * 4 + 3] > 40) n++;
+  }
+  return n;
+}
+function resolveDecimalTotals(items, nameBoxes, gap) {   // keep kit X; ease Y toward the name only when that clears a real ink hit
+  for (const it of items) {
+    const nb = nameBoxes[it.i]; if (!nb || !it.ink) continue;
+    const L = it.L, ink = it.ink, txt = it.txt;
+    const desired = decimalValueY(L, nb.y1, gap, ink), minY = decimalValueY(L, nb.y1, 0, ink);
+    const hitsOther = (vy) => {
+      for (let j = 0; j < nameBoxes.length; j++) {
+        if (j === it.i || !nameBoxes[j]) continue;
+        if (countValueNameInk(L, vy, txt, ink, nameBoxes[j]) > OTHER_INK) return true;
+      }
+      return false;
+    };
+    if (!hitsOther(desired)) { it.vy = desired; continue; }
+    let cleared = false;
+    for (let vy = desired - 0.5; vy >= minY; vy -= 0.5) { if (!hitsOther(vy)) { it.vy = vy; cleared = true; break; } }
+    if (!cleared) it.vy = desired;   // unfixable side clip: keep the measured gap rather than eat into the name
+  }
+}
+
 function pilText(ctx, txt, x, y, anchor, font, sw, fill) {   // PIL anchors: l/m/r + t (ascender) / s (baseline); Montserrat ascender 968/1000
   const [, size, wg] = font; ctx.font = `${wg || 400} ${size}px Montserrat`;
   ctx.textAlign = anchor[0] === "m" ? "center" : anchor[0] === "r" ? "right" : "left"; ctx.textBaseline = "alphabetic";
@@ -330,7 +445,7 @@ async function render(cv, c, kind, view, d) {
 async function renderTotals(cv, m, c, kind, view, w) {
   const P = PRODUCTS[kind], pal = P.pal;
   const [K, VK, F, T, LB] = await Promise.all([kindKit("low", view), viewKit(view, lutOf(m)), totalField(m, c, kind, w.f0, w.f1),
-    readJSON(KIT + view + "/totals.json"), m === "nbm" ? null : readJSON(KIT + view + `/lab_${lutOf(m)}.json?v=20261109snugtot`)]);
+    readJSON(KIT + view + "/totals.json"), m === "nbm" ? null : readJSON(KIT + view + `/lab_${lutOf(m)}.json?v=20261109close`)]);
   const [base, over, title] = await Promise.all([loadImg(KIT + view + "/base.png"), loadImg(KIT + view + "/plain_overlay.png"), loadImg(KIT + view + `/titles/${P.timg ? P.timg(w) : kind}.png`)]);
   const SC = 2;   // same 2x backing as the daily maps
   cv.width = K.W * SC; cv.height = K.H * SC; const ctx = cv.getContext("2d"); ctx.setTransform(SC, 0, 0, SC, 0, 0);
@@ -345,15 +460,23 @@ async function renderTotals(cv, m, c, kind, view, w) {
   if (port) pilText(ctx, P.key, sc.x0, sc.y0 - 10, "ls", ["", 28, 800], 4, "#fff"); else pilText(ctx, P.key, sc.x0 - 14, sc.y1 + 1, "rs", ["", 26, 800], 4, "#fff");
   pilText(ctx, SRC[m].tag, K.W - 34, 30, "rt", ["", 32, 700], 4, "#fff");
   // town values
-  const vals = {}, tv = {};
+  const vals = {}, tv = {}, drawn = [];
   K.labels.forEach((L, i) => {
     const [fi, fj] = LB ? LB[i] : [L.fi, L.fj], v = bil(F, fi, fj); if (v !== v) return;
     const x = P.clip0 === 0 ? v : Math.max(0, v); if (L.wa) vals[L.name] = x;
     if (L.wa && (kind === "snow" || kind === "kuchera" || kind === "snod" || !L.pass_)) tv[L.name] = +pal.fmt(x);
-    // 11-09: decimal totals sit snugly under the overlay town name (kit Y is the integer-temp slot).
-    const vy = (kind === "precip" || kind === "snow" || kind === "snod" || kind === "kuchera") ? L.y - Math.round((L.font[1] || 32) * 0.5) : L.y;
-    pilText(ctx, pal.fmt(x), L.x, vy, L.anchor, L.font, L.sw, pal.valColor(+pal.fmt(x)));
+    const txt = pal.fmt(x);
+    let vy = L.y, ink = null;
+    if (DEC_TOTALS.has(kind)) {
+      if (!K._nameBoxes) K._nameBoxes = nameBoxesFor(over, K.labels);
+      ink = textInk(ctx, txt, L.font, L.sw);
+      const nb = K._nameBoxes[i];
+      if (nb) vy = decimalValueY(L, nb.y1, labelGap(K), ink);
+    }
+    drawn.push({ L, i, txt, vy, ink });
   });
+  if (DEC_TOTALS.has(kind) && K._nameBoxes) resolveDecimalTotals(drawn, K._nameBoxes, labelGap(K));
+  for (const it of drawn) pilText(ctx, it.txt, it.L.x, it.vy, it.L.anchor, it.L.font, it.L.sw, pal.valColor(+it.txt));
   const fitPx = (txt, px) => { while (px > 20) { ctx.font = `800 ${px}px Montserrat`; if (ctx.measureText(txt).width <= K.sum_maxw) break; px -= 2; } return px; };
   const mx = Math.max(...Object.values(tv));
   const l2 = (P.none && !(mx > 0)) ? P.none : extremeLine(Object.fromEntries(Object.entries(tv).map(([k, v]) => [k, v])), K.pops, P.word, !!P.cold,
