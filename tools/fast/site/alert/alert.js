@@ -971,7 +971,7 @@ const Alerts = (() => {
   // Page-graphic shields (t2844u): official MUTCD I/US SVGs + M1-5 state markers,
   // rendered by mapgen/render_alert_map.py (inner 96 I/US, 81 state, plus halo/rim).
   const SHIELD_INNER = { interstate: 96, us: 96, state: 81 };
-  const SHIELD_VER = "20261110sh1";
+  const SHIELD_VER = "20261110sh4";
   function shieldKey(cls, label) {
     const raw = String(label || "");
     if (cls === "interstate") {
@@ -1009,7 +1009,7 @@ const Alerts = (() => {
       const img = new Image();
       img.onload = () => { S.shieldImgs[k] = img; resolve(k); };
       img.onerror = () => { S.shieldImgs[k] = null; resolve(k); };
-      img.src = "alert/shields/" + k + ".png?v=" + SHIELD_VER;
+      img.src = "alert/" + k + ".png?v=" + SHIELD_VER;
     }))).then(() => { S.shieldsReady = true; });
     return S.shieldsPromise;
   }
