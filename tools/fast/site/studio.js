@@ -125,20 +125,16 @@ function base(k) {   // camera at dx = dy = 0, zoom 1: centre (figure px) and sc
 // itself zooms out (about the frame's centre), and a drag past the edge pans the obs map; the frame zoom (1-2.5x) works as before.
 const OZ = { ref: 0, sub: 1 };
 function ozSync() { const S_ = Obs._state; if (!OZ.ref || Math.abs(S_.k - OZ.ref * OZ.sub) > 1e-6 * S_.k) { OZ.ref = S_.k; OZ.sub = 1; } return S_; }
-function obsZoom(k, fr, z) {   // z = wanted total zoom (frame zoom x obs map zoom-out)
-  if (typeof Obs === "undefined" || !MG.img) { fr.zoom = Math.max(1, z); return fr; }
-  const S_ = ozSync(), r = crop(k, fr), X = S_.cx + (r.cx / S_.dpr - S_.w / 2) / S_.k, Y = S_.cy + (r.cy / S_.dpr - S_.h / 2) / S_.k;
-  if (z < 1 || OZ.sub < 1) { OZ.sub = Math.min(1, Math.max(0.035 / OZ.ref, z)); S_.k = OZ.ref * OZ.sub; S_.cx = X; S_.cy = Y; S_.view = ""; fr.dx = fr.dy = 0; fr.zoom = Math.max(1, z); Obs.redraw(); }
-  else fr.zoom = Math.min(2.5, z);
-  return fr;
+// t2827u: 9:16 and 16:9 each keep their own pan/zoom (fr via studio:v:… / studio:h:…).
+// Do not move the shared Obs camera (Obs._state / OZ) — that redrew one bitmap both frames crop, so
+// dragging or zooming one view shifted the other.
+function obsZoom(k, fr, z) {
+  fr.zoom = Math.min(2.5, Math.max(0.05, +z || 1)); return fr;
 }
-function obsPan(k, fr) {   // pan past the bitmap edge: move the obs map by the overflow, keep the frame offset at the edge
-  const r = crop(k, fr); if (typeof Obs === "undefined" || !MG.img) { fr.dx = (r.bx - r.cx) * r.kk; fr.dy = (r.by - r.cy) * r.kk; return fr; }
-  const S_ = ozSync(), ox = (r.bx - (fr.dx || 0) / r.kk) - r.cx, oy = (r.by - (fr.dy || 0) / r.kk) - r.cy;
-  if (Math.abs(ox) > 0.01 || Math.abs(oy) > 0.01) { S_.cx += ox / S_.dpr / S_.k; S_.cy += oy / S_.dpr / S_.k; S_.view = ""; Obs.redraw(); }
-  fr.dx = (r.bx - r.cx) * r.kk; fr.dy = (r.by - r.cy) * r.kk; return fr;
+function obsPan(k, fr) {
+  const r = crop(k, fr); fr.dx = (r.bx - r.cx) * r.kk; fr.dy = (r.by - r.cy) * r.kk; return fr;
 }
-const obsZv = (fr) => Math.round((fr.zoom || 1) * (OBSM() && typeof Obs !== "undefined" && Obs._state ? (ozSync(), OZ.sub) : 1) * 100);
+const obsZv = (fr) => Math.round((fr.zoom || 1) * 100);
 function crop(k, fr) {   // source rect (map bitmap px) for frame k: base camera, then zoom / pan; the panel stays covering the frame when it
   // can, and when it is smaller than the frame (wide view) it stays wholly in the frame (the rest is background)
   if (WEBM()) {   // page is the frame itself: same 1–2.5× zoom and drag clamp as a meteogram (some of the page stays in view)
@@ -154,9 +150,11 @@ function crop(k, fr) {   // source rect (map bitmap px) for frame k: base camera
     const cy = hh >= ih / 2 ? ih / 2 : cl(B.cy - (fr.dy || 0) / kk, hh, ih - hh);
     return { kk, cx, cy, bx: B.cx, by: B.cy, sx: 0, sy: 0, sw: F[k].W / kk, sh: F[k].H / kk, px: 0, py: 0, pw: iw, ph: ih, rs: 1 };
   }
-  if (OBSM() && MG.img) {   // obs: cover fill; pan/zoom
-    const B = base(k), kk = B.k0 * Math.max(1, fr.zoom || 1), iw = IW(MG.img), ih = IH(MG.img), cl = (v, a, b) => Math.min(b, Math.max(a, v)), hw = F[k].W / kk / 2, hh = F[k].H / kk / 2;
-    const cx = cl(B.cx - (fr.dx || 0) / kk, hw, iw - hw), cy = cl(B.cy - (fr.dy || 0) / kk, hh, ih - hh);
+  if (OBSM() && MG.img) {   // obs: cover fill; pan/zoom (z may be <1 — letterbox, do not move the shared Obs map)
+    const B = base(k), z = Math.min(2.5, Math.max(0.05, fr.zoom || 1)), kk = B.k0 * z, iw = IW(MG.img), ih = IH(MG.img), cl = (v, a, b) => Math.min(b, Math.max(a, v));
+    const hw = F[k].W / kk / 2, hh = F[k].H / kk / 2;
+    const cx = hw >= iw / 2 ? iw / 2 : cl(B.cx - (fr.dx || 0) / kk, hw, iw - hw);
+    const cy = hh >= ih / 2 ? ih / 2 : cl(B.cy - (fr.dy || 0) / kk, hh, ih - hh);
     return { kk, cx, cy, bx: B.cx, by: B.cy, sx: 0, sy: 0, sw: F[k].W / kk, sh: F[k].H / kk, px: 0, py: 0, pw: iw, ph: ih, rs: 1 };
   }
   if (MG.on && MG.img) {   // meteogram / WA forecast: pan freely while some of the chart stays in the frame
@@ -1148,7 +1146,7 @@ for (const k of ["v", "h"]) {
   cv.addEventListener("pointerdown", (e) => { if (CLEAN || REC.on || CMPM()) return; if (!last && !WEBM()) return; if (PIN.mode) { placePin(k, cv, e); return; }
     const hit = pinHit(k, cv, e); if (hit) { e.preventDefault(); cv.setPointerCapture(e.pointerId); PD = { k, n: hit, id: e.pointerId, off: pinOff(k, cv, e, hit) }; cv.classList.add("pindrag"); return; }
     if (e.pointerType === "touch" && (S.dragging || !e.isPrimary)) return;   // 11-03: a second finger, or a finger while the scrubber is held: no frame drag
-    cv.setPointerCapture(e.pointerId); cv.focus({ preventScroll: true }); cv.classList.add("drag"); d = { x: e.clientX, y: e.clientY, fr: getFr(k), id: e.pointerId }; });
+    e.preventDefault(); cv.setPointerCapture(e.pointerId); cv.focus({ preventScroll: true }); cv.classList.add("drag"); d = { x: e.clientX, y: e.clientY, fr: getFr(k), id: e.pointerId }; });
   const mgDragAtStart = MG.on;   // a mode opened later (WA forecast) still drags; modes that already dragged keep doing so
   cv.addEventListener("pointerdown", (e) => { if (!CLEAN && !last && MG.img && (mgDragAtStart || WAFCM())) { cv.setPointerCapture(e.pointerId); cv.focus(); cv.classList.add("drag"); d = { x: e.clientX, y: e.clientY, fr: getFr(k), id: e.pointerId }; } });
   cv.addEventListener("pointermove", (e) => { if (PD && PD.k === k && PD.id === e.pointerId) { pinMove(k, cv, e); return; }
@@ -1209,7 +1207,7 @@ for (const k of ["v", "h"]) {
   f.zoom.oninput = () => { const fr = getFr(k); if (CMPM()) { f.zoom.value = "100"; return; } if (OBSM()) obsZoom(k, fr, f.zoom.value / 100); else if (ALERTM()) { fr.zoom = alertZ(f.zoom.value / 100); } else { fr.zoom = Math.max(1, f.zoom.value / 100); } setFr(k, fr); render(k); };
   cv.parentNode.querySelector(".shd").addEventListener("click", async (e) => {
     const a = e.target.closest("button[data-a]"); if (!a || (!last && !WEBM() && !CMPM() && !WAFCM())) return;
-    if (a.dataset.a === "reset") { if (ALERTM() && typeof Alerts !== "undefined") { if (Alerts.fitToSelection) Alerts.fitToSelection(); else if (Alerts._state) { Alerts._state.k = 1; Alerts.redraw(); } } if (OBSM() && typeof Obs !== "undefined" && Obs._state && OZ.sub < 1) { ozSync(); Obs._state.k = OZ.ref; OZ.sub = 1; Obs.redraw(); } setFr(k, { dx: 0, dy: 0, zoom: 1 }); if (ALERTM() && f.zoom) f.zoom.value = "100"; render(k); }
+    if (a.dataset.a === "reset") { setFr(k, { dx: 0, dy: 0, zoom: 1 }); if (f.zoom) f.zoom.value = "100"; render(k); }
     if (a.dataset.a === "mp4" && (!MG.on || OBSM() || CMPM())) openMp4(k);
     if (a.dataset.a === "png" && ALERTM()) { if (!MG.img) return; const I = alertInfo(), st = I && I.t ? new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(I.t).replace(/[^0-9]/g, "") : "now";
       const nm = `alerts_wa_${(I && I.title || "all").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}_${st}PT_${F[k].cv.width}x${F[k].cv.height}.png`;
@@ -1252,6 +1250,29 @@ const setPins = (p) => { try { localStorage.setItem(pinKey(), JSON.stringify(p))
 function frAt(k, x, y, zoom) {   // camera centred on map point (x, y) at this zoom, as a {dx, dy, zoom} framing
   const B = base(k), kk = B.k0 * zoom;
   return { dx: (B.cx - x) * kk, dy: (B.cy - y) * kk, zoom };
+}
+// t2827u: trackpad wheel / pinch on a frame pans or zooms only that frame. Without this, two-finger
+// scroll and pinch zoomed or scrolled the page, so the 16:9 and 9:16 views moved together.
+for (const k of ["v", "h"]) {
+  const f = F[k], cv = f.cv;
+  cv.addEventListener("wheel", (e) => {
+    if (CLEAN || REC.on || CMPM() || PASSM() || (!last && !WEBM() && !(MG.on && MG.img))) return;
+    e.preventDefault();
+    const fr = getFr(k), s = f.W / (cv.clientWidth || 1);
+    if (e.ctrlKey || e.metaKey) {
+      const z0 = OBSM() ? (fr.zoom || 1) : ALERTM() ? alertZ(fr.zoom || 1) : Math.max(1, fr.zoom || 1);
+      const zRaw = z0 * Math.exp(-e.deltaY * 0.01);
+      const z = OBSM() ? Math.min(2.5, Math.max(0.05, zRaw)) : ALERTM() ? alertZ(zRaw) : Math.min(2.5, Math.max(1, zRaw));
+      const b = cv.getBoundingClientRect(), ox = (e.clientX - b.left) * f.W / b.width, oy = (e.clientY - b.top) * f.H / b.height;
+      const r0 = crop(k, fr), mx = r0.cx + (ox - f.W / 2) / r0.kk, my = r0.cy + (oy - f.H / 2) / r0.kk;
+      const kk = base(k).k0 * z, fr2 = frAt(k, mx - (ox - f.W / 2) / kk, my - (oy - f.H / 2) / kk, z), r = crop(k, fr2);
+      fr2.dx = (r.bx - r.cx) * r.kk; fr2.dy = (r.by - r.cy) * r.kk; setFr(k, fr2); render(k); return;
+    }
+    fr.dx -= (e.deltaX || 0) * s; fr.dy -= (e.deltaY || 0) * s;
+    if (OBSM()) obsPan(k, fr);
+    else { const r = crop(k, fr); fr.dx = (r.bx - r.cx) * r.kk; fr.dy = (r.by - r.cy) * r.kk; }
+    setFr(k, fr); render(k);
+  }, { passive: false });
 }
 function drawPins(k, c, r) {
   const p = getPins(), f = F[k], pos = (q) => [f.W / 2 + (q.x - r.cx) * r.kk, f.H / 2 + (q.y - r.cy) * r.kk], R = k === "v" ? 30 : 26;

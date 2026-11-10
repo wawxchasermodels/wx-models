@@ -32,7 +32,10 @@ MODELS = {   # grid "lcc" = HRRR 3 km, "ll" = 0.25 deg global (lat 90 -> -90, lo
                    steps=list(range(1, 49)) + list(range(51, 85, 3)), keep=4, as_model="rrfs",
                    pole_longitude=67.0, pole_latitude=35.0, rlon0=299.0, rlat0=-36.9303, drot=0.1083),
     # NBM (NOAA National Blend, 2.5 km CONUS NDFD grid): 00/06/12/18Z, hourly to 36 h then 3-hourly to 168 h (stage 3, 10-30-26)
-    "nbm":  dict(grid="lcc", views=("puget", "wa", "wwa", "ewa", "passes", "newa", "lm", "pnwhr"), cycles=(0, 6, 12, 18), steps=list(range(1, 37)) + list(range(39, 169, 3)), keep=4,
+    # 11-10 (Benjamin t2825u): regular Pacific Northwest (pnw, "Pacific NW wide") and Pacific NW tight
+    # (pnwt) on the NBM CONUS grid, same cameras as the global models. Existing CONUS views stay.
+    # Published crop is kept unless WX_EXPAND_CROP=1 (adding these frames must not invalidate live runs).
+    "nbm":  dict(grid="lcc", views=("puget", "wa", "wwa", "ewa", "passes", "newa", "lm", "pnwhr", "pnwt", "pnw"), cycles=(0, 6, 12, 18), steps=list(range(1, 37)) + list(range(39, 169, 3)), keep=4,
                  lcc=dict(central_longitude=-95.0, central_latitude=25.0, standard_parallels=(25.0, 25.0)), radius=6371200.0),
     "gfs":  dict(grid="ll", views=GLOBAL_VIEWS, cycles=(0, 6, 12, 18), steps=list(range(3, 361, 3)), keep=3),
     "ifs":  dict(grid="ll", views=GLOBAL_VIEWS, cycles=(0, 6, 12, 18), steps=list(range(3, 145, 3)) + list(range(150, 361, 6)),
@@ -901,6 +904,11 @@ def static(m, out, views_only=None, x2_only=False):
     import house_style as HS, temp_maps as TM, menu_maps as M
     HS.use_for_plots(); extra_views(TM, ccrs)
     pc = ccrs.PlateCarree(); MD = MODELS[m]; vids = MD["views"]
+    only = tuple(v for v in os.environ.get("WX_VIEWS", "").split(",") if v)
+    if only:
+        missing = [v for v in only if v not in TM.VIEWS]
+        if missing: raise KeyError(f"unknown views {missing}")
+        vids = only
     la, lo, oro = model_grid(m); ny_, nx_ = la.shape
     if MD["grid"] == "lcc":
         rad = MD.get("radius", 6371229.0)
@@ -962,7 +970,15 @@ def static(m, out, views_only=None, x2_only=False):
     mp0 = f"{out}/manifest.json"
     if os.path.exists(mp0):   # keep the published crop when it is a superset (runs already in R2 stay valid)
         oc = json.load(open(mp0)).get("models", {}).get(m, {}).get("crop")
-        if oc: i0, i1, j0, j1 = min(i0, oc[0]), max(i1, oc[1]), min(j0, oc[2]), max(j1, oc[3]); print("crop kept/extended from", oc, "->", [i0, i1, j0, j1], flush=True)
+        if oc:
+            expanded = [min(i0, oc[0]), max(i1, oc[1]), min(j0, oc[2]), max(j1, oc[3])]
+            # Adding a wider camera (NBM pnw/pnwt) would otherwise grow the crop and break live run PNGs.
+            if expanded != list(oc) and not os.environ.get("WX_EXPAND_CROP"):
+                print("crop kept at published", oc, "(would expand to", expanded, "; set WX_EXPAND_CROP=1 to expand)", flush=True)
+                i0, i1, j0, j1 = oc
+            else:
+                i0, i1, j0, j1 = expanded
+                print("crop kept/extended from", oc, "->", [i0, i1, j0, j1], flush=True)
     os.makedirs(f"{out}/static", exist_ok=True)
     for vid, (fi, fj, ang) in luts.items():
         np.stack([fi - i0, fj - j0, ang], -1).astype("<f4").tofile(f"{out}/static/lut_{m}_{vid}.bin")
@@ -1018,7 +1034,8 @@ def static(m, out, views_only=None, x2_only=False):
             slots.append(slot); t.set_visible(False)
         lab_items = label_items(fig, ax)
         lp = write_town_labels(f"{out}/static/labels_{vid}.json", lab_items)
-        a_ = views[vid]["cut_abs"]; views[vid]["cut"] = [a_[0] - i0, a_[1] - i0, a_[2] - j0, a_[3] - j0]; del views[vid]["cut_abs"]
+        a_ = views[vid]["cut_abs"]; ch, cw = i1 - i0, j1 - j0
+        views[vid]["cut"] = [max(0, a_[0] - i0), min(ch, a_[1] - i0), max(0, a_[2] - j0), min(cw, a_[3] - j0)]; del views[vid]["cut_abs"]
         views[vid]["towns"] = slots
         if lp: views[vid]["labels"] = f"static/labels_{vid}.json"
         if not os.path.exists(f"{out}/static/towns_{vid}.png") or views_only: sizes[f"towns_{vid}"] = save(fig, f"{out}/static/towns_{vid}.png")
@@ -1610,9 +1627,23 @@ def static(m, out, views_only=None, x2_only=False):
     mp = f"{out}/manifest.json"; man = json.load(open(mp)) if os.path.exists(mp) else {}
     man.update(dpi=DPI, style=dict(BG=HS.BG, INK=HS.INK, MUTED=HS.MUTED, ACCENT=HS.ACCENT))
     MI = minfo(m)
-    man.setdefault("models", {})[m] = dict(name=MI["name"], site=MI["site"], res=MI["res"], grid=MD["grid"],
-                                          crop=[i0, i1, j0, j1], views=views, products=prods, clim=clim, **({"products_x": prods_x} if prods_x else {}))
-    man.setdefault("runs", {}).setdefault(m, [])
+    if os.environ.get("WX_MERGE_VIEWS") and m in man.get("models", {}):
+        old = man["models"][m]
+        for vid, V in views.items():
+            # pnw/pnwt share global base/town/label files; don't point NBM at a scratch labels_*.json
+            if vid in ("pnw", "pnwt") and "labels" in V:
+                V = dict(V); V.pop("labels", None)
+            old.setdefault("views", {})[vid] = V
+        for bag in ("products", "products_x"):
+            src = prods if bag == "products" else prods_x
+            for pid, P in src.items():
+                if pid in old.get(bag, {}) and P.get("keys"):
+                    old[bag][pid].setdefault("keys", {}).update(P["keys"])
+        print(f"{m} merged views {list(views)} into existing manifest, crop {old.get('crop')}", flush=True)
+    else:
+        man.setdefault("models", {})[m] = dict(name=MI["name"], site=MI["site"], res=MI["res"], grid=MD["grid"],
+                                              crop=[i0, i1, j0, j1], views=views, products=prods, clim=clim, **({"products_x": prods_x} if prods_x else {}))
+        man.setdefault("runs", {}).setdefault(m, [])
     json.dump(man, open(mp, "w"), indent=1, allow_nan=False)
     if MD["grid"] == "ll":   # 10-31: Studio-only "Washington (wide, for loops)" view on this crop (static/studio_views.json, not the manifest)
         import studio_views; studio_views.build([m], man, out)
