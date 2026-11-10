@@ -837,8 +837,8 @@ async function viewStatic(vid) {
   })();
   S.statics[sk] = p; return p;
 }
-const keyImg = {}; const keyURL = (pid, vid) => { const K = PRODS()[pid].keys, V = VIEWS()[vid] || {}; const k = (V.keys && V.keys[pid]) || K[VSRC(vid)] || K[V.keysFrom] || K.wa; return (k[0] === "@" ? k.slice(1) : DATA + k) + SV(); };   // Studio-only view: Washington key
-const getKey = (pid, vid) => { const u = keyURL(pid, vid); return keyImg[u] || (keyImg[u] = img(u)); };
+const keyImg = {}; const keyURL = (pid, vid) => { const K = (PRODS()[pid] || {}).keys || {}, V = VIEWS()[vid] || rrfsMenuViews()[vid] || {}; const k = (V.keys && V.keys[pid]) || K[VSRC(vid)] || K[V.keysFrom] || K.wa || K.pnw || K.pnwt || K.na; if (!k) return null; return (k[0] === "@" ? k.slice(1) : DATA + k) + SV(); };   // Coast on rrfsna has no wa key; fall back to a native NA key or skip
+const getKey = (pid, vid) => { const u = keyURL(pid, vid); if (!u) return Promise.resolve(null); return keyImg[u] || (keyImg[u] = img(u)); };
 
 // ---------------------------------------------------------------- data images
 function fieldURL(run, name, f) {   // packed runs: several fields share one RGB PNG, one channel each (run.json steps[].packs)
@@ -1234,7 +1234,7 @@ async function render(lite) {
   const townLive = !!(st.labels && st.labels.length);
   const L2 = { base: fitLayer(layer(st.base, st.baseU, rs), st.baseU, rs, LW, LH),
     towns: townLive ? null : fitLayer(layer(st.towns, st.townsU, rs), st.townsU, rs, LW, LH),
-    key: keyLive ? null : fitLayer(layer(key, kU, rs), kU, rs, LW, LH) };
+    key: (keyLive || !key || !kU) ? null : fitLayer(layer(key, kU, rs), kU, rs, LW, LH) };
   window.__layers = Object.fromEntries(Object.entries(L2).map(([k, v]) => [k, v ? (v.naturalWidth || v.width) : 0]));
   ctx.drawImage(L2.base, 0, 0, LW, LH);
   // 3. product lines
