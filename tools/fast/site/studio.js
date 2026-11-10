@@ -1206,8 +1206,8 @@ for (const k of ["v", "h"]) {
   }, true);
   f.zoom.oninput = () => { const fr = getFr(k); if (CMPM()) { f.zoom.value = "100"; return; } if (OBSM()) obsZoom(k, fr, f.zoom.value / 100); else if (ALERTM()) { fr.zoom = alertZ(f.zoom.value / 100); } else { fr.zoom = Math.max(1, f.zoom.value / 100); } setFr(k, fr); render(k); };
   cv.parentNode.querySelector(".shd").addEventListener("click", async (e) => {
-    const a = e.target.closest("button[data-a]"); if (!a || (!last && !WEBM() && !CMPM() && !WAFCM())) return;
-    if (a.dataset.a === "reset") { setFr(k, { dx: 0, dy: 0, zoom: 1 }); if (f.zoom) f.zoom.value = "100"; render(k); }
+    const a = e.target.closest("button[data-a]"); if (!a || (!last && !WEBM() && !CMPM() && !WAFCM() && !OBSM())) return;
+    if (a.dataset.a === "reset") { if (OBSM() && typeof Obs !== "undefined" && Obs.resetView) Obs.resetView(); setFr(k, { dx: 0, dy: 0, zoom: 1 }); if (f.zoom) f.zoom.value = "100"; render(k); if (OBSM()) render(k === "h" ? "v" : "h"); }
     if (a.dataset.a === "mp4" && (!MG.on || OBSM() || CMPM())) openMp4(k);
     if (a.dataset.a === "png" && ALERTM()) { if (!MG.img) return; const I = alertInfo(), st = I && I.t ? new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(I.t).replace(/[^0-9]/g, "") : "now";
       const nm = `alerts_wa_${(I && I.title || "all").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}_${st}PT_${F[k].cv.width}x${F[k].cv.height}.png`;
@@ -2169,7 +2169,7 @@ if (!CLEAN) {   // Studio: Map | Meteogram switch (first in the menu bar) + the 
       if (!ob_) { ob_ = document.createElement("div"); ob_.id = "obsp"; ob_.innerHTML = `<div id="obs-root"></div>`; pnl.appendChild(ob_); }
       obsLoad = obsLoad || new Promise((ok, bad) => {
         const l = document.createElement("link"); l.rel = "stylesheet"; l.href = "obs/obs.css"; document.head.appendChild(l);
-        const sc = document.createElement("script"); sc.src = "obs/obs.js"; sc.onerror = bad; document.body.appendChild(sc);
+        const sc = document.createElement("script"); sc.src = "obs/obs.js?v=20261110full1"; sc.onerror = bad; document.body.appendChild(sc);
         // 11-03: radar + GOES-West layers (obs/obsimg.js, off by default); the obs map still opens if it fails to load
         sc.onload = () => { const s2 = document.createElement("script"); s2.src = "obs/obsimg.js?v=20261110satpair1"; s2.onload = ok; s2.onerror = ok; document.body.appendChild(s2); }; });
       MG.msg = "Loading observations\u2026"; osig = "";

@@ -315,7 +315,17 @@ const Obs = (() => {
   function hash(str) { let h = 2166136261; for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0) / 4294967296; }
 
   /* ---- view ---- */
-  function setView(id) { const v = VIEWS.find((x) => x.id === id) || VIEWS[0]; S.view = v.id; S.pending = v; if (S.w) applyView(); }
+  const FULL_VIEW_ID = "pnw";   // default / full satellite framing (Pacific NW)
+  function setView(id) { const v = VIEWS.find((x) => x.id === id) || VIEWS[0]; S.view = v.id; S.pending = v; if (S.w) applyView(); if (S.inited) renderViews(); }
+  function persistView() {
+    try {
+      const o = JSON.parse(sessionStorage.getItem("oiState") || "{}");
+      o.view = S.view; o.pv = S.view || o.pv || FULL_VIEW_ID; o.cx = S.cx; o.cy = S.cy; o.k = S.k;
+      sessionStorage.setItem("oiState", JSON.stringify(o));
+    } catch (e) { /* private mode */ }
+  }
+  function goFullView() { setView(FULL_VIEW_ID); hideTip(); if (S.inited) { draw(); renderViews(); writeHashSafe(); } }
+  function resetView() { goFullView(); }
   function applyView() {
     const v = S.pending || VIEWS.find((x) => x.id === S.view) || VIEWS[0]; S.pending = null;
     setProj(v.proj);
@@ -772,8 +782,12 @@ const Obs = (() => {
     $("obs-refresh").onclick = () => load();
     $("dl-obs").onclick = (e) => { e.preventDefault(); download(); };
     const box = $("oviews");
+    const full = document.createElement("button"); full.type = "button"; full.dataset.v = FULL_VIEW_ID; full.dataset.full = "1";
+    full.textContent = "Full view"; full.title = "Default Pacific Northwest view";
+    full.onclick = () => goFullView(); box.append(full);
     for (const v of VIEWS) { const b = document.createElement("button"); b.type = "button"; b.dataset.v = v.id; b.textContent = v.label;
-      b.onclick = () => { S.view = v.id; S.pending = v; applyView(); hideTip(); draw(); renderViews(); writeHashSafe(); }; box.append(b); }
+      b.onclick = () => { if (S.view === v.id) { goFullView(); return; }
+        S.view = v.id; S.pending = v; applyView(); hideTip(); draw(); renderViews(); writeHashSafe(); }; box.append(b); }
     const lb = $("olayers");
     for (const l of LAYERS) {
       const b = document.createElement("button"); b.type = "button"; b.dataset.l = l.id; b.title = LAYER_HELP[l.id];
@@ -789,7 +803,11 @@ const Obs = (() => {
     document.addEventListener("visibilitychange", () => { if (!document.hidden && S.shown && Date.now() - S.loaded > REFRESH_MS) load(); });
   }
   function renderViews() {
-    for (const b of $("oviews").querySelectorAll("button")) b.setAttribute("aria-pressed", String(b.dataset.v === S.view));
+    const onFull = S.view === FULL_VIEW_ID;
+    for (const b of $("oviews").querySelectorAll("button")) {
+      const pressed = b.dataset.full ? onFull : (!b.dataset.full && b.dataset.v === S.view && !onFull);
+      b.setAttribute("aria-pressed", String(pressed));
+    }
     for (const b of $("olayers").querySelectorAll("button")) b.setAttribute("aria-pressed", String(S.on.has(b.dataset.l)));
   }
   const LAYER_HELP = {
@@ -810,7 +828,7 @@ const Obs = (() => {
     draw();
   }
   const layers = () => [...S.on];
-  function writeHashSafe() { renderViews(); if (S.onChange) S.onChange(S.view); }
+  function writeHashSafe() { renderViews(); persistView(); if (S.onChange) S.onChange(S.view); }
 
   // 11-03 (Benjamin t2242u): the saved image is the view you are looking at (any zoom / pan; S.k, S.cx, S.cy are only read), redrawn
   // once at full resolution (up to 4x the CSS size; at most 40 MP desktop / 16 MP phones), credit strip wrapped under it; then back.
@@ -889,5 +907,5 @@ const Obs = (() => {
   // 11-03 hooks for add-on layers: hook("under", fn(g, state)) draws in map km space; hook("credit", fn() -> text) adds to the
   // downloaded image's credit strip; hook("mount", fn(rootEl)) runs once the markup exists (at once if already mounted)
   function hook(kind, fn) { S.hooks[kind].push(fn); if (kind === "mount" && S.inited && S.root) fn(S.root); }
-  return { mount, show, hide, setView, viewId, load, setLayers, layers, hook, redraw: req, drawNow: draw, _state: S, _testBarb };
+  return { mount, show, hide, setView, resetView, viewId, load, setLayers, layers, hook, redraw: req, drawNow: draw, _state: S, _testBarb };
 })();
