@@ -397,6 +397,7 @@ async function boot() {
     runMenu(o2, a2); loadNote();
   }, 120e3);
   setLists();
+  if (!Q.get("view") && alignRrfsViewToRun()) setLists();
   if (await ensureRrfsGrid(S.view)) setLists();
   if (vKeep != null && !(S.runs[S.run] && S.runs[S.run].steps || []).some(x => Math.abs(Date.parse(x.valid) - vKeep) <= 3 * 3600e3)) vKeep = null;
   const f0 = vKeep != null ? null : Q.get("f"), steps = (S.runs[S.run] && S.runs[S.run].steps) || [], found = f0 ? steps.findIndex(s => s.f == +f0) : -1;
@@ -411,7 +412,7 @@ async function boot() {
       const got = await loadListed(cands), R_ = got.data;
       if (!R_ || !R_.steps || !R_.steps.length) throw new Error(next + ": run has no hours");
       S.run = got.run; setLists();
-      try { if (await ensureRrfsGrid(S.view)) setLists(); } catch (err) { showErr(err); return; }
+      if (alignRrfsViewToRun()) setLists();
       const st = S.runs[S.run].steps; let b = 0; st.forEach((x, k) => { if (Math.abs(Date.parse(x.valid) - vt) < Math.abs(Date.parse(st[b].valid) - vt)) b = k; });
       S.i = b; $("step").value = b; memUI(); draw(); loadNote();
       if (got.run !== next) showErr(new Error(next + " is listed but its data is missing. Showing " + got.run + "."));
@@ -512,6 +513,7 @@ async function onCompareMsg(e) {
   const P = PRODS(), has = new Set(S.runs[S.run].fields);
   if (d.prod && P[d.prod] && P[d.prod].fields.every(x => has.has(x))) { S.prod = d.prod; S.tab = null; }
   if (d.view) { await ensureRrfsGrid(d.view); if (rrfsMenuViews()[d.view]) S.view = d.view; }
+  else if (alignRrfsViewToRun()) { /* keep the compare frame on the run it was given */ }
   setLists();
   const lead = typeof d.i === "number";   // shared slider (compare page): this frame leads, so its new state is passed on to the other map
   if (lead) { S.i = Math.max(0, Math.min(S.runs[S.run].steps.length - 1, d.i)); $("step").value = S.i; d.valid = null; }
@@ -645,6 +647,17 @@ async function ensureRrfsGrid(vid) {
     if ($("step")) $("step").value = b;
   }
   return true;
+}
+function alignRrfsViewToRun() {
+  // Honor an explicit run pick: if the current view is not on that grid, fall
+  // back to a native camera instead of bouncing the Runs menu to the mate.
+  if (!rrfsMate((S.run || "").split("/")[0])) return false;
+  if ((VIEWS() || {})[S.view]) return false;
+  const native = VIEWS() || {}, m = (S.run || "").split("/")[0];
+  const next = m === "rrfsna" ? (native.pnw || native.na || Object.keys(native)[0])
+                              : (native.wa || Object.keys(native)[0]);
+  if (!next || next === S.view) return false;
+  S.view = next; return true;
 }
 // Product tabs (Benjamin 10-30 8:04 PM: "upper air tab, surface tab, precipitation tab, snow tab", Pivotal Weather style).
 // The Product menu lists only the open tab's products, in the order below (Pivotal: winds by level, 250 -> 850 mb);
