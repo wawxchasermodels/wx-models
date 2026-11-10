@@ -685,6 +685,7 @@ const Alerts = (() => {
       try { S.roads = (await loadJSON("alert/roads_wa.json")).roads || []; }
       catch (e) { S.roads = []; }
     }
+    if (S.roads && S.roads.length) await preloadShields();
     req();
     if (!S.loaded || Date.now() - S.loaded > REFRESH_MS) loadAlerts();
     else fitToSelection();
@@ -967,8 +968,68 @@ const Alerts = (() => {
       return z >= 1.75;
     });
   }
-  function layoutRoads(cam, towns, measure, priorShields, addNew) {
+  // Page-graphic shields (t2844u): official MUTCD I/US SVGs + M1-5 state markers,
+  // rendered by mapgen/render_alert_map.py (inner 96 I/US, 81 state, plus halo/rim).
+  const SHIELD_INNER = { interstate: 96, us: 96, state: 81 };
+  const SHIELD_VER = "20261110sh1";
+  function shieldKey(cls, label) {
+    const raw = String(label || "");
+    if (cls === "interstate") {
+      const n = raw.replace(/^I-?/i, "");
+      return /^\d{1,3}$/.test(n) ? "I-" + n : null;
+    }
+    if (cls === "us") {
+      const n = raw.replace(/^US\s*/i, "");
+      return /^\d{1,3}$/.test(n) ? "US-" + n : null;
+    }
+    if (cls === "state") return /^\d{1,3}$/.test(raw) ? "S-" + raw : null;
+    return null;
+  }
+  function shieldBox(cls, label, frameMax) {
+    const key = shieldKey(cls, label);
+    const img = key && S.shieldImgs && S.shieldImgs[key];
+    if (!img || !img.naturalWidth) return null;
+    const u = (frameMax > 0 ? frameMax : 1920) / CSS;
+    // Inner heights match the graphic ratio (I/US 64, state 54) at Studio frame size.
+    const inner = (cls === "state" ? 22 : 26) * u;
+    const scale = inner / (SHIELD_INNER[cls] || 96);
+    return { key, img, w: img.naturalWidth * scale, h: img.naturalHeight * scale };
+  }
+  function preloadShields() {
+    if (S.shieldsPromise) return S.shieldsPromise;
+    S.shieldImgs = S.shieldImgs || {};
+    const keys = new Set();
+    for (const r of S.roads || []) {
+      const k = shieldKey(r.cls, r.ref);
+      if (k) keys.add(k);
+    }
+    const list = [...keys];
+    if (!list.length) { S.shieldsReady = true; S.shieldsPromise = Promise.resolve(); return S.shieldsPromise; }
+    S.shieldsPromise = Promise.all(list.map((k) => new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => { S.shieldImgs[k] = img; resolve(k); };
+      img.onerror = () => { S.shieldImgs[k] = null; resolve(k); };
+      img.src = "alert/shields/" + k + ".png?v=" + SHIELD_VER;
+    }))).then(() => { S.shieldsReady = true; });
+    return S.shieldsPromise;
+  }
+  function strokeRoad(ctx, xy, cam, width, style) {
+    ctx.beginPath();
+    let on = false;
+    for (const [x, y] of xy) {
+      const vis = x >= -80 && y >= -80 && x <= cam.W + 80 && y <= cam.H + 80;
+      if (!vis) { on = false; continue; }
+      if (!on) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      on = true;
+    }
+    ctx.lineWidth = width;
+    ctx.strokeStyle = style;
+    ctx.stroke();
+  }
+  function layoutRoads(cam, towns, frameMaxOrMeasure, priorShields, addNew) {
     const project = frameProject(cam);
+    const frameMax = (typeof frameMaxOrMeasure === "number" && frameMaxOrMeasure > 0)
+      ? frameMaxOrMeasure : Math.max(cam.W || 0, cam.H || 0);
     const roads = roadsForZoom(cam.zoom);
     const blocks = [];
     if (towns && towns.items) for (const it of towns.items) { blocks.push(it.dotBox); if (it.b) blocks.push(it.b); }
@@ -980,29 +1041,33 @@ const Alerts = (() => {
     const seenRef = new Set();
     for (const p of priorShields || []) {
       if (!p || p.label == null) continue;
+      const box = shieldBox(p.cls, p.label, frameMax);
+      if (!box) continue;
       const [x, y] = project(p.lon, p.lat);
-      const w = p.w || 22, h = p.h || 18;
-      const b = [x - w / 2 - 2, y - h / 2 - 2, x + w / 2 + 2, y + h / 2 + 2];
+      const w = box.w, h = box.h;
+      const b = [x - w / 2, y - h / 2, x + w / 2, y + h / 2];
       if (x < -40 || y < -40 || x > cam.W + 40 || y > cam.H + 40) continue;
       if (hit(b) || shields.some((s) => townOverlaps(b, s.b))) continue;
-      const sh = { x, y, b, label: p.label, cls: p.cls, lon: p.lon, lat: p.lat, w, h };
+      const sh = { x, y, b, label: p.label, cls: p.cls, lon: p.lon, lat: p.lat, w, h, img: box.img };
       shields.push(sh); blocks.push(b); seenRef.add(p.cls + "|" + p.label);
     }
     if (addNew !== false) for (const cls of ["interstate", "us", "state"]) for (const d of lines) if (d.r.cls === cls) {
       const key = cls + "|" + d.r.ref;
       if (seenRef.has(key)) continue;
+      const box = shieldBox(cls, d.r.ref, frameMax);
+      if (!box) continue;
       const inside = d.xy.filter(([x, y]) => x >= 8 && y >= 8 && x <= cam.W - 8 && y <= cam.H - 8);
       if (inside.length < 2) continue;
       const label = d.r.ref;
-      const tw = measure ? measure(label) : 13 * 0.62 * String(label).length;
-      const w = Math.max(22, tw + 10), h = 18;
-      const spots = [0.5, 0.32, 0.68].map((t) => inside[Math.min(inside.length - 1, Math.round((inside.length - 1) * t))]);
+      const w = box.w, h = box.h;
+      // Same along-line candidates the page graphics try (0.5, 0.35, 0.65, ...).
+      const spots = [0.5, 0.35, 0.65, 0.25, 0.75, 0.15, 0.85].map((t) => inside[Math.min(inside.length - 1, Math.round((inside.length - 1) * t))]);
       for (const [x, y] of spots) {
-        const b = [x - w / 2 - 2, y - h / 2 - 2, x + w / 2 + 2, y + h / 2 + 2];
+        const b = [x - w / 2, y - h / 2, x + w / 2, y + h / 2];
         if (b[0] < 2 || b[1] < 2 || b[2] > cam.W - 2 || b[3] > cam.H - 2) continue;
         if (hit(b) || shields.some((s) => townOverlaps(b, s.b))) continue;
         const [lon, lat] = frameUnproject(cam, x, y);
-        const sh = { x, y, b, label, cls, lon, lat, w, h };
+        const sh = { x, y, b, label, cls, lon, lat, w, h, img: box.img };
         shields.push(sh); blocks.push(b); seenRef.add(key); break;
       }
     }
@@ -1010,36 +1075,22 @@ const Alerts = (() => {
   }
   function paintFrameRoads(ctx, cam, towns, priorShields, addNew) {
     if (!ctx || !cam) return null;
-    const measure = (label) => { ctx.font = "700 13px Montserrat, system-ui, sans-serif"; return ctx.measureText ? ctx.measureText(label).width : 13 * 0.62 * label.length; };
-    const laid = layoutRoads(cam, towns, measure, priorShields, addNew);
+    const frameMax = Math.max(cam.W, cam.H);
+    const laid = layoutRoads(cam, towns, frameMax, priorShields, addNew);
     ctx.save();
     ctx.lineJoin = "round"; ctx.lineCap = "round";
+    // Match page-graphic roads: dark casing + light core (I 196,200,210 / others 168,172,182).
     for (const d of laid.lines) {
-      ctx.beginPath();
-      let on = false;
-      for (const [x, y] of d.xy) {
-        const vis = x >= -80 && y >= -80 && x <= cam.W + 80 && y <= cam.H + 80;
-        if (!vis) { on = false; continue; }
-        if (!on) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-        on = true;
-      }
-      ctx.lineWidth = d.r.cls === "interstate" ? 3.2 : d.r.cls === "us" ? 2.2 : 1.5;
-      ctx.strokeStyle = d.r.cls === "interstate" ? "rgba(214,224,238,0.92)" : "rgba(168,184,204,0.8)";
-      ctx.stroke();
+      const coreW = d.r.cls === "interstate" ? 3.4 : d.r.cls === "us" ? 2.45 : 1.85;
+      strokeRoad(ctx, d.xy, cam, coreW + 2.4, "rgba(18,20,26,0.92)");
     }
-    ctx.font = "700 13px Montserrat, system-ui, sans-serif";
-    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    for (const d of laid.lines) {
+      const coreW = d.r.cls === "interstate" ? 3.4 : d.r.cls === "us" ? 2.45 : 1.85;
+      const col = d.r.cls === "interstate" ? "rgb(196,200,210)" : "rgb(168,172,182)";
+      strokeRoad(ctx, d.xy, cam, coreW, col);
+    }
     for (const s of laid.shields) {
-      const w = s.w || (s.b[2] - s.b[0] - 4), h = s.h || (s.b[3] - s.b[1] - 4);
-      ctx.beginPath();
-      ctx.fillStyle = s.cls === "interstate" ? "#1c3e78" : "#f3f0e8";
-      ctx.strokeStyle = s.cls === "interstate" ? "#e8eef8" : "#1c2430";
-      ctx.lineWidth = 1.25;
-      if (ctx.roundRect) ctx.roundRect(s.x - w / 2, s.y - h / 2, w, h, 4);
-      else ctx.rect(s.x - w / 2, s.y - h / 2, w, h);
-      ctx.fill(); ctx.stroke();
-      ctx.fillStyle = s.cls === "interstate" ? "#f4f7fb" : "#1c2430";
-      ctx.fillText(s.label, s.x, s.y + 0.5);
+      if (s.img) ctx.drawImage(s.img, s.x - s.w / 2, s.y - s.h / 2, s.w, s.h);
     }
     ctx.restore();
     return laid;

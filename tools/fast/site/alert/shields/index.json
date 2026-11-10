@@ -1,0 +1,370 @@
+{
+  "inner": {
+    "interstate": 96,
+    "us": 96,
+    "state": 81
+  },
+  "files": {
+    "I-5": {
+      "file": "I-5.png",
+      "w": 112,
+      "h": 112,
+      "cls": "interstate"
+    },
+    "I-82": {
+      "file": "I-82.png",
+      "w": 112,
+      "h": 112,
+      "cls": "interstate"
+    },
+    "I-84": {
+      "file": "I-84.png",
+      "w": 112,
+      "h": 112,
+      "cls": "interstate"
+    },
+    "I-90": {
+      "file": "I-90.png",
+      "w": 112,
+      "h": 112,
+      "cls": "interstate"
+    },
+    "I-182": {
+      "file": "I-182.png",
+      "w": 136,
+      "h": 112,
+      "cls": "interstate"
+    },
+    "I-205": {
+      "file": "I-205.png",
+      "w": 136,
+      "h": 112,
+      "cls": "interstate"
+    },
+    "I-405": {
+      "file": "I-405.png",
+      "w": 136,
+      "h": 112,
+      "cls": "interstate"
+    },
+    "I-705": {
+      "file": "I-705.png",
+      "w": 136,
+      "h": 112,
+      "cls": "interstate"
+    },
+    "US-2": {
+      "file": "US-2.png",
+      "w": 112,
+      "h": 112,
+      "cls": "us"
+    },
+    "US-12": {
+      "file": "US-12.png",
+      "w": 112,
+      "h": 112,
+      "cls": "us"
+    },
+    "US-26": {
+      "file": "US-26.png",
+      "w": 112,
+      "h": 112,
+      "cls": "us"
+    },
+    "US-30": {
+      "file": "US-30.png",
+      "w": 112,
+      "h": 112,
+      "cls": "us"
+    },
+    "US-95": {
+      "file": "US-95.png",
+      "w": 112,
+      "h": 112,
+      "cls": "us"
+    },
+    "US-97": {
+      "file": "US-97.png",
+      "w": 112,
+      "h": 112,
+      "cls": "us"
+    },
+    "US-101": {
+      "file": "US-101.png",
+      "w": 136,
+      "h": 112,
+      "cls": "us"
+    },
+    "US-195": {
+      "file": "US-195.png",
+      "w": 136,
+      "h": 112,
+      "cls": "us"
+    },
+    "US-197": {
+      "file": "US-197.png",
+      "w": 136,
+      "h": 112,
+      "cls": "us"
+    },
+    "US-395": {
+      "file": "US-395.png",
+      "w": 136,
+      "h": 112,
+      "cls": "us"
+    },
+    "US-730": {
+      "file": "US-730.png",
+      "w": 136,
+      "h": 112,
+      "cls": "us"
+    },
+    "S-1": {
+      "file": "S-1.png",
+      "w": 93,
+      "h": 93,
+      "cls": "state"
+    },
+    "S-3": {
+      "file": "S-3.png",
+      "w": 93,
+      "h": 93,
+      "cls": "state"
+    },
+    "S-4": {
+      "file": "S-4.png",
+      "w": 93,
+      "h": 93,
+      "cls": "state"
+    },
+    "S-6": {
+      "file": "S-6.png",
+      "w": 93,
+      "h": 93,
+      "cls": "state"
+    },
+    "S-7": {
+      "file": "S-7.png",
+      "w": 93,
+      "h": 93,
+      "cls": "state"
+    },
+    "S-8": {
+      "file": "S-8.png",
+      "w": 93,
+      "h": 93,
+      "cls": "state"
+    },
+    "S-9": {
+      "file": "S-9.png",
+      "w": 93,
+      "h": 93,
+      "cls": "state"
+    },
+    "S-11": {
+      "file": "S-11.png",
+      "w": 93,
+      "h": 93,
+      "cls": "state"
+    },
+    "S-13": {
+      "file": "S-13.png",
+      "w": 93,
+      "h": 93,
+      "cls": "state"
+    },
+    "S-14": {
+      "file": "S-14.png",
+      "w": 93,
+      "h": 93,
+      "cls": "state"
+    },
+    "S-16": {
+      "file": "S-16.png",
+      "w": 93,
+      "h": 93,
+      "cls": "state"
+    },
+    "S-17": {
+      "file": "S-17.png",
+      "w": 93,
+      "h": 93,
+      "cls": "state"
+    },
+    "S-18": {
+      "file": "S-18.png",
+      "w": 93,
+      "h": 93,
+      "cls": "state"
+    },
+    "S-19": {
+      "file": "S-19.png",
+      "w": 93,
+      "h": 93,
+      "cls": "state"
+    },
+    "S-20": {
+      "file": "S-20.png",
+      "w": 93,
+      "h": 93,
+      "cls": "state"
+    },
+    "S-21": {
+      "file": "S-21.png",
+      "w": 93,
+      "h": 93,
+      "cls": "state"
+    },
+    "S-31": {
+      "file": "S-31.png",
+      "w": 93,
+      "h": 93,
+      "cls": "state"
+    },
+    "S-33": {
+      "file": "S-33.png",
+      "w": 93,
+      "h": 93,
+      "cls": "state"
+    },
+    "S-37": {
+      "file": "S-37.png",
+      "w": 93,
+      "h": 93,
+      "cls": "state"
+    },
+    "S-91": {
+      "file": "S-91.png",
+      "w": 93,
+      "h": 93,
+      "cls": "state"
+    },
+    "S-99": {
+      "file": "S-99.png",
+      "w": 93,
+      "h": 93,
+      "cls": "state"
+    },
+    "S-123": {
+      "file": "S-123.png",
+      "w": 117,
+      "h": 93,
+      "cls": "state"
+    },
+    "S-125": {
+      "file": "S-125.png",
+      "w": 117,
+      "h": 93,
+      "cls": "state"
+    },
+    "S-127": {
+      "file": "S-127.png",
+      "w": 117,
+      "h": 93,
+      "cls": "state"
+    },
+    "S-167": {
+      "file": "S-167.png",
+      "w": 117,
+      "h": 93,
+      "cls": "state"
+    },
+    "S-169": {
+      "file": "S-169.png",
+      "w": 117,
+      "h": 93,
+      "cls": "state"
+    },
+    "S-212": {
+      "file": "S-212.png",
+      "w": 117,
+      "h": 93,
+      "cls": "state"
+    },
+    "S-213": {
+      "file": "S-213.png",
+      "w": 117,
+      "h": 93,
+      "cls": "state"
+    },
+    "S-217": {
+      "file": "S-217.png",
+      "w": 117,
+      "h": 93,
+      "cls": "state"
+    },
+    "S-224": {
+      "file": "S-224.png",
+      "w": 117,
+      "h": 93,
+      "cls": "state"
+    },
+    "S-401": {
+      "file": "S-401.png",
+      "w": 117,
+      "h": 93,
+      "cls": "state"
+    },
+    "S-410": {
+      "file": "S-410.png",
+      "w": 117,
+      "h": 93,
+      "cls": "state"
+    },
+    "S-432": {
+      "file": "S-432.png",
+      "w": 117,
+      "h": 93,
+      "cls": "state"
+    },
+    "S-509": {
+      "file": "S-509.png",
+      "w": 117,
+      "h": 93,
+      "cls": "state"
+    },
+    "S-512": {
+      "file": "S-512.png",
+      "w": 117,
+      "h": 93,
+      "cls": "state"
+    },
+    "S-516": {
+      "file": "S-516.png",
+      "w": 117,
+      "h": 93,
+      "cls": "state"
+    },
+    "S-518": {
+      "file": "S-518.png",
+      "w": 117,
+      "h": 93,
+      "cls": "state"
+    },
+    "S-520": {
+      "file": "S-520.png",
+      "w": 117,
+      "h": 93,
+      "cls": "state"
+    },
+    "S-522": {
+      "file": "S-522.png",
+      "w": 117,
+      "h": 93,
+      "cls": "state"
+    },
+    "S-539": {
+      "file": "S-539.png",
+      "w": 117,
+      "h": 93,
+      "cls": "state"
+    },
+    "S-970": {
+      "file": "S-970.png",
+      "w": 117,
+      "h": 93,
+      "cls": "state"
+    }
+  },
+  "missing": []
+}

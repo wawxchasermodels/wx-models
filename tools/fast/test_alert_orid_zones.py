@@ -77,7 +77,7 @@ def main():
         return fail("basemap context missing a Montana state outline")
 
     studio = STUDIO.read_text()
-    if "alert/alert.js?v=20261109cnty" not in studio:
+    if "alert/alert.js?v=20261110sh1" not in studio:
         return fail("studio.js must load the new alert.js token")
     if "const CHUNK = 40" not in js:
         return fail("alert.js PZZ fetch must use a chunk large enough for the 24 marine zones")
