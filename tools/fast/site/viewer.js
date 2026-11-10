@@ -606,7 +606,7 @@ const PRODS = () => allProds(MD()), VIEWS = () => MD().views;
 // use this same viewer, so they follow the swap too.
 // Pacific NW high-res (and Studio Washington wide, which shares those files) stay
 // on 3 km inland and fill the blank northwest / Pacific sliver from 13 km RRFS NA.
-const RRFS_WIDE_VIEWS = new Set(["na", "pnw", "pnwt", "coast"]);
+const RRFS_WIDE_VIEWS = new Set(["na", "pnw", "wc", "pnwt", "coast"]);
 function rrfsMate(m) { return m === "rrfs" ? "rrfsna" : m === "rrfsna" ? "rrfs" : null; }
 function rrfsMenuViews() {
   const V = (VIEWS() || {});
@@ -618,7 +618,7 @@ function rrfsMenuViews() {
     extra[id] = Object.assign({}, v, { label: v.label || id });
   }
   if (!Object.keys(extra).length) return V;
-  const order = ["na", "pnw", "pnwt", "puget", "wa", "wwa", "ewa", "passes", "newa", "lm", "bc", "pnwhr", "wawide", "coast"];
+  const order = ["na", "pnw", "wc", "pnwt", "puget", "wa", "wwa", "ewa", "passes", "newa", "lm", "bc", "pnwhr", "wawide", "coast"];
   const merged = {}, seen = new Set();
   for (const id of [...order, ...Object.keys(V), ...Object.keys(extra)]) {
     if (seen.has(id)) continue;
@@ -1475,7 +1475,7 @@ const COAST_VIEWS = {   // order = priority; buoys: "first" = WA buoys placed be
         order: ["Tatoosh Island", "La Push", "Ocean Shores", "Westport", "Long Beach", "Admiralty Inlet", "Port Angeles", "Smith Island", "Birch Bay",
                 "Elliott Bay", "Possession Sound", "Commencement Bay", "Cannon Beach"] },
   pnwt: { style: "region", own: true, re: [], add: ["Ocean Shores", "Westport", "La Push", "Long Beach", "Tatoosh Island"], buoys: "first", big: ["Vancouver"], plainLast: true },   // t2008u: water names (name only) placed last, regular size   // Tacoma's name covered buoy 46041
-  wc: { style: "region", re: [], add: ["Shore Acres", "San Francisco", "Los Angeles", "San Diego", "Monterey", "Eureka", "Crescent City", "Newport",
+  wc: { style: "region", own: true, re: [], add: ["Shore Acres", "San Francisco", "Los Angeles", "San Diego", "Monterey", "Eureka", "Crescent City", "Newport",
         "Santa Barbara", "Half Moon Bay", "Santa Cruz", "Morro Bay", "Fort Bragg", "Bodega Bay", "Cape Mendocino", "Malibu", "Westport", "Tatoosh Island",
         "Coos Bay", "Cannon Beach", "Long Beach", "Ocean Shores", "La Push"], buoys: "after", side: "r" },
   pnw: { style: "region", re: [], add: ["Ocean Shores", "Long Beach", "La Push", "Westport", "Tatoosh Island"], buoys: "after", side: "r" },
