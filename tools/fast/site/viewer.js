@@ -261,6 +261,7 @@ const WAWIDE_PASSES_PNG = "@slayers/static/towns_wawide_p1.png";
 // wide view (studio_views wawide_small_towns.py: towns_wawide_s2.png + its number slots, shipped with the site); wave maps' coast labels too
 // 11-04 (t2314u "yes rebuild those too"): HRRR / RRFS / NBM wide view (pnwhr) too: wawide_s2.json models.{hrrr,rrfs,nbm} = {towns, towns_png}
 let WAWIDE_S2 = null; const WAWIDE_FS = 0.83;
+let TOWN_AIRPORTS = {};
 const PNWT_FS = 0.83;   // Pacific NW tight only: town names + numbers ~17% smaller (still crisp canvas text)
 const PNWHR_FS = 0.78;  // Pacific NW (high-res): town names + numbers ~22% smaller (crisp canvas text; collision unchanged)
 function townFs(vid) {
@@ -329,12 +330,14 @@ async function boot() {
   // 10-29: manifest, fonts and the shown run's run.json in parallel; other runs load when picked
   PV = await fetch("pdata/manifest_pv.json", { cache: "no-cache" }).then(r => r.ok ? r.json() : null).catch(() => null);
   if (PV) PV.re = new RegExp(`^(runs/(${Object.keys(PV.models).join("|")})/|static/(x2/)?(lut|key)_(${Object.keys(PV.models).join("|")})_)`);
-  const [man, sv, vf, wv] = await Promise.all([readJSON(DATA + "manifest.json", { cache: "no-cache" }).then(pvMerge),
+  const [man, sv, vf, wv, ap] = await Promise.all([readJSON(DATA + "manifest.json", { cache: "no-cache" }).then(pvMerge),
                                    fetch(DATA + "static/studio_views.json", { cache: "no-cache" }).then(r => r.ok ? r.json() : null, () => null),
                                    fetch(DATA + "static/view_fixes.json", { cache: "no-cache" }).then(r => r.ok ? r.json() : null, () => null),
                                    fetch(DATA + "static/wave_views.json", { cache: "no-cache" }).then(r => r.ok ? r.json() : null, () => null),
+                                   fetch("town_airports.json", { cache: "no-cache" }).then(r => r.ok ? r.json() : null, () => null),
                                    document.fonts.load("800 20px Montserrat"), document.fonts.load("500 12px Montserrat"),
                                    Q.get("studio") ? fetch("slayers/static/wawide_s2.json", { cache: "no-cache" }).then(r => r.ok ? r.json() : null, () => null).then(j => { WAWIDE_S2 = j; }) : null]);
+  if (ap && ap.towns) TOWN_AIRPORTS = ap.towns;
   if (PV && PV.studio && sv) Object.assign(sv.models || (sv.models = {}), PV.studio);   // 11-03 preview supplement: Studio wide view
   S.man = addStudioViews(waveViews(viewFixes(mergeRunsX(man), vf), wv), sv);
   // runs: "model/cycle", newest first per model; models in a fixed order
@@ -988,6 +991,39 @@ function sampleRC(F, w, fi, fj) {
   const r = Math.floor(fi), c = Math.floor(fj), ty = fi - r, tx = fj - c;
   return (F[r * w + c] * (1 - tx) + F[r * w + c + 1] * tx) * (1 - ty) + (F[(r + 1) * w + c] * (1 - tx) + F[(r + 1) * w + c + 1] * tx) * ty;
 }
+// 11-10 (Benjamin t2840u): town numbers read at the town's ASOS/AWOS airport in every view. Labels stay at
+// t.x / t.y. The Washington view already used official pins (Seattle = KSEA 47.4447N, 122.3144W); Washington
+// wide / PNW / regional views sampled the city-center point (Seattle at 47.6N, 122.315W). Prefer this model's
+// Washington-view slot when it is the same place (exact match); otherwise convert the shared town_airports.json
+// pin. Vancouver WA (KVUO) vs Vancouver BC (CYVR) picks the pin nearer the current sample.
+function townFij(t) {
+  const pins = TOWN_AIRPORTS[t.name];
+  if (!pins || !pins.length || !S.run) return [t.fi, t.fj];
+  const mid = S.run.split("/")[0], M = (S.man.models || {})[mid] || {}, crop = M.crop || [0, 0, 0, 0];
+  const maxd = M.grid === "ll" ? 2.5 : 30;
+  const wa = ((M.views || {}).wa || {}).towns || [];
+  const wt = wa.find(x => x.name === t.name);
+  if (wt && isFinite(wt.fi) && isFinite(wt.fj)) {
+    const d2 = (wt.fi - t.fi) ** 2 + (wt.fj - t.fj) ** 2;
+    if (d2 <= maxd * maxd) return [wt.fi, wt.fj];
+  }
+  let best = null, bd = Infinity;
+  const rs = mid === "ifs9" ? 0.1 : 0.25;
+  const absKey = (mid === "rrfs" || mid === "hrrr" || mid === "nbm") ? mid : null;
+  for (const p of pins) {
+    let fi, fj;
+    if (M.grid === "ll") {
+      fi = (90 - p.lat) / rs - crop[0];
+      fj = ((p.lon + 360) % 360) / rs - crop[2];
+    } else if (absKey && p.abs && p.abs[absKey]) {
+      fi = Math.round(p.abs[absKey][0] - crop[0]);
+      fj = Math.round(p.abs[absKey][1] - crop[2]);
+    } else continue;
+    const d2 = (fi - t.fi) ** 2 + (fj - t.fj) ** 2;
+    if (d2 < bd) { bd = d2; best = [fi, fj]; }
+  }
+  return best && bd <= maxd * maxd ? best : [t.fi, t.fj];
+}
 
 // 10-29 8:45 PM (Benjamin: phone slider "a little janky"): redraws are coalesced to one per animation frame and never
 // overlap; while the slider is being dragged the map is drawn in a lighter mode (fill at half resolution, URL not touched),
@@ -1156,8 +1192,9 @@ async function render(lite) {
     const nums = [];
     if (tmode === "numbers") for (const t of V.towns || []) {
       if (WT && WT.re.has(t.name)) continue;
-      if (!(t.fi >= 0 && t.fj >= 0 && t.fi < D.h - 1 && t.fj < D.w - 1)) continue;
-      let v = sampleRC(D.fill, D.w, t.fi, t.fj); if (!isFinite(v)) continue;
+      const [fi, fj] = townFij(t);
+      if (!(fi >= 0 && fj >= 0 && fi < D.h - 1 && fj < D.w - 1)) continue;
+      let v = sampleRC(D.fill, D.w, fi, fj); if (!isFinite(v)) continue;
       if (pid === "t2m" && t.t2m_corr !== undefined) v += t.t2m_corr;
       nums.push({ name: t.name, x: t.x, y: t.y, text: fmtVal(P, v), size: t.size * townFs(), color: t.color });
     }
@@ -1168,8 +1205,9 @@ async function render(lite) {
   // t2545u: own-label views (Coast) don't draw the static town layer, so its numbers would have no name (the stray '0' / '48'): skip them
   if (!studioHold && haveTowns && tmode === "numbers" && !(WT && WT.own)) for (const t of V.towns) {
     if (WT && WT.re.has(t.name)) continue;   // re-placed with the coast towns
-    if (!(t.fi >= 0 && t.fj >= 0 && t.fi < D.h - 1 && t.fj < D.w - 1)) continue;
-    let v = sampleRC(D.fill, D.w, t.fi, t.fj); if (!isFinite(v)) continue;   // HRRR: integer = nearest 3 km point; global: bilinear at the pin
+    const [fi, fj] = townFij(t);
+    if (!(fi >= 0 && fj >= 0 && fi < D.h - 1 && fj < D.w - 1)) continue;
+    let v = sampleRC(D.fill, D.w, fi, fj); if (!isFinite(v)) continue;   // HRRR: integer = nearest 3 km point; global: bilinear at the pin; airport pin when the town has one
     if (pid === "t2m" && t.t2m_corr !== undefined) v += t.t2m_corr;          // pass summit height correction (temp_maps)
     haloText(ctx, fmtVal(P, v), t.x * LW, t.y * LH, `800 ${pt(t.size * townFs())}px Montserrat`, t.color, pt(3.0), "left", "middle");
     { const fs = pt(t.size * townFs()), tw = ctx.measureText(fmtVal(P, v)).width, hh = fs * 0.55, x = t.x * LW, y = t.y * LH;

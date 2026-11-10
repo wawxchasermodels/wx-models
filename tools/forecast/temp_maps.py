@@ -256,6 +256,36 @@ TOWN_PIN = {"Seattle": (47.4447, -122.3144), "Port Angeles": (48.1220, -123.5066
             "Moses Lake": (47.2086, -119.3191), "Vancouver": (45.6204, -122.6565), "Everett": (47.9070, -122.2816),
             "Pullman": (46.7439, -117.1096), "Ellensburg": (47.0330, -120.5307), "Omak": (48.4644, -119.5181),
             "Aberdeen": (46.9712, -123.9366), "Tacoma": (47.2675, -122.5761)}
+# 11-10 (Benjamin t2840u): every town that has an ASOS/AWOS samples there in every view. Shared table
+# tools/fast/site/town_airports.json (same file the viewer reads). TOWN_PIN above is the original house-rule
+# fallback; town_sample_ll prefers the JSON (and picks Vancouver WA vs Vancouver BC by whichever pin is nearer
+# the label). Labels stay at the town; only the sample point moves.
+_AIRPORT_TABLE = None
+def _airport_table():
+    global _AIRPORT_TABLE
+    if _AIRPORT_TABLE is not None: return _AIRPORT_TABLE
+    here = os.path.dirname(os.path.abspath(__file__))
+    for path in (os.path.join(here, "..", "fast", "site", "town_airports.json"),
+                 os.path.join(here, "town_airports.json")):
+        try:
+            _AIRPORT_TABLE = json.load(open(path)).get("towns") or {}
+            return _AIRPORT_TABLE
+        except Exception:
+            continue
+    _AIRPORT_TABLE = {}
+    return _AIRPORT_TABLE
+
+def town_sample_ll(name, la, lo, max_km=50.0):
+    """(lat, lon) the town number is read at: the official airport pin when this town has one nearby."""
+    pins = _airport_table().get(name) or []
+    if not pins:
+        return TOWN_PIN.get(name, (la, lo))
+    def dist(p):
+        return float(np.hypot((p["lat"] - la) * 111.32, (p["lon"] - lo) * 111.32 * np.cos(np.radians((p["lat"] + la) / 2.0))))
+    best = min(pins, key=dist)
+    if dist(best) <= max_km:
+        return (float(best["lat"]), float(best["lon"]))
+    return (la, lo)
 TOWN_NUM_COLOR, TOWN_NUM_SIZE, TOWN_NUM_HALO = "#0d0f13", 10.5, 3.0   # bold dark number on a white halo (reads on any fill)
 
 # Mountain passes on the Washington view (Benjamin 10-24-26 10:22 PM: "main mountain pass locations on the Washington view").
@@ -434,7 +464,7 @@ def towns(ax, vid, field=None, fmt=fmt_int, pass_corr=None):
     for name, la, lo, side in WA_TOWNS:
         ax.plot(lo, la, "o", ms=3.6, mfc="#1b1d22", mec="white", mew=1.0, transform=pc, zorder=7)
     nums_on = field is not None and os.environ.get("TOWN_NUMBERS", "1") != "0"   # TOWN_NUMBERS=0 turns the numbers off
-    vals = town_values(*field, [TOWN_PIN.get(n, (la, lo)) for n, la, lo, _ in WA_TOWNS]) if nums_on else [np.nan] * len(WA_TOWNS)
+    vals = town_values(*field, [town_sample_ll(n, la, lo) for n, la, lo, _ in WA_TOWNS]) if nums_on else [np.nan] * len(WA_TOWNS)
     if nums_on: ax.town_values = {t[0]: float(v) for t, v in zip(WA_TOWNS, vals)}
     for k, ((name, la, lo, side), v) in enumerate(zip(WA_TOWNS, vals)):
         x, y = xy[k]
@@ -474,7 +504,7 @@ REGION_NUM_SIZE = 9.5   # bold value next to the city name on the Pacific NW fra
 
 def region_towns(ax, vid, field=None, fmt=fmt_int):
     """City names on the Pacific NW frames: small dot + name, tiered (region_places).
-    field = (LA, LO, F) in map units adds the model value at the city point, same numbers and formats as the Washington view
+    field = (LA, LO, F) in map units adds the model value at the town's airport pin (same as the Washington view), else the city point
     (Benjamin 10-25-26 10:08 PM: "dropping more towns is fine"). With numbers on, each city tries "Name 54" inline (preferred
     side, other sides, diagonal nudges), then the number centered under the name; if neither fits, the city is dropped (no
     name-only fallback; logged). A city whose value is missing (off the model grid) keeps its name only (logged).
@@ -485,7 +515,7 @@ def region_towns(ax, vid, field=None, fmt=fmt_int):
     dots, labels, skipped, nonum, size = [], [], [], [], {1: 9.5, 2: 8.5, 3: 8.0}
     places = region_places(vid)
     nums_on = field is not None and os.environ.get("TOWN_NUMBERS", "1") != "0"   # TOWN_NUMBERS=0 turns the numbers off
-    vals = town_values(*field, [(la, lo) for _, la, lo, _ in places]) if nums_on and places else [np.nan] * len(places)
+    vals = town_values(*field, [town_sample_ll(n, la, lo) for n, la, lo, _ in places]) if nums_on and places else [np.nan] * len(places)
     if nums_on: ax.town_values = {}
     placed = 0
     for (name, la, lo, t), v in zip(places, vals):
