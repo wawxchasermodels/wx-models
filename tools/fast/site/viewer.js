@@ -731,10 +731,11 @@ function go(d, wrap) { const n = S.runs[S.run].steps.length; S.i = wrap ? (S.i +
 // ---------------------------------------------------------------- static per view
 async function viewStatic(vid) {
   // 11-04 t2314u: HRRR / RRFS / NBM wide view = pnwhr files, but its own (smaller-label) towns layer ("townsOwn", wawide_small_towns_lcc.py)
-  const V0 = VIEWS()[vid] || {}, own = V0.townsOwn ? vid : null;
+  const V0 = VIEWS()[vid] || rrfsMenuViews()[vid] || {}, own = V0.townsOwn ? vid : null;
   vid = VSRC(vid); const m = S.run.split("/")[0], sk = m + "/" + vid + (own ? "~" + own : "");
   if (S.statics[sk]) return S.statics[sk];
-  const V = VIEWS()[vid];
+  const V = VIEWS()[vid] || rrfsMenuViews()[vid];
+  if (!V || !V.lut) return Promise.reject(new Error("nodata: missing view " + vid));
   const p = (async () => {
     const [lut, base] = await Promise.all([fetch(DATA + V.lut + SV()).then(r => r.arrayBuffer()).then(b => new Float32Array(b)),
                                            img(DATA + (V.base_png || `static/base_${vid}.png`) + SV())]);
@@ -1070,7 +1071,8 @@ async function render(lite) {
         const n = jumpNote(`This run has no ${PRODS()[pid].title} maps.` + (r2 ? ` <button type="button" id="jumprun">Open ${r2.split("/")[1].slice(8)}Z ${r2.split("/")[1].slice(4, 6)}-${r2.split("/")[1].slice(6, 8)} run</button>` : " Try another run in the Runs menu."), 0);
         const b = n.querySelector("#jumprun"); if (b) b.onclick = async () => { await loadRun(r2); S.run = r2; $("run").value = r2; n.hidden = true; setLists(); draw(); }; });
     }
-    const V = VIEWS()[vid], cv = $("map"), st2 = await viewStatic(vid);
+    const V = VIEWS()[vid] || rrfsMenuViews()[vid], cv = $("map"), st2 = await viewStatic(vid);
+    if (!V) return;
     const ctx = sizeMap(cv, V, lite), [LW, LH] = V.fig; ctx.fillStyle = S.man.style.BG; ctx.fillRect(0, 0, LW, LH); ctx.drawImage(layer(st2.base, st2.baseU, cv._rs), 0, 0, LW, LH);
     const miss = `${S.runs[run].runline}  \u00b7  ${V.label}  \u00b7  ${window.__vjNoJump || S.dragging ? "no map at this hour" : "not in this model run"}`;
     if (!coastShown(V)) header(ctx, V, PRODS()[pid].title, step.valid_line, miss, step.badge);
@@ -1079,9 +1081,10 @@ async function render(lite) {
     postCompare(run, pid, vid, step);   // 10-31: still report to the side-by-side page (else sync never starts when a frame opens on such an hour)
     return;
   }
-  if (seq !== drawSeq) return;
+  if (seq !== drawSeq || S.run !== run || S.view !== vid) return;
   const t1 = performance.now();
-  const V = VIEWS()[vid], P = PRODS()[pid], cv = $("map");
+  const V = VIEWS()[vid] || rrfsMenuViews()[vid], P = PRODS()[pid], cv = $("map");
+  if (!V) return;
   const ctx = sizeMap(cv, V, lite), [LW, LH] = V.fig, rs = cv._rs; ctx.fillStyle = S.man.style.BG; ctx.fillRect(0, 0, LW, LH);
   // 1. color fill: value -> bin color, exactly the site's bins (contourf + BoundaryNorm)
   const smp = P.fill === "prt" ? (/^(ifs|ifs9)$/.test(run.split("/")[0]) ? sampleType : sampleNN) : (P.mask_edge || pid === "ssta") && P.min_show !== undefined ? (st_, F_, k_) => sampleMask(st_, F_, k_, P.min_show) : sample;
