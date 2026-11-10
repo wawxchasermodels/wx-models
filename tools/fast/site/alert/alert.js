@@ -1,8 +1,8 @@
-/* Active Alerts map for Studio (WA land + PZZ marine). Preview 2026-11-05.
-   Dark basemap, auto-fit, UNIFORM-SCALE Web Mercator (no lon/lat squish). */
+/* Active Alerts map for Studio (WA land + PZZ marine, plus bordering OR/ID counties
+   and the Oregon coast). Dark basemap, auto-fit, UNIFORM-SCALE Web Mercator (no lon/lat squish). */
 "use strict";
 const Alerts = (() => {
-  const AREAS = ["WA"];
+  const AREAS = ["WA", "OR", "ID"];
   const REFRESH_MS = 5 * 60 * 1000;
   const UA = "WAWeatherChasersStudio/1.0 (alerts; benjamin@wawxchasers)";
   const NWS = "https://api.weather.gov/alerts/active?area=" + AREAS.join(",");
@@ -12,7 +12,7 @@ const Alerts = (() => {
   const C_LAND = "#1a222e";
   const C_COUNTY = "rgba(90,105,125,0.7)";
   const C_STATE = "rgba(200,215,235,0.9)";
-  const WA0 = { lon0: -125.15, lon1: -116.7, lat0: 45.4, lat1: 49.1 };
+  const WA0 = { lon0: -125.15, lon1: -116.45, lat0: 45.35, lat1: 49.1 };
   const CSS = 1600;
   // Backing store is finer than the logical camera so a 250% Studio crop is still near 1 bitmap pixel per frame pixel.
   // Source shorelines are Census 1:500k, not a larger-scale coast. See basemap_wa.json "source".
@@ -176,7 +176,7 @@ const Alerts = (() => {
     if (!b) b = Object.assign({}, WA0);
     const dlon = Math.max(0.12, (b.lon1 - b.lon0) * PAD);
     const dlat = Math.max(0.10, (b.lat1 - b.lat0) * PAD);
-    const MAX = { lon0: -126.5, lon1: -116.5, lat0: 45.4, lat1: 49.15 };
+    const MAX = { lon0: -126.5, lon1: -115.85, lat0: 41.88, lat1: 49.15 };
     let lon0 = Math.max(b.lon0 - dlon, MAX.lon0), lon1 = Math.min(b.lon1 + dlon, MAX.lon1);
     let lat0 = Math.max(b.lat0 - dlat, MAX.lat0), lat1 = Math.min(b.lat1 + dlat, MAX.lat1);
     // Extra north pad so San Juans / N Inland Waters clear the 16:9 top crop
@@ -228,14 +228,17 @@ const Alerts = (() => {
     "Seattle", "Tacoma", "Spokane", "Olympia", "Everett", "Bellingham", "Vancouver",
     "Yakima", "Tri-Cities", "Wenatchee", "Walla Walla", "Aberdeen", "Longview",
     "Mount Vernon", "Ellensburg", "Port Angeles", "Bellevue", "Kent", "Renton",
-    "Kennewick", "Richland", "Pasco", "Bremerton", "Pullman"
+    "Kennewick", "Richland", "Pasco", "Bremerton", "Pullman",
+    "Portland", "Astoria", "Hood River", "The Dalles", "Pendleton", "Coos Bay",
+    "Coeur d'Alene", "Sandpoint", "Moscow", "Lewiston"
   ]);
   const COASTAL_TOWNS = new Set([
     "Aberdeen", "Hoquiam", "Westport", "Ocean Shores", "Long Beach", "Ilwaco",
     "Forks", "Neah Bay", "La Push", "Port Angeles", "Sequim", "Port Townsend",
     "Anacortes", "Friday Harbor", "Oak Harbor", "Blaine", "Birch Bay", "Raymond",
     "South Bend", "Tokeland", "Pacific Beach", "Moclips", "Copalis Beach",
-    "Quinault", "Amanda Park", "Kalaloch", "Ozette"
+    "Quinault", "Amanda Park", "Kalaloch", "Ozette",
+    "Astoria", "Tillamook", "Lincoln City", "Florence", "Coos Bay", "Brookings"
   ]);
   function townPriority(t) {
     if (MAIN_TOWNS.has(t.n)) return 0;
@@ -550,8 +553,8 @@ const Alerts = (() => {
         data = await loadJSON("alert/active_wa.json");
         status("Using cached snapshot (live NWS unavailable)");
       }
-      // Existing coverage: WA land alerts plus PZZ marine, with the box reaching the OR/ID border. Do not tighten this (t2504u).
-      const WA_BOX = { lon0: -126.6, lon1: -116.5, lat0: 45.5, lat1: 49.2 };
+      // Coverage: WA land + marine, bordering OR/ID counties, and the Oregon coast (t2815u).
+      const WA_BOX = { lon0: -126.6, lon1: -115.85, lat0: 41.9, lat1: 49.2 };
       const feats0 = (data.features || []).filter((a) => {
         const zones = (a.properties && a.properties.affectedZones) || [];
         if (!zones.length) return !!a.geometry;
@@ -567,7 +570,7 @@ const Alerts = (() => {
       S.loaded = Date.now();
       S.labCache = null;
       const miss = feats.filter((a) => !a._geom).length;
-      status(`${feats.length} active · WA land + marine${miss ? " · " + miss + " without geometry" : ""} · updated ${new Date(S.loaded).toLocaleTimeString("en-US", { timeZone: "America/Los_Angeles" })} PT`);
+      status(`${feats.length} active · WA + nearby OR/ID + marine${miss ? " · " + miss + " without geometry" : ""} · updated ${new Date(S.loaded).toLocaleTimeString("en-US", { timeZone: "America/Los_Angeles" })} PT`);
       renderChips();
       fitToSelection();
     } catch (e) {
@@ -607,7 +610,7 @@ const Alerts = (() => {
     if (!host) return;
     host.innerHTML = `
       <div class="al-root">
-        <span class="al-title">Active Alerts · WA</span>
+        <span class="al-title">Active Alerts · WA + nearby OR &amp; ID</span>
         <div class="al-chips" id="al-chips" role="listbox" aria-label="Alert types"></div>
         <label class="al-opacity" title="Alert fill opacity">
           <span class="al-opacity-lab">Opacity</span>
@@ -618,7 +621,7 @@ const Alerts = (() => {
         <button type="button" class="al-btn" id="al-reset">Fit view</button>
         <span class="al-meta" id="al-status">…</span>
       </div>
-      <div id="alstage"><canvas id="al-canvas" width="1600" height="1600" aria-label="Active NWS alerts for Washington"></canvas></div>`;
+      <div id="alstage"><canvas id="al-canvas" width="1600" height="1600" aria-label="Active NWS alerts for Washington and nearby Oregon and Idaho"></canvas></div>`;
     $("al-refresh").onclick = () => loadAlerts();
     $("al-reset").onclick = () => fitToSelection();
     const op = $("al-opacity"), opv = $("al-opacity-val");
