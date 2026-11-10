@@ -8,7 +8,7 @@ const $ = id => document.getElementById(id);
   const h = new URLSearchParams(location.hash.slice(1)), t = h.get("t"); if (!t || location.search) return;
   if (t === "meteograms") { location.replace(`meteograms.html#${new URLSearchParams({ s: h.get("s") || "", w: h.get("w") || "", p: h.get("p") || "" })}`); return; }
   if (t === "obs") { location.replace("?obs=1"); return; }
-  const M = { "ECMWF 0.25\u00b0": "ifs", ECMWF: "ifs", AIFS: "aifs", GFS: "gfs", HRRR: "hrrr", RRFS: "rrfs", NBM: "nbm", EPS: "eps", "EPS mean": "eps",
+  const M = { "ECMWF 0.25\u00b0": "ifs", ECMWF: "ifs", AIFS: "aifs", GFS: "gfs", HRRR: "hrrr", RRFS: "rrfs", "RRFS NA": "rrfsna", NBM: "nbm", EPS: "eps", "EPS mean": "eps",
               "EPS 90th pct": "eps", "AIFS ENS": "aens", "AIFS ENS mean": "aens" };
   const V = { full: "wa", west: "wwa", east: "ewa", cascades: "passes", northeast: "newa", lowermainland: "lm", vi: "wa" };
   const ml = h.get("m") || "", m = M[ml] || "", per = h.get("p") || "", p90 = /90th/.test(ml);
@@ -331,7 +331,7 @@ async function boot() {
   if (PV && PV.studio && sv) Object.assign(sv.models || (sv.models = {}), PV.studio);   // 11-03 preview supplement: Studio wide view
   S.man = addStudioViews(waveViews(viewFixes(mergeRunsX(man), vf), wv), sv);
   // runs: "model/cycle", newest first per model; models in a fixed order
-  const order = ["hrrr", "rrfs", "nbm", "gfs", "ifs", "ifs9", "aifs", "eps", "aens", "aensm", "epsm", "gfsw", "oisst"].filter(m => S.man.models[m] && (S.man.runs[m] || []).length);
+  const order = ["hrrr", "rrfs", "rrfsna", "nbm", "gfs", "ifs", "ifs9", "aifs", "eps", "aens", "aensm", "epsm", "gfsw", "oisst"].filter(m => S.man.models[m] && (S.man.runs[m] || []).length);
   const all = []; for (const m of order) for (const c of [...S.man.runs[m]].reverse()) all.push(`${m}/${c}`);
   const qr = Q.get("run"), qm = Q.get("model");
   // 11-01: a ?prod= link with no run/model (e.g. ?prod=waves) opens the first model that has that product
@@ -1153,7 +1153,8 @@ function creditLines(pid, P, towns) {
   const m = S.run.split("/")[0], name = (MD() && MD().name) || "", ec = /^ECMWF/.test(name) || /^(ifs|ifs9|aifs|eps|aens|aensm|epsm)$/.test(m);
   const L = [];
   if (P.clim === "pr" || /^qpf(a|pct)$/.test(pid)) L.push("Normals: PRISM Group, Oregon State University, https://prism.oregonstate.edu (accessed 30 Oct 2026); NOAA CPC & GPCP via NOAA PSL.");
-  const a = [ec ? `Data: \u00a9 ${CREDIT_YEAR} ECMWF (www.ecmwf.int), CC BY 4.0. Modified.` : (pid === "t2m" ? "" : "Data: NOAA (public domain).")];
+  const noaa = m === "rrfsna" ? "Data: NOAA/NCEP RRFS (public domain)." : (pid === "t2m" ? "" : "Data: NOAA (public domain).");
+  const a = [ec ? `Data: \u00a9 ${CREDIT_YEAR} ECMWF (www.ecmwf.int), CC BY 4.0. Modified.` : noaa];
   if (towns) a.push("Places: GeoNames (geonames.org), CC BY 4.0."); a.push("Basemap: Natural Earth.");
   L.push(a.filter(Boolean).join("  "));
   return L;
@@ -2238,7 +2239,7 @@ const MG = { open: null, town: Q.get("town") || "Seattle", run: null, cache: new
 const PTZ = "America/Los_Angeles";
 const fmtPT = (iso, o) => new Intl.DateTimeFormat("en-US", Object.assign({ timeZone: PTZ }, o)).format(new Date(iso));
 function mgRuns() {   // newest run of each model that carries town points
-  const order = ["hrrr", "rrfs", "nbm", "gfs", "ifs", "ifs9", "aifs", "eps", "aens"], out = [];
+  const order = ["hrrr", "rrfs", "rrfsna", "nbm", "gfs", "ifs", "ifs9", "aifs", "eps", "aens"], out = [];
   for (const m of order) for (const c of [...(S.man.runs[m] || [])].reverse()) { const r = `${m}/${c}`; if (S.runs[r] && !S.runs[r].points) continue; out.push(r); break; }
   return out;
 }

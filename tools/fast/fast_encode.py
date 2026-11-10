@@ -24,6 +24,13 @@ MODELS = {   # grid "lcc" = HRRR 3 km, "ll" = 0.25 deg global (lat 90 -> -90, lo
     # ECMWF 0.25 06/18Z only to 144 h (3-hourly); AIFS 06/18Z to 360 h (6-hourly) like 00/12Z.
     # RRFS (NOAA, 3 km CONUS, operational since 2026): 00/06/12/18Z hourly to 48 h then 3-hourly to 84 h (stage 3, 10-30-26)
     "rrfs": dict(grid="lcc", views=("puget", "wa", "wwa", "ewa", "passes", "newa", "lm", "pnwhr"), cycles=(0, 6, 12, 18), steps=list(range(1, 49)) + list(range(51, 85, 3)), keep=4),
+    # 11-09 (Benjamin t2818u/t2819u): operational 13 km North American 2dfld (noaa-rrfs-ops-pds), rotated lat-lon.
+    # Covers the full North Pacific on the site's na / pnw frames (CONUS 3 km RRFS stays on puget/wa/.../pnwhr). pnwt is
+    # a few degrees past the CONUS west wall and is clean on this grid. Same steps/keep as CONUS RRFS; as_model=rrfs so
+    # existing RRFS getters and products apply. Winds / accumulations read R.m so they stay on the NA files.
+    "rrfsna": dict(grid="rotll", views=("na", "pnw", "pnwt"), cycles=(0, 6, 12, 18),
+                   steps=list(range(1, 49)) + list(range(51, 85, 3)), keep=4, as_model="rrfs",
+                   pole_longitude=67.0, pole_latitude=35.0, rlon0=299.0, rlat0=-36.9303, drot=0.1083),
     # NBM (NOAA National Blend, 2.5 km CONUS NDFD grid): 00/06/12/18Z, hourly to 36 h then 3-hourly to 168 h (stage 3, 10-30-26)
     "nbm":  dict(grid="lcc", views=("puget", "wa", "wwa", "ewa", "passes", "newa", "lm", "pnwhr"), cycles=(0, 6, 12, 18), steps=list(range(1, 37)) + list(range(39, 169, 3)), keep=4,
                  lcc=dict(central_longitude=-95.0, central_latitude=25.0, standard_parallels=(25.0, 25.0)), radius=6371200.0),
@@ -57,7 +64,8 @@ MODELS = {   # grid "lcc" = HRRR 3 km, "ll" = 0.25 deg global (lat 90 -> -90, lo
     # 0.125-offset 0.25 deg grid to the GFS 0.25 deg grid (same crop / layers); one "run" = the newest 14 daily analyses (tools/fast/oisst.py)
     "oisst": dict(grid="ll", views=GLOBAL_VIEWS, cycles=(0,), steps=list(range(0, 14 * 24, 24)), keep=1, grid_from="gfs", note="daily analyses, newest 14 days"),
 }
-MINFO = {"aens": dict(name="ECMWF AIFS Ensemble", site="AIFS ENS", res="0.25\u00b0 \u00b7 50 members", credit_as="aifs"),
+MINFO = {"rrfsna": dict(name="NOAA RRFS", site="RRFS NA", res="13 km", noaa=True),
+         "aens": dict(name="ECMWF AIFS Ensemble", site="AIFS ENS", res="0.25\u00b0 \u00b7 50 members", credit_as="aifs"),
          "nbm": dict(name="NOAA NBM", site="NBM", res="2.5 km", noaa=True),
          "eps": dict(name="ECMWF Ensemble", site="ECMWF EPS", res="0.25\u00b0 \u00b7 50 members", credit_as="ifs"),
          "ifs9": dict(name="ECMWF IFS", site="ECMWF 9 km", res="9 km (0.1\u00b0)", credit_as="ifs"),
@@ -271,7 +279,7 @@ def steps_for(m, hour):
     """Forecast hours a cycle of model m carries (ECMWF 0.25 06/18Z stop at 144 h)."""
     MD = MODELS[m]
     return MD["steps_short"] if hour in MD.get("short_cycles", ()) else MD["steps"]
-NOAA = ("hrrr", "gfs", "rrfs")
+NOAA = ("hrrr", "gfs", "rrfs", "rrfsna")
 
 def _patch_models(M):
     """In-memory only (live tools untouched): RRFS pressure-level fields come from its prslev file."""
@@ -344,7 +352,7 @@ def _inc(R, m, what):
     s0 = _prev_step(m, R.c, R.s)
     if m in NOAA:
         now = np.asarray(R.acc0("APCP:surface")[2], float) / 25.4
-        prev = 0.0 if s0 == 0 else np.asarray(M.Reader(m, R.c, s0).acc0("APCP:surface")[2], float) / 25.4
+        prev = 0.0 if s0 == 0 else np.asarray(M.Reader(getattr(R, "m", m), R.c, s0).acc0("APCP:surface")[2], float) / 25.4
     else:
         now = np.asarray(R.st.field(what)[2], float) * 39.3701
         prev = 0.0 if s0 == 0 else np.asarray(TM.Step(R.m, R.c, s0).field(what)[2], float) * 39.3701
@@ -498,7 +506,7 @@ def _dsnod(R, m):
     if m not in ("hrrr", "rrfs"): raise KeyError("dsnod")
     import menu_maps as M
     a = np.asarray(R._idx("SNOD:surface", R.url)[2], float)
-    R0 = M.Reader(m, R.c, 0); b = np.asarray(R0._idx("SNOD:surface", R0.url)[2], float)
+    R0 = M.Reader(getattr(R, "m", m), R.c, 0); b = np.asarray(R0._idx("SNOD:surface", R0.url)[2], float)
     return np.clip((a - b) * 39.3701, -60, 60)
 
 FIELDS = {   # name: (getter, units)
@@ -901,6 +909,16 @@ def static(m, out, views_only=None, x2_only=False):
         d = 3000.0 if "lcc" not in MD else float(np.hypot(g[0, 1, 0] - gx0, g[0, 1, 1] - gy0))   # grid spacing (NBM 2539.7 m)
         def to_ij(LO_, LA_):
             hh = hp.transform_points(pc, LO_, LA_); return (hh[..., 1] - gy0) / d, (hh[..., 0] - gx0) / d
+    elif MD["grid"] == "rotll":
+        # RRFS NA 13 km: GRIB rotated lat-lon (southern pole 35S, 247E => cartopy north pole 35N, 67E).
+        # First point geo (~157.38W, 1.56S) <-> rotated (299.0, -36.9303); row 0 is south, like HRRR.
+        rp = ccrs.RotatedPole(pole_longitude=MD["pole_longitude"], pole_latitude=MD["pole_latitude"])
+        rlon0, rlat0, drot = MD["rlon0"], MD["rlat0"], MD["drot"]
+        def to_ij(LO_, LA_):
+            pts = rp.transform_points(pc, LO_, LA_)
+            rlon = np.mod(pts[..., 0], 360.0)
+            rlon = np.where(rlon < rlon0 - 180.0, rlon + 360.0, rlon)
+            return (pts[..., 1] - rlat0) / drot, (rlon - rlon0) / drot
     else:
         rs_ = MD.get("res", 0.25)
         def to_ij(LO_, LA_): return (90.0 - LA_) / rs_, np.mod(LO_, 360.0) / rs_
@@ -921,10 +939,19 @@ def static(m, out, views_only=None, x2_only=False):
         luts[vid] = (fi, fj, ang)
         views[vid] = dict(label=V["label"], fig=[int(round(W)), int(round(H))], size_in=[float(x) for x in fig.get_size_inches()],
                           panel=[px, py, pw, ph], stride=STRIDE, nx=nx, ny=ny, barbs_across=HS.BARBS_ACROSS.get(vid, 20))
-        b_ = V["box"]; lob = np.mod(lo, 360) if MD["grid"] == "ll" else lo; bl0, bl1 = (np.mod(b_[0], 360), np.mod(b_[1], 360)) if MD["grid"] == "ll" else (b_[0], b_[1])
+        b_ = V["box"]
+        if MD["grid"] == "ll":
+            lob = np.mod(lo, 360); bl0, bl1 = np.mod(b_[0], 360), np.mod(b_[1], 360)
+        elif MD["grid"] == "rotll" and b_[0] < -180:
+            lob = np.where(lo > 0, lo - 360.0, lo); bl0, bl1 = b_[0], b_[1]
+        else:
+            lob = lo; bl0, bl1 = b_[0], b_[1]
         inlon = ((lob >= bl0) & (lob <= bl1)) if bl0 <= bl1 else ((lob >= bl0) | (lob <= bl1))
         mm = (la >= b_[2]) & (la <= b_[3]) & inlon
-        ii, jj = np.where(mm); views[vid]["cut_abs"] = [int(ii.min()), int(ii.max() + 1), int(jj.min()), int(jj.max() + 1)]
+        if mm.any():
+            ii, jj = np.where(mm); views[vid]["cut_abs"] = [int(ii.min()), int(ii.max() + 1), int(jj.min()), int(jj.max() + 1)]
+        else:
+            views[vid]["cut_abs"] = [ny_, 0, nx_, 0]   # empty: merge below is a no-op
         plt.close(fig)
     allfi = np.concatenate([l[0].ravel() for l in luts.values()]); allfj = np.concatenate([l[1].ravel() for l in luts.values()])
     ok = np.isfinite(allfi) & (allfi >= 0) & (allfi <= ny_ - 1) & (allfj >= 0) & (allfj <= nx_ - 1)

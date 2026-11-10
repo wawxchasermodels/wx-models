@@ -197,6 +197,20 @@ def earth_relative(u, v, lon, m):
     return np.cos(a) * u + np.sin(a) * v, -np.sin(a) * u + np.cos(a) * v
 
 
+def earth_relative_rotll(u, v, lat, lon):
+    """Rotated lat-lon grid-relative winds -> earth east/north, from neighboring geographic points.
+    Grid U is along +column (rotated east); grid V is along +row (rotated north)."""
+    dlo = np.empty_like(lon, dtype=float); dla = np.empty_like(lat, dtype=float)
+    dlo[:, 1:-1] = lon[:, 2:] - lon[:, :-2]; dla[:, 1:-1] = lat[:, 2:] - lat[:, :-2]
+    dlo[:, 0] = lon[:, 1] - lon[:, 0]; dla[:, 0] = lat[:, 1] - lat[:, 0]
+    dlo[:, -1] = lon[:, -1] - lon[:, -2]; dla[:, -1] = lat[:, -1] - lat[:, -2]
+    dlo = (dlo + 180.0) % 360.0 - 180.0
+    east_j = dlo * np.cos(np.deg2rad(lat)); north_j = dla
+    n = np.hypot(east_j, north_j); n = np.where(n == 0, 1.0, n)
+    ge_e, ge_n = east_j / n, north_j / n
+    return u * ge_e + v * (-ge_n), u * ge_n + v * ge_e
+
+
 def cut(lat, lon, arrs, vid):
     """Crop to the view's lon/lat box (0-360 longitudes so the NA frame can reach past the dateline).
     2-D lat/lon (high-res Lambert grids): crop to the rows/columns that touch the box; contour on the 2-D coordinates."""

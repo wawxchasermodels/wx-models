@@ -36,7 +36,7 @@ LASTMAN = {}
 MAN_EVERY = 300   # s between manifest rewrites while a run is coming in (run.json is updated every chunk)
 # --watch: minutes after the cycle time when the first step is usually out (measured 10-31 from R2 upload times and the
 # NOAA / ECMWF open-data files); watching starts WATCH_EARLY min before that, and stops WATCH_SPAN h after it or when complete
-DUE_MIN = {"hrrr": 45, "rrfs": 60, "nbm": 55, "gfs": 200, "ifs": 330, "ifs9": 420, "aifs": 320, "eps": 380, "aens": 350, "gfsw": 215}
+DUE_MIN = {"hrrr": 45, "rrfs": 60, "rrfsna": 70, "nbm": 55, "gfs": 200, "ifs": 330, "ifs9": 420, "aifs": 320, "eps": 380, "aens": 350, "gfsw": 215}
 WATCH_EARLY, WATCH_SPAN = 60, 6
 
 def run_due(s3, m):
