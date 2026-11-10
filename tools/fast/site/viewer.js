@@ -601,9 +601,12 @@ const allProds = md => md._allP || (md._allP = (() => {
   return A; })());
 const PRODS = () => allProds(MD()), VIEWS = () => MD().views;
 // When RRFS is selected, wider cameras stay in the view menu and load the 13 km
-// NA grid (rrfsna). Tight CONUS cameras stay on 3 km rrfs. Studio and Compare
+// NA grid (rrfsna). Tight CONUS cameras stay on 3 km rrfs. Coast is ocean-centered
+// and is not encoded on 3 km, so it uses the 13 km grid too. Studio and Compare
 // use this same viewer, so they follow the swap too.
-const RRFS_WIDE_VIEWS = new Set(["na", "pnw", "pnwt"]);
+// Pacific NW high-res (and Studio Washington wide, which shares those files) stay
+// on 3 km inland and fill the blank northwest / Pacific sliver from 13 km RRFS NA.
+const RRFS_WIDE_VIEWS = new Set(["na", "pnw", "pnwt", "coast"]);
 function rrfsMate(m) { return m === "rrfs" ? "rrfsna" : m === "rrfsna" ? "rrfs" : null; }
 function rrfsMenuViews() {
   const V = (VIEWS() || {});
@@ -661,6 +664,72 @@ function alignRrfsViewToRun() {
                               : (native.wa || Object.keys(native)[0]);
   if (!next || next === S.view) return false;
   S.view = next; return true;
+}
+function rrfsGapfillVid(vid) {
+  if ((S.run || "").split("/")[0] !== "rrfs") return null;
+  const src = ((VIEWS() || {})[vid] || {}).src || vid;
+  return src === "pnwhr" ? "pnwhr" : null;
+}
+async function mateViewStatic(vid, mateRun) {
+  const sk = "gapfill/" + mateRun.split("/")[0] + "/" + vid;
+  if (S.statics[sk]) return S.statics[sk];
+  const V = (((S.man.models || {})[mateRun.split("/")[0]] || {}).views || {})[vid];
+  if (!V || !V.lut) return null;
+  const p = (async () => {
+    const lut = new Float32Array(await fetch(DATA + V.lut + SV()).then(r => { if (!r.ok) throw new Error("nodata: gapfill lut"); return r.arrayBuffer(); }));
+    const [px, py, pw, ph] = V.panel, x0 = Math.round(px), y0 = Math.round(py), W = Math.round(px + pw) - x0, H = Math.round(py + ph) - y0;
+    const { nx, ny, stride } = V, G = S.runs[mateRun].grid, gnx = G.nx, gny = G.ny;
+    const idx = new Int32Array(W * H), wx = new Float32Array(W * H), wy = new Float32Array(W * H);
+    for (let y = 0; y < H; y++) {
+      const gy = (y + 0.5) / stride, j0 = Math.min(ny - 2, gy | 0), ty = gy - j0;
+      for (let x = 0; x < W; x++) {
+        const gx = (x + 0.5) / stride, i0 = Math.min(nx - 2, gx | 0), tx = gx - i0;
+        const a = (j0 * nx + i0) * 3, b = a + 3, c = a + nx * 3, d = c + 3;
+        const fi = (lut[a] * (1 - tx) + lut[b] * tx) * (1 - ty) + (lut[c] * (1 - tx) + lut[d] * tx) * ty;
+        const fj = (lut[a + 1] * (1 - tx) + lut[b + 1] * tx) * (1 - ty) + (lut[c + 1] * (1 - tx) + lut[d + 1] * tx) * ty;
+        const k = y * W + x;
+        if (!(fi >= 0 && fj >= 0 && fi <= gny - 1 && fj <= gnx - 1)) { idx[k] = -1; continue; }
+        const r0 = Math.min(gny - 2, fi | 0), c0 = Math.min(gnx - 2, fj | 0);
+        idx[k] = r0 * gnx + c0; wy[k] = fi - r0; wx[k] = fj - c0;
+      }
+    }
+    return { x0, y0, W, H, idx, wx, wy, gnx, gny };
+  })();
+  S.statics[sk] = p; return p;
+}
+async function loadRrfsGapfill(run, vid, pid, f) {
+  const gvid = rrfsGapfillVid(vid);
+  if (!gvid) return null;
+  const c = run.split("/")[1];
+  if (!(S.man.runs && (S.man.runs.rrfsna || []).includes(c))) return null;
+  const mate = "rrfsna/" + c;
+  try { await loadRun(mate); } catch (e) { return null; }
+  if (!S.runs[mate] || !S.runs[mate].steps || !S.runs[mate].steps.find(st => st.f === f)) return null;
+  let st13 = null;
+  try { st13 = await mateViewStatic(gvid, mate); } catch (e) { return null; }
+  if (!st13) return null;
+  let D13 = null;
+  try { D13 = await productFields(mate, pid, f); } catch (e) { return null; }
+  if (!D13 || !D13.fill) return null;
+  const G = (S.runs[run] || {}).grid || {};
+  return { st: st13, D: D13, gny: G.ny || 0, gnx: G.nx || 0 };
+}
+function sampleRrfsGap(smp0, st3, F3, st13, F13, k, gny, categorical) {
+  const v3 = smp0(st3, F3, k), v13 = smp0(st13, F13, k);
+  if (st3.idx[k] < 0) return v13;
+  if (categorical) return (v3 === v3) ? v3 : v13;
+  if (!(v13 === v13)) return v3;
+  const gnx = st3.gnx, i = st3.idx[k], r0 = (i / gnx) | 0, c0 = i - r0 * gnx;
+  const fi = r0 + st3.wy[k], fj = c0 + st3.wx[k], M = 8;
+  let w = 1;
+  if (fi < M) w = Math.min(w, fi / M);
+  if (fj < M) w = Math.min(w, fj / M);
+  if (gny && fi > gny - 1 - M) w = Math.min(w, (gny - 1 - fi) / M);
+  if (fj > gnx - 1 - M) w = Math.min(w, (gnx - 1 - fj) / M);
+  w = Math.max(0, Math.min(1, w));
+  if (w >= 0.999) return v3;
+  if (!(v3 === v3)) return v13;
+  return w * v3 + (1 - w) * v13;
 }
 // Product tabs (Benjamin 10-30 8:04 PM: "upper air tab, surface tab, precipitation tab, snow tab", Pivotal Weather style).
 // The Product menu lists only the open tab's products, in the order below (Pivotal: winds by level, 250 -> 850 mb);
@@ -1090,6 +1159,7 @@ async function render(lite) {
   if (!Rrun || !Rrun.steps || !Rrun.steps[S.i]) { showErr(new Error("No forecast hours are available for " + (run || "this run") + ".")); return; }
   const step = Rrun.steps[S.i], f = step.f;
   let st, D, key;
+  const gfP = loadRrfsGapfill(run, vid, pid, f);
   try { [st, D, key] = await Promise.all([viewStatic(vid), productFields(run, pid, f), getKey(pid, vid)]); }
   catch (e) {
     if (seq !== drawSeq) return;
@@ -1123,7 +1193,11 @@ async function render(lite) {
   if (!V) return;
   const ctx = sizeMap(cv, V, lite), [LW, LH] = V.fig, rs = cv._rs; ctx.fillStyle = S.man.style.BG; ctx.fillRect(0, 0, LW, LH);
   // 1. color fill: value -> bin color, exactly the site's bins (contourf + BoundaryNorm)
-  const smp = P.fill === "prt" ? (/^(ifs|ifs9)$/.test(run.split("/")[0]) ? sampleType : sampleNN) : (P.mask_edge || pid === "ssta") && P.min_show !== undefined ? (st_, F_, k_) => sampleMask(st_, F_, k_, P.min_show) : sample;
+  const smp0 = P.fill === "prt" ? (/^(ifs|ifs9)$/.test(run.split("/")[0]) ? sampleType : sampleNN) : (P.mask_edge || pid === "ssta") && P.min_show !== undefined ? (st_, F_, k_) => sampleMask(st_, F_, k_, P.min_show) : sample;
+  let GF = null; try { GF = await gfP; } catch (e) { GF = null; }
+  if (GF && (GF.st.W !== st.W || GF.st.H !== st.H)) GF = null;
+  S.gapfill = !!GF;
+  const smp = !GF ? smp0 : (st_, F_, k_) => sampleRrfsGap(smp0, st_, F_, GF.st, GF.D.fill, k_, GF.gny, P.fill === "prt");
   const pal = palette(pid), mins = P.min_show, im = ctx.createImageData(st.W, st.H), o = im.data, F = D.fill, n = st.W * st.H;
   const vals = new Float32Array(n);
   if (lite) {   // half resolution: one sample per 2x2 block
@@ -1238,9 +1312,15 @@ async function render(lite) {
   let maxv = null;
   if (MAXH_PIDS.test(pid)) {
     if (!D.mx) D.mx = {};
-    if (D.mx[vid] === undefined) { let mx = -Infinity; for (let r = r0; r < r1; r++) for (let c = c0; c < c1; c++) { const v = D.fill[r * D.w + c]; if (v > mx) mx = v; } D.mx[vid] = mx; }
-    if (isFinite(D.mx[vid]) && D.mx[vid] >= 0) {
-      maxv = D.mx[vid]; if (!coastNow) { const yb = st.y0 + st.H, yc = yb + (LH - yb) * 0.5;
+    const mxkey = S.gapfill ? vid + "+na" : vid;
+    if (D.mx[mxkey] === undefined) {
+      let mx = -Infinity;
+      if (S.gapfill) { for (let k = 0; k < vals.length; k++) if (vals[k] > mx) mx = vals[k]; }
+      else { for (let r = r0; r < r1; r++) for (let c = c0; c < c1; c++) { const v = D.fill[r * D.w + c]; if (v > mx) mx = v; } }
+      D.mx[mxkey] = mx;
+    }
+    if (isFinite(D.mx[mxkey]) && D.mx[mxkey] >= 0) {
+      maxv = D.mx[mxkey]; if (!coastNow) { const yb = st.y0 + st.H, yc = yb + (LH - yb) * 0.5;
       ctx.save(); ctx.font = `800 ${pt(11)}px Montserrat`; ctx.fillStyle = S.man.style.INK; ctx.textAlign = "right"; ctx.textBaseline = "middle";
       ctx.fillText(`Max height: ${Math.round(maxv)} ft`, st.x0 + st.W, yc); ctx.restore(); }
     }
@@ -1274,7 +1354,8 @@ function creditLines(pid, P, towns) {
   const m = S.run.split("/")[0], name = (MD() && MD().name) || "", ec = /^ECMWF/.test(name) || /^(ifs|ifs9|aifs|eps|aens|aensm|epsm)$/.test(m);
   const L = [];
   if (P.clim === "pr" || /^qpf(a|pct)$/.test(pid)) L.push("Normals: PRISM Group, Oregon State University, https://prism.oregonstate.edu (accessed 30 Oct 2026); NOAA CPC & GPCP via NOAA PSL.");
-  const noaa = m === "rrfsna" ? "Data: NOAA/NCEP RRFS (public domain)." : (pid === "t2m" ? "" : "Data: NOAA (public domain).");
+  const noaa = S.gapfill ? "Data: NOAA/NCEP RRFS 3 km CONUS and 13 km North American (public domain)."
+    : m === "rrfsna" ? "Data: NOAA/NCEP RRFS (public domain)." : (pid === "t2m" ? "" : "Data: NOAA (public domain).");
   const a = [ec ? `Data: \u00a9 ${CREDIT_YEAR} ECMWF (www.ecmwf.int), CC BY 4.0. Modified.` : noaa];
   if (towns) a.push("Places: GeoNames (geonames.org), CC BY 4.0."); a.push("Basemap: Natural Earth.");
   L.push(a.filter(Boolean).join("  "));
