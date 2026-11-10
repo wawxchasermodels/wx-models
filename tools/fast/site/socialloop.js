@@ -229,6 +229,7 @@ async function findStorm() {
   try {
     const R = await fetch(`${DATA}runs/ifs/${run}/run.json`).then((r) => { if (!r.ok) throw new Error("this run's model data is no longer kept (newest ECMWF runs only)"); return r.json(); });
     if (!R.fields.includes("mslp")) throw new Error("no sea-level pressure in this run");
+    await StormFind.loadCrop(DATA);
     const hs = hours(), H = [];
     for (const f of hs) {
       if (S.run !== run || S.view !== view) throw new Error("the run or view changed");

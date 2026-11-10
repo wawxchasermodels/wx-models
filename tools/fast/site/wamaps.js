@@ -228,7 +228,7 @@ const loadImg = u => WA.imgs[u] || (WA.imgs[u] = new Promise((ok, no) => { const
 async function viewKit(view, mdl = "nbm") {
   const kk = view + "@" + mdl; if (WA.kits[kk]) return WA.kits[kk];
   return (WA.kits[kk] = (async () => {
-    const [lut, mask] = await Promise.all([fetch(KIT + view + (mdl === "nbm" ? "/lut.bin" : `/lut_${mdl}.bin`) + "?v=20261109ifs557", { cache: "no-cache" }).then(r => { if (!r.ok) throw new Error("lut " + r.status); return r.arrayBuffer(); }).then(b => new Float32Array(b)),
+    const [lut, mask] = await Promise.all([fetch(KIT + view + (mdl === "nbm" ? "/lut.bin" : `/lut_${mdl}.bin`) + "?v=20261109snugtot", { cache: "no-cache" }).then(r => { if (!r.ok) throw new Error("lut " + r.status); return r.arrayBuffer(); }).then(b => new Float32Array(b)),
                                            loadImg(KIT + view + "/mask.png")]);
     const oc = new OffscreenCanvas(mask.width, mask.height), cx = oc.getContext("2d", { willReadFrequently: true }); cx.drawImage(mask, 0, 0);
     const md = cx.getImageData(0, 0, mask.width, mask.height).data, m = new Uint8Array(mask.width * mask.height); for (let k = 0; k < m.length; k++) m[k] = md[k * 4];
@@ -330,7 +330,7 @@ async function render(cv, c, kind, view, d) {
 async function renderTotals(cv, m, c, kind, view, w) {
   const P = PRODUCTS[kind], pal = P.pal;
   const [K, VK, F, T, LB] = await Promise.all([kindKit("low", view), viewKit(view, lutOf(m)), totalField(m, c, kind, w.f0, w.f1),
-    readJSON(KIT + view + "/totals.json"), m === "nbm" ? null : readJSON(KIT + view + `/lab_${lutOf(m)}.json?v=20261109ifs557`)]);
+    readJSON(KIT + view + "/totals.json"), m === "nbm" ? null : readJSON(KIT + view + `/lab_${lutOf(m)}.json?v=20261109snugtot`)]);
   const [base, over, title] = await Promise.all([loadImg(KIT + view + "/base.png"), loadImg(KIT + view + "/plain_overlay.png"), loadImg(KIT + view + `/titles/${P.timg ? P.timg(w) : kind}.png`)]);
   const SC = 2;   // same 2x backing as the daily maps
   cv.width = K.W * SC; cv.height = K.H * SC; const ctx = cv.getContext("2d"); ctx.setTransform(SC, 0, 0, SC, 0, 0);
@@ -350,7 +350,9 @@ async function renderTotals(cv, m, c, kind, view, w) {
     const [fi, fj] = LB ? LB[i] : [L.fi, L.fj], v = bil(F, fi, fj); if (v !== v) return;
     const x = P.clip0 === 0 ? v : Math.max(0, v); if (L.wa) vals[L.name] = x;
     if (L.wa && (kind === "snow" || kind === "kuchera" || kind === "snod" || !L.pass_)) tv[L.name] = +pal.fmt(x);
-    pilText(ctx, pal.fmt(x), L.x, L.y, L.anchor, L.font, L.sw, pal.valColor(+pal.fmt(x)));
+    // 11-09: decimal totals sit snugly under the overlay town name (kit Y is the integer-temp slot).
+    const vy = (kind === "precip" || kind === "snow" || kind === "snod" || kind === "kuchera") ? L.y - Math.round((L.font[1] || 32) * 0.5) : L.y;
+    pilText(ctx, pal.fmt(x), L.x, vy, L.anchor, L.font, L.sw, pal.valColor(+pal.fmt(x)));
   });
   const fitPx = (txt, px) => { while (px > 20) { ctx.font = `800 ${px}px Montserrat`; if (ctx.measureText(txt).width <= K.sum_maxw) break; px -= 2; } return px; };
   const mx = Math.max(...Object.values(tv));

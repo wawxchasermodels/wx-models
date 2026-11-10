@@ -1587,6 +1587,7 @@ async function ifsLut(vid) {   // ECMWF 0.25 LUT of a view: figure px <-> lat / 
   const lut = await lutC[vid]; return lut ? { Vi, lut } : null;
 }
 async function llToFig(lat, lon) {
+  if (S.man && S.man.models && S.man.models.ifs) StormFind.IFS.setCrop(S.man.models.ifs.crop);
   const L = await ifsLut(S.view), st = await viewStatic(S.view); if (!L) return null;
   const [fi, fj] = StormFind.IFS.ij(lat, lon), p = gridInv(L.Vi, { lut: L.lut, W: st.W, H: st.H }, fi, fj, null);
   return p ? { x: st.x0 + p[0], y: st.y0 + p[1] } : null;
@@ -1599,6 +1600,7 @@ async function findStorms() {
   if (!R_.fields.includes("mslp")) { mpSt("This model has no sea-level pressure, so the storm finder can't run on it. Try ECMWF or GFS."); return []; }
   TRK.busy = true; $s("mpsf").disabled = true; mpSt("Finding storms\u2026");
   try {
+    if (S.man && S.man.models && S.man.models.ifs) StormFind.IFS.setCrop(S.man.models.ifs.crop);
     const V = VIEWS()[vid], st = await viewStatic(vid), steps = R_.steps, L = await ifsLut(vid);
     const use = steps.length > 48 ? steps.filter((x) => x.f % 6 === 0) : steps, hours = [];
     for (let n = 0; n < use.length; n++) {

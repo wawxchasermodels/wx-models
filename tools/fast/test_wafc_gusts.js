@@ -214,7 +214,12 @@ const si = lowKit.labels.findIndex((L) => L.name === "Seattle");
 assert.ok(si >= 0);
 assert.ok(Math.abs(labIfs[si][0] - 162.22) < 0.05);
 assert.ok(Math.abs(labIfs[si][1] - 393.74) < 0.05, "Seattle IFS fj " + labIfs[si][1]);
-assert.ok(wamaps.includes("/ 0.25 - 557") || fs.readFileSync(path.join(ROOT, "wamaps/build_totals_kit.py"), "utf8").includes("/ 0.25 - 557"));
+const kitPy = fs.readFileSync(path.join(ROOT, "wamaps/build_totals_kit.py"), "utf8");
+assert.ok(kitPy.includes("[8, 356, 557, 1421]") || kitPy.includes("/ 0.25 - 557"), "IFS crop fallback is j0=557");
+assert.ok(!kitPy.includes("/ 0.25 - 600") && !kitPy.includes("[8, 356, 600,"), "IFS crop must not hardcode old j0=600");
+assert.ok(kitPy.includes("_crop") && kitPy.includes("WX_MANIFEST"), "IFS crop derived from manifest when available");
+assert.ok(wamaps.includes('const vy = (kind === "precip" || kind === "snow" || kind === "snod" || kind === "kuchera")'), "decimal totals share a tighter label Y");
+assert.ok(wamaps.includes("L.y - Math.round((L.font[1] || 32) * 0.5)"));
 
 console.log("wafc gusts + framing: ok");
 
