@@ -1676,7 +1676,7 @@ function bxFill() {
   const ck = (id, v, t, on) => `<label><input type="checkbox" data-g="${id}" value="${v}"${on ? " checked" : ""}> ${t}</label>`, [m0] = S.run.split("/"), R_ = S.runs[S.run];
   $s("bxm").innerHTML = MORDER.filter((m) => S.man.models[m] && (S.man.runs[m] || []).length).map((m) => ck("m", m, S.man.models[m].site || m, m === m0)).join("");
   $s("bxp").innerHTML = Object.entries(PRODS()).filter(([, p]) => p.fields.every((fl) => R_.fields.includes(fl))).map(([k, p]) => ck("p", k, p.title, k === S.prod)).join("");
-  $s("bxv").innerHTML = Object.entries(VIEWS()).map(([k, v]) => ck("v", k, v.label, k === S.view)).join(""); bxCount();
+  $s("bxv").innerHTML = Object.entries(typeof rrfsMenuViews === "function" ? rrfsMenuViews() : VIEWS()).map(([k, v]) => ck("v", k, v.label, k === S.view)).join(""); bxCount();
 }
 const bxSel = (g) => [...document.querySelectorAll(`#mpbatch input[data-g="${g}"]:checked`)].map((e) => e.value);
 function bxCount() { const n = bxSel("m").length * bxSel("p").length * bxSel("v").length * (+$s("bxsv").checked + +$s("bxsh").checked); $s("bxn").textContent = `${n} video${n === 1 ? "" : "s"} (at most 40)`; return n; }

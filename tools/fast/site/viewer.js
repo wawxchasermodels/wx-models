@@ -397,6 +397,7 @@ async function boot() {
     runMenu(o2, a2); loadNote();
   }, 120e3);
   setLists();
+  if (await ensureRrfsGrid(S.view)) setLists();
   if (vKeep != null && !(S.runs[S.run] && S.runs[S.run].steps || []).some(x => Math.abs(Date.parse(x.valid) - vKeep) <= 3 * 3600e3)) vKeep = null;
   const f0 = vKeep != null ? null : Q.get("f"), steps = (S.runs[S.run] && S.runs[S.run].steps) || [], found = f0 ? steps.findIndex(s => s.f == +f0) : -1;
   S.i = found >= 0 ? found : (String(S.run || "").startsWith("oisst/") ? Math.max(0, steps.length - 1) : 0);   // 11-03: daily analyses open on the newest day. A missing hour is not index 0 via findIndex -1.
@@ -410,7 +411,8 @@ async function boot() {
       const got = await loadListed(cands), R_ = got.data;
       if (!R_ || !R_.steps || !R_.steps.length) throw new Error(next + ": run has no hours");
       S.run = got.run; setLists();
-      const st = R_.steps; let b = 0; st.forEach((x, k) => { if (Math.abs(Date.parse(x.valid) - vt) < Math.abs(Date.parse(st[b].valid) - vt)) b = k; });
+      try { if (await ensureRrfsGrid(S.view)) setLists(); } catch (err) { showErr(err); return; }
+      const st = S.runs[S.run].steps; let b = 0; st.forEach((x, k) => { if (Math.abs(Date.parse(x.valid) - vt) < Math.abs(Date.parse(st[b].valid) - vt)) b = k; });
       S.i = b; $("step").value = b; memUI(); draw(); loadNote();
       if (got.run !== next) showErr(new Error(next + " is listed but its data is missing. Showing " + got.run + "."));
     } catch (err) {
@@ -429,7 +431,9 @@ async function boot() {
   $("obsbtn") && ($("obsbtn").onclick = obsOpen);
   $("mgbtn") && ($("mgbtn").onclick = () => mgOpen("town")); $("pfbtn") && ($("pfbtn").onclick = () => mgOpen("pass"));
   $("prod").onchange = e => { S.prod = e.target.value; S.lastTab[S.tab || tabOf(S.prod)] = S.prod; draw(); };
-  $("view").onchange = e => { S.view = e.target.value; resetZoom(); draw(); };
+  $("view").onchange = async e => { S.view = e.target.value; resetZoom();
+    try { if (await ensureRrfsGrid(S.view)) setLists(); } catch (err) { showErr(err); return; }
+    draw(); };
   const sl = $("step"), endDrag = () => { if (S.dragging) { S.dragging = false; draw(); } };
   sl.addEventListener("pointerdown", () => { S.dragging = true; });
   sl.addEventListener("touchstart", () => { S.dragging = true; }, { passive: true });
@@ -507,7 +511,7 @@ async function onCompareMsg(e) {
   if (d.run && d.run !== S.run) { try { await loadRun(d.run); S.run = d.run; $("run").value = d.run; } catch (err) { return; } }
   const P = PRODS(), has = new Set(S.runs[S.run].fields);
   if (d.prod && P[d.prod] && P[d.prod].fields.every(x => has.has(x))) { S.prod = d.prod; S.tab = null; }
-  if (d.view && VIEWS()[d.view]) S.view = d.view;
+  if (d.view) { await ensureRrfsGrid(d.view); if (rrfsMenuViews()[d.view]) S.view = d.view; }
   setLists();
   const lead = typeof d.i === "number";   // shared slider (compare page): this frame leads, so its new state is passed on to the other map
   if (lead) { S.i = Math.max(0, Math.min(S.runs[S.run].steps.length - 1, d.i)); $("step").value = S.i; d.valid = null; }
@@ -591,6 +595,57 @@ const allProds = md => md._allP || (md._allP = (() => {
     A[k] = Object.assign({}, P, { isobars: Object.assign({}, P.isobars, ISO_MSLP), extra: typeof P.extra === "string" ? P.extra.replace(/isobars every 4 mb/g, "isobars every 2 mb") : P.extra });
   return A; })());
 const PRODS = () => allProds(MD()), VIEWS = () => MD().views;
+// When RRFS is selected, wider cameras stay in the view menu and load the 13 km
+// NA grid (rrfsna). Tight CONUS cameras stay on 3 km rrfs. Studio and Compare
+// use this same viewer, so they follow the swap too.
+const RRFS_WIDE_VIEWS = new Set(["na", "pnw", "pnwt"]);
+function rrfsMate(m) { return m === "rrfs" ? "rrfsna" : m === "rrfsna" ? "rrfs" : null; }
+function rrfsMenuViews() {
+  const V = (VIEWS() || {});
+  const mate = rrfsMate((S.run || "").split("/")[0]);
+  if (!mate || !S.man || !S.man.models[mate]) return V;
+  const raw = S.man.models[mate].views || {}, extra = {};
+  for (const [id, v] of Object.entries(raw)) {
+    if (V[id]) continue;
+    extra[id] = Object.assign({}, v, { label: v.label || id });
+  }
+  if (!Object.keys(extra).length) return V;
+  const order = ["na", "pnw", "pnwt", "puget", "wa", "wwa", "ewa", "passes", "newa", "lm", "bc", "pnwhr", "wawide", "coast"];
+  const merged = {}, seen = new Set();
+  for (const id of [...order, ...Object.keys(V), ...Object.keys(extra)]) {
+    if (seen.has(id)) continue;
+    if (V[id]) { merged[id] = V[id]; seen.add(id); }
+    else if (extra[id]) { merged[id] = extra[id]; seen.add(id); }
+  }
+  return merged;
+}
+function pickRrfsRun(mate, cycle) {
+  const cs = (S.man && S.man.runs && S.man.runs[mate]) || [];
+  if (!cs.length) return null;
+  if (cycle && cs.includes(cycle)) return mate + "/" + cycle;
+  return mate + "/" + cs[cs.length - 1];
+}
+async function ensureRrfsGrid(vid) {
+  if (!vid || !S.run) return false;
+  const [m, c] = S.run.split("/");
+  if (!rrfsMate(m)) return false;
+  const want = RRFS_WIDE_VIEWS.has(vid) ? "rrfsna" : "rrfs";
+  if (m === want) return false;
+  if (!((S.man.models[want] || {}).views || {})[vid]) return false;
+  const next = pickRrfsRun(want, c);
+  if (!next) return false;
+  try { await loadRun(next); } catch (e) { return false; }
+  const cur = S.runs[S.run], vt = cur && cur.steps && cur.steps[S.i] ? Date.parse(cur.steps[S.i].valid) : null;
+  S.run = next;
+  if ($("run") && [...$("run").options].some(o => o.value === next)) $("run").value = next;
+  if (vt && S.runs[next] && S.runs[next].steps) {
+    const st = S.runs[next].steps; let b = 0;
+    st.forEach((x, k) => { if (Math.abs(Date.parse(x.valid) - vt) < Math.abs(Date.parse(st[b].valid) - vt)) b = k; });
+    S.i = b;
+    if ($("step")) $("step").value = b;
+  }
+  return true;
+}
 // Product tabs (Benjamin 10-30 8:04 PM: "upper air tab, surface tab, precipitation tab, snow tab", Pivotal Weather style).
 // The Product menu lists only the open tab's products, in the order below (Pivotal: winds by level, 250 -> 850 mb);
 // product ids / URLs are unchanged (?prod= picks its tab). Products not listed here land in an "Other" tab.
@@ -616,7 +671,7 @@ const hasWaves = m => { const P = allProds(S.man.models[m] || {}); return WAVE_T
 const runInTab = (r, tab) => { const m = r.split("/")[0]; if (Q.get("embed")) return true; return tab === "wav" ? hasWaves(m) : !OCEAN.includes(m); };
 S.lastTab = {};
 function setLists() {   // products this run carries (all their fields present), views this model has
-  const R_ = S.runs[S.run], has = new Set(R_.fields), P = PRODS(), V = VIEWS();
+  const R_ = S.runs[S.run], has = new Set(R_.fields), P = PRODS(), V = rrfsMenuViews();
   const prods = Object.entries(P).filter(([k, p]) => p.fields.every(f => has.has(f)));
   const tabs = [...TABS, ["other", "Other", []]].map(([id, label, ids]) => [id, label,
     prods.filter(([k]) => id === "other" ? tabOf(k) === "other" : ids.includes(k)).sort((a, b) => ids.indexOf(a[0]) - ids.indexOf(b[0]))]).filter(t => t[2].length);
