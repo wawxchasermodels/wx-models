@@ -61,8 +61,11 @@ def main():
         return fail(f"basemap counties {len(bm.get('counties') or [])} too few")
 
     studio = STUDIO.read_text()
-    if "alert/alert.js?v=20261109orid" not in studio:
+    if "alert/alert.js?v=20261109orid2" not in studio:
         return fail("studio.js must load the new alert.js token")
+    js = (here / "tools/fast/site/alert/alert.js").read_text()
+    if "const CHUNK = 40" not in js:
+        return fail("alert.js PZZ fetch must use a chunk large enough for the 24 marine zones")
 
     # Posting watchers must stay WA-only.
     watch = (RELAY / "logic" / "watch.py").read_text()

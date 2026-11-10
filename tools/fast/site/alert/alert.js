@@ -541,12 +541,20 @@ const Alerts = (() => {
         const byId = new Map();
         for (const a of (land.features || [])) byId.set(a.id || (a.properties && a.properties.id), a);
         const pzz = [...S.zones.keys()].filter((k) => /^PZZ\d+$/.test(k));
-        for (let i = 0; i < pzz.length; i += 15) {
-          const chunk = pzz.slice(i, i + 15);
-          try {
-            const m = await loadJSON("https://api.weather.gov/alerts/active?zone=" + chunk.join(","), { headers: { Accept: "application/geo+json", "User-Agent": UA } });
-            for (const a of (m.features || [])) byId.set(a.id || (a.properties && a.properties.id), a);
-          } catch (e) { /* skip */ }
+        // One request while the pack fits (24 PZZ today). A 15-zone chunk left the new OR
+        // marine zones on a second fetch that NWS often 429s right after the land query.
+        const CHUNK = 40;
+        for (let i = 0; i < pzz.length; i += CHUNK) {
+          const chunk = pzz.slice(i, i + CHUNK);
+          let fetched = false;
+          for (let attempt = 0; attempt < 2 && !fetched; attempt++) {
+            try {
+              if (attempt) await new Promise((r) => setTimeout(r, 400));
+              const m = await loadJSON("https://api.weather.gov/alerts/active?zone=" + chunk.join(","), { headers: { Accept: "application/geo+json", "User-Agent": UA } });
+              for (const a of (m.features || [])) byId.set(a.id || (a.properties && a.properties.id), a);
+              fetched = true;
+            } catch (e) { /* retry once, then skip this chunk */ }
+          }
         }
         data = { type: "FeatureCollection", features: [...byId.values()] };
       } catch (liveErr) {
