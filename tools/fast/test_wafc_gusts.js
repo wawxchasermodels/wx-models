@@ -41,6 +41,7 @@ assert.deepStrictEqual(gust.gustModels("west", ["nbm", "ifs9", "ifs", "eps", "hr
 assert.deepStrictEqual(gust.gustModels("full", ["nbm", "ifs", "eps", "hrrr"]), ["nbm", "ifs", "eps", "hrrr"]);
 assert.deepStrictEqual(gust.gustModels("east", ["eps", "hrrr"]), ["eps", "hrrr"]);
 assert.ok(!gust.gustModels("west", ["nbm", "ifs", "eps", "hrrr"]).includes("eps"));
+assert.ok(wamaps.includes("jd > 1.6 * 3600e3"));
 assert.ok(wamaps.includes('["gust", "Max gust"]'));
 assert.strictEqual(gust.gustWindowLabel({ ms0: 0, ms1: 1, day: "Friday", md: "11-7" }), "Max gust over 2 PM to 11 PM Friday 11-7");
 

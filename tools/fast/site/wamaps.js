@@ -399,8 +399,9 @@ function setTimes() {
     if (Ph.hours === 24) {   // prefer a PT calendar day; 3-hourly EPS snaps to the step nearest midnight
       let best = null, bestOff = 99;
       for (let i = 0; i < T.length; i++) {
-        const j = T.findIndex(t => Math.abs(t.ms - (T[i].ms + 24 * 3600e3)) < 3.1 * 3600e3);
-        if (j <= i) continue;
+        const target = T[i].ms + 24 * 3600e3; let j = -1, jd = Infinity;
+        T.forEach((t, k) => { const d = Math.abs(t.ms - target); if (k > i && d < jd) { jd = d; j = k; } });
+        if (j <= i || jd > 1.6 * 3600e3) continue;   // closest step to +24 h, not the first within a wide band (that was 21 h on 3-hourly EPS)
         const h = +ptParts(T[i].ms).hour, off = Math.min(h, 24 - h);
         if (off < bestOff) { bestOff = off; best = [i, j]; if (off === 0) break; }
       }
