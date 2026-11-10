@@ -404,7 +404,7 @@ function strongestMember(c, f, k, cur, r, headBot, cbY) {
   const fs = k === "v" ? 17 : 15, text = `${Math.round(T.mb)} mb${T.num != null ? ` · Mem ${T.num}` : ""}`;   // t2767u: no prefix, no bar
   c.font = `800 ${fs}px Montserrat`;
   const w = c.measureText(text).width, pad = 8, h = fs + 2 * pad;
-  const blocks = [f.hdr, f.badge, f.lowKeyBox, [0, cbY - 45, f.W, f.H]].filter(Boolean);
+  const blocks = [f.hdr, f.badge, f.lowKeyBox, [0, cbY - 45, f.W, f.H]].concat(window.__studioTownBoxes || []).filter(Boolean);
   const overlap = (a, b) => Math.max(0, Math.min(a[2], b[2]) - Math.max(a[0], b[0])) * Math.max(0, Math.min(a[3], b[3]) - Math.max(a[1], b[1]));
   let best;
   for (const gap of [16, 45, 80, 125]) for (const [sx, sy] of [[1,-1],[-1,-1],[1,1],[-1,1]]) {
@@ -966,7 +966,7 @@ function renderMg(k, frO) {
 // at backing scale and drops or nudges any label that would sit in the title/date band, the footer, or past the frame edge.
 function paintStudioTowns(c, k, r, top, bot) {
   const src = window.__studioTownSrc;
-  if (!src || !src.items || !src.items.length || !r || !r.sw || !r.rs) return;
+  if (!src || !src.items || !src.items.length || !r || !r.sw || !r.rs) { window.__studioTownBoxes = []; return; }
   const f = F[k], rs = r.rs, sc = f.W / r.sw, dpi = src.dpi || 100, kk = sc * rs;
   const toF = (figX, figY) => [(figX * rs - r.sx) * sc, (figY * rs - r.sy) * (f.H / r.sh)];
   const margin = 8, hits = (b) => b[0] < margin || b[1] < top || b[2] > f.W - margin || b[3] > bot;
@@ -1007,6 +1007,7 @@ function paintStudioTowns(c, k, r, top, bot) {
     c.fillStyle = n.color || "#0d0f13"; c.fillText(n.text, x0 + dx, y0 + dy);
   }
   c.restore();
+  window.__studioTownBoxes = placed;
 }
 async function render(k, frO) {   // frO: camera override (MP4 storm-track pan)
   ssFit(F[k], REC.flat ? 1 : PSS);   // every Studio frame is 2x so titles, keys, credits and labels rasterize at export size
@@ -1087,9 +1088,11 @@ async function render(k, frO) {   // frO: camera override (MP4 storm-track pan)
   else { c.textAlign = "right"; dl.forEach((l, i) => c.fillText(l, f.W - f.pad, f.H - 24 - 30 - (dl.length - 1 - i) * dlh)); c.textAlign = "left"; }
   const dUp = k === "v" ? 0 : dl.length * dlh + 4;
   if (logo) { c.font = `800 ${k === "v" ? 34 : 28}px Montserrat`; c.fillStyle = "#fff"; c.textAlign = "right"; c.fillText(logo, f.W - f.pad, f.H - (k === "v" ? 70 : 60) - dUp); c.textAlign = "left"; }
-  if (P.lows) { lowKey(c, f, k, cbY, cbS); strongestMember(c, f, k, cur, r, headBot, cbY); }
   c.restore();
   paintStudioTowns(c0, k, r, headBot + 10, cbY - 16);
+  c.save(); sharpShadow(c, k);
+  if (P.lows) { lowKey(c, f, k, cbY, cbS); strongestMember(c, f, k, cur, r, headBot, cbY); }
+  c.restore();
   c = c0; ovPut(c, f, k);
   if (cnr) cornerLogo(c, cnr);
   if (BR.lower) lowerThird(k, c);

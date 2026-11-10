@@ -262,6 +262,13 @@ const WAWIDE_PASSES_PNG = "@slayers/static/towns_wawide_p1.png";
 // 11-04 (t2314u "yes rebuild those too"): HRRR / RRFS / NBM wide view (pnwhr) too: wawide_s2.json models.{hrrr,rrfs,nbm} = {towns, towns_png}
 let WAWIDE_S2 = null; const WAWIDE_FS = 0.83;
 const PNWT_FS = 0.83;   // Pacific NW tight only: town names + numbers ~17% smaller (still crisp canvas text)
+const PNWHR_FS = 0.78;  // Pacific NW (high-res): town names + numbers ~22% smaller (crisp canvas text; collision unchanged)
+function townFs(vid) {
+  const v = vid || (typeof S !== "undefined" && S.view) || "";
+  if (v === "pnwt") return PNWT_FS;
+  if (v === "pnwhr") return PNWHR_FS;
+  return 1;
+}
 function addStudioViews(man, sv) {
   // 10-31 7:55 PM (Benjamin: "city labels on the new washington wide are way too big"): the global models now get a real view
   // made for Studio (tools/fast/studio_views.py -> static/studio_views.json, not in manifest.json): its own basemap and town layer
@@ -1068,6 +1075,7 @@ async function render(lite) {
   ctx.restore();
   // 4. towns (dots + names static) and live numbers
   const tmode = P.towns || "numbers";
+  window.__townBoxes = [];
   const WT = (WAVE_PIDS.test(pid) || VSRC(S.view) === "coast") && MD().grid === "ll" ? coastPlan(ctx, st, V, LW, LH) : null;   // wave maps + Coast (t2532u wwa towns)
   if (WT && WT.C && WT.C.allTowns) WT.plainNames = !WAVE_PIDS.test(pid);   // Coast non-wave: names only; wave: model values at the pin
   const haveTowns = !!(st.towns || townLive);
@@ -1080,9 +1088,9 @@ async function render(lite) {
       if (!(t.fi >= 0 && t.fj >= 0 && t.fi < D.h - 1 && t.fj < D.w - 1)) continue;
       let v = sampleRC(D.fill, D.w, t.fi, t.fj); if (!isFinite(v)) continue;
       if (pid === "t2m" && t.t2m_corr !== undefined) v += t.t2m_corr;
-      nums.push({ name: t.name, x: t.x, y: t.y, text: fmtVal(P, v), size: t.size * (S.view === "pnwt" ? PNWT_FS : 1), color: t.color });
+      nums.push({ name: t.name, x: t.x, y: t.y, text: fmtVal(P, v), size: t.size * townFs(), color: t.color });
     }
-    window.__studioTownSrc = { items: S.view === "pnwt" ? (st.labels || []).map(it => it.k === "t" ? Object.assign({}, it, { size: it.size * PNWT_FS }) : it) : st.labels, nums, LW, LH, dpi: S.man.dpi || 100 };
+    window.__studioTownSrc = { items: (townFs() !== 1) ? (st.labels || []).map(it => it.k === "t" ? Object.assign({}, it, { size: it.size * townFs() }) : it) : st.labels, nums, LW, LH, dpi: S.man.dpi || 100 };
   } else if (Q.get("studio")) window.__studioTownSrc = null;
   const drewTowns = !studioHold && townLive && tmode !== "none" && !(WT && WT.own) && drawTownLayer(ctx, st.labels, LW, LH, WT && WT.re, WT && WT.erase);
   if (!studioHold && !drewTowns && st.towns && L2.towns && tmode !== "none" && !(WT && WT.own)) ctx.drawImage(WT && WT.erase.length ? erasedTowns(L2.towns, `${st.townsU}#${WT.vid}`, WT.erase, LW) : L2.towns, 0, 0, LW, LH);
@@ -1092,11 +1100,14 @@ async function render(lite) {
     if (!(t.fi >= 0 && t.fj >= 0 && t.fi < D.h - 1 && t.fj < D.w - 1)) continue;
     let v = sampleRC(D.fill, D.w, t.fi, t.fj); if (!isFinite(v)) continue;   // HRRR: integer = nearest 3 km point; global: bilinear at the pin
     if (pid === "t2m" && t.t2m_corr !== undefined) v += t.t2m_corr;          // pass summit height correction (temp_maps)
-    haloText(ctx, fmtVal(P, v), t.x * LW, t.y * LH, `800 ${pt(t.size * (S.view === "pnwt" ? PNWT_FS : 1))}px Montserrat`, t.color, pt(3.0), "left", "middle");
+    haloText(ctx, fmtVal(P, v), t.x * LW, t.y * LH, `800 ${pt(t.size * townFs())}px Montserrat`, t.color, pt(3.0), "left", "middle");
+    { const fs = pt(t.size * townFs()), tw = ctx.measureText(fmtVal(P, v)).width, hh = fs * 0.55, x = t.x * LW, y = t.y * LH;
+      (window.__townBoxes = window.__townBoxes || []).push([x, y - hh, x + tw, y + hh * 0.75]); }
   }
   // 11-01 8:32 AM (Benjamin t1987u: "Include known buoy locations off the coast, and have them show the wave height numbers, do the same for
   // significant wave height"; t1988u: "Just make them look like the other locations in the map"): NDBC buoys on the ECMWF wave maps only
   if (WT) drawCoast(ctx, st, D, P, V, LW, LH, WT);
+  window.__coastTaken = (WT && (WT.taken || WT.boxes)) ? (WT.taken || WT.boxes).slice() : [];
   if (P.lows && S.lowPanel && !Q.get("studio")) paintLowPanel(ctx, st, V, S.lowPanel);   // 11-02 (Benjamin t2115u): not in Studio frames (Studio has its own dot key); kept on the viewer
   // t2772u: Studio frames label the strongest member themselves (studio.js strongestMember, per crop); drawing it here too gave two overlapping labels
   // 5. key + header text (canvas text at the display backing scale; raster key only if the product has no level metadata)
@@ -1131,6 +1142,7 @@ async function render(lite) {
   $("stat").textContent = `F+${f}  data ${S.last.data_ms.toFixed(0)} ms · fill ${S.last.fill_ms.toFixed(0)} ms · lines/labels ${S.last.overlay_ms.toFixed(0)} ms`;
   window.__drawn = `${pid}/${vid}/${f}` + (lite ? "~" : ""); window.__rs = rs;
   showCoast(cv, V, { title: P.title, valid: step.valid_line, sub: `${S.runs[run].runline}  \u00b7  ${V.label}  \u00b7  ${extra}`, badge: step.badge, P, pid, maxv, towns: !!(haveTowns && tmode !== "none") });
+  if (coastNow && P.lows && S.lowPanel) paintCoastStrongLow(cv, V, S.lowPanel, { maxv });
   postCompare(run, pid, vid, step);
   if (lite) { if (window.onStudioDraw && Q.get("studio")) window.onStudioDraw(cv_(), S.cur, step, true); return; }
   // iOS Safari throws after 100 history.replaceState calls in 10 s: update the URL once things settle
@@ -1713,10 +1725,13 @@ function drawTownLayer(ctx, items, LW, LH, skip, erase) {
     ctx.fillStyle = it.fill || "#1b1d22"; ctx.strokeStyle = it.stroke || "#ffffff"; ctx.lineWidth = pt(it.mew || 0);
     if (it.mew) ctx.stroke(); ctx.fill();
   }
-  const nameSc = (typeof S !== "undefined" && S.view === "pnwt") ? PNWT_FS : 1;
+  const nameSc = (typeof S !== "undefined") ? townFs(S.view) : 1;
+  window.__townBoxes = [];
   for (const it of items) if (it.k === "t" && !(skipT && skipT.has && skipT.has(it.t))) {
     const font = `${it.style === "italic" ? "italic " : ""}${it.w || 600} ${pt(it.size * nameSc)}px Montserrat`;
     haloText(ctx, it.t, it.x * LW, it.y * LH, font, it.fill || "#1b1d22", pt(it.halo == null ? 2.6 : it.halo), "left", "middle");
+    const tw = ctx.measureText(it.t).width, hh = pt(it.size * nameSc) * 0.55, x = it.x * LW, y = it.y * LH;
+    window.__townBoxes.push([x, y - hh, x + tw, y + hh * 0.75]);
   }
   ctx.restore(); return true;
 }
@@ -2107,7 +2122,13 @@ function lowGeom(st, D, P, V) {
   const lat = fi => 90 - (fi + cr[0]) * 0.25, lon = fj => (fj + cr[2]) * 0.25;
   const km = (a1, o1, a2, o2) => { const p1 = a1 * Math.PI / 180, p2 = a2 * Math.PI / 180, dl = (o2 - o1) * Math.PI / 180;
     return 6371 * Math.acos(Math.min(1, Math.max(-1, Math.sin(p1) * Math.sin(p2) + Math.cos(p1) * Math.cos(p2) * Math.cos(dl)))); };
-  const inView = p => p && p[0] >= 0 && p[1] >= 0 && p[0] <= st.W && p[1] <= st.H;
+  const Cframe = coastShown(V);
+  const inView = p => {
+    if (!(p && p[0] >= 0 && p[1] >= 0 && p[0] <= st.W && p[1] <= st.H)) return false;
+    if (!Cframe) return true;
+    const X = st.x0 + p[0], Y = st.y0 + p[1];
+    return X >= Cframe.x && Y >= Cframe.y && X <= Cframe.x + Cframe.w && Y <= Cframe.y + Cframe.h;
+  };
   // member lows: pixel position, in view only (same rule as the old list: "in view")
   const L = [];
   for (const row of (Array.isArray(E.lows) ? E.lows : [])) {
@@ -2191,6 +2212,27 @@ function paintStrongLow(ctx, st, g, obs) {
   ctx.save(); ctx.font = `800 ${pt(10.5)}px Montserrat`; ctx.textAlign = "left"; ctx.textBaseline = "middle"; ctx.lineJoin = "round";   // t2767u: white text, dark halo
   ctx.strokeStyle = "#0b0d12"; ctx.lineWidth = pt(2.6); ctx.strokeText(s, best[0], best[1]); ctx.fillStyle = "#ffffff"; ctx.fillText(s, best[0], best[1]); ctx.restore();
 }
+function paintCoastStrongLow(cv, V, g, meta) {
+  const C = coastShown(V), T = g && g.top;
+  if (!C || !cv || !T || !g.hasNum || !T.num) return;
+  const ctx = cv.getContext("2d");
+  const T2 = Object.assign({}, T, { x: T.x - C.x, y: T.y - C.y + C.head });
+  if (T2.x < 4 || T2.y < C.head + 4 || T2.x > C.w - 4 || T2.y > C.head + C.h - 4) return;
+  const means = (g.means || []).map(([mx, my, mv]) => [mx - C.x, my - C.y + C.head, mv])
+    .filter(([mx, my]) => mx >= 0 && my >= C.head && mx <= C.w && my <= C.head + C.h);
+  const g2 = Object.assign({}, g, { top: T2, means });
+  const st2 = { x0: 0, y0: C.head, W: C.w, H: C.h };
+  const shift = b => [b[0] - C.x, b[1] - C.y + C.head, b[2] - C.x, b[3] - C.y + C.head];
+  const obs = [];
+  for (const b of (window.__coastTaken || [])) if (b && b.length >= 4) obs.push(shift(b));
+  for (const b of (window.__townBoxes || [])) if (b && b.length >= 4) obs.push(shift(b));
+  obs.push([0, 0, C.W, C.head], [0, C.head + C.h, C.W, C.H]);   // title band + footer (key, max, credits)
+  if (meta && meta.maxv != null && isFinite(meta.maxv)) {
+    const barY = C.head + C.h + 18;
+    obs.push([C.W - 280, barY - 28, C.W - 8, barY + 4]);
+  }
+  paintStrongLow(ctx, st2, g2, obs);
+}
 function paintLowPanel(ctx, st, V, g) {   // ens_maps.low_panel, drawn inside the left edge of the map + the dot legend
   const [LW, LH] = V.fig, PW = Math.round(0.092 * LW), x0 = g.side === "right" ? st.x0 + st.W - PW - pt(3) : st.x0 + pt(3), y0 = st.y0 + pt(3), H = st.H - pt(6);
   const ms = g.meanVals.slice(0, 4), mrows = Math.max(1, Math.ceil(ms.length / 2));
@@ -2222,7 +2264,7 @@ function paintLowPanel(ctx, st, V, g) {   // ens_maps.low_panel, drawn inside th
   // 11-03 small fixes (EPS lows: the label could sit on the mean red L): the label is a box tested against every mean L
   // (letter + number, hlBox), the list box, the dot key and the map edge.
   const lwK = pt(78), lhK = pt(11) * (DOT_LABELS.length + 1) + pt(8), kx = g.side === "right" ? x0 - lwK - pt(5) : x0 + PW + pt(5), ky = st.y0 + st.H - lhK - pt(5);
-  paintStrongLow(ctx, st, g, [[x0, y0, x0 + PW, y0 + H], [kx, ky, kx + lwK, ky + lhK]]);
+  if (!coastShown(V)) paintStrongLow(ctx, st, g, [[x0, y0, x0 + PW, y0 + H], [kx, ky, kx + lwK, ky + lhK]]);
   // "Member low (mb)" legend, lower left of the map just right of the list (old: matplotlib legend, lower left)
   const lw = pt(78), rh = pt(11), lhgt = rh * (DOT_LABELS.length + 1) + pt(8), lx = g.side === "right" ? x0 - lw - pt(5) : x0 + PW + pt(5), ly = st.y0 + st.H - lhgt - pt(5);
   ctx.globalAlpha = 0.92; ctx.fillStyle = "#ffffff"; ctx.fillRect(lx, ly, lw, lhgt); ctx.globalAlpha = 1; ctx.strokeStyle = "#c9c4b8"; ctx.strokeRect(lx, ly, lw, lhgt);
