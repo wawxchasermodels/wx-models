@@ -259,16 +259,24 @@ function pill(c, x, y, txt, size, bg, fg) {
 }
 function colorbar(c, P, x, y, w, h, size) {
   const L = P.levels, C = P.colors; if (!L || !C || L.length < 2) return false;
+  // t2848u: ensemble low-centers share the website's P.core swatch (navy/black "within 25 km" = 100% core). Same fractions as viewer.js keyBox / drawViewerKey.
+  let barW = w, coreX = 0, coreW = 0;
+  if (P.core && P.core.color) {
+    const full = 0.976 - 0.150, barF = 0.872 - 0.150, gapF = 0.888 - 0.872, swF = 0.088;
+    barW = w * barF / full; coreX = x + w * (barF + gapF) / full; coreW = w * swF / full;
+  }
   const lo = L[0], hi = L[L.length - 1], n = L.length - 1;   // equal-width bins (like the site's keys), ticks placed inside their bin
   // 11-01 9:16 AM (Benjamin t1996u "the numbers need to be fixed"): optional per-bin cell widths P.kw (max wave: 75-77.5 and 77.5-80 half a cell
   // each, so 75-80 is one cell like the other 5 ft steps and 75 / 80 / 85 stay evenly spaced on their color edges)
   const KW = Array.isArray(P.kw) && P.kw.length === n ? P.kw : null, CW = [0]; for (let i = 0; i < n; i++) CW.push(CW[i] + (KW ? KW[i] : 1));
   const X = (v) => { let i = 0; while (i < n - 1 && v > L[i + 1]) i++; const fr = Math.min(1, Math.max(0, (v - L[i]) / ((L[i + 1] - L[i]) || 1)));
-    return x + (CW[i] + fr * (CW[i + 1] - CW[i])) / CW[n] * w; };
+    return x + (CW[i] + fr * (CW[i + 1] - CW[i])) / CW[n] * barW; };
   const sh = [c.shadowColor, c.shadowBlur, c.shadowOffsetX, c.shadowOffsetY];
-  if (sh[1] || sh[2] || sh[3]) { c.fillStyle = "#000"; c.fillRect(x, y, w, h); c.shadowColor = "rgba(0,0,0,0)"; }
+  if (sh[1] || sh[2] || sh[3]) { c.fillStyle = "#000"; c.fillRect(x, y, barW, h); if (coreW) c.fillRect(coreX, y, coreW, h); c.shadowColor = "rgba(0,0,0,0)"; }
   for (let i = 0; i < C.length && i < L.length - 1; i++) { c.fillStyle = C[i]; c.fillRect(Math.floor(X(L[i])), y, Math.ceil(X(L[i + 1]) - X(L[i])) + 1, h); }
-  c.strokeStyle = "rgba(255,255,255,0.55)"; c.lineWidth = 1.5; c.strokeRect(x, y, w, h); c.shadowColor = sh[0];
+  c.strokeStyle = "rgba(255,255,255,0.55)"; c.lineWidth = 1.5; c.strokeRect(x, y, barW, h);
+  if (coreW) { c.fillStyle = P.core.color; c.fillRect(coreX, y, coreW, h); c.strokeRect(coreX, y, coreW, h); }
+  c.shadowColor = sh[0];
   c.font = `600 ${size}px Montserrat`; c.fillStyle = "#e9ecf1"; c.textAlign = "center";
   // ticks: skip any whose label would touch the previous drawn one (precip keys bunch 0.01-0.5 into a few bins)
   // 11-01 8:55 AM (Benjamin t1992u "add a couple more numbers to the scale, maybe every 5 feet"): the max wave bars (5 ft numbers 40-85, one per bin)
@@ -282,6 +290,12 @@ function colorbar(c, P, x, y, w, h, size) {
       c.fillRect(tx - 2, y + h, 2, size * 0.35); c.textAlign = "left"; c.fillText(s_, lx, y + h + size * 1.35); c.textAlign = "center"; lastR = lx + tw; return;
     }
     lastR = tx + tw / 2; c.fillRect(tx - 1, y + h, 2, size * 0.35); c.fillText(s_, tx, y + h + size * 1.35); });
+  if (coreW) {
+    const lab = `within ${P.core.km || 25} km`;
+    let zs = size; c.font = `700 ${zs}px Montserrat`; c.textAlign = "center"; c.fillStyle = "#e9ecf1";
+    while (zs > 10 && c.measureText(lab).width > coreW - 4) { zs -= 0.5; c.font = `700 ${zs}px Montserrat`; }
+    c.fillText(lab, coreX + coreW / 2, y + h + size * 1.35);
+  }
   c.textAlign = "left"; c.font = `700 ${size}px Montserrat`; c.fillText(P.key || "", x, y - size * 0.55);
   return true;
 }
