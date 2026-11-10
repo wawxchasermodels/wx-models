@@ -1601,13 +1601,19 @@ def static(m, out, views_only=None, x2_only=False):
     clim = {}
     for var in sorted({P["clim"] for P in prods.values() if P.get("clim")}):
         clim[var] = clim_static(m, out, crop_la, crop_lo, var, None if oro is None else oro[i0:i1, j0:j1] / 3.28084)
+    def _finite_json(o):
+        if isinstance(o, dict): return all(_finite_json(v) for v in o.values())
+        if isinstance(o, (list, tuple)): return all(_finite_json(v) for v in o)
+        if isinstance(o, (float, np.floating)): return bool(np.isfinite(o))
+        return True
+    clim = {k: v for k, v in clim.items() if _finite_json(v)}   # drop unusable clim (NaN ranges are invalid JSON)
     mp = f"{out}/manifest.json"; man = json.load(open(mp)) if os.path.exists(mp) else {}
     man.update(dpi=DPI, style=dict(BG=HS.BG, INK=HS.INK, MUTED=HS.MUTED, ACCENT=HS.ACCENT))
     MI = minfo(m)
     man.setdefault("models", {})[m] = dict(name=MI["name"], site=MI["site"], res=MI["res"], grid=MD["grid"],
                                           crop=[i0, i1, j0, j1], views=views, products=prods, clim=clim, **({"products_x": prods_x} if prods_x else {}))
     man.setdefault("runs", {}).setdefault(m, [])
-    json.dump(man, open(mp, "w"), indent=1)
+    json.dump(man, open(mp, "w"), indent=1, allow_nan=False)
     if MD["grid"] == "ll":   # 10-31: Studio-only "Washington (wide, for loops)" view on this crop (static/studio_views.json, not the manifest)
         import studio_views; studio_views.build([m], man, out)
         if "pnwt" in vids: studio_views.pnwt_fix([m], man, out)   # 10-31: Pacific NW tight town layer + slots, versioned (towns_pnwt_v2.png)
