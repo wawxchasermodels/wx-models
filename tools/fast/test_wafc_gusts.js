@@ -197,5 +197,14 @@ for (const view of ["full", "west", "east"]) {
   }
 }
 
+
+// 11-09 queue B: EPS ensemble-mean precip, snow, gusts, and 24 h temps on WA maps (not deterministic IFS extras).
+assert.ok(wamaps.includes('eps: { tag: "[ECMWF ENS]", name: "ECMWF ENS mean", res: "ECMWF ENS mean 0.25°", ec: 1, lut: "ifs", kinds: ["precip", "snow", "gust", "tmin24", "tmax24"] }'));
+assert.ok(wamaps.includes('field: { def: "t2m", eps: "mint" }'));
+assert.ok(wamaps.includes('field: { def: "t2m", eps: "maxt" }'));
+assert.ok(wamaps.includes('ifs: { tag: "[ECMWF 0.25°]", name: "ECMWF 0.25°", res: "ECMWF IFS 0.25°", ec: 1, kinds: ["precip", "snow", "gust"] }'));
+assert.ok(!gust.gustModels("west", ["nbm", "ifs", "eps", "hrrr"]).includes("eps"));
+
 console.log("wafc gusts + framing: ok");
+
 

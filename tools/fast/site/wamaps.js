@@ -17,7 +17,7 @@ const KINDS = [["low", "Lows"], ["high", "Highs"], ["gust", "Max gust"], ["preci
 // the model's fast crop shares (EPS uses the IFS 0.25 grid), ec = ECMWF data (licence credit), kinds = the window products it can make.
 const SRC = { nbm: { tag: "[NBM 2.5 km]", name: "NBM", res: "NBM 2.5 km", kinds: ["precip", "snow", "gust"] }, ifs9: { tag: "[ECMWF 9 km]", name: "ECMWF 9 km", ec: 1, kinds: ["precip", "snow"] },
               ifs: { tag: "[ECMWF 0.25°]", name: "ECMWF 0.25°", res: "ECMWF IFS 0.25°", ec: 1, kinds: ["precip", "snow", "gust"] },
-              eps: { tag: "[ECMWF ENS]", name: "ECMWF ENS mean", res: "ECMWF ENS mean 0.25°", ec: 1, lut: "ifs", kinds: ["gust"] },
+              eps: { tag: "[ECMWF ENS]", name: "ECMWF ENS mean", res: "ECMWF ENS mean 0.25°", ec: 1, lut: "ifs", kinds: ["precip", "snow", "gust", "tmin24", "tmax24"] },   // 11-09 queue B: EPS mean precip/snow/temps; gusts were already here
               hrrr: { tag: "[HRRR 3 km]", name: "HRRR", res: "HRRR 3 km", kinds: ["precip", "snow", "gust", "wind", "tmin24", "tmax24", "snod", "kuchera"] } };
 // Western WA gusts: HRRR and the standard NBM 10 m gust only (both instantaneous at the valid hour, maxed over the
 // window below). No ensemble (EPS) and no IFS in that menu. Full state and Eastern WA keep their gust sources.
@@ -95,8 +95,8 @@ const PRODUCTS = {
   snow: { title: () => "Total Snowfall", pal: SNOW, key: "Snow (in)", field: { nbm: "ns6", def: "asnow" }, word: "Snowiest", none: "Little or no snow at labeled spots" },
   // 11-09 HRRR extras on WA forecast maps (t2810u queue A): 12 h max 10 m wind, 24 h min/max t2m, snow depth change from 0", Kuchera.
   wind: { title: () => "12-Hour Max Wind", pal: GUST, key: "Wind (mph)", field: { def: "u10" }, word: "Windiest", none: "Calm at labeled towns", wind: 1, hours: 12, winPt: 1 },
-  tmin24: { title: () => "24-Hour Low Temps", pal: TEMP, key: "Temp (°F)", field: { def: "t2m" }, word: "Coldest", cold: 1, tminmax: "min", hours: 24, winPt: 1, clip0: 0 },
-  tmax24: { title: () => "24-Hour High Temps", pal: TEMP, key: "Temp (°F)", field: { def: "t2m" }, word: "Warmest", tminmax: "max", hours: 24, winPt: 1, clip0: 0 },
+  tmin24: { title: () => "24-Hour Low Temps", pal: TEMP, key: "Temp (°F)", field: { def: "t2m", eps: "mint" }, word: "Coldest", cold: 1, tminmax: "min", hours: 24, winPt: 1, clip0: 0 },
+  tmax24: { title: () => "24-Hour High Temps", pal: TEMP, key: "Temp (°F)", field: { def: "t2m", eps: "maxt" }, word: "Warmest", tminmax: "max", hours: 24, winPt: 1, clip0: 0 },
   snod: { title: () => "Snow Depth from 0\"", pal: SNOD, key: "Depth (in)", field: { def: "dsnod" }, word: "Snowiest", none: "Little or no snow-depth gain at labeled spots", dsnod: 1 },
   kuchera: { title: () => "Kuchera Snowfall", pal: SNOW, key: "Snow (in)", field: { def: "kinc" }, word: "Snowiest", none: "Little or no snow at labeled spots", suminc: 1 },
 };
@@ -182,8 +182,9 @@ async function totalField(m, c, kind, f0, f1) {
       return { v: o, w: Us[0].w, h: Us[0].h, n: fs.length, fs };
     }
     if (PRODUCTS[kind].tminmax) {
-      const st = R_.steps.filter(s => s.ranges.t2m), fs = gustSteps(st, f0, f1, true);
-      const Fs = await Promise.all(fs.map(f => getField(rk, "t2m", f))), o = Float32Array.from(Fs[0].v), mn = PRODUCTS[kind].tminmax === "min";
+      const inst = fld === "t2m";   // EPS mint/maxt are period min/max (mean of member extremes), same window rule as 10fg
+      const st = R_.steps.filter(s => s.ranges[fld]), fs = gustSteps(st, f0, f1, inst);
+      const Fs = await Promise.all(fs.map(f => getField(rk, fld, f))), o = Float32Array.from(Fs[0].v), mn = PRODUCTS[kind].tminmax === "min";
       for (const F of Fs.slice(1)) for (let k = 0; k < o.length; k++) if (mn ? F.v[k] < o[k] : F.v[k] > o[k]) o[k] = F.v[k];
       return { v: o, w: Fs[0].w, h: Fs[0].h, n: fs.length, fs };
     }
@@ -395,12 +396,15 @@ function setTimes() {
       const j = byK(ymdh(T[i].ms + 9 * 3600e3)); if (j > i) { a = i; b = j; break; } } }
   const Ph = PRODUCTS[S.kind] || {};
   if ((a < 0 || b < 0) && Ph.hours) {   // 12 h wind / 24 h temps: prefer a midnight-to-midnight PT day for temps, else the last N hours
-    if (Ph.hours === 24) {
+    if (Ph.hours === 24) {   // prefer a PT calendar day; 3-hourly EPS snaps to the step nearest midnight
+      let best = null, bestOff = 99;
       for (let i = 0; i < T.length; i++) {
-        if (+ptParts(T[i].ms).hour !== 0) continue;
-        const j = T.findIndex(t => Math.abs(t.ms - (T[i].ms + 24 * 3600e3)) < 1800e3);
-        if (j > i) { a = i; b = j; break; }
+        const j = T.findIndex(t => Math.abs(t.ms - (T[i].ms + 24 * 3600e3)) < 3.1 * 3600e3);
+        if (j <= i) continue;
+        const h = +ptParts(T[i].ms).hour, off = Math.min(h, 24 - h);
+        if (off < bestOff) { bestOff = off; best = [i, j]; if (off === 0) break; }
       }
+      if (best) { a = best[0]; b = best[1]; }
     }
     if (a < 0 || b < 0) {
       const end = T.length - 1, target = T[end].ms - Ph.hours * 3600e3; let i = 0;
@@ -480,8 +484,9 @@ async function boot() {
   fillSel($("kind"), KINDS, S.kind); fillSel($("view"), VIEWS, S.view);
   await setRun();
   $("run").onchange = async e => { S.c = e.target.value; await loadRunM(isTot() ? S.m : "nbm", S.c); if (isTot()) setTimes(); else setDays(); draw(); };
-  $("kind").onchange = async e => { const nk = e.target.value, hrrrOnly = ["gust", "wind", "tmin24", "tmax24", "snod", "kuchera"];
-    if (hrrrOnly.includes(nk) && !hrrrOnly.includes(S.kind) && (WA.man.runs.hrrr || []).length) { S.m = "hrrr"; S.c = null; }
+  $("kind").onchange = async e => { const nk = e.target.value, hrrrPref = ["gust", "wind", "tmin24", "tmax24", "snod", "kuchera"];
+    const keep = SRC[S.m] && SRC[S.m].kinds.includes(nk) && (S.m === "eps" || hrrrPref.includes(S.kind));
+    if (hrrrPref.includes(nk) && !keep && (WA.man.runs.hrrr || []).length) { S.m = "hrrr"; S.c = null; }
     S.kind = nk; S.want = null; await setRun(); draw(); };
   $("model").onchange = async e => { S.m = e.target.value; S.c = null; await setRun(); draw(); };
   $("from").onchange = e => { S.f0 = e.target.value; S.want = null; setTimes(); draw(); };
