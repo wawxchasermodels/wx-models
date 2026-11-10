@@ -57,11 +57,27 @@ def main():
         return fail("towns missing " + ", ".join(missing_t))
 
     bm = json.loads((SITE / "basemap_wa.json").read_text())
-    if len(bm.get("counties") or []) < 39 + len(county_ids()):
-        return fail(f"basemap counties {len(bm.get('counties') or [])} too few")
+    # 39 WA + 36 OR + 44 ID + 56 MT county outlines (t2816u). Alert pack stays smaller.
+    if len(bm.get("counties") or []) != 39 + 36 + 44 + 56:
+        return fail(f"basemap counties {len(bm.get('counties') or [])} != 175 (WA+OR+ID+MT)")
+    if len(bm.get("context") or []) < 4:
+        return fail(f"basemap context {len(bm.get('context') or [])} should include OR, ID, BC, and MT")
+    # Montana land fill should reach east of -110 (and not be a second copy of Idaho).
+    def bbox(g):
+        xs, ys = [], []
+        def w(c):
+            if c and isinstance(c[0], (int, float)):
+                xs.append(c[0]); ys.append(c[1])
+            else:
+                for x in c: w(x)
+        w((g or {}).get("coordinates"))
+        return (min(xs), max(xs), min(ys), max(ys)) if xs else None
+    mt = [g for g in (bm.get("context") or []) if (b := bbox(g)) and b[1] > -110 and b[0] < -115.5 and b[2] < 45.2]
+    if not mt:
+        return fail("basemap context missing a Montana state outline")
 
     studio = STUDIO.read_text()
-    if "alert/alert.js?v=20261109orid2" not in studio:
+    if "alert/alert.js?v=20261109cnty" not in studio:
         return fail("studio.js must load the new alert.js token")
     if "const CHUNK = 40" not in js:
         return fail("alert.js PZZ fetch must use a chunk large enough for the 24 marine zones")
@@ -94,6 +110,14 @@ def main():
         return fail("Oregon-coast marine should match")
     if not kept(["WAC033"]):
         return fail("King County WA should still match")
+    if any(str(z).startswith(("MTC", "MTZ")) for z in have):
+        return fail("Montana must not be in the alert zone pack")
+    if "ORZ118" in have or "ORC039" in have:
+        return fail("inland Lane must stay out of the alert zone pack")
+    if 'const AREAS = ["WA", "OR", "ID"]' not in js:
+        return fail("AREAS must stay WA, OR, ID (no Montana fetch)")
+    if "basemap_wa.json?v=20261109cnty" not in js:
+        return fail("alert.js must cache-bust the completed county basemap")
 
     print(f"test_alert_orid_zones: ok ({len(all_new_zone_ids())} new zone ids, "
           f"{len(county_ids())} counties, {len(NEW_TOWNS)} towns, pack {len(have)} zones)")

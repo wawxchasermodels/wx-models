@@ -669,7 +669,7 @@ const Alerts = (() => {
     }
     if (!S.stateGeom) {
       try {
-        const bm = await loadJSON("alert/basemap_wa.json");
+        const bm = await loadJSON("alert/basemap_wa.json?v=20261109cnty");
         S.stateGeom = bm.state || null;
         S.countyGeoms = bm.counties || [];
         S.contextGeoms = bm.context || [];
