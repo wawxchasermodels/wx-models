@@ -334,7 +334,7 @@ async function boot() {
                                    fetch(DATA + "static/studio_views.json", { cache: "no-cache" }).then(r => r.ok ? r.json() : null, () => null),
                                    fetch(DATA + "static/view_fixes.json", { cache: "no-cache" }).then(r => r.ok ? r.json() : null, () => null),
                                    fetch(DATA + "static/wave_views.json", { cache: "no-cache" }).then(r => r.ok ? r.json() : null, () => null),
-                                   fetch("town_airports.json", { cache: "no-cache" }).then(r => r.ok ? r.json() : null, () => null),
+                                   fetch("slayers/static/town_airports.json", { cache: "no-cache" }).then(r => r.ok ? r.json() : null, () => null),
                                    document.fonts.load("800 20px Montserrat"), document.fonts.load("500 12px Montserrat"),
                                    Q.get("studio") ? fetch("slayers/static/wawide_s2.json", { cache: "no-cache" }).then(r => r.ok ? r.json() : null, () => null).then(j => { WAWIDE_S2 = j; }) : null]);
   if (ap && ap.towns) TOWN_AIRPORTS = ap.towns;

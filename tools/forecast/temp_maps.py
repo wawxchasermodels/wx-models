@@ -265,7 +265,8 @@ def _airport_table():
     global _AIRPORT_TABLE
     if _AIRPORT_TABLE is not None: return _AIRPORT_TABLE
     here = os.path.dirname(os.path.abspath(__file__))
-    for path in (os.path.join(here, "..", "fast", "site", "town_airports.json"),
+    for path in (os.path.join(here, "..", "fast", "site", "slayers", "static", "town_airports.json"),
+                 os.path.join(here, "..", "fast", "site", "town_airports.json"),
                  os.path.join(here, "town_airports.json")):
         try:
             _AIRPORT_TABLE = json.load(open(path)).get("towns") or {}
