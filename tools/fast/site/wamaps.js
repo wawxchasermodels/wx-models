@@ -228,7 +228,7 @@ const loadImg = u => WA.imgs[u] || (WA.imgs[u] = new Promise((ok, no) => { const
 async function viewKit(view, mdl = "nbm") {
   const kk = view + "@" + mdl; if (WA.kits[kk]) return WA.kits[kk];
   return (WA.kits[kk] = (async () => {
-    const [lut, mask] = await Promise.all([fetch(KIT + view + (mdl === "nbm" ? "/lut.bin" : `/lut_${mdl}.bin`)).then(r => { if (!r.ok) throw new Error("lut " + r.status); return r.arrayBuffer(); }).then(b => new Float32Array(b)),
+    const [lut, mask] = await Promise.all([fetch(KIT + view + (mdl === "nbm" ? "/lut.bin" : `/lut_${mdl}.bin`) + "?v=20261109ifs557", { cache: "no-cache" }).then(r => { if (!r.ok) throw new Error("lut " + r.status); return r.arrayBuffer(); }).then(b => new Float32Array(b)),
                                            loadImg(KIT + view + "/mask.png")]);
     const oc = new OffscreenCanvas(mask.width, mask.height), cx = oc.getContext("2d", { willReadFrequently: true }); cx.drawImage(mask, 0, 0);
     const md = cx.getImageData(0, 0, mask.width, mask.height).data, m = new Uint8Array(mask.width * mask.height); for (let k = 0; k < m.length; k++) m[k] = md[k * 4];
@@ -330,7 +330,7 @@ async function render(cv, c, kind, view, d) {
 async function renderTotals(cv, m, c, kind, view, w) {
   const P = PRODUCTS[kind], pal = P.pal;
   const [K, VK, F, T, LB] = await Promise.all([kindKit("low", view), viewKit(view, lutOf(m)), totalField(m, c, kind, w.f0, w.f1),
-    readJSON(KIT + view + "/totals.json"), m === "nbm" ? null : readJSON(KIT + view + `/lab_${lutOf(m)}.json`)]);
+    readJSON(KIT + view + "/totals.json"), m === "nbm" ? null : readJSON(KIT + view + `/lab_${lutOf(m)}.json?v=20261109ifs557`)]);
   const [base, over, title] = await Promise.all([loadImg(KIT + view + "/base.png"), loadImg(KIT + view + "/plain_overlay.png"), loadImg(KIT + view + `/titles/${P.timg ? P.timg(w) : kind}.png`)]);
   const SC = 2;   // same 2x backing as the daily maps
   cv.width = K.W * SC; cv.height = K.H * SC; const ctx = cv.getContext("2d"); ctx.setTransform(SC, 0, 0, SC, 0, 0);

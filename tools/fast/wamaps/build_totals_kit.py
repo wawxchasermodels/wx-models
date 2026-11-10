@@ -22,7 +22,7 @@ hx0, hy0 = hr(237.280472 - 360, 21.138123)
 MODELS = {   # model -> (lon, lat) -> (image row, column) on the fast crop
     "hrrr": lambda lo, la: (lambda x, y: ((y - hy0) / 3000.0 - 584, (x - hx0) / 3000.0 - 0))(*hr(lo, la)),
     "ifs9": lambda lo, la: ((90.0 - la) / 0.1 - 310, np.mod(lo, 360.0) / 0.1 - 2150),
-    "ifs":  lambda lo, la: ((90.0 - la) / 0.25 - 8, np.mod(lo, 360.0) / 0.25 - 600),
+    "ifs":  lambda lo, la: ((90.0 - la) / 0.25 - 8, np.mod(lo, 360.0) / 0.25 - 557),   # crop j0=557 after NA west1200 (was 600)
 }
 IMPACT = "/workspace/usa_alerts/impact.ttf"
 for view in ("full", "west", "east"):

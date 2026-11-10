@@ -206,6 +206,16 @@ assert.ok(wamaps.includes('field: { def: "t2m", eps: "maxt" }'));
 assert.ok(wamaps.includes('ifs: { tag: "[ECMWF 0.25°]", name: "ECMWF 0.25°", res: "ECMWF IFS 0.25°", ec: 1, kinds: ["precip", "snow", "gust"] }'));
 assert.ok(!gust.gustModels("west", ["nbm", "ifs", "eps", "hrrr"]).includes("eps"));
 
+
+// IFS/EPS crop j0 is 557 (NA west1200). lab_ifs must not use the old j0=600 (Seattle fj 350.74).
+const labIfs = JSON.parse(fs.readFileSync(path.join(ROOT, "site/wamaps/kit/full/lab_ifs.json"), "utf8"));
+const lowKit = JSON.parse(fs.readFileSync(path.join(ROOT, "site/wamaps/kit/full/low.json"), "utf8"));
+const si = lowKit.labels.findIndex((L) => L.name === "Seattle");
+assert.ok(si >= 0);
+assert.ok(Math.abs(labIfs[si][0] - 162.22) < 0.05);
+assert.ok(Math.abs(labIfs[si][1] - 393.74) < 0.05, "Seattle IFS fj " + labIfs[si][1]);
+assert.ok(wamaps.includes("/ 0.25 - 557") || fs.readFileSync(path.join(ROOT, "wamaps/build_totals_kit.py"), "utf8").includes("/ 0.25 - 557"));
+
 console.log("wafc gusts + framing: ok");
 
 
