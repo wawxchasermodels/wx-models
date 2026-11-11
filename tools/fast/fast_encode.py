@@ -24,8 +24,18 @@ MODELS = {   # grid "lcc" = HRRR 3 km, "ll" = 0.25 deg global (lat 90 -> -90, lo
     # ECMWF 0.25 06/18Z only to 144 h (3-hourly); AIFS 06/18Z to 360 h (6-hourly) like 00/12Z.
     # RRFS (NOAA, 3 km CONUS, operational since 2026): 00/06/12/18Z hourly to 48 h then 3-hourly to 84 h (stage 3, 10-30-26)
     "rrfs": dict(grid="lcc", views=("puget", "wa", "wwa", "ewa", "passes", "newa", "lm", "pnwhr"), cycles=(0, 6, 12, 18), steps=list(range(1, 49)) + list(range(51, 85, 3)), keep=4),
+    # 11-09 (Benjamin t2818u/t2819u): operational 13 km North American 2dfld (noaa-rrfs-ops-pds), rotated lat-lon.
+    # Covers the full North Pacific on the site's na / pnw frames (CONUS 3 km RRFS stays on puget/wa/.../pnwhr). pnwt is
+    # a few degrees past the CONUS west wall and is clean on this grid. Same steps/keep as CONUS RRFS; as_model=rrfs so
+    # existing RRFS getters and products apply. Winds / accumulations read R.m so they stay on the NA files.
+    "rrfsna": dict(grid="rotll", views=("na", "pnw", "pnwt"), cycles=(0, 6, 12, 18),
+                   steps=list(range(1, 49)) + list(range(51, 85, 3)), keep=4, as_model="rrfs",
+                   pole_longitude=67.0, pole_latitude=35.0, rlon0=299.0, rlat0=-36.9303, drot=0.1083),
     # NBM (NOAA National Blend, 2.5 km CONUS NDFD grid): 00/06/12/18Z, hourly to 36 h then 3-hourly to 168 h (stage 3, 10-30-26)
-    "nbm":  dict(grid="lcc", views=("puget", "wa", "wwa", "ewa", "passes", "newa", "lm", "pnwhr"), cycles=(0, 6, 12, 18), steps=list(range(1, 37)) + list(range(39, 169, 3)), keep=4,
+    # 11-10 (Benjamin t2825u): regular Pacific Northwest (pnw, "Pacific NW wide") and Pacific NW tight
+    # (pnwt) on the NBM CONUS grid, same cameras as the global models. Existing CONUS views stay.
+    # Published crop is kept unless WX_EXPAND_CROP=1 (adding these frames must not invalidate live runs).
+    "nbm":  dict(grid="lcc", views=("puget", "wa", "wwa", "ewa", "passes", "newa", "lm", "pnwhr", "pnwt", "pnw"), cycles=(0, 6, 12, 18), steps=list(range(1, 37)) + list(range(39, 169, 3)), keep=4,
                  lcc=dict(central_longitude=-95.0, central_latitude=25.0, standard_parallels=(25.0, 25.0)), radius=6371200.0),
     "gfs":  dict(grid="ll", views=GLOBAL_VIEWS, cycles=(0, 6, 12, 18), steps=list(range(3, 361, 3)), keep=3),
     "ifs":  dict(grid="ll", views=GLOBAL_VIEWS, cycles=(0, 6, 12, 18), steps=list(range(3, 145, 3)) + list(range(150, 361, 6)),
@@ -57,7 +67,8 @@ MODELS = {   # grid "lcc" = HRRR 3 km, "ll" = 0.25 deg global (lat 90 -> -90, lo
     # 0.125-offset 0.25 deg grid to the GFS 0.25 deg grid (same crop / layers); one "run" = the newest 14 daily analyses (tools/fast/oisst.py)
     "oisst": dict(grid="ll", views=GLOBAL_VIEWS, cycles=(0,), steps=list(range(0, 14 * 24, 24)), keep=1, grid_from="gfs", note="daily analyses, newest 14 days"),
 }
-MINFO = {"aens": dict(name="ECMWF AIFS Ensemble", site="AIFS ENS", res="0.25\u00b0 \u00b7 50 members", credit_as="aifs"),
+MINFO = {"rrfsna": dict(name="NOAA RRFS", site="RRFS NA", res="13 km", noaa=True),
+         "aens": dict(name="ECMWF AIFS Ensemble", site="AIFS ENS", res="0.25\u00b0 \u00b7 50 members", credit_as="aifs"),
          "nbm": dict(name="NOAA NBM", site="NBM", res="2.5 km", noaa=True),
          "eps": dict(name="ECMWF Ensemble", site="ECMWF EPS", res="0.25\u00b0 \u00b7 50 members", credit_as="ifs"),
          "ifs9": dict(name="ECMWF IFS", site="ECMWF 9 km", res="9 km (0.1\u00b0)", credit_as="ifs"),
@@ -271,7 +282,7 @@ def steps_for(m, hour):
     """Forecast hours a cycle of model m carries (ECMWF 0.25 06/18Z stop at 144 h)."""
     MD = MODELS[m]
     return MD["steps_short"] if hour in MD.get("short_cycles", ()) else MD["steps"]
-NOAA = ("hrrr", "gfs", "rrfs")
+NOAA = ("hrrr", "gfs", "rrfs", "rrfsna")
 
 def _patch_models(M):
     """In-memory only (live tools untouched): RRFS pressure-level fields come from its prslev file."""
@@ -344,7 +355,7 @@ def _inc(R, m, what):
     s0 = _prev_step(m, R.c, R.s)
     if m in NOAA:
         now = np.asarray(R.acc0("APCP:surface")[2], float) / 25.4
-        prev = 0.0 if s0 == 0 else np.asarray(M.Reader(m, R.c, s0).acc0("APCP:surface")[2], float) / 25.4
+        prev = 0.0 if s0 == 0 else np.asarray(M.Reader(getattr(R, "m", m), R.c, s0).acc0("APCP:surface")[2], float) / 25.4
     else:
         now = np.asarray(R.st.field(what)[2], float) * 39.3701
         prev = 0.0 if s0 == 0 else np.asarray(TM.Step(R.m, R.c, s0).field(what)[2], float) * 39.3701
@@ -498,7 +509,7 @@ def _dsnod(R, m):
     if m not in ("hrrr", "rrfs"): raise KeyError("dsnod")
     import menu_maps as M
     a = np.asarray(R._idx("SNOD:surface", R.url)[2], float)
-    R0 = M.Reader(m, R.c, 0); b = np.asarray(R0._idx("SNOD:surface", R0.url)[2], float)
+    R0 = M.Reader(getattr(R, "m", m), R.c, 0); b = np.asarray(R0._idx("SNOD:surface", R0.url)[2], float)
     return np.clip((a - b) * 39.3701, -60, 60)
 
 FIELDS = {   # name: (getter, units)
@@ -692,6 +703,85 @@ def clim_static(m, out, LA, LO, var="z500", oro_m=None):
     if var == "t2m": d["hours"] = [0, 6, 12, 18]
     return d
 
+def _mpl_hex(c, fallback="#1b1d22"):
+    from matplotlib.colors import to_hex
+    try: return to_hex(c, keep_alpha=False)
+    except Exception: return fallback
+
+
+def _font_weight(t):
+    # house_style.font() bakes the weight into Montserrat-wNNN.ttf and leaves FontProperties at its default,
+    # so get_fontweight() is "normal" even when the file is 600 / 700 / 800.
+    fp = t.get_fontproperties()
+    fname = fp.get_file() if hasattr(fp, "get_file") else ""
+    base = os.path.basename(fname or "")
+    if base.startswith("Montserrat-w") and base[12:15].isdigit(): return int(base[12:15])
+    w = t.get_fontweight()
+    if isinstance(w, (int, float)) and int(w) >= 200: return int(w)
+    return {"ultralight": 200, "light": 300, "normal": 400, "regular": 400, "medium": 500,
+            "semibold": 600, "demibold": 600, "bold": 700, "extrabold": 800, "black": 900}.get(str(w).lower(), 600)
+
+
+def _halo_pt(t):
+    for e in (t.get_path_effects() or []):
+        lw = getattr(e, "_linewidth", None)
+        if lw is None and isinstance(getattr(e, "_gc", None), dict): lw = e._gc.get("linewidth")
+        if lw: return float(lw)
+    return 2.6
+
+
+def label_items(fig, ax):
+    """Name labels and town / pass markers in figure fractions (same anchors as the towns PNG).
+
+    Number artists ("88") are omitted: the viewer still paints the live value at the manifest slot.
+    Placement and collision are whatever temp_maps already resolved; this only records the result.
+    """
+    fig.canvas.draw(); r = fig.canvas.get_renderer()
+    Wd, Hd = fig.get_size_inches() * fig.dpi
+    items = []
+    for ln in getattr(ax, "lines", []):
+        mk = ln.get_marker()
+        if mk is None or mk in ("None", " ", ""): continue
+        ms, mew = float(ln.get_markersize() or 0), float(ln.get_markeredgewidth() or 0)
+        fill, stroke = _mpl_hex(ln.get_markerfacecolor()), _mpl_hex(ln.get_markeredgecolor(), "#ffffff")
+        try: pts = ln.get_transform().transform(ln.get_xydata())
+        except Exception: continue
+        for x, y in pts:
+            items.append(dict(k="m", mk=str(mk), x=round(float(x) / Wd, 5), y=round(1 - float(y) / Hd, 5),
+                              ms=round(ms, 2), mew=round(mew, 2), fill=fill, stroke=stroke))
+    for t in list(getattr(ax, "texts", [])):
+        if not t.get_visible(): continue
+        s = t.get_text()
+        if not s or s == "88": continue
+        bb = t.get_window_extent(r)
+        items.append(dict(k="t", t=s, x=round(float(bb.x0) / Wd, 5), y=round(1 - (float(bb.y0) + float(bb.y1)) / 2 / Hd, 5),
+                          size=round(float(t.get_fontsize()), 2), w=_font_weight(t),
+                          style="italic" if t.get_fontstyle() == "italic" else "",
+                          fill=_mpl_hex(t.get_color()), halo=round(_halo_pt(t), 2)))
+    return items
+
+
+def write_town_labels(path, items):
+    if not items: return None
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    json.dump(dict(v=1, items=items), open(path, "w"), separators=(",", ":"))
+    return path
+
+
+def place_view_towns(TM, ax, vid, field):
+    """Site town placement for one view (static() and the label export). "88" stands in for the live number."""
+    f88 = lambda v: None if not np.isfinite(v) else "88"
+    if vid in WA_LIKE and vid != "wa":
+        l0, l1, a0, a1 = TM.VIEWS[vid]["ll"]; ins = lambda la_, lo_: a0 + 0.05 <= la_ <= a1 - 0.05 and l0 + 0.05 <= lo_ <= l1 - 0.05
+        keepT, keepP = TM.WA_TOWNS, TM.WA_PASSES
+        first = TOWN_SETS.get(vid, []); names = {t[0] for t in first}
+        TM.WA_TOWNS = [t for t in first + [t for t in keepT if t[0] not in names] + EXTRA_TOWNS.get(vid, []) if ins(t[1], t[2])]
+        TM.WA_PASSES = {k: v for k, v in {**keepP, **(BC_PASSES_FAST if vid in ("bc", "lm") else {})}.items() if ins(v[1], v[2])}
+        try: return TM.towns(ax, "wa", field, f88) or []
+        finally: TM.WA_TOWNS, TM.WA_PASSES = keepT, keepP
+    return TM.towns(ax, vid, field, f88) or []
+
+
 # ------------------------------------------------------------------------------------------------ static
 def extra_views(TM, ccrs):
     lcc = lambda lon: ccrs.LambertConformal(central_longitude=lon, central_latitude=47.3, standard_parallels=(45, 49))
@@ -814,6 +904,11 @@ def static(m, out, views_only=None, x2_only=False):
     import house_style as HS, temp_maps as TM, menu_maps as M
     HS.use_for_plots(); extra_views(TM, ccrs)
     pc = ccrs.PlateCarree(); MD = MODELS[m]; vids = MD["views"]
+    only = tuple(v for v in os.environ.get("WX_VIEWS", "").split(",") if v)
+    if only:
+        missing = [v for v in only if v not in TM.VIEWS]
+        if missing: raise KeyError(f"unknown views {missing}")
+        vids = only
     la, lo, oro = model_grid(m); ny_, nx_ = la.shape
     if MD["grid"] == "lcc":
         rad = MD.get("radius", 6371229.0)
@@ -822,6 +917,16 @@ def static(m, out, views_only=None, x2_only=False):
         d = 3000.0 if "lcc" not in MD else float(np.hypot(g[0, 1, 0] - gx0, g[0, 1, 1] - gy0))   # grid spacing (NBM 2539.7 m)
         def to_ij(LO_, LA_):
             hh = hp.transform_points(pc, LO_, LA_); return (hh[..., 1] - gy0) / d, (hh[..., 0] - gx0) / d
+    elif MD["grid"] == "rotll":
+        # RRFS NA 13 km: GRIB rotated lat-lon (southern pole 35S, 247E => cartopy north pole 35N, 67E).
+        # First point geo (~157.38W, 1.56S) <-> rotated (299.0, -36.9303); row 0 is south, like HRRR.
+        rp = ccrs.RotatedPole(pole_longitude=MD["pole_longitude"], pole_latitude=MD["pole_latitude"])
+        rlon0, rlat0, drot = MD["rlon0"], MD["rlat0"], MD["drot"]
+        def to_ij(LO_, LA_):
+            pts = rp.transform_points(pc, LO_, LA_)
+            rlon = np.mod(pts[..., 0], 360.0)
+            rlon = np.where(rlon < rlon0 - 180.0, rlon + 360.0, rlon)
+            return (pts[..., 1] - rlat0) / drot, (rlon - rlon0) / drot
     else:
         rs_ = MD.get("res", 0.25)
         def to_ij(LO_, LA_): return (90.0 - LA_) / rs_, np.mod(LO_, 360.0) / rs_
@@ -842,10 +947,19 @@ def static(m, out, views_only=None, x2_only=False):
         luts[vid] = (fi, fj, ang)
         views[vid] = dict(label=V["label"], fig=[int(round(W)), int(round(H))], size_in=[float(x) for x in fig.get_size_inches()],
                           panel=[px, py, pw, ph], stride=STRIDE, nx=nx, ny=ny, barbs_across=HS.BARBS_ACROSS.get(vid, 20))
-        b_ = V["box"]; lob = np.mod(lo, 360) if MD["grid"] == "ll" else lo; bl0, bl1 = (np.mod(b_[0], 360), np.mod(b_[1], 360)) if MD["grid"] == "ll" else (b_[0], b_[1])
+        b_ = V["box"]
+        if MD["grid"] == "ll":
+            lob = np.mod(lo, 360); bl0, bl1 = np.mod(b_[0], 360), np.mod(b_[1], 360)
+        elif MD["grid"] == "rotll" and b_[0] < -180:
+            lob = np.where(lo > 0, lo - 360.0, lo); bl0, bl1 = b_[0], b_[1]
+        else:
+            lob = lo; bl0, bl1 = b_[0], b_[1]
         inlon = ((lob >= bl0) & (lob <= bl1)) if bl0 <= bl1 else ((lob >= bl0) | (lob <= bl1))
         mm = (la >= b_[2]) & (la <= b_[3]) & inlon
-        ii, jj = np.where(mm); views[vid]["cut_abs"] = [int(ii.min()), int(ii.max() + 1), int(jj.min()), int(jj.max() + 1)]
+        if mm.any():
+            ii, jj = np.where(mm); views[vid]["cut_abs"] = [int(ii.min()), int(ii.max() + 1), int(jj.min()), int(jj.max() + 1)]
+        else:
+            views[vid]["cut_abs"] = [ny_, 0, nx_, 0]   # empty: merge below is a no-op
         plt.close(fig)
     allfi = np.concatenate([l[0].ravel() for l in luts.values()]); allfj = np.concatenate([l[1].ravel() for l in luts.values()])
     ok = np.isfinite(allfi) & (allfi >= 0) & (allfi <= ny_ - 1) & (allfj >= 0) & (allfj <= nx_ - 1)
@@ -856,7 +970,15 @@ def static(m, out, views_only=None, x2_only=False):
     mp0 = f"{out}/manifest.json"
     if os.path.exists(mp0):   # keep the published crop when it is a superset (runs already in R2 stay valid)
         oc = json.load(open(mp0)).get("models", {}).get(m, {}).get("crop")
-        if oc: i0, i1, j0, j1 = min(i0, oc[0]), max(i1, oc[1]), min(j0, oc[2]), max(j1, oc[3]); print("crop kept/extended from", oc, "->", [i0, i1, j0, j1], flush=True)
+        if oc:
+            expanded = [min(i0, oc[0]), max(i1, oc[1]), min(j0, oc[2]), max(j1, oc[3])]
+            # Adding a wider camera (NBM pnw/pnwt) would otherwise grow the crop and break live run PNGs.
+            if expanded != list(oc) and not os.environ.get("WX_EXPAND_CROP"):
+                print("crop kept at published", oc, "(would expand to", expanded, "; set WX_EXPAND_CROP=1 to expand)", flush=True)
+                i0, i1, j0, j1 = oc
+            else:
+                i0, i1, j0, j1 = expanded
+                print("crop kept/extended from", oc, "->", [i0, i1, j0, j1], flush=True)
     os.makedirs(f"{out}/static", exist_ok=True)
     for vid, (fi, fj, ang) in luts.items():
         np.stack([fi - i0, fj - j0, ang], -1).astype("<f4").tofile(f"{out}/static/lut_{m}_{vid}.bin")
@@ -872,15 +994,7 @@ def static(m, out, views_only=None, x2_only=False):
         fig.savefig(path.replace("/static/", "/static/x2/"), dpi=DPI * X2, transparent=True)
         plt.close(fig); return os.path.getsize(path)
     def town_call(ax, vid, field):
-        if vid in WA_LIKE and vid != "wa":   # zoomed Washington frames: the Washington town list, only places inside the frame
-            l0, l1, a0, a1 = TM.VIEWS[vid]["ll"]; ins = lambda la_, lo_: a0 + 0.05 <= la_ <= a1 - 0.05 and l0 + 0.05 <= lo_ <= l1 - 0.05
-            keepT, keepP = TM.WA_TOWNS, TM.WA_PASSES
-            first = TOWN_SETS.get(vid, []); names = {t[0] for t in first}
-            TM.WA_TOWNS = [t for t in first + [t for t in keepT if t[0] not in names] + EXTRA_TOWNS.get(vid, []) if ins(t[1], t[2])]
-            TM.WA_PASSES = {k: v for k, v in {**keepP, **(BC_PASSES_FAST if vid in ("bc", "lm") else {})}.items() if ins(v[1], v[2])}
-            try: return TM.towns(ax, "wa", field, lambda v: None if not np.isfinite(v) else "88") or []
-            finally: TM.WA_TOWNS, TM.WA_PASSES = keepT, keepP
-        return TM.towns(ax, vid, field, lambda v: None if not np.isfinite(v) else "88") or []
+        return place_view_towns(TM, ax, vid, field)
     crop_la, crop_lo = la[i0:i1, j0:j1], lo[i0:i1, j0:j1]
     if MD["grid"] == "ll":   # towns are all in the western hemisphere: sample on the part of the crop with lon 180..360 (-180..0, monotonic)
         wcols = np.where(crop_lo[0] >= 180)[0]; tw_la, tw_lo = crop_la[:, wcols], crop_lo[:, wcols] - 360
@@ -918,8 +1032,12 @@ def static(m, out, views_only=None, x2_only=False):
                 rr, cc = int(round(fi_)) + i0, int(round(fj_)) + j0
                 slot["t2m_corr"] = float(TM.LAPSE_T_F_PER_FT * (oro[rr, cc] - el))
             slots.append(slot); t.set_visible(False)
-        a_ = views[vid]["cut_abs"]; views[vid]["cut"] = [a_[0] - i0, a_[1] - i0, a_[2] - j0, a_[3] - j0]; del views[vid]["cut_abs"]
+        lab_items = label_items(fig, ax)
+        lp = write_town_labels(f"{out}/static/labels_{vid}.json", lab_items)
+        a_ = views[vid]["cut_abs"]; ch, cw = i1 - i0, j1 - j0
+        views[vid]["cut"] = [max(0, a_[0] - i0), min(ch, a_[1] - i0), max(0, a_[2] - j0), min(cw, a_[3] - j0)]; del views[vid]["cut_abs"]
         views[vid]["towns"] = slots
+        if lp: views[vid]["labels"] = f"static/labels_{vid}.json"
         if not os.path.exists(f"{out}/static/towns_{vid}.png") or views_only: sizes[f"towns_{vid}"] = save(fig, f"{out}/static/towns_{vid}.png")
         else: plt.close(fig)
         print(f"{m} {vid}: {len(slots)} town numbers", flush=True)
@@ -1500,13 +1618,33 @@ def static(m, out, views_only=None, x2_only=False):
     clim = {}
     for var in sorted({P["clim"] for P in prods.values() if P.get("clim")}):
         clim[var] = clim_static(m, out, crop_la, crop_lo, var, None if oro is None else oro[i0:i1, j0:j1] / 3.28084)
+    def _finite_json(o):
+        if isinstance(o, dict): return all(_finite_json(v) for v in o.values())
+        if isinstance(o, (list, tuple)): return all(_finite_json(v) for v in o)
+        if isinstance(o, (float, np.floating)): return bool(np.isfinite(o))
+        return True
+    clim = {k: v for k, v in clim.items() if _finite_json(v)}   # drop unusable clim (NaN ranges are invalid JSON)
     mp = f"{out}/manifest.json"; man = json.load(open(mp)) if os.path.exists(mp) else {}
     man.update(dpi=DPI, style=dict(BG=HS.BG, INK=HS.INK, MUTED=HS.MUTED, ACCENT=HS.ACCENT))
     MI = minfo(m)
-    man.setdefault("models", {})[m] = dict(name=MI["name"], site=MI["site"], res=MI["res"], grid=MD["grid"],
-                                          crop=[i0, i1, j0, j1], views=views, products=prods, clim=clim, **({"products_x": prods_x} if prods_x else {}))
-    man.setdefault("runs", {}).setdefault(m, [])
-    json.dump(man, open(mp, "w"), indent=1)
+    if os.environ.get("WX_MERGE_VIEWS") and m in man.get("models", {}):
+        old = man["models"][m]
+        for vid, V in views.items():
+            # pnw/pnwt share global base/town/label files; don't point NBM at a scratch labels_*.json
+            if vid in ("pnw", "pnwt") and "labels" in V:
+                V = dict(V); V.pop("labels", None)
+            old.setdefault("views", {})[vid] = V
+        for bag in ("products", "products_x"):
+            src = prods if bag == "products" else prods_x
+            for pid, P in src.items():
+                if pid in old.get(bag, {}) and P.get("keys"):
+                    old[bag][pid].setdefault("keys", {}).update(P["keys"])
+        print(f"{m} merged views {list(views)} into existing manifest, crop {old.get('crop')}", flush=True)
+    else:
+        man.setdefault("models", {})[m] = dict(name=MI["name"], site=MI["site"], res=MI["res"], grid=MD["grid"],
+                                              crop=[i0, i1, j0, j1], views=views, products=prods, clim=clim, **({"products_x": prods_x} if prods_x else {}))
+        man.setdefault("runs", {}).setdefault(m, [])
+    json.dump(man, open(mp, "w"), indent=1, allow_nan=False)
     if MD["grid"] == "ll":   # 10-31: Studio-only "Washington (wide, for loops)" view on this crop (static/studio_views.json, not the manifest)
         import studio_views; studio_views.build([m], man, out)
         if "pnwt" in vids: studio_views.pnwt_fix([m], man, out)   # 10-31: Pacific NW tight town layer + slots, versioned (towns_pnwt_v2.png)
