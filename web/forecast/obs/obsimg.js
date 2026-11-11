@@ -86,19 +86,43 @@ const ObsImg = (() => {
     if (s.kind === "rad") return `${RAD_WMS}?SERVICE=WMS&REQUEST=GetMap&VERSION=1.3.0&LAYERS=${s.layer}&STYLES=&CRS=CRS:84&BBOX=${w},${so},${e},${n}&WIDTH=${W}&HEIGHT=${H}&FORMAT=${encodeURIComponent(s.fmt)}&TRANSPARENT=TRUE&TIME=${t}`;
     return `${GIBS_WMS}?SERVICE=WMS&REQUEST=GetMap&VERSION=1.3.0&LAYERS=${s.layer}&STYLES=&CRS=EPSG:4326&BBOX=${so},${w},${n},${e}&WIDTH=${W}&HEIGHT=${H}&FORMAT=${encodeURIComponent(s.fmt)}&TIME=${t}`;
   }
-  function getImg(id, tile, t) {   // cached Image (decoded); resolves null on failure
+  // Clean IR paints two GIBS images: detail (the east / center box) and wide (the only pixels west of 140W).
+  // decoding stays async until decode() finishes, then the bitmap is copied into one canvas per size so the
+  // GPU upload is the whole frame. A half-decoded wide JPEG used to land a frame later than the smaller detail image.
+  const fullPx = new WeakSet(), pxPool = {};
+  function gpuSrc(im) {
+    if (!im || !fullPx.has(im)) return im;
+    const w = im.naturalWidth, h = im.naturalHeight; if (!w || !h) return im;
+    const k = w + "x" + h; let c = pxPool[k];
+    if (!c) { c = pxPool[k] = document.createElement("canvas"); c.width = w; c.height = h; }
+    if (c._im !== im) { c.getContext("2d").drawImage(im, 0, 0); c._im = im; }
+    return c;
+  }
+  function getImg(id, tile, t) {   // cached Image; r.ok means loaded and decoded (null on failure)
     const key = id + "|" + tile + "|" + t; let r = ST.img.get(key);
     if (!r && SRC[id].kind === "star") {   // NOAA STAR water vapor: cleaned in this page, then shown from a blob: URL (same origin)
       const im = new Image(); im.decoding = "async"; r = { im, ok: false, sec: secOf(tile) }; r.p = starImg(r, r.sec, t); ST.img.set(key, r);
     }
     if (!r) {
       const im = new Image(); im.crossOrigin = "anonymous"; im.decoding = "async";
-      r = { im, ok: false, p: new Promise((res) => { im.onload = () => {
-        // GIBS lists the newest times before every tile of them is filled in: such a frame comes back all black. Drop it (the loop uses the rest)
-        if (SRC[id].kind === "gibs" && blank(im)) { r.bad = true; ST.blank.add(id + "|" + t); pickFrames(id); res(null); bump(); return; }
-        r.ok = true; res(im); bump(); if (ST.obs) Obs.redraw(); };
+      r = { im, ok: false, p: new Promise((res) => {
+        let settled = false; const done = (v) => { if (!settled) { settled = true; res(v); } };
+        im.onload = async () => {
+          try {
+            if (ST.img.get(key) !== r) { done(null); return; }
+            try { if (im.decode) await im.decode(); } catch (e) { /* drawImage below still uses whatever decoded */ }
+            if (ST.img.get(key) !== r) { done(null); return; }
+            // GIBS lists the newest times before every tile of them is filled in: such a frame comes back all black. Drop it (the loop uses the rest)
+            if (SRC[id].kind === "gibs" && blank(im)) { r.bad = true; ST.blank.add(id + "|" + t); pickFrames(id); done(null); bump(); uiTime(); return; }
+            try { im.decoding = "sync"; } catch (e) {}
+            if (SRC[id].kind === "gibs") fullPx.add(im);
+            r.ok = true; r.okAt = (typeof performance !== "undefined" ? performance.now() : Date.now()); done(im); bump();
+            // do not paint a satellite frame until every layer of that time (west and east) has decoded
+            if (ST.obs && layersReady(id, t)) Obs.redraw(); else uiTime();
+          } catch (e) { if (!r.ok) { r.bad = true; done(null); } }
+        };
         // 11-04 (t2299u) a failed request (GIBS is uncached and slow, ~3 s detail / ~6-10 s wide) gets one retry before the frame is dropped
-        im.onerror = () => { if (!r.retried) { r.retried = true; setTimeout(() => { if (ST.img.get(key) === r) im.src = url(id, tile, t) + "&r=1"; else res(null); }, 1500); return; } r.bad = true; res(null); }; }) };
+        im.onerror = () => { if (!r.retried) { r.retried = true; setTimeout(() => { if (ST.img.get(key) === r) im.src = url(id, tile, t) + "&r=1"; else done(null); }, 1500); return; } r.bad = true; done(null); }; }) };
       im.src = url(id, tile, t); ST.img.set(key, r);
     }
     return r;
@@ -158,11 +182,11 @@ const ObsImg = (() => {
   function underT(L, t) { L = L || []; for (let i = L.length - 1; i >= 0; i--) if (Date.parse(L[i]) <= Date.parse(t) + 60e3) return L[i]; return L[0] || null; }
   const unders = (tile, t) => [["fd", underT(ST.fdT, t)], ...(tile === "detail" ? [["wide", underT(ST.wusT, t)]] : [])].filter((x) => x[1]);
   // 11-03 (t2248u) what is drawn under a frame so the whole map stays covered at every zoom / pan: water vapor = full disk (+ West US
-  // under PNW); GIBS Clean IR / GeoColor zoomed in = the wide box (same time) under the sharper detail box
-  const undersOf = (id, tile, t) => (SRC[id].kind === "star" ? unders(tile, t) : SRC[id].kind === "gibs" && tile === "detail" ? [["wide", wideT(id, t)]] : []);
-  // 11-04 (t2299u) the wide GIBS frame under a zoomed-in frame (only seen past the detail box edge) is ~1.1 MB and 6-10 s from GIBS:
-  // use one every 30 min (newest back), so a 4-hour loop loads 9 of them instead of 24
-  function wideT(id, t) { const f = ST.frames[id], i = f.indexOf(t); if (i < 0) return t; const L = f.length; return f[Math.max(0, L - 1 - 3 * Math.round((L - 1 - i) / 3))]; }
+  // under PNW); GIBS zoomed in = the wide box under the sharper detail box.
+  // 11-10: every GIBS product (Clean IR and GeoColor) uses the wide box at the same time as the detail box, and a frame
+  // is only shown once both are loaded and decoded, then swapped together. GeoColor no longer steps the wide box every 30 min
+  // (that left the west side on a coarser cadence and made it jump when a nearer frame arrived).
+  const undersOf = (id, tile, t) => (SRC[id].kind === "star" ? unders(tile, t) : SRC[id].kind === "gibs" && tile === "detail" ? [["wide", t]] : []);
   // red / pink map-line pixels (STAR draws them pure red; JPEG blurs them into the background). Yellow / orange (dry air) is not a line.
   const lineAt = (d, i) => { const r = d[i], g = d[i + 1], b = d[i + 2]; return (r - g > 60 && g - b < 60) || (r - g > 12 && Math.abs(g - b) < 31); };
   let procQ = Promise.resolve();
@@ -211,15 +235,40 @@ const ObsImg = (() => {
         let out = null; try { out = await starClean(raw, sec); } catch (e) { out = null; } raw.onload = raw.onerror = null; raw.src = "";   // free the raw copy
         if (out === "moved") { ST.wvMoved = true; r.bad = true; res(null); return; }
         if (!out) { r.bad = true; res(null); return; }
-        r.u = URL.createObjectURL(out); r.im.onload = () => { r.ok = true; res(r.im); bump(); if (ST.obs) Obs.redraw(); };
+        r.u = URL.createObjectURL(out); r.im.onload = () => { r.ok = true; r.okAt = (typeof performance !== "undefined" ? performance.now() : Date.now()); res(r.im); bump(); if (ST.obs && layersReady("wv", t)) Obs.redraw(); else uiTime(); };
         r.im.onerror = () => { r.bad = true; res(null); }; r.im.src = r.u; };
       raw.src = fname(sec, t); });
   }
 
-  /* ---- loading: newest frame first (shows at once), then the rest in the background ---- */
-  // 11-04 (t2299u) under frame not loaded (yet) or failed: use the nearest loaded one in time, so the map edges never blink empty
-  function underOk(id, tl, tu) { const r = ST.img.get(id + "|" + tl + "|" + tu); if (r && r.ok) return r; const T = Date.parse(tu); let best = null, bd = 1e15;
-    for (const [k, q] of ST.img) if (q.ok && k.startsWith(id + "|" + tl + "|")) { const d = Math.abs(Date.parse(k.slice(id.length + tl.length + 2)) - T); if (d < bd) { bd = d; best = q; } } return best; }
+  /* ---- loading: newest frame first (stays on screen), then the rest; the loop starts only once that window is loaded ---- */
+  // 11-10: a frame's under-layers must be the same (or intended) time and already decoded. Do not fall back to a
+  // nearer/older west image: that is what made GeoColor's ocean jump while the east side had already stepped.
+  function underOk(id, tl, tu) { const r = ST.img.get(id + "|" + tl + "|" + tu); return (r && r.ok) ? r : null; }
+  // Layers a frame has to have before it can play or be painted. Every GIBS product needs detail (east / center)
+  // and wide (west of 140W) at that same timestamp, both loaded and decoded. Water vapor also waits on the full-disk
+  // (and West US, under a PNW frame) sector that is drawn under it.
+  function needLayers(id, t) {
+    if (SRC[id].kind === "gibs") return [["detail", t], ["wide", t]];
+    if (SRC[id].kind === "star") { const tile = listTile(id); return [[tile, t], ...unders(tile, t)]; }
+    return [[listTile(id), t]];
+  }
+  function layersReady(id, t) { return !!t && needLayers(id, t).every(([tl, u]) => { const r = ST.img.get(id + "|" + tl + "|" + u); return !!(r && r.ok); }); }
+  function dropFailed() {   // blank or retry-failed layers are already marked bad; drop that time so it cannot stall the loop
+    for (const id of on()) { let cut = false;
+      for (const t of [...ST.frames[id]]) if (needLayers(id, t).some(([tl, u]) => { const r = ST.img.get(id + "|" + tl + "|" + u); return r && r.bad && !r.ok; })) { ST.blank.add(id + "|" + t); cut = true; }
+      if (cut) pickFrames(id); }
+    if (ST.idx >= len()) ST.idx = Math.max(0, len() - 1);
+  }
+  function loopReady() {
+    const ids = on(); if (!ids.length) return false;
+    for (const id of ids) for (const t of ST.frames[id]) if (!layersReady(id, t)) return false;
+    return true;
+  }
+  function loadNote() {
+    let n = 0, N = 0;
+    for (const id of on()) for (const t of ST.frames[id]) { N++; if (layersReady(id, t)) n++; }
+    return N && n < N ? "Loading loop " + n + "/" + N : "";
+  }
   let loading = null;
   async function refresh() {
     if (loading) return loading;
@@ -230,19 +279,22 @@ const ObsImg = (() => {
         const fr = ST.frames[id]; if (!fr.length) { ST.msg = SRC[id].label + ": no recent frames"; continue; }
         const tile = listTile(id);
         for (let tries = 0; tries < 5 && ST.frames[id].length; tries++) { const f = ST.frames[id], t = f[f.length - 1];
-          const rm = getImg(id, tile, t); for (const [tl, u] of undersOf(id, tile, t)) getImg(id, tl, u);   // main frame first in the cleaning queue
-          if (await rm.p) break; if (id === "wv") { ST.blank.add(id + "|" + t); pickFrames(id); } }   // newest real frame first
+          const need = needLayers(id, t);   // wait for west and east (and water-vapor unders) of this time
+          const rs = need.map(([tl, u]) => getImg(id, tl, u));
+          if ((await Promise.all(rs.map((r) => r.p))).every(Boolean)) break;
+          if (id === "wv" || SRC[id].kind === "gibs") { ST.blank.add(id + "|" + t); pickFrames(id); } }   // newest real frame first; keep it on screen while the rest load
         if (id === "wv" && ST.wvMoved && !ST.frames.wv.some((t) => { const r = ST.img.get("wv|" + tile + "|" + t); return r && r.ok; })) ST.msg = "Water vapor paused: NOAA moved its image sector, so it would not line up with this map";
       }
       prune(); if (ST.idx < 0 || ST.idx >= len()) ST.idx = len() - 1;
-      ui(); bump(); Obs.redraw(); if (!ST.timer) tick();
+      ui(); bump(); Obs.redraw();   // newest still stays up; do not start the loop until the window below has loaded
       for (let pass = 0; pass < 2; pass++) {   // pass 2: frames that slid in after black ones dropped out
-        // 11-04 (t2299u) every loop frame first (newest back), then the bigger frames drawn under them, so the loop fills in quickly
-        const todo = [], und = []; for (const id of on()) { const tile = listTile(id); for (const t of [...ST.frames[id]].reverse()) { todo.push([id, tile, t]); for (const [tl, u] of undersOf(id, tile, t)) und.push([id, tl, u, tile]); } }
-        todo.push(...und);
-        await Promise.all([0, 1, 2, 3, 4, 5].map(async () => {   // 11-04 (t2299u) 6 at a time: GIBS builds each image on request (~3-10 s, never cached), so waiting on 3 left the loop half empty for a minute
-        while (todo.length) { const [id, tile, t, under_] = todo.shift(); if (on().includes(id) && (listTile(id) === (under_ || tile))) { const r = getImg(id, tile, t); await r.p; if (id === "wv" && !under_ && r.bad) { ST.blank.add(id + "|" + t); pickFrames(id); } } } }));
+        // 11-04 (t2299u) 6 at a time: GIBS builds each image on request (~3-10 s, never cached), so waiting on 3 left the loop half empty for a minute
+        // 11-10: queue every required layer of each frame (newest back), west with east, so a frame becomes ready as a pair
+        const todo = []; for (const id of on()) for (const t of [...ST.frames[id]].reverse()) for (const [tl, u] of needLayers(id, t)) todo.push([id, tl, u, t]);
+        await Promise.all([0, 1, 2, 3, 4, 5].map(async () => {
+        while (todo.length) { const [id, tile, t, mainT] = todo.shift(); if (on().includes(id)) { const r = getImg(id, tile, t); await r.p; if (r.bad) { ST.blank.add(id + "|" + mainT); pickFrames(id); } } } }));
       }
+      dropFailed(); if (ST.idx < 0 || ST.idx >= len()) ST.idx = Math.max(0, len() - 1);
       ui(); bump(); Obs.redraw();
     })().finally(() => { loading = null; });
     return loading;
@@ -254,14 +306,28 @@ const ObsImg = (() => {
   /* ---- loop ---- */
   // 11-04 loop speed (0.25x - 4x, 1x = the old 380 ms per frame / 1.6 s on the newest); remembered for the session
   const spd = () => { let v = 1; try { v = +sessionStorage.getItem("oiSpeed") || 1; } catch (e) { /* private mode */ } return Math.max(0.25, Math.min(4, v)); };
+  let stepping = false;
+  function arm(ms) { clearTimeout(ST.timer); ST.timer = setTimeout(tick, ms); }
   function tick() {
-    clearTimeout(ST.timer); ST.timer = 0; if (!on().length || ST.hold) return;
-    if (!ST.playing || !ST.obs || !ST.obs.shown || document.hidden) { ST.timer = setTimeout(tick, 600); return; }
-    const L = len(); if (L > 1) {
-      const ready = (i) => on().every((id) => { const r = ST.img.get(id + "|" + listTile(id) + "|" + tAt(id, i)); return r && r.ok; });
-      for (let s = 1; s <= L; s++) { const nxt = (ST.idx + s) % L; if (ready(nxt)) { if (nxt !== ST.idx) { ST.idx = nxt; bump(); Obs.redraw(); uiTime(); } break; } }
+    clearTimeout(ST.timer); ST.timer = 0; if (stepping || !on().length || ST.hold) return;
+    if (!ST.playing || !ST.obs || !ST.obs.shown || document.hidden) { arm(600); return; }
+    dropFailed(); const L = len(); if (ST.idx >= L) ST.idx = Math.max(0, L - 1);
+    if (!loopReady()) { uiTime(); arm(300); return; }   // hold the newest valid still; do not skip frames that are still loading
+    const pace = () => Math.round((ST.idx === L - 1 ? 1600 : 380) / spd());   // 11-04 (t2266u) loop speed slider; dwell on the newest frame
+    if (L > 1) {
+      const nxt = (ST.idx + 1) % L, tOk = (id) => layersReady(id, tAt(id, nxt));
+      if (on().every(tOk) && nxt !== ST.idx) {
+        const dec = [], ahead = [];
+        const queueDec = (i, into) => { for (const id of on()) for (const [tl, u] of needLayers(id, tAt(id, i))) { const r = ST.img.get(id + "|" + tl + "|" + u); if (r && r.im && r.im.decode) into.push(r.im.decode().catch(() => {})); } };
+        queueDec(nxt, dec);
+        if (L > 2) queueDec((nxt + 1) % L, ahead);   // prefetch-decode one frame ahead so the loop does not stall
+        if (ahead.length) Promise.all(ahead).catch(() => {});
+        const go = () => { try { ST.idx = nxt; bump(); Obs.drawNow(); uiTime(); } finally { arm(pace()); } };
+        if (dec.length) { stepping = true; Promise.all(dec).then(() => { stepping = false; if (!ST.playing || ST.hold || !ST.obs || !ST.obs.shown || document.hidden) { tick(); return; } go(); }); return; }
+        go(); return;
+      }
     }
-    ST.timer = setTimeout(tick, Math.round((ST.idx === L - 1 ? 1600 : 380) / spd()));   // 11-04 (t2266u) loop speed slider   // dwell on the newest frame
+    arm(pace());
   }
 
   /* ---- WebGL reprojection (lat/lon image -> obs map Lambert conformal at the current zoom / pan) ---- */
@@ -313,7 +379,12 @@ const ObsImg = (() => {
   // the newest loaded frame at or before loop index i (so a frame still loading never blanks the layer)
   function frameImg(id, i) {
     const tile = listTile(id), other = tile === "detail" ? "wide" : "detail";
-    for (let j = i; j >= 0; j--) { const t = tAt(id, j); for (const tl of [tile, other]) { const r = ST.img.get(id + "|" + tl + "|" + t); if (r && r.ok) return { im: r.im, tile: tl, t }; } }
+    for (let j = i; j >= 0; j--) {
+      const t = tAt(id, j); if (!t) continue;
+      if (!layersReady(id, t)) continue;   // never show the east/detail box while its west/wide (or under) image is still decoding
+      for (const tl of [tile, other]) { const r = ST.img.get(id + "|" + tl + "|" + t); if (r && r.ok) return { im: r.im, tile: tl, t }; }
+    }
+    if (SRC[id].kind !== "rad") return null;
     // still loading after a zoom / view change: keep showing the newest frame already here (any box) rather than nothing
     let best = null; for (const [k, r] of ST.img) { const [kid, tl, t] = k.split("|"); if (kid === id && r.ok && (tl === "detail" || tl === "wide") && (!best || t > best.t)) best = { im: r.im, tile: tl, t }; }
     return best;
@@ -328,19 +399,20 @@ const ObsImg = (() => {
     gl.viewport(0, 0, W, H); gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
     gl.uniform2f(U.sz, W, H); gl.uniform1f(U.dpr, S.dpr); gl.uniform1f(U.k, S.k); gl.uniform1f(U.cx, S.cx); gl.uniform1f(U.cy, S.cy);
     gl.uniform1f(U.n, J.n); gl.uniform1f(U.F, J.F); gl.uniform1f(U.rho0, J.rho0); gl.uniform1f(U.L0, J.L0);     let drew = 0; ST.shown = {};
-    const draw1 = (u, im, setBox) => { try { gl.activeTexture(gl.TEXTURE0 + u); gl.bindTexture(gl.TEXTURE_2D, G.tex[u]); gl.uniform1i(U.tex, u);
-      if (G.cur[u] !== im) { gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, im); G.cur[u] = im; }
+    const draw1 = (u, im, setBox) => { try { const src = gpuSrc(im), token = (src && src._im) || src; gl.activeTexture(gl.TEXTURE0 + u); gl.bindTexture(gl.TEXTURE_2D, G.tex[u]); gl.uniform1i(U.tex, u);
+      if (G.cur[u] !== token) { gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, src); G.cur[u] = token; }
       setBox(); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4); drew++; } catch (e) { ST.drawErr = (ST.drawErr || 0) + 1; G.cur[u] = null; } };
     const geoBox = (sec) => () => { const S_ = SEC[sec], q = S_.g; gl.uniform1f(U.geo, 1); gl.uniform1f(U.lim, -2); gl.uniform4f(U.gg, q[0], q[1], q[2] * S_.W, q[3] * S_.H); gl.uniform3f(U.cut, S_.cut[0], S_.cut[1], S_.cut[2]); gl.uniform4f(U.box, 0, 0, 1, 1); gl.uniform1f(U.alpha, 1); };
     for (const id of [ST.sat, ST.radar ? "radar" : ""].filter(Boolean)) {   // satellite first, radar on top
       const f = frameImg(id, ST.idx < 0 ? len() - 1 : ST.idx); if (!f) continue;
       const u = id === "radar" ? 1 : 0;
       if (SRC[id].kind === "star") {
-        for (const [tl, tu] of unders(f.tile, f.t)) { const ru = ST.img.get("wv|" + tl + "|" + tu), rw = ru && ru.ok ? ru : [...ST.img.entries()].filter(([k, r]) => k.startsWith("wv|" + tl + "|") && r.ok).map(([, r]) => r).pop();
-          if (rw) draw1(tl === "fd" ? 3 : 2, rw.im, geoBox(secOf(tl))); }
+        for (const [tl, tu] of unders(f.tile, f.t)) { const ru = ST.img.get("wv|" + tl + "|" + tu); if (ru && ru.ok) draw1(tl === "fd" ? 3 : 2, ru.im, geoBox(secOf(tl))); }
         draw1(u, f.im, geoBox(secOf(f.tile))); ST.shown[id] = f.t; continue;
       }
-      for (const [tl, tu] of undersOf(id, f.tile, f.t)) { const ru = underOk(id, tl, tu); if (ru) draw1(2, ru.im, () => { const b = SRC[id].tiles[tl].box; gl.uniform1f(U.geo, 0); gl.uniform1f(U.lim, SRC[id].kind === "gibs" ? 0.165 : -2); gl.uniform4f(U.box, b[0], b[1], b[2], b[3]); gl.uniform1f(U.alpha, SRC[id].alpha); }); }
+      const unders = undersOf(id, f.tile, f.t);
+      if (SRC[id].kind === "gibs" && unders.some(([tl, tu]) => !underOk(id, tl, tu))) continue;   // wide (west) not decoded: do not paint the detail box alone
+      for (const [tl, tu] of unders) { const ru = underOk(id, tl, tu); if (ru) draw1(2, ru.im, () => { const b = SRC[id].tiles[tl].box; gl.uniform1f(U.geo, 0); gl.uniform1f(U.lim, SRC[id].kind === "gibs" ? 0.165 : -2); gl.uniform4f(U.box, b[0], b[1], b[2], b[3]); gl.uniform1f(U.alpha, SRC[id].alpha); }); }
       draw1(u, f.im, () => { const b = SRC[id].tiles[f.tile].box; gl.uniform1f(U.geo, 0); gl.uniform1f(U.lim, SRC[id].kind === "gibs" ? 0.165 : -2); gl.uniform4f(U.box, b[0], b[1], b[2], b[3]); gl.uniform1f(U.alpha, SRC[id].alpha); });
       ST.shown[id] = f.t;
     }
@@ -407,7 +479,8 @@ const ObsImg = (() => {
   function uiTime() {
     const el = $("oi-t"); if (!el) return;
     const parts = on().map((id) => { const t = (ST.shown && ST.shown[id]) || tAt(id, Math.max(0, ST.idx)); return t ? `${id === "radar" ? "Radar" : SRC[id].label} ${tf.format(new Date(t))}` : ""; }).filter(Boolean);
-    const txt = ST.glFail || ST.msg || (parts.length ? parts.join(" \u00b7 ") + " PT" : "loading\u2026");
+    const note = loadNote();
+    const txt = ST.glFail || ST.msg || (parts.length ? parts.join(" \u00b7 ") + " PT" + (note ? " \u00b7 " + note : "") : (note || "loading\u2026"));
     if (el.textContent !== txt) el.textContent = txt; const sl = $("oi-slide"); if (sl && document.activeElement !== sl) sl.value = String(Math.max(0, ST.idx));
   }
   function set(o) {
@@ -423,7 +496,7 @@ const ObsImg = (() => {
 
   // 11-04 (Benjamin t2269u "when I refresh ... it refreshes onto the same exact product and view"): radar / satellite choice and the
   // map's zoom / pan are kept for this tab (sessionStorage) and put back after a refresh; frames always load fresh
-  const VKEY = { "-121,44,50,47": "pnw", "-122,45,60,52": "west", "-123,46,50,48.5": "salish" };
+  const VKEY = { "-121,44,50,47": "pnw", "-122,45,60,52": "west", "-123,46,50,48.5": "salish", "-133,30,55,42": "full" };
   let rsDone = false;
   setInterval(() => { const S_ = Obs._state; if (!rsDone || !S_ || !S_.w || !S_.P) return;
     try { sessionStorage.setItem("oiState", JSON.stringify({ radar: ST.radar, sat: ST.sat, view: S_.view, pv: VKEY[S_.P.key] || "", cx: S_.cx, cy: S_.cy, k: S_.k })); } catch (e) { /* private mode */ } }, 1000);
@@ -449,6 +522,6 @@ const ObsImg = (() => {
   function hold(h) { ST.hold = !!h; if (!h) tick(); }
   function seek(p) { const L = len(); if (!L) return; ST.idx = Math.max(0, Math.min(L - 1, Math.floor(p * L * 0.999))); bump(); Obs.drawNow(); uiTime(); }
   return { set, state: () => ({ speed: spd(), radar: ST.radar, sat: ST.sat, idx: ST.idx, n: len(), playing: ST.playing, frames: ST.frames, shown: ST.shown, msg: ST.msg, wvMoved: !!ST.wvMoved, drawErr: ST.drawErr || 0, glLost: ST.glLost || 0, glFail: ST.glFail, imgs: ST.img.size, loaded: [...ST.img.values()].filter((r) => r.ok).length }),
-    _imgs: () => [...ST.img.entries()].map(([k, r]) => [k, !!r.ok, !!r.bad]), _tile: (id) => tileFor(id),   // test hooks (QA)
+    _imgs: () => [...ST.img.entries()].map(([k, r]) => [k, !!r.ok, !!r.bad, r.okAt || 0]), _tile: (id) => tileFor(id),   // test hooks (QA)
     active: () => on().length > 0, credits, info, hold, seek, refresh, ready: () => loading || Promise.resolve() };
 })();
