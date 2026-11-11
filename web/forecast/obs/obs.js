@@ -44,6 +44,8 @@ const Obs = (() => {
     { id: "pnw", label: "Pacific NW", lon: -120.9, lat: 47.3, span: 1150, proj: [-121, 44, 50, 47] },
     { id: "west", label: "West + Western Canada", lon: -122, lat: 52.5, span: 3300, proj: [-122, 45, 60, 52] },
     { id: "salish", label: "Vancouver Island + Puget Sound", lon: -123, lat: 48.6, span: 600, proj: [-123, 46, 50, 48.5] },
+    // t2901u: Full view = the whole northeast Pacific satellite picture (GOES-West wide box), not the tight PNW framing; own button
+    { id: "full", label: "Full view", lon: -133, lat: 42, span: 7000, proj: [-133, 30, 55, 42], noBtn: true },
   ];
 
   /* ---- Lambert conformal conic (sphere, km), one per view so each view reads "north-up" ---- */
@@ -315,7 +317,7 @@ const Obs = (() => {
   function hash(str) { let h = 2166136261; for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0) / 4294967296; }
 
   /* ---- view ---- */
-  const FULL_VIEW_ID = "pnw";   // default / full satellite framing (Pacific NW)
+  const FULL_VIEW_ID = "full";   // t2901u: widest framing (full northeast Pacific satellite view)
   function setView(id) { const v = VIEWS.find((x) => x.id === id) || VIEWS[0]; S.view = v.id; S.pending = v; if (S.w) applyView(); if (S.inited) renderViews(); }
   function persistView() {
     try {
@@ -783,9 +785,9 @@ const Obs = (() => {
     $("dl-obs").onclick = (e) => { e.preventDefault(); download(); };
     const box = $("oviews");
     const full = document.createElement("button"); full.type = "button"; full.dataset.v = FULL_VIEW_ID; full.dataset.full = "1";
-    full.textContent = "Full view"; full.title = "Default Pacific Northwest view";
+    full.textContent = "Full view"; full.title = "Whole northeast Pacific satellite view";
     full.onclick = () => goFullView(); box.append(full);
-    for (const v of VIEWS) { const b = document.createElement("button"); b.type = "button"; b.dataset.v = v.id; b.textContent = v.label;
+    for (const v of VIEWS) { if (v.noBtn) continue; const b = document.createElement("button"); b.type = "button"; b.dataset.v = v.id; b.textContent = v.label;
       b.onclick = () => { if (S.view === v.id) { goFullView(); return; }
         S.view = v.id; S.pending = v; applyView(); hideTip(); draw(); renderViews(); writeHashSafe(); }; box.append(b); }
     const lb = $("olayers");

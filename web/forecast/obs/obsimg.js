@@ -496,7 +496,7 @@ const ObsImg = (() => {
 
   // 11-04 (Benjamin t2269u "when I refresh ... it refreshes onto the same exact product and view"): radar / satellite choice and the
   // map's zoom / pan are kept for this tab (sessionStorage) and put back after a refresh; frames always load fresh
-  const VKEY = { "-121,44,50,47": "pnw", "-122,45,60,52": "west", "-123,46,50,48.5": "salish" };
+  const VKEY = { "-121,44,50,47": "pnw", "-122,45,60,52": "west", "-123,46,50,48.5": "salish", "-133,30,55,42": "full" };
   let rsDone = false;
   setInterval(() => { const S_ = Obs._state; if (!rsDone || !S_ || !S_.w || !S_.P) return;
     try { sessionStorage.setItem("oiState", JSON.stringify({ radar: ST.radar, sat: ST.sat, view: S_.view, pv: VKEY[S_.P.key] || "", cx: S_.cx, cy: S_.cy, k: S_.k })); } catch (e) { /* private mode */ } }, 1000);
