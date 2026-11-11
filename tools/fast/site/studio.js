@@ -128,13 +128,16 @@ function ozSync() { const S_ = Obs._state; if (!OZ.ref || Math.abs(S_.k - OZ.ref
 // t2827u: 9:16 and 16:9 each keep their own pan/zoom (fr via studio:v:… / studio:h:…).
 // Do not move the shared Obs camera (Obs._state / OZ) — that redrew one bitmap both frames crop, so
 // dragging or zooming one view shifted the other.
+// t2894u: the frame zoom stays at 100 % or more. Below 1x it only shrank the obs map bitmap (one region's 1600 px square) into a small
+// box with empty frame around it, and that zoom was saved per frame, so Full view / region buttons still showed the tiny square.
+const OBS_ZMIN = 1;
 function obsZoom(k, fr, z) {
-  fr.zoom = Math.min(2.5, Math.max(0.05, +z || 1)); return fr;
+  fr.zoom = Math.min(2.5, Math.max(OBS_ZMIN, +z || 1)); return fr;
 }
 function obsPan(k, fr) {
   const r = crop(k, fr); fr.dx = (r.bx - r.cx) * r.kk; fr.dy = (r.by - r.cy) * r.kk; return fr;
 }
-const obsZv = (fr) => Math.round((fr.zoom || 1) * 100);
+const obsZv = (fr) => Math.round(Math.max(OBS_ZMIN, fr.zoom || 1) * 100);
 function crop(k, fr) {   // source rect (map bitmap px) for frame k: base camera, then zoom / pan; the panel stays covering the frame when it
   // can, and when it is smaller than the frame (wide view) it stays wholly in the frame (the rest is background)
   if (WEBM()) {   // page is the frame itself: same 1–2.5× zoom and drag clamp as a meteogram (some of the page stays in view)
@@ -151,7 +154,7 @@ function crop(k, fr) {   // source rect (map bitmap px) for frame k: base camera
     return { kk, cx, cy, bx: B.cx, by: B.cy, sx: 0, sy: 0, sw: F[k].W / kk, sh: F[k].H / kk, px: 0, py: 0, pw: iw, ph: ih, rs: 1 };
   }
   if (OBSM() && MG.img) {   // obs: cover fill; pan/zoom (z may be <1 — letterbox, do not move the shared Obs map)
-    const B = base(k), z = Math.min(2.5, Math.max(0.05, fr.zoom || 1)), kk = B.k0 * z, iw = IW(MG.img), ih = IH(MG.img), cl = (v, a, b) => Math.min(b, Math.max(a, v));
+    const B = base(k), z = Math.min(2.5, Math.max(OBS_ZMIN, fr.zoom || 1)), kk = B.k0 * z, iw = IW(MG.img), ih = IH(MG.img), cl = (v, a, b) => Math.min(b, Math.max(a, v));
     const hw = F[k].W / kk / 2, hh = F[k].H / kk / 2;
     const cx = hw >= iw / 2 ? iw / 2 : cl(B.cx - (fr.dx || 0) / kk, hw, iw - hw);
     const cy = hh >= ih / 2 ? ih / 2 : cl(B.cy - (fr.dy || 0) / kk, hh, ih - hh);
@@ -452,7 +455,7 @@ function obsInfo() {
   return { on: [...on, ...imPills], t, title, when, view: S_.view, img: IM };
 }
 function renderObs(k, frO) {
-  const f = F[k], c0 = f.cv.getContext("2d"), fr = frO || getFr(k); if (!frO) { f.zoom.min = "5"; f.zoom.max = "250"; f.zoom.value = obsZv(fr); }
+  const f = F[k], c0 = f.cv.getContext("2d"), fr = frO || getFr(k); if (!frO) { f.zoom.min = "100"; f.zoom.max = "250"; f.zoom.value = obsZv(fr); }
   frameTx(c0, f); c0.clearRect(0, 0, f.W, f.H); c0.fillStyle = BG === "transparent" ? "#111316" : BG; c0.fillRect(0, 0, f.W, f.H);
   const I = obsInfo();
   if (!MG.img || !I || !I.t) { c0.font = `700 ${k === "v" ? 40 : 34}px Montserrat`; c0.fillStyle = "#c9ced8"; c0.textAlign = "center"; c0.fillText(MG.msg || "Loading observations\u2026", f.W / 2, f.H / 2); c0.textAlign = "left"; return; }
@@ -1201,7 +1204,7 @@ for (const k of ["v", "h"]) {
     if (PD) { e.preventDefault(); return; }
     if (!pz) return; e.preventDefault(); if (e.targetTouches.length !== 2 || e.touches.length !== 2) return;   // a finger elsewhere (scrubber, other frame, a third one): hold the zoom
     const [a, b] = [oxy(e.targetTouches[0]), oxy(e.targetTouches[1])], ox = (a[0] + b[0]) / 2, oy = (a[1] + b[1]) / 2;
-    if (OBSM()) { const zo = Math.min(2.5, Math.max(0.05, pz.z * Math.max(10, Math.hypot(a[0] - b[0], a[1] - b[1])) / pz.d)), fo = obsZoom(k, getFr(k), zo); setFr(k, fo); render(k); window.__spinch = { k, zoom: zo }; return; }   // 11-04: zoom out past 1x
+    if (OBSM()) { const zo = Math.min(2.5, Math.max(OBS_ZMIN, pz.z * Math.max(10, Math.hypot(a[0] - b[0], a[1] - b[1])) / pz.d)), fo = obsZoom(k, getFr(k), zo); setFr(k, fo); render(k); window.__spinch = { k, zoom: zo }; return; }   // 11-04: zoom out past 1x
     const zRaw = pz.z * Math.max(10, Math.hypot(a[0] - b[0], a[1] - b[1])) / pz.d;
     const z = ALERTM() ? alertZ(zRaw) : Math.min(2.5, Math.max(1, zRaw)), kk = base(k).k0 * z;
     const fr = frAt(k, pz.mx - (ox - f.W / 2) / kk, pz.my - (oy - f.H / 2) / kk, z), r = crop(k, fr);   // map point under the fingers stays under them
@@ -1276,7 +1279,7 @@ for (const k of ["v", "h"]) {
     if (e.ctrlKey || e.metaKey) {
       const z0 = OBSM() ? (fr.zoom || 1) : ALERTM() ? alertZ(fr.zoom || 1) : Math.max(1, fr.zoom || 1);
       const zRaw = z0 * Math.exp(-e.deltaY * 0.01);
-      const z = OBSM() ? Math.min(2.5, Math.max(0.05, zRaw)) : ALERTM() ? alertZ(zRaw) : Math.min(2.5, Math.max(1, zRaw));
+      const z = OBSM() ? Math.min(2.5, Math.max(OBS_ZMIN, zRaw)) : ALERTM() ? alertZ(zRaw) : Math.min(2.5, Math.max(1, zRaw));
       const b = cv.getBoundingClientRect(), ox = (e.clientX - b.left) * f.W / b.width, oy = (e.clientY - b.top) * f.H / b.height;
       const r0 = crop(k, fr), mx = r0.cx + (ox - f.W / 2) / r0.kk, my = r0.cy + (oy - f.H / 2) / r0.kk;
       const kk = base(k).k0 * z, fr2 = frAt(k, mx - (ox - f.W / 2) / kk, my - (oy - f.H / 2) / kk, z), r = crop(k, fr2);
@@ -2189,6 +2192,9 @@ if (!CLEAN) {   // Studio: Map | Meteogram switch (first in the menu bar) + the 
       MG.msg = "Loading observations\u2026"; osig = "";
       obsLoad.then(() => { if (OBSM()) { Obs.show(); fitFrames(); } }, () => { obsLoad = null; MG.msg = "Observations could not load."; renderAll(); });
       poll = setInterval(ograb, 400);
+      // t2894u: picking a region (or Full view) re-frames both frames on it (each frame's own pan / zoom back to the default)
+      if (!window.__obsViewReset) { window.__obsViewReset = 1; document.addEventListener("click", (e) => { if (!OBSM() || !e.target.closest("#oviews button")) return;
+        for (const k of ["v", "h"]) { setFr(k, { dx: 0, dy: 0, zoom: 1 }); if (F[k].zoom) F[k].zoom.value = "100"; } renderAll(); }); }
       renderAll(); fitFrames(); return;
     }
     if (on && !fr_) { fr_ = document.createElement("iframe"); fr_.id = "mgf"; fr_.title = "Meteogram pickers";
