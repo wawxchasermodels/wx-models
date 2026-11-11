@@ -276,7 +276,10 @@ function addStudioViews(man, sv) {
   // drawn at the size the Studio frames show it. Models without one (HRRR / RRFS / NBM) keep the high-res Pacific NW map as before.
   // Washington (wide, for loops) stays Studio-only. Coast view does not: the regular map page lists it too (t2511u).
   const SVM = (sv && sv.models) || {};
-  if (Q.get("studio")) for (const [m, M] of Object.entries(man.models || {})) { const V = M.views || {}, own = (SVM[m] || {}).wawide, src = V.pnwt ? "pnwt" : V.pnwhr ? "pnwhr" : null;
+  // 11-11 (t2889u/t2893u): HRRR / RRFS / NBM (lcc 2.5-3 km grids) always build the wide view from pnwhr: their town layer and number
+  // slots (wawide_s2.json models.{hrrr,rrfs,nbm}, towns_pnwhr_s2.png) are placed on pnwhr. NBM gained pnw / pnwt on 11-10, which made
+  // its wide view pick pnwt (borders/raster off from the towns, totals blank). Global models keep their own Studio view.
+  if (Q.get("studio")) for (const [m, M] of Object.entries(man.models || {})) { const V = M.views || {}, own = (SVM[m] || {}).wawide, src = M.grid === "lcc" && V.pnwhr ? "pnwhr" : V.pnwt ? "pnwt" : V.pnwhr ? "pnwhr" : null;
     if ((!own && !src) || !V.wa || V.wawide) continue; const out = {};
     for (const [k, v] of Object.entries(V)) { out[k] = v; if (k === "wa") out.wawide = own ? Object.assign({}, own, { studioWide: "wa", towns_png: WAWIDE_PASSES_PNG }, WAWIDE_S2 && WAWIDE_S2.models && WAWIDE_S2.models[m] ? { towns: WAWIDE_S2.models[m], towns_png: "@slayers/" + WAWIDE_S2.png } : {}) : Object.assign({}, V[src], { label: "Washington (wide, for loops)", src, studioWide: "wa" }, WAWIDE_S2 && WAWIDE_S2.models && WAWIDE_S2.models[m] && WAWIDE_S2.models[m].towns_png ? { towns: WAWIDE_S2.models[m].towns, towns_png: "@slayers/" + WAWIDE_S2.models[m].towns_png, townsOwn: true } : {}); }
     M.views = out; }
