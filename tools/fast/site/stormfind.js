@@ -7,9 +7,25 @@
 (() => {
 const D2R = Math.PI / 180;
 const hav = (a1, o1, a2, o2) => { const s = Math.sin((a2 - a1) * D2R / 2) ** 2 + Math.cos(a1 * D2R) * Math.cos(a2 * D2R) * Math.sin((o2 - o1) * D2R / 2) ** 2; return 12742 * Math.asin(Math.min(1, Math.sqrt(s))); };
-// ECMWF 0.25 deg crop used by the site: row 0 = 88N (north up), col 0 = 150E
-const IFS = { lat: (i) => 88 - i * 0.25, lon: (j) => { const l = 150 + j * 0.25; return l > 180 ? l - 360 : l; },
-  ij: (lat, lon) => [(88 - lat) / 0.25, ((((lon % 360) + 360) % 360) - 150) / 0.25] };
+// ECMWF 0.25 deg crop: lat/lon from the live manifest crop [i0, i1, j0, j1]
+// (was row 0 = 88N / col 0 = 150E when j0 was 600; NA west1200 moved j0).
+let CR = [8, 356, 557, 1421];
+const IFS = {
+  setCrop(cr) { if (cr && cr.length >= 4) CR = [+cr[0], +cr[1], +cr[2], +cr[3]]; },
+  lat: (i) => 90 - (i + CR[0]) * 0.25,
+  lon: (j) => { const l = (j + CR[2]) * 0.25; return l > 180 ? l - 360 : l; },
+  ij: (lat, lon) => [(90 - lat) / 0.25 - CR[0], ((((lon % 360) + 360) % 360) / 0.25 - CR[2])]
+};
+let cropP = null;
+function loadCrop(DATA) {
+  return cropP || (cropP = (async () => {
+    const manRes = await fetch(DATA + "manifest.json", { cache: "no-cache" });
+    if (!manRes.ok) throw new Error("manifest.json HTTP " + manRes.status);
+    const man = await manRes.json();
+    IFS.setCrop(((man.models || {}).ifs || (man.models || {}).gfs || {}).crop);
+    return man;
+  })().catch((e) => { cropP = null; throw e; }));
+}
 function blurG(a, w, h, sigma) {   // separable gaussian, reflect (same as viewer.js blur)
   const r = Math.ceil(4 * sigma), k = []; let s = 0;
   for (let i = -r; i <= r; i++) { const v = Math.exp(-i * i / (2 * sigma * sigma)); k.push(v); s += v; }
@@ -44,9 +60,11 @@ async function decode(DATA, R, name, f) {   // viewer.js getField (packed channe
 let landP = null;
 function landMask(DATA) {   // fn(lat, lon) -> true land / false sea / null unknown, from the newest ECMWF run's wave field
   return landP || (landP = (async () => {
-    const man = await (await fetch(DATA + "manifest.json", { cache: "no-cache" })).json(), rs = (man.runs || {}).ifs || [];
+    const man = await loadCrop(DATA), rs = (man.runs || {}).ifs || [];
     for (const r of rs.slice().reverse()) {
-      const R = await (await fetch(`${DATA}runs/ifs/${r}/run.json`)).json(); if (!R.fields.includes("swh")) continue;
+      const runRes = await fetch(`${DATA}runs/ifs/${r}/run.json`);
+      if (!runRes.ok) continue;
+      const R = await runRes.json(); if (!R.fields || !R.fields.includes("swh")) continue;
       const st = R.steps.find((s) => s.ranges && s.ranges.swh); if (!st) continue;
       const F = await decode(DATA, R, "swh", st.f);
       return (lat, lon) => { const [i, j] = IFS.ij(lat, lon), ii = Math.round(i), jj = Math.round(j);
@@ -116,5 +134,5 @@ function lccProj(lon0, lat0, sp1, sp2) {
   return (lon, lat) => { let dl = lon - lon0; while (dl > 180) dl -= 360; while (dl < -180) dl += 360; const r = rho(lat * D2R), th = n * dl * D2R; return [r * Math.sin(th), r0 - r * Math.cos(th)]; };
 }
 const fmtLL = (p) => p.lat === undefined ? "" : `${Math.abs(p.lat).toFixed(1)}\u00b0${p.lat >= 0 ? "N" : "S"} ${Math.abs(p.lon).toFixed(1)}\u00b0${p.lon < 0 ? "W" : "E"}`;
-window.StormFind = { hav, IFS, blurG, decode, landMask, lowsLL, track, landfall, plan, lccProj, fmtLL };
+window.StormFind = { hav, IFS, loadCrop, blurG, decode, landMask, lowsLL, track, landfall, plan, lccProj, fmtLL };
 })();

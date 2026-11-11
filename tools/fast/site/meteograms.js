@@ -7,6 +7,8 @@
 // One change asked for by Benjamin (10-30): stacked charts get their own time axis under every panel.
 "use strict";
 const DATA = window.WX_DATA || "data/";
+// Same numbers the map page's pass chart draws (viewer.js MG_FLOORS). The guard compares these two objects.
+const MG_FLOORS = window.MG_FLOORS_MG = { passPrecipIn: 3, passSnow6In: 12 };
 const $ = (id) => document.getElementById(id);
 const PTZ = "America/Los_Angeles";
 const FMT = {}; const fmt = (o) => FMT[JSON.stringify(o)] || (FMT[JSON.stringify(o)] = new Intl.DateTimeFormat("en-US", Object.assign({ timeZone: PTZ }, o)));
@@ -548,9 +550,9 @@ async function build(sec, prod, town) {
         const sn = T.snow ? cut(T.snow) : null, fz = T.fzinc ? cut(T.fzinc) : null;
         const sw = Pinc.map((p, i) => Math.min(p, sn ? (sn[i] || 0) / 10 : 0)), fr = Pinc.map((p, i) => Math.min(p - sw[i], fz ? fz[i] || 0 : 0)), rn = Pinc.map((p, i) => Math.max(0, p - sw[i] - fr[i]));
         const b1 = sw, b2 = sw.map((v, i) => v + fr[i]), bw = w[1] || w[0];
-        // Benjamin 11-04 t2305u: on passes the precip-per-hour axis never shrinks below 3 in (grows above it with the data)
+        // Benjamin 11-04 t2305u: on passes the precip axis never shrinks below 3 in, for every step length (grows above it with the data)
         const isPass = town.pt.k === "pass", pHi = Math.max(0, ...b2.map((v, i) => v + rn[i]));
-        panels.push({ ylab: `in per ${every} h`, legend: "upper left", ...(isPass ? { ylim: () => [0, Math.max(every === 1 ? 3 : 0.1, pHi * 1.15)] } : {}), items: [{ t: "bars", x, y: sw, w: bw, color: K.SNOW, label: "Snow" }, { t: "bars", x, y: fr, base: b1, w: bw, color: K.ICE, label: "Freezing rain" },
+        panels.push({ ylab: `in per ${every} h`, legend: "upper left", ...(isPass ? { ylim: () => [0, Math.max(MG_FLOORS.passPrecipIn, pHi * 1.15)] } : {}), items: [{ t: "bars", x, y: sw, w: bw, color: K.SNOW, label: "Snow" }, { t: "bars", x, y: fr, base: b1, w: bw, color: K.ICE, label: "Freezing rain" },
           { t: "bars", x, y: x.map(() => 0), w: bw, color: K.PLUM, label: "Sleet" }, { t: "bars", x, y: rn, base: b2, w: bw, color: K.RAIN, label: "Rain" }, { t: "bars", x, y: x.map(() => 0), w: bw, color: K.MUTED, label: "Type not set" }] });
         const SN = T.snowTot ? cut(T.snowTot).map((v) => v || 0) : null;
         // Benjamin 10-31 ("snowfall bar graph (snow per 6 h) on the pass meteograms", same as the map page's Pass Forecaster): passes get
@@ -558,7 +560,7 @@ async function build(sec, prod, town) {
         if (town.pt.k === "pass" && sn) {
           const s6x = [], s6 = []; f.forEach((F_, i) => { if (F_ % 6 !== 0 || F_ === 0) return; let v = 0; f.forEach((g, j) => { if (g > F_ - 6 && g <= F_) v += sn[j] || 0; }); s6x.push(x[i] - 3 * 36e5); s6.push(v); });
           const mx = Math.max(0, ...s6), tot = s6.reduce((a_, v) => a_ + v, 0);
-          if (s6.length) panels.push({ ylab: "in per 6 h", legend: "upper left", ylim: () => [0, Math.max(12, mx * 1.2)]   /* t2305u: at least 12 in */, items: [{ t: "bars", x: s6x, y: s6, w: 6 * 36e5 * 0.85, color: K.SNOW, label: `Snow per 6 h${T.snowEst ? " (est. 10:1 where \u2264 33\u00b0F)" : ""}  \u00b7  max ${mx.toFixed(1)} in, ${tot.toFixed(1)} in in all` }] });
+          if (s6.length) panels.push({ ylab: "in per 6 h", legend: "upper left", ylim: () => [0, Math.max(MG_FLOORS.passSnow6In, mx * 1.2)]   /* t2305u: at least 12 in */, items: [{ t: "bars", x: s6x, y: s6, w: 6 * 36e5 * 0.85, color: K.SNOW, label: `Snow per 6 h${T.snowEst ? " (est. 10:1 where \u2264 33\u00b0F)" : ""}  \u00b7  max ${mx.toFixed(1)} in, ${tot.toFixed(1)} in in all` }] });
         }
         panels.push({ ylab: "snow (in)", legend: "upper left", ylim: bottom0, items: [...(SN ? [{ t: "line", x, y: SN, color: K.SNOW, lw: 2.5, label: `Model snowfall ${SN[SN.length - 1].toFixed(1)} in` }] : []), { t: "line", x, y: A.map((v) => v * 10), color: K.MUTED, lw: 1.4, dash: "--", label: "10:1 of all precip" }] });
       }

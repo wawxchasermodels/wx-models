@@ -151,7 +151,22 @@ TOWNS = {"Seattle": (-122.33, 47.61), "Portland": (-122.68, 45.52), "Spokane": (
          "Eugene": (-123.09, 44.05), "Medford": (-122.87, 42.33), "Bend": (-121.31, 44.06), "Olympia": (-122.9, 47.04),
          "Pendleton": (-118.79, 45.67), "Kelowna": (-119.5, 49.89)}
 PC = ccrs.PlateCarree()
-CROP = (8, 600)   # ECMWF 0.25 crop origin (row, col) of the global 90N..90S / 0..359.75E grid; row 0 = 88N (north up)
+# ECMWF 0.25 crop origin (row, col) of the global 90N..90S / 0..359.75E grid.
+# Fallback matches the live NA west1200 crop; apply_crop() overwrites from manifest.models.ifs.crop.
+CROP = (8, 557)
+LAT0 = 90.0 - CROP[0] * 0.25
+LON0 = CROP[1] * 0.25
+
+def apply_crop(man, model="ifs"):
+    """Set CROP/LAT0/LON0 from man.models[model].crop = [i0, i1, j0, j1]."""
+    global CROP, LAT0, LON0
+    cr = ((man or {}).get("models") or {}).get(model, {}).get("crop")
+    if not cr or len(cr) < 4:
+        return
+    CROP = (int(cr[0]), int(cr[2]))
+    LAT0 = 90.0 - CROP[0] * 0.25
+    LON0 = CROP[1] * 0.25
+    _geo.clear()
 
 _geo = {}
 def geometry(view, k):
@@ -163,7 +178,7 @@ def geometry(view, k):
     s = 2   # field sampled every 2 output px, drawn with bilinear smoothing (fills are smooth; lines are vectors)
     xs = np.linspace(ext[0], ext[1], W // s); ys = np.linspace(ext[3], ext[2], H // s)
     X, Y = np.meshgrid(xs, ys); ll = PC.transform_points(proj, X, Y)
-    rows = (88.0 - ll[..., 1]) / 0.25; cols = ((ll[..., 0] % 360) - 150.0) / 0.25
+    rows = (LAT0 - ll[..., 1]) / 0.25; cols = ((ll[..., 0] % 360) - LON0) / 0.25
     _geo[(view, k)] = g = dict(proj=proj, ext=ext, X=X, Y=Y, rows=rows, cols=cols); return g
 
 def sample(a, g, smooth):
@@ -202,7 +217,7 @@ def wrap(fig, s, f, px, maxw, W, H):
     return lines + [cur]
 
 def render(D, R, run, prod, view, f, k, out, F, logo="", dpi=200):
-    P = product(D, R, prod, f); g = geometry(view, k); V = VIEWS[view]; W, H = W_[k]
+    apply_crop(getattr(D, "man", None)); P = product(D, R, prod, f); g = geometry(view, k); V = VIEWS[view]; W, H = W_[k]
     fig = plt.figure(figsize=(W / 200, H / 200), dpi=200, facecolor=BG)
     ax = fig.add_axes([0, 0, 1, 1], projection=g["proj"]); ax.set_facecolor(BG); ax.set_extent(g["ext"], crs=g["proj"])
     sc = "10m" if view == "pnw" else "50m"
@@ -262,7 +277,7 @@ def hl(ax, g, P, view, k, F):
     allc.sort(key=lambda c: -abs(float(a[c[1], c[2]]) - 1013.0))
     r = ax.figure.canvas.get_renderer(); boxes = []
     for kind, i, j in allc:
-        lat = 88.0 - (i + 0) * 0.25; lon = 150.0 + j * 0.25
+        lat = LAT0 - (i + 0) * 0.25; lon = LON0 + j * 0.25
         x, y = g["proj"].transform_point(lon if lon <= 180 else lon - 360, lat, PC)
         fx, fy = (x - e[0]) / (e[1] - e[0]), (e[3] - y) / (e[3] - e[2])   # 0..1 across / down the frame
         top, bot = (0.30, 0.80) if k == "v" else (0.28, 0.76)
@@ -374,7 +389,7 @@ def main():
     ap.add_argument("--skip-existing", action="store_true")
     ap.add_argument("--hd", action="store_true", help="HD loop frames: <out>/<run>/loop/<name>.jpg at 1920x1080 / 1080x1920 (Social tab MP4 loops)")
     ap.add_argument("--every", type=int, default=0, help="with --hd: every N hours from the first to the last of --hours (e.g. --hours 24,240 --every 6)")
-    a = ap.parse_args(); D = Data(a.base); F = fonts()
+    a = ap.parse_args(); D = Data(a.base); apply_crop(D.man); F = fonts()
     runs = D.man["runs"]["ifs"]; run = a.run or next(r for r in reversed(runs) if r[-2:] in ("00", "12"))
     R = D.run(run); done = []; have = {s_["f"] for s_ in R["steps"]}
     hours = list(map(int, a.hours.split(",")))

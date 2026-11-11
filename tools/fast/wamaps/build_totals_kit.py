@@ -19,10 +19,20 @@ def nbm_ll(fi, fj):
 # HRRR 3 km: sphere 6371229 m, LCC 38.5/38.5, lon0 -97.5, first point 21.138123 N 237.280472 E (row 0 = south, like the encoder)
 hr = pyproj.Proj("+proj=lcc +lat_0=38.5 +lon_0=-97.5 +lat_1=38.5 +lat_2=38.5 +a=6371229 +b=6371229 +x_0=0 +y_0=0 +no_defs")
 hx0, hy0 = hr(237.280472 - 360, 21.138123)
-MODELS = {   # model -> (lon, lat) -> (image row, column) on the fast crop
+def _crop(man, m, fallback):
+    cr = ((man or {}).get("models") or {}).get(m, {}).get("crop")
+    return cr if cr and len(cr) >= 4 else fallback
+def _ll(crop, dlon):
+    i0, j0 = crop[0], crop[2]
+    return lambda lo, la: ((90.0 - la) / dlon - i0, np.mod(lo, 360.0) / dlon - j0)
+_man = None
+_mp = os.environ.get("WX_MANIFEST")
+if _mp and os.path.isfile(_mp):
+    _man = json.load(open(_mp))
+MODELS = {   # model -> (lon, lat) -> (image row, column) on the fast crop (IFS/IFS9 from manifest crop when WX_MANIFEST is set)
     "hrrr": lambda lo, la: (lambda x, y: ((y - hy0) / 3000.0 - 584, (x - hx0) / 3000.0 - 0))(*hr(lo, la)),
-    "ifs9": lambda lo, la: ((90.0 - la) / 0.1 - 310, np.mod(lo, 360.0) / 0.1 - 2150),
-    "ifs":  lambda lo, la: ((90.0 - la) / 0.25 - 8, np.mod(lo, 360.0) / 0.25 - 600),
+    "ifs9": _ll(_crop(_man, "ifs9", [310, 541, 2150, 2541]), 0.1),
+    "ifs":  _ll(_crop(_man, "ifs", [8, 356, 557, 1421]), 0.25),
 }
 IMPACT = "/workspace/usa_alerts/impact.ttf"
 for view in ("full", "west", "east"):
