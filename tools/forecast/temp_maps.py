@@ -392,6 +392,7 @@ def _hits(bb, others, pad=1.5):
 REGION_TOWNS = {   # view: (min population per tier, newest-to-oldest), max labels
     "pnwhr": ((250000, 60000, 15000), 60),
     "pnwt": ((250000, 60000, 20000), 55),
+    "wc": ((250000, 60000, 20000), 60),   # 11-10 West Coast: shared regional list, CA/OR/WA/BC coast corridor
 }
 REGION_REQUESTED = ("Seattle", "Portland", "Spokane", "Victoria", "Bellingham", "Port Angeles", "Forks", "Neah Bay",
                     "Port Townsend", "Oak Harbor", "Mount Vernon", "Arlington", "Sumas", "Olympia", "Shelton", "Aberdeen",

@@ -16,7 +16,7 @@ try: import eccodes  # noqa: F401
 except ModuleNotFoundError: sys.modules["eccodes"] = types.ModuleType("eccodes")
 import fast_encode as FE
 
-VIEWS = ("wa", "wwa", "ewa", "puget", "passes", "newa", "bc", "lm", "pnwhr", "pnwt", "pnw", "na")
+VIEWS = ("wa", "wwa", "ewa", "puget", "passes", "newa", "bc", "lm", "pnwhr", "pnwt", "pnw", "wc", "na")
 
 
 def synth(TM, vid):

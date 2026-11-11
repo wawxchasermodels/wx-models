@@ -15,7 +15,7 @@ for p in (os.environ.get("WX_FORECAST_TOOLS"), os.path.join(HERE, "..", "forecas
 
 DPI = 100; STRIDE = 8; X2 = 2   # X2: hi-res copies of the fixed layers (static/x2/)
 HRRR_LCC = dict(central_longitude=-97.5, central_latitude=38.5, standard_parallels=(38.5, 38.5))
-GLOBAL_VIEWS = ("puget", "wa", "wwa", "ewa", "passes", "newa", "lm", "bc", "pnwt", "pnw", "na")
+GLOBAL_VIEWS = ("puget", "wa", "wwa", "ewa", "passes", "newa", "lm", "bc", "pnwt", "pnw", "wc", "na")
 MODELS = {   # grid "lcc" = HRRR 3 km, "ll" = 0.25 deg global (lat 90 -> -90, lon rolled to 0..360)
     # 10-31 12:02 PM (Benjamin pt1876u): runs on the site = 4 for HRRR / RRFS / NBM / ECMWF / EPS / AIFS ENS, 3 for GFS / AIFS,
     # 2 for ECMWF 9 km (keep=). R2 ~3.6 -> ~6 GB; older runs still keep town files for the meteograms page (MG_KEEP).
@@ -28,7 +28,7 @@ MODELS = {   # grid "lcc" = HRRR 3 km, "ll" = 0.25 deg global (lat 90 -> -90, lo
     # Covers the full North Pacific on the site's na / pnw frames (CONUS 3 km RRFS stays on puget/wa/.../pnwhr). pnwt is
     # a few degrees past the CONUS west wall and is clean on this grid. Same steps/keep as CONUS RRFS; as_model=rrfs so
     # existing RRFS getters and products apply. Winds / accumulations read R.m so they stay on the NA files.
-    "rrfsna": dict(grid="rotll", views=("na", "pnw", "pnwt"), cycles=(0, 6, 12, 18),
+    "rrfsna": dict(grid="rotll", views=("na", "pnw", "wc", "pnwt"), cycles=(0, 6, 12, 18),
                    steps=list(range(1, 49)) + list(range(51, 85, 3)), keep=4, as_model="rrfs",
                    pole_longitude=67.0, pole_latitude=35.0, rlon0=299.0, rlat0=-36.9303, drot=0.1083),
     # NBM (NOAA National Blend, 2.5 km CONUS NDFD grid): 00/06/12/18Z, hourly to 36 h then 3-hourly to 168 h (stage 3, 10-30-26)
@@ -802,6 +802,11 @@ def extra_views(TM, ccrs):
     TM.VIEWS.setdefault("lm", dict(label="Lower Mainland", size=(16, 9.5), proj=lcb(-122.35, 49.2), ll=(-123.45, -121.25, 48.86, 49.6), box=(-124.3, -120.4, 48.5, 49.95)))
     TM.VIEWS.setdefault("newa", dict(label="NE WA mountains", size=(16, 11.5), proj=lcb(-118.55, 48.3), ll=(-120.15, -116.95, 47.6, 49.0), box=(-121.0, -116.1, 47.2, 49.4)))
     TM.VIEWS.setdefault("passes", dict(label="Cascade Passes", size=(16, 15), proj=lcc(-121.2), ll=(-123.9, -118.5, 46.2, 49.05), box=(-125, -117.5, 45.4, 49.8)))
+    # 11-01 / 11-10: "West Coast" (wc). Same camera as the wave-only view (wave_views.py): Mercator,
+    # Vancouver Island / Washington down to northern Baja (31.8-49.8 N), widened west over the Pacific
+    # (to 152 W) so the offshore buoys fit. Shared towns list via REGION_TOWNS["wc"].
+    TM.VIEWS.setdefault("wc", dict(label="West Coast", size=(16, 10.5), proj=ccrs.Mercator(central_longitude=-134),
+                                   ll=(-152.0, -116.0, 31.8, 49.8), box=(-155.0, -113.0, 30.0, 51.5)))
 WA_LIKE = ("wa", "wwa", "ewa", "passes", "puget", "bc", "lm", "newa")
 # Southern BC / Lower Mainland towns (old site's precip_map.py BC lists, lat-lon order), placed ahead of the WA towns
 _BC = [("Vancouver", 49.2827, -123.1207), ("Victoria", 48.4284, -123.3656), ("Abbotsford", 49.0504, -122.3045), ("Nanaimo", 49.1659, -123.9401),
@@ -1633,19 +1638,32 @@ def static(m, out, views_only=None, x2_only=False):
             # pnw/pnwt share global base/town/label files; don't point NBM at a scratch labels_*.json
             if vid in ("pnw", "pnwt") and "labels" in V:
                 V = dict(V); V.pop("labels", None)
-            old.setdefault("views", {})[vid] = V
-        for bag in ("products", "products_x"):
-            src = prods if bag == "products" else prods_x
-            for pid, P in src.items():
-                if pid in old.get(bag, {}) and P.get("keys"):
-                    old[bag][pid].setdefault("keys", {}).update(P["keys"])
+            vs = old.setdefault("views", {})
+            if vid == "wc" and "pnw" in vs:
+                out = {}
+                for k, v in vs.items():
+                    if k == vid: continue
+                    out[k] = v
+                    if k == "pnw": out[vid] = V
+                if vid not in out: out[vid] = V
+                old["views"] = out
+            else:
+                vs[vid] = V
+        srcs = {"products": prods, "products_x": prods_x}
+        for bag, src in list(old.items()):
+            if not (str(bag).startswith("products") and isinstance(src, dict)): continue
+            take = srcs.get(bag) or {**prods, **prods_x}
+            for pid, P in take.items():
+                if pid in src and P.get("keys"):
+                    src[pid].setdefault("keys", {}).update(P["keys"])
         print(f"{m} merged views {list(views)} into existing manifest, crop {old.get('crop')}", flush=True)
     else:
         man.setdefault("models", {})[m] = dict(name=MI["name"], site=MI["site"], res=MI["res"], grid=MD["grid"],
                                               crop=[i0, i1, j0, j1], views=views, products=prods, clim=clim, **({"products_x": prods_x} if prods_x else {}))
         man.setdefault("runs", {}).setdefault(m, [])
     json.dump(man, open(mp, "w"), indent=1, allow_nan=False)
-    if MD["grid"] == "ll":   # 10-31: Studio-only "Washington (wide, for loops)" view on this crop (static/studio_views.json, not the manifest)
+    if MD["grid"] == "ll" and not only:   # skip when WX_VIEWS is a targeted add (do not rebuild wawide/coast)
+        # 10-31: Studio-only "Washington (wide, for loops)" view on this crop (static/studio_views.json, not the manifest)
         import studio_views; studio_views.build([m], man, out)
         if "pnwt" in vids: studio_views.pnwt_fix([m], man, out)   # 10-31: Pacific NW tight town layer + slots, versioned (towns_pnwt_v2.png)
     print(f"{m} static done, crop {[i0, i1, j0, j1]}", flush=True)
