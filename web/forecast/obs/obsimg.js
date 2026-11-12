@@ -20,6 +20,7 @@
      below: a frame that no longer lines up is not shown). Before use the burned-in red lines are masked and filled from the pixels
      around them, and the NOAA logo + time bar are cut off (our own coastlines / borders draw on top). PNW sector (1200 px, every 5 min)
      over the West US sector (1000 px = 2 km, every 10 min) over the full disk (1808 px = 6 km, every 10 min, fills the rest). The CDN lists ~10 days of frames, so the full loop is there on first open.
+   11-12 GeoColor / Clean IR line removal must only follow thin bright map strokes seeded from the fitted ref points; a global isolated-bright or red-minus-green test also matches cloud highlights and the fill turns them into tiles.
    11-03 (t2226u) "Hide menu" button: collapses the view / layer / satellite chips (choice kept in localStorage obsMenuMin). */
 "use strict";
 const ObsImg = (() => {
@@ -210,30 +211,26 @@ const ObsImg = (() => {
       const S = SEC[sec], W = im.naturalWidth, H = im.naturalHeight; if (W !== S.W || H !== S.H) return "moved";
       const c = document.createElement("canvas"); c.width = W; c.height = H; const g = c.getContext("2d", { willReadFrequently: true }); g.drawImage(im, 0, 0);
       const id = g.getImageData(0, 0, W, H), d = id.data, N = W * H, bad = new Uint8Array(N);
-      for (let p = 0, i = 0; p < N; p++, i += 4) if (lineAt(d, i)) bad[p] = 1;
-      // 11-03 (t2254u) faint pink JPEG traces of the lines (e.g. over the Prairies / Dakotas on blue or yellow): red-minus-green clearly above its 9x9 neighbourhood mean
-      { const I = new Float64Array((W + 1) * (H + 1)), e = (p) => d[p * 4] - d[p * 4 + 1];
-        for (let y = 0; y < H; y++) { let row = 0; for (let x = 0; x < W; x++) { row += e(y * W + x); I[(y + 1) * (W + 1) + x + 1] = I[y * (W + 1) + x + 1] + row; } }
-        for (let y = 0; y < H; y++) { const y0 = Math.max(0, y - 4), y1 = Math.min(H, y + 5);
-          for (let x = 0; x < W; x++) { const p = y * W + x; if (bad[p]) continue; const x0 = Math.max(0, x - 4), x1 = Math.min(W, x + 5);
-            const m = (I[y1 * (W + 1) + x1] - I[y0 * (W + 1) + x1] - I[y1 * (W + 1) + x0] + I[y0 * (W + 1) + x0]) / ((y1 - y0) * (x1 - x0));
-            if (e(p) - m > 16) bad[p] = 1; } } }
-      // alignment test: NOAA's own state / border lines must still be where the fitted geometry puts them
-      // IR / GeoColor: NOAA draws thin bright white (or pale cyan) boundaries instead of the pink water-vapor lines
-      const overlayAt = (i) => { const r = d[i], g = d[i + 1], b = d[i + 2]; return Math.max(r, g, b) >= 220 && Math.min(r, g, b) >= 140; };
-      if (band && band !== "09") {
-        for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-          const p = y * W + x; if (bad[p] || !overlayAt(p * 4)) continue;
-          let same = 0, tot = 0;
-          for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
-            const xx = x + dx, yy = y + dy; if (xx < 0 || yy < 0 || xx >= W || yy >= H) continue;
-            tot++; if (overlayAt((yy * W + xx) * 4)) same++;
-          }
-          if (tot && same / tot < 0.7) bad[p] = 1;
-        }
+      // IR / GeoColor: NOAA draws thin bright white (or pale cyan) boundaries, not the pink water-vapor lines.
+      // A global "isolated bright pixel" or red-minus-green test also matches cloud highlights and sunlit land;
+      // the neighbour-fill then carves those frames into Voronoi-like tiles (obvious over the Gulf of Alaska /
+      // North Pacific on Full view, where the 6 km full disk is the only coverage). Seed from the known ref
+      // points and flood only along thin bright strokes. Water vapor keeps the original pink-line cleaner.
+      const overlayAt = (i) => { const r = d[i], gg = d[i + 1], b = d[i + 2]; return Math.max(r, gg, b) >= 220 && Math.min(r, gg, b) >= 140; };
+      const wv = !band || band === "09";
+      if (wv) {
+        for (let p = 0, i = 0; p < N; p++, i += 4) if (lineAt(d, i)) bad[p] = 1;
+        // 11-03 (t2254u) faint pink JPEG traces of the lines (e.g. over the Prairies / Dakotas on blue or yellow): red-minus-green clearly above its 9x9 neighbourhood mean
+        { const I = new Float64Array((W + 1) * (H + 1)), e = (p) => d[p * 4] - d[p * 4 + 1];
+          for (let y = 0; y < H; y++) { let row = 0; for (let x = 0; x < W; x++) { row += e(y * W + x); I[(y + 1) * (W + 1) + x + 1] = I[y * (W + 1) + x + 1] + row; } }
+          for (let y = 0; y < H; y++) { const y0 = Math.max(0, y - 4), y1 = Math.min(H, y + 5);
+            for (let x = 0; x < W; x++) { const p = y * W + x; if (bad[p]) continue; const x0 = Math.max(0, x - 4), x1 = Math.min(W, x + 5);
+              const m = (I[y1 * (W + 1) + x1] - I[y0 * (W + 1) + x1] - I[y1 * (W + 1) + x0] + I[y0 * (W + 1) + x0]) / ((y1 - y0) * (x1 - x0));
+              if (e(p) - m > 16) bad[p] = 1; } } }
       }
+      // alignment test: NOAA's own state / border lines must still be where the fitted geometry puts them
       let hit = 0; const R = S.ref, n = R.length / 2;
-      if (!band || band === "09") {
+      if (wv) {
         for (let k = 0; k < R.length; k += 2) { const x = R[k], y = R[k + 1]; let h = 0; for (let dy = -1; dy <= 1 && !h; dy++) for (let dx = -1; dx <= 1; dx++) if (bad[(y + dy) * W + x + dx]) { h = 1; break; } hit += h; }
         if (hit / n < 0.8) return "moved";
       } else {
@@ -247,9 +244,31 @@ const ObsImg = (() => {
         }
         // Full-disk GeoColor lines are often too faint at 6 km for the bright-overlay test; size already matched.
         if (hit / n < 0.8 && !(sec === "fd" && band === "GEOCOLOR")) return "moved";
+        // thin-line flood: 5x5 mostly-bright neighbourhoods are cloud tops, not map lines
+        const I = new Int32Array((W + 1) * (H + 1));
+        for (let y = 0; y < H; y++) { let row = 0; for (let x = 0; x < W; x++) { row += overlayAt((y * W + x) * 4) ? 1 : 0; I[(y + 1) * (W + 1) + x + 1] = I[y * (W + 1) + x + 1] + row; } }
+        const fatAt = (x, y) => {
+          const x0 = Math.max(0, x - 2), x1 = Math.min(W, x + 3), y0 = Math.max(0, y - 2), y1 = Math.min(H, y + 3);
+          const same = I[y1 * (W + 1) + x1] - I[y0 * (W + 1) + x1] - I[y1 * (W + 1) + x0] + I[y0 * (W + 1) + x0];
+          return same / ((y1 - y0) * (x1 - x0)) >= 0.7;
+        };
+        const q = [];
+        const tryAdd = (x, y) => {
+          if (x < 0 || y < 0 || x >= W || y >= H) return;
+          const p = y * W + x; if (bad[p] || !overlayAt(p * 4) || fatAt(x, y)) return;
+          bad[p] = 1; q.push(p);
+        };
+        for (let k = 0; k < R.length; k += 2) {
+          const x = R[k], y = R[k + 1];
+          for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) tryAdd(x + dx, y + dy);
+        }
+        for (let i = 0; i < q.length; i++) {
+          const p = q[i], x = p % W, y = (p - x) / W;
+          for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if (dx || dy) tryAdd(x + dx, y + dy);
+        }
       }
-      // grow the mask 2 px (3 on the 6 km full disk: JPEG halo), then fill it from the edges inward with the mean of the known neighbours
-      const m = new Uint8Array(N), gr = sec === "fd" ? 3 : 2;
+      // grow the mask 2 px (3 on the 6 km full-disk water-vapor lines: JPEG halo), then fill it from the edges inward with the mean of the known neighbours
+      const m = new Uint8Array(N), gr = (sec === "fd" && wv) ? 3 : 2;
       for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (bad[y * W + x]) for (let yy = Math.max(0, y - gr); yy <= Math.min(H - 1, y + gr); yy++) for (let xx = Math.max(0, x - gr); xx <= Math.min(W - 1, x + gr); xx++) m[yy * W + xx] = 1;
       let todo = []; for (let p = 0; p < N; p++) if (m[p]) todo.push(p);
       for (let it = 0; it < 40 && todo.length; it++) {
@@ -598,6 +617,6 @@ const ObsImg = (() => {
   function hold(h) { ST.hold = !!h; if (!h) tick(); }
   function seek(p) { const L = len(); if (!L) return; ST.idx = Math.max(0, Math.min(L - 1, Math.floor(p * L * 0.999))); bump(); Obs.drawNow(); uiTime(); }
   return { set, state: () => ({ speed: spd(), radar: ST.radar, sat: ST.sat, idx: ST.idx, n: len(), playing: ST.playing, frames: ST.frames, shown: ST.shown, msg: ST.msg, wvMoved: !!ST.wvMoved, drawErr: ST.drawErr || 0, glLost: ST.glLost || 0, glFail: ST.glFail, imgs: ST.img.size, loaded: [...ST.img.values()].filter((r) => r.ok).length, dbg: ST.dbg || null }),
-    _imgs: () => [...ST.img.entries()].map(([k, r]) => [k, !!r.ok, !!r.bad, r.okAt || 0]), _tile: (id) => tileFor(id),   // test hooks (QA)
+    _imgs: () => [...ST.img.entries()].map(([k, r]) => [k, !!r.ok, !!r.bad, r.okAt || 0]), _tile: (id) => tileFor(id), _starClean: starClean,   // test hooks (QA)
     active: () => on().length > 0, credits, info, hold, seek, refresh, ready: () => loading || Promise.resolve() };
 })();
