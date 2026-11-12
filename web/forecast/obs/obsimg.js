@@ -483,7 +483,14 @@ const ObsImg = (() => {
       draw1(u, f.im, () => { const b = SRC[id].tiles[f.tile].box; gl.uniform1f(U.geo, 0); gl.uniform1f(U.lim, SRC[id].kind === "gibs" ? 0.165 : -2); gl.uniform4f(U.box, b[0], b[1], b[2], b[3]); gl.uniform1f(U.alpha, SRC[id].alpha); });
       ST.shown[id] = f.t;
     }
-    if (drew) { g.setTransform(1, 0, 0, 1, 0, 0); g.imageSmoothingEnabled = true; g.drawImage(cv, 0, 0); }
+    if (drew) {
+      // Flush WebGL before copying onto the map canvas. Without this, some GPUs (and headless Chromium)
+      // leave the 2d canvas blank even though the satellite loop is advancing.
+      const px = new Uint8Array(4); gl.readPixels(Math.max(0, (W >> 1) - 1), Math.max(0, (H >> 1) - 1), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+      ST.dbg = Object.assign(ST.dbg || {}, { drew, px: [px[0], px[1], px[2], px[3]], W, H });
+      gl.finish();
+      g.setTransform(1, 0, 0, 1, 0, 0); g.imageSmoothingEnabled = true; g.drawImage(cv, 0, 0);
+    }
     uiTime();
   }
 
