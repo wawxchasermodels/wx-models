@@ -245,7 +245,8 @@ const ObsImg = (() => {
           }
           hit += h;
         }
-        if (hit / n < 0.8) return "moved";
+        // Full-disk GeoColor lines are often too faint at 6 km for the bright-overlay test; size already matched.
+        if (hit / n < 0.8 && !(sec === "fd" && band === "GEOCOLOR")) return "moved";
       }
       // grow the mask 2 px (3 on the 6 km full disk: JPEG halo), then fill it from the edges inward with the mean of the known neighbours
       const m = new Uint8Array(N), gr = sec === "fd" ? 3 : 2;
@@ -439,6 +440,15 @@ const ObsImg = (() => {
       if (!layersReady(id, t)) continue;   // never show the east/detail box while its west/wide (or under) image is still decoding
       for (const tl of [tile, other]) { const r = ST.img.get(id + "|" + tl + "|" + t); if (r && r.ok) return { im: r.im, tile: tl, t }; }
     }
+    // STAR: still show the newest decoded sector image if unders (fd / wide) are not ready yet
+    if (SRC[id].kind === "star") {
+      let best = null;
+      for (const [k, r] of ST.img) {
+        const [kid, tl, t] = k.split("|");
+        if (kid === id && r.ok && (!best || t > best.t)) best = { im: r.im, tile: tl, t };
+      }
+      return best;
+    }
     if (SRC[id].kind !== "rad") return null;
     // still loading after a zoom / view change: keep showing the newest frame already here (any box) rather than nothing
     let best = null; for (const [k, r] of ST.img) { const [kid, tl, t] = k.split("|"); if (kid === id && r.ok && (tl === "detail" || tl === "wide") && (!best || t > best.t)) best = { im: r.im, tile: tl, t }; }
@@ -459,7 +469,9 @@ const ObsImg = (() => {
       setBox(); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4); drew++; } catch (e) { ST.drawErr = (ST.drawErr || 0) + 1; G.cur[u] = null; } };
     const geoBox = (sec) => () => { const S_ = SEC[sec], q = S_.g; gl.uniform1f(U.geo, 1); gl.uniform1f(U.lim, -2); gl.uniform4f(U.gg, q[0], q[1], q[2] * S_.W, q[3] * S_.H); gl.uniform3f(U.cut, S_.cut[0], S_.cut[1], S_.cut[2]); gl.uniform4f(U.box, 0, 0, 1, 1); gl.uniform1f(U.alpha, 1); };
     for (const id of [ST.sat, ST.radar ? "radar" : ""].filter(Boolean)) {   // satellite first, radar on top
-      const f = frameImg(id, ST.idx < 0 ? len() - 1 : ST.idx); if (!f) continue;
+      const f = frameImg(id, ST.idx < 0 ? len() - 1 : ST.idx);
+      ST.dbg = { id, idx: ST.idx, listTile: listTile(id), hasF: !!f, fTile: f && f.tile, fT: f && f.t, fW: f && f.im && f.im.naturalWidth, ready: (ST.frames[id] || []).filter((t) => layersReady(id, t)).length };
+      if (!f) continue;
       const u = id === "radar" ? 1 : 0;
       if (SRC[id].kind === "star") {
         for (const [tl, tu] of unders(f.tile, f.t)) { const ru = ST.img.get(id + "|" + tl + "|" + tu); if (ru && ru.ok) draw1(tl === "fd" ? 3 : 2, ru.im, geoBox(secOf(tl))); }
@@ -576,7 +588,7 @@ const ObsImg = (() => {
   function info() { return on().map((id) => ({ id, label: PILL[id], t: (ST.shown && ST.shown[id]) || tAt(id, Math.max(0, ST.idx)) })); }
   function hold(h) { ST.hold = !!h; if (!h) tick(); }
   function seek(p) { const L = len(); if (!L) return; ST.idx = Math.max(0, Math.min(L - 1, Math.floor(p * L * 0.999))); bump(); Obs.drawNow(); uiTime(); }
-  return { set, state: () => ({ speed: spd(), radar: ST.radar, sat: ST.sat, idx: ST.idx, n: len(), playing: ST.playing, frames: ST.frames, shown: ST.shown, msg: ST.msg, wvMoved: !!ST.wvMoved, drawErr: ST.drawErr || 0, glLost: ST.glLost || 0, glFail: ST.glFail, imgs: ST.img.size, loaded: [...ST.img.values()].filter((r) => r.ok).length }),
+  return { set, state: () => ({ speed: spd(), radar: ST.radar, sat: ST.sat, idx: ST.idx, n: len(), playing: ST.playing, frames: ST.frames, shown: ST.shown, msg: ST.msg, wvMoved: !!ST.wvMoved, drawErr: ST.drawErr || 0, glLost: ST.glLost || 0, glFail: ST.glFail, imgs: ST.img.size, loaded: [...ST.img.values()].filter((r) => r.ok).length, dbg: ST.dbg || null }),
     _imgs: () => [...ST.img.entries()].map(([k, r]) => [k, !!r.ok, !!r.bad, r.okAt || 0]), _tile: (id) => tileFor(id),   // test hooks (QA)
     active: () => on().length > 0, credits, info, hold, seek, refresh, ready: () => loading || Promise.resolve() };
 })();
