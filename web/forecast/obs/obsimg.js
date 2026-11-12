@@ -106,7 +106,18 @@ const ObsImg = (() => {
     if (!r) {
       const im = new Image(); im.crossOrigin = "anonymous"; im.decoding = "async";
       r = { im, ok: false, p: new Promise((res) => {
-        let settled = false; const done = (v) => { if (!settled) { settled = true; res(v); } };
+        let settled = false, loadWait = 0;
+        const done = (v) => { if (!settled) { settled = true; if (loadWait) clearTimeout(loadWait); res(v); } };
+        // 11-12: GIBS WMS GetMap often hangs (no onerror) on large tiles, which left the loop stuck on "loading" and Play dead.
+        // Bound each request, retry once, then drop that time so older frames can play.
+        const loadMs = SRC[id].kind === "gibs" ? 18000 : 25000;
+        const srcOf = () => url(id, tile, t) + (r.retried ? "&r=1" : "");
+        const armLoad = () => { if (loadWait) clearTimeout(loadWait); loadWait = setTimeout(() => {
+          if (settled) return;
+          if (!r.retried) { r.retried = true; im.src = srcOf(); armLoad(); return; }
+          r.bad = true; try { im.removeAttribute("src"); } catch (e) {}
+          done(null); bump(); uiTime();
+        }, loadMs); };
         im.onload = async () => {
           try {
             if (ST.img.get(key) !== r) { done(null); return; }
@@ -122,7 +133,8 @@ const ObsImg = (() => {
           } catch (e) { if (!r.ok) { r.bad = true; done(null); } }
         };
         // 11-04 (t2299u) a failed request (GIBS is uncached and slow, ~3 s detail / ~6-10 s wide) gets one retry before the frame is dropped
-        im.onerror = () => { if (!r.retried) { r.retried = true; setTimeout(() => { if (ST.img.get(key) === r) im.src = url(id, tile, t) + "&r=1"; else done(null); }, 1500); return; } r.bad = true; done(null); }; }) };
+        im.onerror = () => { if (!r.retried) { r.retried = true; setTimeout(() => { if (ST.img.get(key) === r) { im.src = srcOf(); armLoad(); } else done(null); }, 1500); return; } r.bad = true; done(null); };
+        armLoad(); }) };
       im.src = url(id, tile, t); ST.img.set(key, r);
     }
     return r;
@@ -259,10 +271,12 @@ const ObsImg = (() => {
       if (cut) pickFrames(id); }
     if (ST.idx >= len()) ST.idx = Math.max(0, len() - 1);
   }
+  function readyAt(i) { return i >= 0 && on().every((id) => layersReady(id, tAt(id, i))); }
   function loopReady() {
+    // 11-12: start the loop once at least two frames are fully decoded. Waiting for the whole window
+    // left Play stuck while GIBS hung on later tiles.
     const ids = on(); if (!ids.length) return false;
-    for (const id of ids) for (const t of ST.frames[id]) if (!layersReady(id, t)) return false;
-    return true;
+    return ids.every((id) => ST.frames[id].filter((t) => layersReady(id, t)).length >= 2);
   }
   function loadNote() {
     let n = 0, N = 0;
@@ -312,15 +326,19 @@ const ObsImg = (() => {
     clearTimeout(ST.timer); ST.timer = 0; if (stepping || !on().length || ST.hold) return;
     if (!ST.playing || !ST.obs || !ST.obs.shown || document.hidden) { arm(600); return; }
     dropFailed(); const L = len(); if (ST.idx >= L) ST.idx = Math.max(0, L - 1);
-    if (!loopReady()) { uiTime(); arm(300); return; }   // hold the newest valid still; do not skip frames that are still loading
-    const pace = () => Math.round((ST.idx === L - 1 ? 1600 : 380) / spd());   // 11-04 (t2266u) loop speed slider; dwell on the newest frame
+    if (!loopReady()) { uiTime(); arm(300); return; }   // hold the newest valid still until two frames are ready, then loop those
+    let newestReady = ST.idx;
+    for (let i = L - 1; i >= 0; i--) if (readyAt(i)) { newestReady = i; break; }
+    const pace = () => Math.round((ST.idx === newestReady ? 1600 : 380) / spd());   // 11-04 (t2266u) loop speed slider; dwell on the newest ready frame
     if (L > 1) {
-      const nxt = (ST.idx + 1) % L, tOk = (id) => layersReady(id, tAt(id, nxt));
-      if (on().every(tOk) && nxt !== ST.idx) {
+      // skip times still loading or dropped; wrap to the next ready frame so Play always advances
+      let nxt = -1;
+      for (let k = 1; k <= L; k++) { const j = (ST.idx + k) % L; if (j !== ST.idx && readyAt(j)) { nxt = j; break; } }
+      if (nxt >= 0) {
         const dec = [], ahead = [];
         const queueDec = (i, into) => { for (const id of on()) for (const [tl, u] of needLayers(id, tAt(id, i))) { const r = ST.img.get(id + "|" + tl + "|" + u); if (r && r.im && r.im.decode) into.push(r.im.decode().catch(() => {})); } };
         queueDec(nxt, dec);
-        if (L > 2) queueDec((nxt + 1) % L, ahead);   // prefetch-decode one frame ahead so the loop does not stall
+        if (L > 2) { let nxt2 = -1; for (let k = 1; k <= L; k++) { const j = (nxt + k) % L; if (j !== nxt && readyAt(j)) { nxt2 = j; break; } } if (nxt2 >= 0) queueDec(nxt2, ahead); }
         if (ahead.length) Promise.all(ahead).catch(() => {});
         const go = () => { try { ST.idx = nxt; bump(); Obs.drawNow(); uiTime(); } finally { arm(pace()); } };
         if (dec.length) { stepping = true; Promise.all(dec).then(() => { stepping = false; if (!ST.playing || ST.hold || !ST.obs || !ST.obs.shown || document.hidden) { tick(); return; } go(); }); return; }
