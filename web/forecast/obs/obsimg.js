@@ -33,14 +33,16 @@ const ObsImg = (() => {
     radar: { label: "Radar", kind: "rad", layer: "conus_bref_qcd", fmt: "image/png", alpha: 0.88, n: 24, stepMin: 5, refreshMin: 4,
       tiles: { detail: { box: [-130, 39, -104, 53], px: [2080, 1120] }, wide: { box: [-130, 30, -100, 55], px: [1200, 1250] } },
       credit: "Radar: NOAA/NWS MRMS base reflectivity (public domain)" },
-    ir: { label: "Clean IR", kind: "gibs", layer: "GOES-West_ABI_Band13_Clean_Infrared", fmt: "image/jpeg", alpha: 1, n: 24, stepMin: 10, refreshMin: 10,
-      tiles: { detail: { box: [-140, 37, -100, 57], px: [2000, 1000] }, wide: { box: [-180, -10, -55, 78], px: [3125, 2200] } },   // 11-04: south to 10S for zoomed-out Studio / ocean views
-      credit: "Satellite: NOAA GOES-West Clean IR (band 13) via NASA GIBS/ESDIS" },
-    gc: { label: "GeoColor", kind: "gibs", layer: "GOES-West_ABI_GeoColor", fmt: "image/jpeg", alpha: 1, n: 24, stepMin: 10, refreshMin: 10,
-      tiles: { detail: { box: [-140, 37, -100, 57], px: [2000, 1000] }, wide: { box: [-180, -10, -55, 78], px: [3125, 2200] } },
-      credit: "Satellite: NOAA GOES-West GeoColor, NOAA/NESDIS/STAR, CIRA/NOAA via NASA GIBS/ESDIS" },
-    // detail = PNW sector over the West US sector; wide = West US sector (the box is only used to pick the tile)
-    wv: { label: "Water vapor", kind: "star", alpha: 1, n: 24, stepMin: 5, refreshMin: 4,
+    // 11-12: Clean IR and GeoColor use the same NOAA/NESDIS/STAR sectors as water vapor. NASA GIBS WMS GetMap
+    // was hanging / 504ing, so those loops never started and Play did nothing.
+    ir: { label: "Clean IR", kind: "star", band: "13", alpha: 1, n: 24, stepMin: 10, refreshMin: 10,
+      tiles: { detail: { box: [-126, 32, -108, 50] }, wide: { box: [-160, 20, -100, 62] } },
+      credit: "Satellite: NOAA GOES-West Clean IR (band 13), NOAA/NESDIS/STAR" },
+    gc: { label: "GeoColor", kind: "star", band: "GEOCOLOR", alpha: 1, n: 24, stepMin: 10, refreshMin: 10,
+      tiles: { detail: { box: [-126, 32, -108, 50] }, wide: { box: [-160, 20, -100, 62] } },
+      credit: "Satellite: NOAA GOES-West GeoColor, NOAA/NESDIS/STAR, CIRA/NOAA" },
+        // detail = PNW sector over the West US sector; wide = West US sector (the box is only used to pick the tile)
+    wv: { label: "Water vapor", kind: "star", band: "09", alpha: 1, n: 24, stepMin: 5, refreshMin: 4,
       tiles: { detail: { box: [-126, 32, -108, 50] }, wide: { box: [-160, 20, -100, 62] } },
       credit: "Satellite: NOAA GOES-West Mid-Level Water Vapor (band 9), NOAA/NESDIS/STAR" },
   };
@@ -101,7 +103,7 @@ const ObsImg = (() => {
   function getImg(id, tile, t) {   // cached Image; r.ok means loaded and decoded (null on failure)
     const key = id + "|" + tile + "|" + t; let r = ST.img.get(key);
     if (!r && SRC[id].kind === "star") {   // NOAA STAR water vapor: cleaned in this page, then shown from a blob: URL (same origin)
-      const im = new Image(); im.decoding = "async"; r = { im, ok: false, sec: secOf(tile) }; r.p = starImg(r, r.sec, t); ST.img.set(key, r);
+      const im = new Image(); im.decoding = "async"; r = { im, ok: false, sec: secOf(tile) }; r.p = starImg(r, r.sec, t, bandOf(id)); ST.img.set(key, r);
     }
     if (!r) {
       const im = new Image(); im.crossOrigin = "anonymous"; im.decoding = "async";
@@ -155,9 +157,10 @@ const ObsImg = (() => {
     const ll = inv(S.cx, S.cy); return ll && ll[0] > T[0] && ll[0] < T[2] && ll[1] > T[1] && ll[1] < T[3] ? "detail" : "wide"; };
 
   // the tile a source's frame list was made for (water vapor PNW and West US frames have different times: never mix them while the list reloads)
-  const listTile = (id) => (SRC[id].kind === "star" && ST.wvTile ? ST.wvTile : tileFor(id));
+  const listTile = (id) => (SRC[id].kind === "star" && ST.starTile && ST.starTile[id] ? ST.starTile[id] : tileFor(id));
   /* ---- water vapor: NOAA/NESDIS/STAR band 9 sector JPGs (ABI fixed grid), map lines / logo / time bar removed ---- */
-  const STAR = (sec) => `https://cdn.star.nesdis.noaa.gov/GOES18/ABI/${sec === "fd" ? "FD" : "SECTOR/" + sec}/09/`, TAG = (sec) => (sec === "fd" ? "FD" : sec);
+  const bandOf = (id) => (SRC[id] && SRC[id].band) || "09";
+  const STAR = (sec, band) => `https://cdn.star.nesdis.noaa.gov/GOES18/ABI/${sec === "fd" ? "FD" : "SECTOR/" + sec}/${band}/`, TAG = (sec) => (sec === "fd" ? "FD" : sec);
   // g = [x0, y0, dx, dy]: scan angle (rad) of the image's left / top edge and the size of one pixel; cut = [time bar top, logo right, logo top]
   // (fractions of the image); ref = pixels (x, y pairs) that sit on NOAA's state / border lines when the sector has not moved
   const SEC = {
@@ -171,24 +174,24 @@ const ObsImg = (() => {
   const secOf = (tile) => (tile === "detail" ? "pnw" : tile === "fd" ? "fd" : "wus");
   try { indexedDB.deleteDatabase("obsimg-wv"); } catch (e) { /* frames saved by the 11-03 browser-built loop are no longer used */ }
   const doy2iso = (s) => new Date(Date.UTC(+s.slice(0, 4), 0, +s.slice(4, 7), +s.slice(7, 9), +s.slice(9, 11))).toISOString().replace(".000Z", "Z");
-  async function starList(sec) {
-    const x = await (await fetch(STAR(sec), { cache: "no-store" })).text(), re = new RegExp(`(\\d{11})_GOES18-ABI-${TAG(sec)}-09-${SEC[sec].sz}\\.jpg`, "g");
+  async function starList(sec, band) {
+    const x = await (await fetch(STAR(sec, band), { cache: "no-store" })).text(), re = new RegExp(`(\\d{11})_GOES18-ABI-${TAG(sec)}-${band}-${SEC[sec].sz}\\.jpg`, "g");
     const set = new Set(); let m; while ((m = re.exec(x))) set.add(m[1]);
     return [...set].sort().slice(-40).map(doy2iso);
   }
-  const fname = (sec, t) => { const d = new Date(t), y = d.getUTCFullYear(), j = Math.round((Date.UTC(y, d.getUTCMonth(), d.getUTCDate()) - Date.UTC(y, 0, 1)) / 864e5) + 1, p = (v, n) => String(v).padStart(n, "0");
-    return `${STAR(sec)}${y}${p(j, 3)}${p(d.getUTCHours(), 2)}${p(d.getUTCMinutes(), 2)}_GOES18-ABI-${TAG(sec)}-09-${SEC[sec].sz}.jpg`; };
+  const fname = (sec, t, band) => { const d = new Date(t), y = d.getUTCFullYear(), j = Math.round((Date.UTC(y, d.getUTCMonth(), d.getUTCDate()) - Date.UTC(y, 0, 1)) / 864e5) + 1, p = (v, n) => String(v).padStart(n, "0");
+    return `${STAR(sec, band)}${y}${p(j, 3)}${p(d.getUTCHours(), 2)}${p(d.getUTCMinutes(), 2)}_GOES18-ABI-${TAG(sec)}-${band}-${SEC[sec].sz}.jpg`; };
   async function starTimes(id) {
-    const s = SRC[id], tile = tileFor(id), now = Date.now();
-    if (ST.timesAt[id] && ST.wvTile === tile && now - ST.timesAt[id] < s.refreshMin * 60e3 && ST.frames[id].length) return ST.frames[id];
-    const [wus, fd] = await Promise.all([starList("wus"), starList("fd")]); ST.wusT = wus.slice(-30); ST.fdT = fd.slice(-30);
-    const all = tile === "detail" ? await starList("pnw") : wus;
+    const s = SRC[id], tile = tileFor(id), now = Date.now(), band = bandOf(id);
+    if (ST.timesAt[id] && ST.starTile && ST.starTile[id] === tile && now - ST.timesAt[id] < s.refreshMin * 60e3 && ST.frames[id].length) return ST.frames[id];
+    const [wus, fd] = await Promise.all([starList("wus", band), starList("fd", band)]); ST.wusT = wus.slice(-30); ST.fdT = fd.slice(-30);
+    const all = tile === "detail" ? await starList("pnw", band) : wus;
     const pick = [], gap = (tile === "detail" ? 5 : 10) * 60e3 - 30e3;
     for (let i = all.length - 1; i >= 0 && pick.length < s.n + 2; i--) { const t = Date.parse(all[i]); if (!pick.length || Date.parse(pick[0]) - t >= gap) pick.unshift(all[i]); }
     // frames that failed (not on the CDN yet, or did not line up) get another try with each new list
     for (const k of [...ST.blank]) if (k.startsWith(id + "|")) { ST.blank.delete(k); const t = k.slice(id.length + 1); for (const tl of ["detail", "wide", "fd"]) { const r = ST.img.get(id + "|" + tl + "|" + t); if (r && r.bad) ST.img.delete(id + "|" + tl + "|" + t); } }
     ST.wvMoved = false;
-    ST.all[id] = pick; ST.timesAt[id] = now; ST.wvTile = tile; return pickFrames(id);
+    ST.all[id] = pick; ST.timesAt[id] = now; ST.starTile = ST.starTile || {}; ST.starTile[id] = tile; return pickFrames(id);
   }
   // frames drawn under a main frame (bottom first): full disk, then West US under a PNW frame; each the newest at or before it
   function underT(L, t) { L = L || []; for (let i = L.length - 1; i >= 0; i--) if (Date.parse(L[i]) <= Date.parse(t) + 60e3) return L[i]; return L[0] || null; }
@@ -240,7 +243,7 @@ const ObsImg = (() => {
     };
     const p = procQ.then(run, run); procQ = p.catch(() => null); return p;
   }
-  function starImg(r, sec, t) {   // raw NOAA JPG -> cleaned copy (blob: URL on this page) -> r.im
+  function starImg(r, sec, t, band) {   // raw NOAA JPG -> cleaned copy (blob: URL on this page) -> r.im
     const raw = new Image(); raw.crossOrigin = "anonymous"; raw.decoding = "async";
     return new Promise((res) => { raw.onerror = () => { r.bad = true; res(null); };
       raw.onload = async () => {
@@ -249,7 +252,7 @@ const ObsImg = (() => {
         if (!out) { r.bad = true; res(null); return; }
         r.u = URL.createObjectURL(out); r.im.onload = () => { r.ok = true; r.okAt = (typeof performance !== "undefined" ? performance.now() : Date.now()); res(r.im); bump(); if (ST.obs && layersReady("wv", t)) Obs.redraw(); else uiTime(); };
         r.im.onerror = () => { r.bad = true; res(null); }; r.im.src = r.u; };
-      raw.src = fname(sec, t); });
+      raw.src = fname(sec, t, band); });
   }
 
   /* ---- loading: newest frame first (stays on screen), then the rest; the loop starts only once that window is loaded ---- */
