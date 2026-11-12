@@ -477,9 +477,11 @@ const ObsImg = (() => {
         for (const [tl, tu] of unders(f.tile, f.t)) { const ru = ST.img.get(id + "|" + tl + "|" + tu); if (ru && ru.ok) draw1(tl === "fd" ? 3 : 2, ru.im, geoBox(secOf(tl))); }
         draw1(u, f.im, geoBox(secOf(f.tile))); ST.shown[id] = f.t; continue;
       }
-      const unders = undersOf(id, f.tile, f.t);
-      if (SRC[id].kind === "gibs" && unders.some(([tl, tu]) => !underOk(id, tl, tu))) continue;   // wide (west) not decoded: do not paint the detail box alone
-      for (const [tl, tu] of unders) { const ru = underOk(id, tl, tu); if (ru) draw1(2, ru.im, () => { const b = SRC[id].tiles[tl].box; gl.uniform1f(U.geo, 0); gl.uniform1f(U.lim, SRC[id].kind === "gibs" ? 0.165 : -2); gl.uniform4f(U.box, b[0], b[1], b[2], b[3]); gl.uniform1f(U.alpha, SRC[id].alpha); }); }
+      // 11-12: do not name this "unders" — a later const unders in this block was TDZ-shadowing the
+      // unders() helper, throwing ReferenceError (swallowed by Obs.hook) so STAR frames never painted.
+      const underLyr = undersOf(id, f.tile, f.t);
+      if (SRC[id].kind === "gibs" && underLyr.some(([tl, tu]) => !underOk(id, tl, tu))) continue;   // wide (west) not decoded: do not paint the detail box alone
+      for (const [tl, tu] of underLyr) { const ru = underOk(id, tl, tu); if (ru) draw1(2, ru.im, () => { const b = SRC[id].tiles[tl].box; gl.uniform1f(U.geo, 0); gl.uniform1f(U.lim, SRC[id].kind === "gibs" ? 0.165 : -2); gl.uniform4f(U.box, b[0], b[1], b[2], b[3]); gl.uniform1f(U.alpha, SRC[id].alpha); }); }
       draw1(u, f.im, () => { const b = SRC[id].tiles[f.tile].box; gl.uniform1f(U.geo, 0); gl.uniform1f(U.lim, SRC[id].kind === "gibs" ? 0.165 : -2); gl.uniform4f(U.box, b[0], b[1], b[2], b[3]); gl.uniform1f(U.alpha, SRC[id].alpha); });
       ST.shown[id] = f.t;
     }
