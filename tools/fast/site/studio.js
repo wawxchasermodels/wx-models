@@ -2197,9 +2197,9 @@ if (!CLEAN) {   // Studio: Map | Meteogram switch (first in the menu bar) + the 
       if (!ob_) { ob_ = document.createElement("div"); ob_.id = "obsp"; ob_.innerHTML = `<div id="obs-root"></div>`; pnl.appendChild(ob_); }
       obsLoad = obsLoad || new Promise((ok, bad) => {
         const l = document.createElement("link"); l.rel = "stylesheet"; l.href = "obs/obs.css"; document.head.appendChild(l);
-        const sc = document.createElement("script"); sc.src = "obs/obs.js?v=20261112sat1"; sc.onerror = bad; document.body.appendChild(sc);
+        const sc = document.createElement("script"); sc.src = "obs/obs.js?v=20261112sat2"; sc.onerror = bad; document.body.appendChild(sc);
         // 11-03: radar + GOES-West layers (obs/obsimg.js, off by default); the obs map still opens if it fails to load
-        sc.onload = () => { const s2 = document.createElement("script"); s2.src = "obs/obsimg.js?v=20261112sat1"; s2.onload = ok; s2.onerror = ok; document.body.appendChild(s2); }; });
+        sc.onload = () => { const s2 = document.createElement("script"); s2.src = "obs/obsimg.js?v=20261112sat2"; s2.onload = ok; s2.onerror = ok; document.body.appendChild(s2); }; });
       MG.msg = "Loading observations\u2026"; osig = "";
       obsLoad.then(() => { if (OBSM()) { Obs.show(); fitFrames(); } }, () => { obsLoad = null; MG.msg = "Observations could not load."; renderAll(); });
       poll = setInterval(ograb, 400);

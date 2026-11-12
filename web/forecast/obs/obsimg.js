@@ -110,7 +110,7 @@ const ObsImg = (() => {
         const done = (v) => { if (!settled) { settled = true; if (loadWait) clearTimeout(loadWait); res(v); } };
         // 11-12: GIBS WMS GetMap often hangs (no onerror) on large tiles, which left the loop stuck on "loading" and Play dead.
         // Bound each request, retry once, then drop that time so older frames can play.
-        const loadMs = SRC[id].kind === "gibs" ? 18000 : 25000;
+        const loadMs = SRC[id].kind === "gibs" ? 12000 : 20000;
         const srcOf = () => url(id, tile, t) + (r.retried ? "&r=1" : "");
         const armLoad = () => { if (loadWait) clearTimeout(loadWait); loadWait = setTimeout(() => {
           if (settled) return;
@@ -290,9 +290,24 @@ const ObsImg = (() => {
       ST.msg = "";
       for (const id of on()) {
         try { await times(id); } catch (e) { ST.msg = SRC[id].label + " times unavailable"; continue; }
-        const fr = ST.frames[id]; if (!fr.length) { ST.msg = SRC[id].label + ": no recent frames"; continue; }
+        if (!ST.frames[id].length) { ST.msg = SRC[id].label + ": no recent frames"; }
+      }
+      // 11-12: start the whole window now (newest first). Do not wait through hung newest GIBS tiles before loading the rest —
+      // that left Play stuck on one pending map. Timeout drops a bad time; the loop starts once two frames are ready.
+      const loadWindow = async () => {
+        for (let pass = 0; pass < 2; pass++) {   // pass 2: frames that slid in after black ones dropped out
+          // 11-04 (t2299u) 6 at a time: GIBS builds each image on request (~3-10 s, never cached), so waiting on 3 left the loop half empty for a minute
+          // 11-10: queue every required layer of each frame (newest back), west with east, so a frame becomes ready as a pair
+          const todo = []; for (const id of on()) for (const t of [...ST.frames[id]].reverse()) for (const [tl, u] of needLayers(id, t)) todo.push([id, tl, u, t]);
+          await Promise.all([0, 1, 2, 3, 4, 5].map(async () => {
+          while (todo.length) { const [id, tile, t, mainT] = todo.shift(); if (on().includes(id)) { const r = getImg(id, tile, t); await r.p; if (r.bad) { ST.blank.add(id + "|" + mainT); pickFrames(id); } } } }));
+        }
+      };
+      const windowP = loadWindow();
+      for (const id of on()) {
+        if (!ST.frames[id].length) continue;
         const tile = listTile(id);
-        for (let tries = 0; tries < 5 && ST.frames[id].length; tries++) { const f = ST.frames[id], t = f[f.length - 1];
+        for (let tries = 0; tries < 3 && ST.frames[id].length; tries++) { const f = ST.frames[id], t = f[f.length - 1];
           const need = needLayers(id, t);   // wait for west and east (and water-vapor unders) of this time
           const rs = need.map(([tl, u]) => getImg(id, tl, u));
           if ((await Promise.all(rs.map((r) => r.p))).every(Boolean)) break;
@@ -300,14 +315,8 @@ const ObsImg = (() => {
         if (id === "wv" && ST.wvMoved && !ST.frames.wv.some((t) => { const r = ST.img.get("wv|" + tile + "|" + t); return r && r.ok; })) ST.msg = "Water vapor paused: NOAA moved its image sector, so it would not line up with this map";
       }
       prune(); if (ST.idx < 0 || ST.idx >= len()) ST.idx = len() - 1;
-      ui(); bump(); Obs.redraw();   // newest still stays up; do not start the loop until the window below has loaded
-      for (let pass = 0; pass < 2; pass++) {   // pass 2: frames that slid in after black ones dropped out
-        // 11-04 (t2299u) 6 at a time: GIBS builds each image on request (~3-10 s, never cached), so waiting on 3 left the loop half empty for a minute
-        // 11-10: queue every required layer of each frame (newest back), west with east, so a frame becomes ready as a pair
-        const todo = []; for (const id of on()) for (const t of [...ST.frames[id]].reverse()) for (const [tl, u] of needLayers(id, t)) todo.push([id, tl, u, t]);
-        await Promise.all([0, 1, 2, 3, 4, 5].map(async () => {
-        while (todo.length) { const [id, tile, t, mainT] = todo.shift(); if (on().includes(id)) { const r = getImg(id, tile, t); await r.p; if (r.bad) { ST.blank.add(id + "|" + mainT); pickFrames(id); } } } }));
-      }
+      ui(); bump(); Obs.redraw();   // newest ready still can show; the loop starts as soon as two frames are decoded
+      await windowP;
       dropFailed(); if (ST.idx < 0 || ST.idx >= len()) ST.idx = Math.max(0, len() - 1);
       ui(); bump(); Obs.redraw();
     })().finally(() => { loading = null; });
