@@ -103,7 +103,7 @@ const ObsImg = (() => {
   function getImg(id, tile, t) {   // cached Image; r.ok means loaded and decoded (null on failure)
     const key = id + "|" + tile + "|" + t; let r = ST.img.get(key);
     if (!r && SRC[id].kind === "star") {   // NOAA STAR water vapor: cleaned in this page, then shown from a blob: URL (same origin)
-      const im = new Image(); im.decoding = "async"; r = { im, ok: false, sec: secOf(tile) }; r.p = starImg(r, r.sec, t, bandOf(id)); ST.img.set(key, r);
+      const im = new Image(); im.decoding = "async"; r = { im, ok: false, sec: secOf(tile) }; r.p = starImg(r, r.sec, t, bandOf(id), id); ST.img.set(key, r);
     }
     if (!r) {
       const im = new Image(); im.crossOrigin = "anonymous"; im.decoding = "async";
@@ -205,7 +205,7 @@ const ObsImg = (() => {
   // red / pink map-line pixels (STAR draws them pure red; JPEG blurs them into the background). Yellow / orange (dry air) is not a line.
   const lineAt = (d, i) => { const r = d[i], g = d[i + 1], b = d[i + 2]; return (r - g > 60 && g - b < 60) || (r - g > 12 && Math.abs(g - b) < 31); };
   let procQ = Promise.resolve();
-  function starClean(im, sec) {   // -> Promise<Blob | "moved" | null>, one image at a time so the page stays responsive
+  function starClean(im, sec, band) {   // -> Promise<Blob | "moved" | null>, one image at a time so the page stays responsive
     const run = async () => {
       const S = SEC[sec], W = im.naturalWidth, H = im.naturalHeight; if (W !== S.W || H !== S.H) return "moved";
       const c = document.createElement("canvas"); c.width = W; c.height = H; const g = c.getContext("2d", { willReadFrequently: true }); g.drawImage(im, 0, 0);
@@ -219,9 +219,34 @@ const ObsImg = (() => {
             const m = (I[y1 * (W + 1) + x1] - I[y0 * (W + 1) + x1] - I[y1 * (W + 1) + x0] + I[y0 * (W + 1) + x0]) / ((y1 - y0) * (x1 - x0));
             if (e(p) - m > 16) bad[p] = 1; } } }
       // alignment test: NOAA's own state / border lines must still be where the fitted geometry puts them
+      // IR / GeoColor: NOAA draws thin bright white (or pale cyan) boundaries instead of the pink water-vapor lines
+      const overlayAt = (i) => { const r = d[i], g = d[i + 1], b = d[i + 2]; return Math.max(r, g, b) >= 220 && Math.min(r, g, b) >= 140; };
+      if (band && band !== "09") {
+        for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+          const p = y * W + x; if (bad[p] || !overlayAt(p * 4)) continue;
+          let same = 0, tot = 0;
+          for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+            const xx = x + dx, yy = y + dy; if (xx < 0 || yy < 0 || xx >= W || yy >= H) continue;
+            tot++; if (overlayAt((yy * W + xx) * 4)) same++;
+          }
+          if (tot && same / tot < 0.7) bad[p] = 1;
+        }
+      }
       let hit = 0; const R = S.ref, n = R.length / 2;
-      for (let k = 0; k < R.length; k += 2) { const x = R[k], y = R[k + 1]; let h = 0; for (let dy = -1; dy <= 1 && !h; dy++) for (let dx = -1; dx <= 1; dx++) if (bad[(y + dy) * W + x + dx]) { h = 1; break; } hit += h; }
-      if (hit / n < 0.8) return "moved";
+      if (!band || band === "09") {
+        for (let k = 0; k < R.length; k += 2) { const x = R[k], y = R[k + 1]; let h = 0; for (let dy = -1; dy <= 1 && !h; dy++) for (let dx = -1; dx <= 1; dx++) if (bad[(y + dy) * W + x + dx]) { h = 1; break; } hit += h; }
+        if (hit / n < 0.8) return "moved";
+      } else {
+        for (let k = 0; k < R.length; k += 2) {
+          const x = R[k], y = R[k + 1]; let h = 0;
+          for (let dy = -2; dy <= 2 && !h; dy++) for (let dx = -2; dx <= 2; dx++) {
+            const xx = x + dx, yy = y + dy; if (xx < 0 || yy < 0 || xx >= W || yy >= H) continue;
+            if (overlayAt((yy * W + xx) * 4)) { h = 1; break; }
+          }
+          hit += h;
+        }
+        if (hit / n < 0.8) return "moved";
+      }
       // grow the mask 2 px (3 on the 6 km full disk: JPEG halo), then fill it from the edges inward with the mean of the known neighbours
       const m = new Uint8Array(N), gr = sec === "fd" ? 3 : 2;
       for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (bad[y * W + x]) for (let yy = Math.max(0, y - gr); yy <= Math.min(H - 1, y + gr); yy++) for (let xx = Math.max(0, x - gr); xx <= Math.min(W - 1, x + gr); xx++) m[yy * W + xx] = 1;
@@ -243,14 +268,14 @@ const ObsImg = (() => {
     };
     const p = procQ.then(run, run); procQ = p.catch(() => null); return p;
   }
-  function starImg(r, sec, t, band) {   // raw NOAA JPG -> cleaned copy (blob: URL on this page) -> r.im
+  function starImg(r, sec, t, band, id) {   // raw NOAA JPG -> cleaned copy (blob: URL on this page) -> r.im
     const raw = new Image(); raw.crossOrigin = "anonymous"; raw.decoding = "async";
     return new Promise((res) => { raw.onerror = () => { r.bad = true; res(null); };
       raw.onload = async () => {
-        let out = null; try { out = await starClean(raw, sec); } catch (e) { out = null; } raw.onload = raw.onerror = null; raw.src = "";   // free the raw copy
+        let out = null; try { out = await starClean(raw, sec, band); } catch (e) { out = null; } raw.onload = raw.onerror = null; raw.src = "";   // free the raw copy
         if (out === "moved") { ST.wvMoved = true; r.bad = true; res(null); return; }
         if (!out) { r.bad = true; res(null); return; }
-        r.u = URL.createObjectURL(out); r.im.onload = () => { r.ok = true; r.okAt = (typeof performance !== "undefined" ? performance.now() : Date.now()); res(r.im); bump(); if (ST.obs && layersReady("wv", t)) Obs.redraw(); else uiTime(); };
+        r.u = URL.createObjectURL(out); r.im.onload = () => { r.ok = true; r.okAt = (typeof performance !== "undefined" ? performance.now() : Date.now()); res(r.im); bump(); if (ST.obs && layersReady(id, t)) Obs.redraw(); else uiTime(); };
         r.im.onerror = () => { r.bad = true; res(null); }; r.im.src = r.u; };
       raw.src = fname(sec, t, band); });
   }
@@ -314,8 +339,8 @@ const ObsImg = (() => {
           const need = needLayers(id, t);   // wait for west and east (and water-vapor unders) of this time
           const rs = need.map(([tl, u]) => getImg(id, tl, u));
           if ((await Promise.all(rs.map((r) => r.p))).every(Boolean)) break;
-          if (id === "wv" || SRC[id].kind === "gibs") { ST.blank.add(id + "|" + t); pickFrames(id); } }   // newest real frame first; keep it on screen while the rest load
-        if (id === "wv" && ST.wvMoved && !ST.frames.wv.some((t) => { const r = ST.img.get("wv|" + tile + "|" + t); return r && r.ok; })) ST.msg = "Water vapor paused: NOAA moved its image sector, so it would not line up with this map";
+          if (SRC[id].kind === "star" || SRC[id].kind === "gibs") { ST.blank.add(id + "|" + t); pickFrames(id); } }   // newest real frame first; keep it on screen while the rest load
+        if (SRC[id].kind === "star" && ST.wvMoved && !ST.frames[id].some((t) => { const r = ST.img.get(id + "|" + tile + "|" + t); return r && r.ok; })) ST.msg = SRC[id].label + " paused: NOAA moved its image sector, so it would not line up with this map";
       }
       prune(); if (ST.idx < 0 || ST.idx >= len()) ST.idx = len() - 1;
       ui(); bump(); Obs.redraw();   // newest ready still can show; the loop starts as soon as two frames are decoded
@@ -437,7 +462,7 @@ const ObsImg = (() => {
       const f = frameImg(id, ST.idx < 0 ? len() - 1 : ST.idx); if (!f) continue;
       const u = id === "radar" ? 1 : 0;
       if (SRC[id].kind === "star") {
-        for (const [tl, tu] of unders(f.tile, f.t)) { const ru = ST.img.get("wv|" + tl + "|" + tu); if (ru && ru.ok) draw1(tl === "fd" ? 3 : 2, ru.im, geoBox(secOf(tl))); }
+        for (const [tl, tu] of unders(f.tile, f.t)) { const ru = ST.img.get(id + "|" + tl + "|" + tu); if (ru && ru.ok) draw1(tl === "fd" ? 3 : 2, ru.im, geoBox(secOf(tl))); }
         draw1(u, f.im, geoBox(secOf(f.tile))); ST.shown[id] = f.t; continue;
       }
       const unders = undersOf(id, f.tile, f.t);
@@ -481,7 +506,7 @@ const ObsImg = (() => {
     menuUi(root);
     const pc = root.querySelector(".obs-credit");
     if (pc && !$("oi-credit")) { const p = document.createElement("p"); p.className = "obs-credit"; p.id = "oi-credit";
-      p.innerHTML = `Radar: NOAA/NWS NCEP MRMS base reflectivity (public domain). Satellite: NOAA GOES-West (GOES-18) ABI. Clean IR (band 13) and GeoColor via <a href="https://nasa-gibs.github.io/gibs-api-docs/">NASA GIBS</a>/ESDIS; GeoColor imagery: NOAA/NESDIS/STAR, CIRA/NOAA. ${GIBS_ACK} Mid-level water vapor (band 9): <a href="https://www.star.nesdis.noaa.gov/GOES/">NOAA/NESDIS/STAR</a>; NOAA's map lines, logo and time bar are removed so the image sits under this map's own lines. Not an official NOAA or NASA product.`;
+      p.innerHTML = `Radar: NOAA/NWS NCEP MRMS base reflectivity (public domain). Satellite: NOAA GOES-West (GOES-18) ABI. Clean IR (band 13), GeoColor and mid-level water vapor (band 9) from <a href="https://www.star.nesdis.noaa.gov/GOES/">NOAA/NESDIS/STAR</a>; GeoColor imagery: NOAA/NESDIS/STAR, CIRA/NOAA. NOAA's map lines, logo and time bar are removed so the image sits under this map's own lines. Not an official NOAA or NASA product.`;
       pc.after(p); }
     $("oi-play").onclick = () => { ST.playing = !ST.playing; ui(); tick(); };
     { const sp = $("oi-speed"), sv = $("oi-spdv"); sp.value = String(spd()); sv.textContent = spd() + "x";
