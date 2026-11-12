@@ -64,6 +64,7 @@ const getFr = (k) => {
   try { return Object.assign({ dx: 0, dy: 0, zoom: 1 }, JSON.parse(localStorage.getItem(key(k)) || "{}")); } catch (e) { return { dx: 0, dy: 0, zoom: 1 }; }
 };
 const setFr = (k, fr) => { if (!CLEAN) localStorage.setItem(key(k), JSON.stringify(fr)); };
+window.__studioQA = () => ({ mode: MG.on ? MG.kind : (typeof S !== "undefined" ? S.view : "map"), fr: { v: getFr("v"), h: getFr("h") } });
 let last = null;   // {cv, cur, step}
 const fmtTick = (v, P) => { if (P.levels && P.levels[0] === 0.01 && [12, 18].includes(P.levels[P.levels.length - 1])) return Math.abs(v - Math.round(v)) < 1e-6 ? String(Math.round(v)) : String(+(+v).toFixed(2));   // 11-03 t2254u: 18 in precip key, "4 6 8 10 12" not "4.0 6.0 ..." (crowded on 16:9)
    const a = P.ticks || []; const dec = a.some((t) => Math.abs(t - Math.round(t)) > 1e-6) ? (a.some((t) => Math.abs(t * 10 - Math.round(t * 10)) > 1e-6) ? 2 : 1) : 0; return Number(v).toFixed(dec); };
@@ -131,23 +132,46 @@ function ozSync() { const S_ = Obs._state; if (!OZ.ref || Math.abs(S_.k - OZ.ref
 // t2894u: the frame zoom stays at 100 % or more. Below 1x it only shrank the obs map bitmap (one region's 1600 px square) into a small
 // box with empty frame around it, and that zoom was saved per frame, so Full view / region buttons still showed the tiny square.
 const OBS_ZMIN = 1;
-// t2900u: zooming a frame out past 1x widens the obs map's own view again (pre-2d318b7 behavior), so the frame stays filled;
-// 1x-2.5x stays per frame. The zoom-out itself is the shared obs map (the other frame widens with it).
-function obsZoom(k, fr, z) {   // z = wanted total zoom (frame zoom x obs map zoom-out)
+// t2900u: zooming a frame out past 1x widens that frame's obs camera (floor ~13000 km) so the frame stays filled.
+// t2912u: keep that zoom-out / edge-pan on the frame's own cam (fr.ok/ocx/ocy), not Obs._state / OZ — dragging or
+// zooming one view must not move the other. renderObs applies the frame cam, redraws, then restores the shared state.
+function snapObsCam() { const S_ = ozSync(); return { k: S_.k, cx: S_.cx, cy: S_.cy, view: S_.view, ref: OZ.ref, sub: OZ.sub }; }
+function applyObsCam(cam) { if (!cam || typeof Obs === "undefined") return; const S_ = Obs._state; S_.k = cam.k; S_.cx = cam.cx; S_.cy = cam.cy; S_.view = cam.view || ""; OZ.ref = cam.ref; OZ.sub = cam.sub; }
+function frObsCam(fr) { return fr && fr.ok != null ? { k: fr.ok, cx: fr.ocx, cy: fr.ocy, view: fr.oview || "", ref: fr.oref, sub: fr.osub } : null; }
+function ensureFrCam(fr) { if (fr.ok == null) { const c = snapObsCam(); fr.ok = c.k; fr.ocx = c.cx; fr.ocy = c.cy; fr.oview = c.view; fr.oref = c.ref; fr.osub = c.sub; } return fr; }
+function frSub(fr) { return fr && fr.osub != null ? fr.osub : (typeof Obs !== "undefined" && Obs._state ? (ozSync(), OZ.sub) : 1); }
+function withObsCam(fr, fn) {
+  if (typeof Obs === "undefined" || !frObsCam(fr)) return fn();
+  const prev = snapObsCam(); applyObsCam(frObsCam(fr));
+  try { if (Obs.drawNow) Obs.drawNow(); else Obs.redraw(); return fn(); }
+  finally { applyObsCam(prev); }
+}
+function obsZoom(k, fr, z) {   // z = wanted total zoom (frame zoom x this frame's obs map zoom-out)
   z = Math.min(2.5, Math.max(0.01, +z || 1));
   if (typeof Obs === "undefined" || !MG.img) { fr.zoom = Math.max(OBS_ZMIN, z); return fr; }
-  const S_ = ozSync(), r = crop(k, fr), X = S_.cx + (r.cx / S_.dpr - S_.w / 2) / S_.k, Y = S_.cy + (r.cy / S_.dpr - S_.h / 2) / S_.k;
-  if (z < 1 || OZ.sub < 1) { OZ.sub = Math.min(1, Math.max(0.1 / OZ.ref, z));   /* t2900u: floor ~13000 km across, the whole satellite picture still fills */ S_.k = OZ.ref * OZ.sub; S_.cx = X; S_.cy = Y; S_.view = ""; fr.dx = fr.dy = 0; fr.zoom = Math.max(OBS_ZMIN, z); Obs.redraw(); }
-  else fr.zoom = z;
+  const S_ = ozSync(), r = crop(k, fr);
+  const k0 = fr.ok != null ? fr.ok : S_.k, cx0 = fr.ok != null ? fr.ocx : S_.cx, cy0 = fr.ok != null ? fr.ocy : S_.cy;
+  const X = cx0 + (r.cx / S_.dpr - S_.w / 2) / k0, Y = cy0 + (r.cy / S_.dpr - S_.h / 2) / k0;
+  if (z < 1 || frSub(fr) < 1) {
+    ensureFrCam(fr);
+    const ref = fr.oref || OZ.ref;
+    fr.osub = Math.min(1, Math.max(0.1 / ref, z));   // t2900u: floor ~13000 km across
+    fr.ok = ref * fr.osub; fr.ocx = X; fr.ocy = Y; fr.oview = "";
+    fr.dx = fr.dy = 0; fr.zoom = Math.max(OBS_ZMIN, z);
+  } else fr.zoom = z;
   return fr;
 }
-function obsPan(k, fr) {   // pan past the bitmap edge: move the obs map by the overflow (pre-2d318b7), keep the frame offset at the edge
+function obsPan(k, fr) {   // pan past the bitmap edge: move this frame's obs camera by the overflow, keep the frame offset at the edge
   const r = crop(k, fr); if (typeof Obs === "undefined" || !MG.img) { fr.dx = (r.bx - r.cx) * r.kk; fr.dy = (r.by - r.cy) * r.kk; return fr; }
   const S_ = ozSync(), ox = (r.bx - (fr.dx || 0) / r.kk) - r.cx, oy = (r.by - (fr.dy || 0) / r.kk) - r.cy;
-  if (Math.abs(ox) > 0.01 || Math.abs(oy) > 0.01) { S_.cx += ox / S_.dpr / S_.k; S_.cy += oy / S_.dpr / S_.k; S_.view = ""; Obs.redraw(); }
+  if (Math.abs(ox) > 0.01 || Math.abs(oy) > 0.01) {
+    ensureFrCam(fr);
+    const kk = fr.ok || S_.k;
+    fr.ocx += ox / S_.dpr / kk; fr.ocy += oy / S_.dpr / kk; fr.oview = "";
+  }
   fr.dx = (r.bx - r.cx) * r.kk; fr.dy = (r.by - r.cy) * r.kk; return fr;
 }
-const obsZv = (fr) => Math.round(Math.max(OBS_ZMIN, fr.zoom || 1) * (OBSM() && typeof Obs !== "undefined" && Obs._state ? (ozSync(), OZ.sub) : 1) * 100);
+const obsZv = (fr) => Math.round(Math.max(OBS_ZMIN, fr.zoom || 1) * (OBSM() ? frSub(fr) : 1) * 100);
 function crop(k, fr) {   // source rect (map bitmap px) for frame k: base camera, then zoom / pan; the panel stays covering the frame when it
   // can, and when it is smaller than the frame (wide view) it stays wholly in the frame (the rest is background)
   if (WEBM()) {   // page is the frame itself: same 1–2.5× zoom and drag clamp as a meteogram (some of the page stays in view)
@@ -468,6 +492,7 @@ function renderObs(k, frO) {
   const f = F[k], c0 = f.cv.getContext("2d"), fr = frO || getFr(k); if (!frO) { f.zoom.min = "5"; f.zoom.max = "250"; f.zoom.value = obsZv(fr); }
   frameTx(c0, f); c0.clearRect(0, 0, f.W, f.H); c0.fillStyle = BG === "transparent" ? "#111316" : BG; c0.fillRect(0, 0, f.W, f.H);
   const I = obsInfo();
+  if (fr && fr.ok != null) withObsCam(fr, () => {});   // paint this frame's own obs camera into the shared bitmap, then restore state
   if (!MG.img || !I || !I.t) { c0.font = `700 ${k === "v" ? 40 : 34}px Montserrat`; c0.fillStyle = "#c9ced8"; c0.textAlign = "center"; c0.fillText(MG.msg || "Loading observations\u2026", f.W / 2, f.H / 2); c0.textAlign = "left"; return; }
   const r = crop(k, fr); c0.imageSmoothingEnabled = true; c0.imageSmoothingQuality = "high";
   c0.drawImage(MG.img, f.W / 2 - r.cx * r.kk, f.H / 2 - r.cy * r.kk, IW(MG.img) * r.kk, IH(MG.img) * r.kk);
@@ -1234,7 +1259,7 @@ for (const k of ["v", "h"]) {
   f.zoom.oninput = () => { const fr = getFr(k); if (CMPM()) { f.zoom.value = "100"; return; } if (OBSM()) obsZoom(k, fr, f.zoom.value / 100); else if (ALERTM()) { fr.zoom = alertZ(f.zoom.value / 100); } else { fr.zoom = Math.max(1, f.zoom.value / 100); } setFr(k, fr); render(k); };
   cv.parentNode.querySelector(".shd").addEventListener("click", async (e) => {
     const a = e.target.closest("button[data-a]"); if (!a || (!last && !WEBM() && !CMPM() && !WAFCM() && !OBSM())) return;
-    if (a.dataset.a === "reset") { if (OBSM() && typeof Obs !== "undefined" && Obs.resetView) Obs.resetView(); setFr(k, { dx: 0, dy: 0, zoom: 1 }); if (f.zoom) f.zoom.value = "100"; render(k); if (OBSM()) render(k === "h" ? "v" : "h"); }
+    if (a.dataset.a === "reset") { setFr(k, { dx: 0, dy: 0, zoom: 1 }); if (f.zoom) f.zoom.value = "100"; render(k); }   // t2912u: only this frame; do not resetView / redraw the other Observations view
     if (a.dataset.a === "mp4" && (!MG.on || OBSM() || CMPM())) openMp4(k);
     if (a.dataset.a === "png" && ALERTM()) { if (!MG.img) return; const I = alertInfo(), st = I && I.t ? new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(I.t).replace(/[^0-9]/g, "") : "now";
       const nm = `alerts_wa_${(I && I.title || "all").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}_${st}PT_${F[k].cv.width}x${F[k].cv.height}.png`;
@@ -1287,7 +1312,7 @@ for (const k of ["v", "h"]) {
     e.preventDefault();
     const fr = getFr(k), s = f.W / (cv.clientWidth || 1);
     if (e.ctrlKey || e.metaKey) {
-      if (OBSM()) { const zt = obsZv(fr) / 100 * Math.exp(-e.deltaY * 0.01); if (zt < 1 || OZ.sub < 1) { obsZoom(k, fr, zt); setFr(k, fr); render(k); return; } }   // t2900u: zoom out widens the obs map
+      if (OBSM()) { const zt = obsZv(fr) / 100 * Math.exp(-e.deltaY * 0.01); if (zt < 1 || frSub(fr) < 1) { obsZoom(k, fr, zt); setFr(k, fr); render(k); return; } }   // t2900u / t2912u: zoom out widens this frame only
       const z0 = OBSM() ? (fr.zoom || 1) : ALERTM() ? alertZ(fr.zoom || 1) : Math.max(1, fr.zoom || 1);
       const zRaw = z0 * Math.exp(-e.deltaY * 0.01);
       const z = OBSM() ? Math.min(2.5, Math.max(OBS_ZMIN, zRaw)) : ALERTM() ? alertZ(zRaw) : Math.min(2.5, Math.max(1, zRaw));
@@ -2197,9 +2222,9 @@ if (!CLEAN) {   // Studio: Map | Meteogram switch (first in the menu bar) + the 
       if (!ob_) { ob_ = document.createElement("div"); ob_.id = "obsp"; ob_.innerHTML = `<div id="obs-root"></div>`; pnl.appendChild(ob_); }
       obsLoad = obsLoad || new Promise((ok, bad) => {
         const l = document.createElement("link"); l.rel = "stylesheet"; l.href = "obs/obs.css"; document.head.appendChild(l);
-        const sc = document.createElement("script"); sc.src = "obs/obs.js?v=20261112sat7"; sc.onerror = bad; document.body.appendChild(sc);
+        const sc = document.createElement("script"); sc.src = "obs/obs.js?v=20261112cam1"; sc.onerror = bad; document.body.appendChild(sc);
         // 11-03: radar + GOES-West layers (obs/obsimg.js, off by default); the obs map still opens if it fails to load
-        sc.onload = () => { const s2 = document.createElement("script"); s2.src = "obs/obsimg.js?v=20261112sat7"; s2.onload = ok; s2.onerror = ok; document.body.appendChild(s2); }; });
+        sc.onload = () => { const s2 = document.createElement("script"); s2.src = "obs/obsimg.js?v=20261112cam1"; s2.onload = ok; s2.onerror = ok; document.body.appendChild(s2); }; });
       MG.msg = "Loading observations\u2026"; osig = "";
       obsLoad.then(() => { if (OBSM()) { Obs.show(); fitFrames(); } }, () => { obsLoad = null; MG.msg = "Observations could not load."; renderAll(); });
       poll = setInterval(ograb, 400);
