@@ -314,6 +314,44 @@ function colorbar(c, P, x, y, w, h, size) {
   c.strokeStyle = "rgba(255,255,255,0.55)"; c.lineWidth = 1.5; c.strokeRect(x, y, barW, h);
   if (coreW) { c.fillStyle = P.core.color; c.fillRect(coreX, y, coreW, h); c.strokeRect(coreX, y, coreW, h); }
   c.shadowColor = sh[0];
+  // t2913u: gust keys get small, outlined mph numbers at the actual scale breakpoints. "on" sits on the bar
+  // (readable on light and dark colors); "above" sits just over the bar. window.__studioGustKey can flip for comparison.
+  const gustKey = /gust/i.test(P.key || "") && /mph/i.test(P.key || "");
+  const gustPlace = gustKey ? (window.__studioGustKey || "on") : "";
+  const gustNums = () => {
+    const ns = Math.round(gustPlace === "on" ? Math.min(h * 0.68, size * 0.78) : size * 0.85);
+    c.font = `800 ${ns}px Montserrat`;
+    const items = (P.ticks || []).filter((t) => t >= lo - 1e-9 && t <= hi + 1e-9).map((t) => {
+      const s_ = fmtTick(t, P), tw = c.measureText(s_).width; let tx = X(t);
+      if (gustPlace === "on") tx = Math.min(x + barW - tw / 2 - 2, Math.max(x + tw / 2 + 2, tx));
+      return { t, s: s_, tw, tx };
+    });
+    const gap = ns * 0.32, kept = [];
+    const fits = (it, prevR) => it.tx - it.tw / 2 >= prevR + gap;
+    // Keep as many breakpoints as fit; always try to hold the ends (0 and 120, etc.)
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i], last = i === items.length - 1;
+      if (!kept.length) { kept.push(it); continue; }
+      if (last) {
+        while (kept.length > 1 && !fits(it, kept[kept.length - 1].tx + kept[kept.length - 1].tw / 2)) kept.pop();
+        if (fits(it, kept[kept.length - 1].tx + kept[kept.length - 1].tw / 2)) kept.push(it);
+        break;
+      }
+      if (fits(it, kept[kept.length - 1].tx + kept[kept.length - 1].tw / 2)) kept.push(it);
+    }
+    const ty = gustPlace === "on" ? y + h / 2 : y - ns * 0.22;
+    const base = gustPlace === "on" ? "middle" : "alphabetic";
+    const sh2 = [c.shadowColor, c.shadowBlur, c.shadowOffsetX, c.shadowOffsetY];
+    c.shadowColor = "rgba(0,0,0,0)"; c.textAlign = "center"; c.textBaseline = base; c.lineJoin = "round"; c.miterLimit = 2;
+    for (const it of kept) {
+      c.lineWidth = Math.max(3, ns * 0.22); c.strokeStyle = "rgba(8,10,14,0.92)"; c.strokeText(it.s, it.tx, ty);
+      c.fillStyle = "#fff"; c.fillText(it.s, it.tx, ty);
+    }
+    c.shadowColor = sh2[0]; c.shadowBlur = sh2[1]; c.shadowOffsetX = sh2[2]; c.shadowOffsetY = sh2[3];
+    c.textBaseline = "alphabetic";
+  };
+  if (gustPlace === "on" || gustPlace === "above") gustNums();
+  else {
   c.font = `600 ${size}px Montserrat`; c.fillStyle = "#e9ecf1"; c.textAlign = "center";
   // ticks: skip any whose label would touch the previous drawn one (precip keys bunch 0.01-0.5 into a few bins)
   // 11-01 8:55 AM (Benjamin t1992u "add a couple more numbers to the scale, maybe every 5 feet"): the max wave bars (5 ft numbers 40-85, one per bin)
@@ -327,13 +365,16 @@ function colorbar(c, P, x, y, w, h, size) {
       c.fillRect(tx - 2, y + h, 2, size * 0.35); c.textAlign = "left"; c.fillText(s_, lx, y + h + size * 1.35); c.textAlign = "center"; lastR = lx + tw; return;
     }
     lastR = tx + tw / 2; c.fillRect(tx - 1, y + h, 2, size * 0.35); c.fillText(s_, tx, y + h + size * 1.35); });
+  }
   if (coreW) {
     const lab = `within ${P.core.km || 25} km`;
     let zs = size; c.font = `700 ${zs}px Montserrat`; c.textAlign = "center"; c.fillStyle = "#e9ecf1";
     while (zs > 10 && c.measureText(lab).width > coreW - 4) { zs -= 0.5; c.font = `700 ${zs}px Montserrat`; }
     c.fillText(lab, coreX + coreW / 2, y + h + size * 1.35);
   }
-  c.textAlign = "left"; c.font = `700 ${size}px Montserrat`; c.fillText(P.key || "", x, y - size * 0.55);
+  c.textAlign = "left"; c.font = `700 ${size}px Montserrat`;
+  const keyY = gustPlace === "above" ? y - Math.round(size * 0.85) - size * 0.9 : y - size * 0.55;
+  c.fillText(P.key || "", x, keyY);
   return true;
 }
 // ---- branding (10-31 3:49 PM, Benjamin: "Yes to 3"): a title card at the start of a video and a lower third on every frame
