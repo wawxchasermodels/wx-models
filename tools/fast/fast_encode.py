@@ -22,14 +22,16 @@ MODELS = {   # grid "lcc" = HRRR 3 km, "ll" = 0.25 deg global (lat 90 -> -90, lo
     "hrrr": dict(grid="lcc", views=("puget", "wa", "wwa", "ewa", "passes", "newa", "lm", "pnwhr"), cycles=(0, 6, 12, 18), steps=list(range(1, 49)), keep=4),
     # 06/18Z added 10-29-26 7:24 PM (Benjamin). Checked on data.ecmwf.int / NOAA 10-29 18Z: GFS 06/18Z go to 384 h like 00/12Z;
     # ECMWF 0.25 06/18Z only to 144 h (3-hourly); AIFS 06/18Z to 360 h (6-hourly) like 00/12Z.
-    # RRFS (NOAA, 3 km CONUS, operational since 2026): 00/06/12/18Z hourly to 48 h then 3-hourly to 84 h (stage 3, 10-30-26)
-    "rrfs": dict(grid="lcc", views=("puget", "wa", "wwa", "ewa", "passes", "newa", "lm", "pnwhr"), cycles=(0, 6, 12, 18), steps=list(range(1, 49)) + list(range(51, 85, 3)), keep=4),
+    # RRFS (NOAA, 3 km CONUS, operational since 2026): 00/06/12/18Z. 11-12-26 (Benjamin t2923u "Just push and deploy as long as it's good"):
+    # every hour to 84 h (was hourly to 48 h then 3-hourly). Checked noaa-rrfs-ops-pds 11-11 06/12/18Z + 11-12 00Z: 2dfld/prslev 3 km and 13 km
+    # f000-f084 all hourly; F49+ .idx carry 1 h APCP / MXUPHL / LTNG windows ("49-50 hour"), so no 3 h special case past F48.
+    "rrfs": dict(grid="lcc", views=("puget", "wa", "wwa", "ewa", "passes", "newa", "lm", "pnwhr"), cycles=(0, 6, 12, 18), steps=list(range(1, 85)), keep=4),
     # 11-09 (Benjamin t2818u/t2819u): operational 13 km North American 2dfld (noaa-rrfs-ops-pds), rotated lat-lon.
     # Covers the full North Pacific on the site's na / pnw frames (CONUS 3 km RRFS stays on puget/wa/.../pnwhr). pnwt is
     # a few degrees past the CONUS west wall and is clean on this grid. Same steps/keep as CONUS RRFS; as_model=rrfs so
     # existing RRFS getters and products apply. Winds / accumulations read R.m so they stay on the NA files.
     "rrfsna": dict(grid="rotll", views=("na", "pnw", "wc", "pnwt"), cycles=(0, 6, 12, 18),
-                   steps=list(range(1, 49)) + list(range(51, 85, 3)), keep=4, as_model="rrfs",
+                   steps=list(range(1, 85)), keep=4, as_model="rrfs",
                    pole_longitude=67.0, pole_latitude=35.0, rlon0=299.0, rlat0=-36.9303, drot=0.1083),
     # NBM (NOAA National Blend, 2.5 km CONUS NDFD grid): 00/06/12/18Z, hourly to 36 h then 3-hourly to 168 h (stage 3, 10-30-26)
     # 11-10 (Benjamin t2825u): regular Pacific Northwest (pnw, "Pacific NW wide") and Pacific NW tight
@@ -316,7 +318,7 @@ def _ltng(R, m):
     raise KeyError("ltng")
 # Severe tab (Benjamin 10-31 9:15 AM "simulated radar + updraft helicity ... helicity streaks. 0-3km cape, surface cape, lapse rates",
 # 9:30 AM "Severe tab, then ensembles"): HRRR / RRFS only, all from the files already read (checked 10-31 .idx: wrfsfc / RRFS 2dfld + prslev)
-def _uh(R, m):   # 2-5 km updraft helicity, max over the hour ending at the step (RRFS past F48 is 3-hourly: only the last hour of each 3 h)
+def _uh(R, m):   # 2-5 km updraft helicity, max over the hour ending at the step (RRFS hourly to F84 since 11-12-26; older runs past F48 were 3-hourly, last hour of each 3 h only)
     if m not in ("hrrr", "rrfs"): raise KeyError("uh")
     return np.clip(np.asarray(R._idx("MXUPHL:5000-2000 m above ground", R.url, (f"{R.s - 1}-{R.s} hour max fcst",))[2], float), 0, None)
 def _cape3(R, m):
@@ -1432,7 +1434,7 @@ def static(m, out, views_only=None, x2_only=False):
                        **table(UH_L, CM["uh"], "max"), extra="highest in the hour ending at the valid time  \u00b7  75+ = rotating storm (supercell)  \u00b7  up to {hi} in view",
                        pct=[0, 100], **SV)
     prods["uhs"] = dict(prods["uh"], title="Updraft Helicity Streaks", window=9999, wmax=True, wfield="uh", fill="window", sofar=True,
-                        extra="highest hourly 2-5 km updraft helicity since the run started = storm tracks  \u00b7  RRFS past F48: 1 h in each 3 h  \u00b7  up to {hi} in view")
+                        extra="highest hourly 2-5 km updraft helicity since the run started = storm tracks  \u00b7  up to {hi} in view")
     prods["refuh"] = dict(prods["refc"], title="Simulated Radar + Updraft Helicity", fields=["refc", "uh"], fill="refc", cmap_of="refc",
                           isobars=dict(field="uh", every=75, min=75, sigma=0.7, color="#101114", lw=1.6, halo=2.2),
                           extra="composite reflectivity  \u00b7  black rings = 2-5 km updraft helicity 75, 150, 225 m\u00b2/s\u00b2 (rotating storms)", **SV)
