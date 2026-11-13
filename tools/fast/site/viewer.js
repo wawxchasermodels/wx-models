@@ -2788,7 +2788,7 @@ function obsOpen() {
   $("obsov").hidden = false; try { if (!Q.get("studio") && !Q.get("embed")) sessionStorage.setItem("vw:obs", "1"); } catch (e) { /* private mode */ }
   obsLoad = obsLoad || new Promise((ok, bad) => {
     const l = document.createElement("link"); l.rel = "stylesheet"; l.href = "obs/obs.css"; document.head.appendChild(l);
-    const sc = document.createElement("script"); sc.src = "obs/obs.js?v=20261112gc1"; sc.onerror = bad; document.body.appendChild(sc);
+    const sc = document.createElement("script"); sc.src = "obs/obs.js?v=20261112wa2"; sc.onerror = bad; document.body.appendChild(sc);
     // 11-03: radar + GOES-West layers (obs/obsimg.js, off by default); the obs map still opens if it fails to load
     sc.onload = () => { const s2 = document.createElement("script"); s2.src = "obs/obsimg.js?v=20261112gc1"; s2.onload = ok; s2.onerror = ok; document.body.appendChild(s2); };
   });

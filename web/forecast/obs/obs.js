@@ -41,6 +41,14 @@ const Obs = (() => {
   const LAYER_IDS = LAYERS.map((l) => l.id);
   const MAX_AGE_MIN = 90, REFRESH_MS = 10 * 60e3;
   const VIEWS = [   // span = km across the shorter screen side; proj = [central meridian, std parallel 1, std parallel 2, origin lat]
+    // t2991u: Washington matches the model-map "wa" view's visible panel (published bounds, all models
+    // 1920x1080: 45.32–49.48 N at the central meridian, centre 47.40 N 121.23 W). Same LCC params as
+    // temp_maps wa (central_longitude -120.5, parallels 45/49, origin lat 47.3). span = the panel's
+    // north–south extent in this sphere projection (461.6 km; cartopy/WGS84 panel height is 461.5 km).
+    // fitLat: Studio's offscreen stage is square (1600x1600) and cover-cropped into 16:9 / 9:16 frames;
+    // inflate span so the 16:9 crop keeps that same latitude (the model WA panel is wide, so its 16:9
+    // cover also keeps full latitude). Clicking the selected button still returns to Full view.
+    { id: "wa", label: "Washington", lon: -121.23, lat: 47.40, span: 461.6, proj: [-120.5, 45, 49, 47.3], fitLat: true },
     { id: "pnw", label: "Pacific NW", lon: -120.9, lat: 47.3, span: 1150, proj: [-121, 44, 50, 47] },
     { id: "west", label: "West + Western Canada", lon: -122, lat: 52.5, span: 3300, proj: [-122, 45, 60, 52] },
     { id: "salish", label: "Vancouver Island + Puget Sound", lon: -123, lat: 48.6, span: 600, proj: [-123, 46, 50, 48.5] },
@@ -332,7 +340,12 @@ const Obs = (() => {
     const v = S.pending || VIEWS.find((x) => x.id === S.view) || VIEWS[0]; S.pending = null;
     setProj(v.proj);
     [S.cx, S.cy] = S.P.f(v.lon, v.lat);
-    S.k = Math.min(S.w, S.h) / v.span;
+    // span = km across the shorter screen side. A square canvas (Studio's 1600x1600 stage) is later
+    // cover-cropped to 16:9, which would otherwise keep only 9/16 of the designed latitude; for
+    // views that must match a model map's latitude (fitLat), size the square so the 16:9 crop is exact.
+    let span = v.span;
+    if (v.fitLat && S.w && S.h && Math.abs(S.w - S.h) / Math.max(S.w, S.h) < 0.05) span = v.span * 16 / 9;
+    S.k = Math.min(S.w, S.h) / span;
   }
   const viewId = () => S.view;
   const sx = (x) => (x - S.cx) * S.k + S.w / 2, sy = (y) => (y - S.cy) * S.k + S.h / 2;
