@@ -984,7 +984,7 @@ async function productFields(run, pid, f) {
     } else if (P.fill === "hmax") { const a = F.swh.v, o = new Float32Array(a.length); for (let k = 0; k < a.length; k++) o[k] = a[k] < 0 ? a[k] : a[k] * 1.86; out.fill = o;
     } else if (P.fill === "thick") { const a = F.z500.v, b = F.z1000.v, o = new Float32Array(a.length); for (let k = 0; k < a.length; k++) o[k] = (a[k] - b[k]) / 10; out.fill = blur(o, g.w, g.h, 1.0);
     } else if (P.fill === "snowlvl") { const a = F.frz.v, o = new Float32Array(a.length); for (let k = 0; k < a.length; k++) o[k] = Math.max(0, a[k] - 1000); out.fill = o; }
-    else if (P.fill === "prt" && F.prt && !Q.get("ptraw")) out.fill = prtSmooth(F.prt.v, g.w, g.h);   // 11-12 precip type smoothing (?ptraw=1: as encoded)
+    else if (P.fill === "prt" && F.prt && !Q.get("ptraw")) out.fill = prtSmooth(F.prt.v, g.w, g.h, !/^(hrrr|rrfs)/.test(run.split("/")[0]));   // 11-12 precip type smoothing (?ptraw=1: as encoded)
     else out.fill = F[P.fill] ? F[P.fill].v : g.v;
     if (P.lows && F.mslp) out.mslpRaw = F.mslp.v;   // ensemble-mean lows (L + central pressure)
     if (P.lows || P.spag) out.ens = await fetch(`${DATA}runs/${run}/single/ens_f${String(f).padStart(3, "0")}.json`).then(r => r.ok ? r.json() : null, () => null);
@@ -1049,11 +1049,13 @@ function sampleType(st, F, k) {
   return (t << 4) | Math.min(hi, Math.max(1, Math.round(band)));
 }
 // 11-12 (Benjamin 8:19 PM "smooth the simulated precip type a bit"): every model with precip type (HRRR, RRFS, GFS, ECMWF).
-// prtSmooth: one pass of a 3x3 majority filter on the TYPE only, among wet grid points (center counts 2, each wet neighbor 1; a
-// type replaces the center's only when it strictly outweighs it, ties keep). Removes lone single-point type flips and ragged
-// specks; straight or curved real boundaries and convex corners keep their place. The rate band and which points are wet / dry
-// are never changed (dry stays 0, wet keeps its own band), so where precip falls and how heavy it is stay exactly as encoded.
-function prtSmooth(src, w, h) {
+// prtSmooth: one pass on the TYPE only, among wet grid points. 3 km grids (HRRR, RRFS; lone = false): 3x3 majority (center counts
+// 2, each wet neighbor 1; a type replaces the center's only when it strictly outweighs it, ties keep) -> no single-point flips or
+// ragged specks, while straight / curved boundaries and convex corners stay put. 0.25 deg grids (GFS, ECMWF; lone = true): a grid
+// point there is ~25 km and a one-cell-wide Cascade-crest snow band is real, so only a point with NO same-type wet neighbor that is
+// surrounded (6+ wet neighbors, 5+ of one other type) takes that type. The rate band and which points are wet / dry are never
+// changed (dry stays 0, wet keeps its own band), so where precip falls and how heavy it is stay exactly as encoded.
+function prtSmooth(src, w, h, lone) {
   const n = w * h, o = new Float32Array(src), T = new Int8Array(n);
   for (let k = 0; k < n; k++) { const v = Math.round(src[k]); T[k] = v >= 1 && (v & 15) ? (v >> 4) & 3 : -1; }
   const c = [0, 0, 0, 0];
@@ -1063,11 +1065,12 @@ function prtSmooth(src, w, h) {
     for (let dr = -1; dr <= 1; dr++) { const rr = r + dr; if (rr < 0 || rr >= h) continue;
       for (let dq = -1; dq <= 1; dq++) { const qq = q + dq; if ((!dr && !dq) || qq < 0 || qq >= w) continue; const t = T[rr * w + qq]; if (t >= 0) c[t]++; } }
     let tb = t0; for (let t = 0; t < 4; t++) if (c[t] > c[tb]) tb = t;
+    if (lone && (c[t0] > 2 || c[tb] < 5 || c[0] + c[1] + c[2] + c[3] - 2 < 6)) continue;
     if (tb !== t0) o[k] = (tb << 4) | (Math.round(src[k]) & 15);
   }
   return o;
 }
-// sampleTypeNN (HRRR / RRFS / GFS precip type): wet / dry and the rate band come from the nearest grid point exactly as before
+// sampleTypeNN (HRRR / RRFS precip type; GFS keeps sampleNN: soft edges inside 25 km blocks would thin one-cell bands): wet / dry and the rate band come from the nearest grid point exactly as before
 // (sampleNN), so the precip area is unchanged; only the TYPE is the one with the most bilinear weight among the 4 surrounding wet
 // points, so rain / snow / mix lines follow a smooth curve instead of grid-cell stair steps. Types never blend into new colors.
 function sampleTypeNN(st, F, k) {
@@ -1227,7 +1230,7 @@ async function render(lite) {
   if (!V) return;
   const ctx = sizeMap(cv, V, lite), [LW, LH] = V.fig, rs = cv._rs; ctx.fillStyle = S.man.style.BG; ctx.fillRect(0, 0, LW, LH);
   // 1. color fill: value -> bin color, exactly the site's bins (contourf + BoundaryNorm)
-  const smp0 = P.fill === "prt" ? (/^(ifs|ifs9)$/.test(run.split("/")[0]) ? sampleType : Q.get("ptraw") ? sampleNN : sampleTypeNN) : (P.mask_edge || pid === "ssta") && P.min_show !== undefined ? (st_, F_, k_) => sampleMask(st_, F_, k_, P.min_show) : sample;
+  const smp0 = P.fill === "prt" ? (/^(ifs|ifs9)$/.test(run.split("/")[0]) ? sampleType : /^(hrrr|rrfs)/.test(run.split("/")[0]) && !Q.get("ptraw") ? sampleTypeNN : sampleNN) : (P.mask_edge || pid === "ssta") && P.min_show !== undefined ? (st_, F_, k_) => sampleMask(st_, F_, k_, P.min_show) : sample;
   let GF = null; try { GF = await gfP; } catch (e) { GF = null; }
   if (GF && (GF.st.W !== st.W || GF.st.H !== st.H)) GF = null;
   S.gapfill = !!GF;
