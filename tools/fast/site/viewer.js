@@ -1332,7 +1332,7 @@ async function render(lite) {
   window.__coastTaken = (WT && (WT.taken || WT.boxes)) ? (WT.taken || WT.boxes).slice() : [];
   { const cv = $("map");
     window.__labelSharp = { vid: VSRC(S.view) || S.view, view: S.view,
-      path: (WT && WT.own) ? "coast" : (drewTowns ? "live" : (!studioHold && st.towns && L2.towns && tmode !== "none" ? "png" : "none")),
+      path: (WT && WT.own) ? "coast" : (studioHold ? "studio" : (drewTowns ? "live" : (st.towns && L2.towns && tmode !== "none" ? "png" : "none"))),
       townFs: townFs(S.view), coastFs: (WT && WT.vid === "coast") ? COAST_FS : null,
       rs: (cv && cv._rs) || 1, dpr: window.devicePixelRatio || 1,
       backingW: cv ? cv.width : 0, cssW: cv ? (cv.offsetWidth || 0) : 0,
