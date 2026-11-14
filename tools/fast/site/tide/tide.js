@@ -1,6 +1,7 @@
-// Tides viewer (Benjamin t3011u, 2026-11-14): NOAA official tide prediction, observed water level, and an experimental
-// "Conditional Prediction" = prediction + forecast non-tidal residual (STOFS-2D-Global sub-tidal water level, bias-corrected to the current
-// observed residual, relaxing to the 30-day mean residual = slow coastal sea level anomaly incl. Kelvin waves / El Nino).
+// Tides viewer (Benjamin t3011u / wording t3023u, 2026-11-14): NOAA official tide prediction, observed water level, and an experimental
+// "Conditional Prediction" = official prediction + NOAA STOFS surge forecast (which already includes low pressure and wind driven
+// coastal waves), with a fading correction to the current observed residual. The 30 day average offset is used only after the STOFS
+// forecast ends or if it is missing. The inverse barometer figure is info only (already included in STOFS) and is not added on top.
 // All data is public NOAA (CO-OPS API with CORS, STOFS on the NOAA Open Data bucket). No keys. Times shown in Pacific time.
 // window.TIDE.draw(ctx, W, H, opt) draws the chart into any 2D context in CSS px (Studio draws it into its frames).
 (() => {
@@ -242,11 +243,11 @@ function drawChart(c, W, H, opt) {
   const lastObs = D.obs.length ? D.obs[D.obs.length - 1] : null;
   if (lastObs && D.rNow != null) info.push(`Latest observed ${lastObs[1].toFixed(2)} ft at ${fTime.format(new Date(lastObs[0]))}  \u00b7  residual (observed \u2212 predicted) ${sgn(D.rNow, 2)} ft`);
   const bits = [];
-  if (D.pr) bits.push(`Pressure ${D.pr.hpa.toFixed(1)} hPa (inverse barometer \u2248 ${sgn((1013.25 - D.pr.hpa) * 0.0328, 2)} ft)`);
-  if (D.rSlow != null) bits.push(`30-day mean residual ${sgn(D.rSlow, 2)} ft (slow anomaly, Kelvin wave / El Ni\u00f1o)`);
+  if (D.pr) bits.push(`Pressure ${D.pr.hpa.toFixed(1)} hPa (inverse barometer \u2248 ${sgn((1013.25 - D.pr.hpa) * 0.0328, 2)} ft, info only, already included in STOFS)`);
+  if (D.rSlow != null) bits.push(`30 day average offset ${sgn(D.rSlow, 2)} ft, used only after the STOFS forecast ends or if it is missing`);
   if (bits.length) info.push(bits.join("  \u00b7  "));
-  info.push(D.method === "stofs" ? `Conditional = official + STOFS-2D-Global ${new Date(D.cyc.t).getUTCHours().toString().padStart(2, "0")}Z surge + anomaly (bias ${sgn(D.bias, 2)} ft fading 12 h), then the 30-day mean. Experimental, not official.`
-    : `Conditional = official + current residual relaxing to the 30-day mean (STOFS guidance unavailable). Experimental, not official.`);
+  info.push(D.method === "stofs" ? `Conditional = official prediction + NOAA STOFS ${new Date(D.cyc.t).getUTCHours().toString().padStart(2, "0")}Z surge forecast, which already includes low pressure and wind driven coastal waves, plus a fading correction to current observations (bias ${sgn(D.bias, 2)} ft fading 12 h). Experimental, not official.`
+    : `Conditional = official prediction + current residual, relaxing to the 30 day average offset (STOFS forecast missing). Experimental, not official.`);
   const infoFs = portrait ? 12.5 : 12.5, lh = 18 * s;
   // wrap info lines to width
   c.font = F(600, infoFs); const wrapped = [];
