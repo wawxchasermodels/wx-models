@@ -38,6 +38,9 @@ const det = (m) => [
   [`${m}_rh_xsec`, "Rel. Humidity X-Sec", null, NA_XSEC],
 ];
 const ens = (m) => [
+  // 11-14 (t3010u): same stacked Surface / Winter look as HRRR, with ensemble spread styled in
+  [`${m}_surface_summary`, "Surface Summary", "summary"],
+  [`${m}_winter_summary`, "Winter Weather Summary", "winter"],
   [`${m}_daily_hilo`, "Daily High/Low Temp", "hilo"],
   [`${m}_qpf_plume`, "Total QPF Plume", "plume_tp"],
   [`${m}_snow_plume`, "Total Snow Plume", "plume_sf"],
@@ -515,6 +518,106 @@ function daily(S_, fn) {   // per PT day (only days with >= 4 values), members k
 }
 const memEmpty = (sec, what) => ({ empty: ["Not generated yet", `${what} need the ensemble members at each town. They are stored from the first ${sec.label} run encoded after 10-30 evening, at 47 places (the old site's towns, the mountain passes and a few more). Check back after the next ${sec.label} run.`], sug: "mem" });
 
+
+function membersAtTimes(S_, x) {   // align member rows to the mean series' valid times (within 2 h)
+  if (!S_ || !S_.m || !S_.x || !x || !x.length) return null;
+  const idx = x.map((tm) => { let b = 0; for (let i = 1; i < S_.x.length; i++) if (Math.abs(S_.x[i] - tm) < Math.abs(S_.x[b] - tm)) b = i; return Math.abs(S_.x[b] - tm) <= 2 * 36e5 ? b : -1; });
+  if (idx.every((i) => i < 0)) return null;
+  const A = S_.m.map((row) => idx.map((i) => (i < 0 ? null : row[i])));
+  return A.some((row) => row.some(fin)) ? A : null;
+}
+function withBands(items, S_, x, color, label) {   // 10-90 / 25-75 fills behind the HRRR-style mean line / fill
+  const A = membersAtTimes(S_, x); if (!A) return items;
+  return [...bandsItems(x, A, color, label).filter((it) => it.t === "fill"), ...items];
+}
+function relabelItem(items, from, to) { return items.map((it) => (it.label === from ? Object.assign({}, it, { label: to }) : it)); }
+function sdFill(x, mean, sd, color) {
+  return { t: "fill", x, lo: mean.map((v, i) => (v == null ? null : v - (sd[i] || 0))), hi: mean.map((v, i) => (v == null ? null : v + (sd[i] || 0))), color, alpha: 0.22, label: "\u00b11 spread" };
+}
+// Shared HRRR / EPS / AIFS ENS stacked summaries (figPanels, same colours, fonts, axes, floors).
+// Ensemble: mean from pts, plus member 10-90 / 25-75 bands (else t2sd \u00b11 spread) and the IFS baseline on EPS.
+function stackedChart(sec, prod, town, T, name, base, c, maxF, M, R) {
+  const k = prod.kind, pn = town.pt.n, corr = town.pt.c || 0;
+  const lim = T.f.map((f) => f <= maxF), cut = (a) => a && a.filter((_, i) => lim[i]);
+  const x = cut(T.x), f = cut(T.f), every = f.length > 1 ? f[1] - f[0] : 1, hourly = !!sec.hrs;
+  const stepH = f.map((v, i) => (i ? v - f[i - 1] : every)), w = stepH.map((h) => h * 36e5 * 0.85);
+  const A = T.apcpTot ? cut(T.apcpTot).map((v) => v || 0) : null, Pinc = A ? A.map((v, i) => Math.max(0, i ? v - A[i - 1] : v)) : null;
+  const runL = runLine(sec, c, every);
+  const t2M = M ? memTown(M, pn, "2t", (v) => v + corr, maxF) : null;
+  const gstM = M ? memTown(M, pn, "10fg", (v) => v, maxF) : null;
+  const tpM = M ? memTown(M, pn, "tp", (v) => v, maxF) : null;
+  const sfM = M ? memTown(M, pn, "sf", (v) => v, maxF) : null;
+  const tccM = M ? memTown(M, pn, "tcc", (v) => v, maxF) : null;
+  const dressTemp = (items, mean, sd) => {
+    let out = items;
+    if (t2M) out = withBands(relabelItem(out, "Temp", "Temp (ens. mean)"), t2M, x, K.WARM, "Temp");
+    else if (sd) out = [sdFill(x, mean, sd, K.WARM), ...relabelItem(out, "Temp", "Temp (ens. mean)")];
+    if (R) out = out.concat(refLine(R, x, (tm) => refVal(R, "t2m", tm)));
+    return out;
+  };
+  if (k === "summary") {
+    const panels = [];
+    if (T.t2m) {
+      let items = [{ t: "line", x, y: cut(T.t2m), color: K.WARM, lw: 2.5, label: "Temp" }, ...(T.d2m ? [{ t: "line", x, y: cut(T.d2m), color: K.RAIN, lw: 2, label: "Dew point" }] : []), { t: "hline", y: 32, label: "Freezing (32\u00b0F)", color: K.COLD, dash: "--", lw: 1.3 }];
+      items = dressTemp(items, cut(T.t2m), T.t2sd ? cut(T.t2sd) : null);
+      panels.push({ ylab: "\u00b0F", legend: "upper right", items });
+    }
+    if (T.gust || T.wind) {
+      let items = [...(T.gust ? [{ t: "line", x, y: cut(T.gust), color: K.WARM, lw: 2, label: "Gust" }] : []), ...(T.wind ? [{ t: "line", x, y: cut(T.wind), color: K.INK, lw: 1.6, label: "Sustained" }] : [])];
+      if (gstM && T.gust) items = withBands(relabelItem(items, "Gust", "Gust (ens. mean)"), gstM, x, K.WARM, "Gust");
+      if (R && T.gust) items = items.concat(refLine(R, x, (tm) => refGust6(R, tm)));
+      panels.push({ ylab: "mph", legend: "upper right", items });
+    }
+    if (A) {
+      let items = [{ t: "bars", x, y: Pinc, w: w[1] || w[0], color: K.RAIN, label: `${every}-hour precip` }, { t: "line", x, y: A, color: K.MEAN, lw: 2, label: `Total ${A[A.length - 1].toFixed(2)} in` }];
+      if (tpM) items = withBands(relabelItem(items, `Total ${A[A.length - 1].toFixed(2)} in`, `Total (ens. mean) ${A[A.length - 1].toFixed(2)} in`), withZero(tpM, c), x, K.RAIN, "Total");
+      if (R) items = items.concat(refLine(R, x, (tm) => refVal(R, "apcpTot", tm, runTime(c))));
+      panels.push({ ylab: "in", legend: "upper right", ylim: () => [0, Math.max(0.05, A[A.length - 1] * 1.15)], items });
+    }
+    const tccA = tccM ? membersAtTimes(tccM, x) : null;
+    const tcc = T.tcc ? cut(T.tcc) : (tccA ? colStat({ x, m: tccA }, nanmean) : null);
+    if (tcc && tcc.some(fin)) {
+      let items = [{ t: "fill", x, lo: x.map(() => 0), hi: tcc, color: K.MUTED, alpha: 0.6, label: T.tcc ? "Cloud cover" : "Cloud cover (ens. mean)" }];
+      if (tccM) items = withBands(items, tccM, x, K.MUTED, "Cloud cover");
+      panels.push({ ylab: "%", legend: "upper right", ylim: () => [0, 100], items });
+    }
+    if (!panels.length) return { empty: ["Not in this model", "This model has no surface fields at this place."] };
+    return Object.assign(base, { fig: "panels", hIn: 13.5 * panels.length / 4, hourly, title: `${name} ${sec.tag} Surface Summary`, sub: runL, panels });
+  }
+  if (k === "winter") {
+    if (!T.t2m && !A) return { empty: ["Not enough data", "This model has no temperature or precipitation at this place."] };
+    const panels = [];
+    if (T.t2m) {
+      let items = [{ t: "line", x, y: cut(T.t2m), color: K.WARM, lw: 2.5, label: "Temp" }, ...(T.d2m ? [{ t: "line", x, y: cut(T.d2m), color: K.RAIN, lw: 1.8, label: "Dew point" }] : []), { t: "hline", y: 32, label: "Freezing (32\u00b0F)", color: K.COLD, dash: "--", lw: 1.3 }];
+      items = dressTemp(items, cut(T.t2m), T.t2sd ? cut(T.t2sd) : null);
+      panels.push({ ylab: "\u00b0F", legend: "upper left", items });
+    }
+    if (A) {   // precip by type: the fast data has snow (water = snow / 10) and freezing rain amounts, the rest is rain
+      const sn = T.snow ? cut(T.snow) : null, fz = T.fzinc ? cut(T.fzinc) : null;
+      const sw = Pinc.map((p, i) => Math.min(p, sn ? (sn[i] || 0) / 10 : 0)), fr = Pinc.map((p, i) => Math.min(p - sw[i], fz ? fz[i] || 0 : 0)), rn = Pinc.map((p, i) => Math.max(0, p - sw[i] - fr[i]));
+      const b1 = sw, b2 = sw.map((v, i) => v + fr[i]), bw = w[1] || w[0];
+      // Benjamin 11-04 t2305u: on passes the precip axis never shrinks below 3 in, for every step length (grows above it with the data)
+      const isPass = town.pt.k === "pass", pHi = Math.max(0, ...b2.map((v, i) => v + rn[i]));
+      panels.push({ ylab: `in per ${every} h`, legend: "upper left", ...(isPass ? { ylim: () => [0, Math.max(MG_FLOORS.passPrecipIn, pHi * 1.15)] } : {}), items: [{ t: "bars", x, y: sw, w: bw, color: K.SNOW, label: "Snow" }, { t: "bars", x, y: fr, base: b1, w: bw, color: K.ICE, label: "Freezing rain" },
+        { t: "bars", x, y: x.map(() => 0), w: bw, color: K.PLUM, label: "Sleet" }, { t: "bars", x, y: rn, base: b2, w: bw, color: K.RAIN, label: "Rain" }, { t: "bars", x, y: x.map(() => 0), w: bw, color: K.MUTED, label: "Type not set" }] });
+      const SN = T.snowTot ? cut(T.snowTot).map((v) => v || 0) : null;
+      // Benjamin 10-31 ("snowfall bar graph (snow per 6 h) on the pass meteograms", same as the map page's Pass Forecaster): passes get
+      // a Snow per 6 h bar panel (each bar = the 6 h window ending at a 00/06/12/18-hour step, inches) above the running total
+      if (town.pt.k === "pass" && sn) {
+        const s6x = [], s6 = []; f.forEach((F_, i) => { if (F_ % 6 !== 0 || F_ === 0) return; let v = 0; f.forEach((g, j) => { if (g > F_ - 6 && g <= F_) v += sn[j] || 0; }); s6x.push(x[i] - 3 * 36e5); s6.push(v); });
+        const mx = Math.max(0, ...s6), tot = s6.reduce((a_, v) => a_ + v, 0);
+        if (s6.length) panels.push({ ylab: "in per 6 h", legend: "upper left", ylim: () => [0, Math.max(MG_FLOORS.passSnow6In, mx * 1.2)]   /* t2305u: at least 12 in */, items: [{ t: "bars", x: s6x, y: s6, w: 6 * 36e5 * 0.85, color: K.SNOW, label: `Snow per 6 h${T.snowEst ? " (est. 10:1 where \u2264 33\u00b0F)" : ""}  \u00b7  max ${mx.toFixed(1)} in, ${tot.toFixed(1)} in in all` }] });
+      }
+      let snowItems = [...(SN ? [{ t: "line", x, y: SN, color: K.SNOW, lw: 2.5, label: `Model snowfall ${SN[SN.length - 1].toFixed(1)} in` }] : []), { t: "line", x, y: A.map((v) => v * 10), color: K.MUTED, lw: 1.4, dash: "--", label: "10:1 of all precip" }];
+      if (sfM && SN) snowItems = withBands(relabelItem(snowItems, `Model snowfall ${SN[SN.length - 1].toFixed(1)} in`, `Model snowfall (ens. mean) ${SN[SN.length - 1].toFixed(1)} in`), withZero(sfM, c), x, K.SNOW, "Snowfall");
+      if (R && SN) snowItems = snowItems.concat(refLine(R, x, (tm) => refVal(R, "snowTot", tm, runTime(c))));
+      panels.push({ ylab: "snow (in)", legend: "upper left", ylim: bottom0, items: snowItems });
+    }
+    return Object.assign(base, { fig: "panels", hIn: 11 * panels.length / 3, hourly, title: `${name} ${sec.tag} Winter Weather Summary`, sub: runL + "  \u00b7  precip bars colored by the model's precip type at each hour", panels });
+  }
+  return { empty: ["Not available yet", prod.note || "This chart is not drawn on the fast site yet."] };
+}
+
 async function build(sec, prod, town) {
   const m = sec.id, runs = runsOf(m);
   // 10-31: EPS 06/18Z runs stop at 144 h; these charts are 240-360 h (old-site EPS layout), so the newest 00/12Z run comes first
@@ -526,48 +629,17 @@ async function build(sec, prod, town) {
   const credit = sec.credit, run = runLine(sec, c);
   const base = { credit, run: c };
   if (k.startsWith("mr_")) return multiRun(sec, prod, town, runs, base);
-  if (!ensM) {
+  if (k === "summary" || k === "winter") {
     const T = townSeries(D, pn); if (!T) return { empty: ["Not in this model", `${name} is outside the ${sec.label} area.`] };
-    const lim = sec.hrs ? T.f.map((f) => f <= sec.hrs) : T.f.map(() => true), cut = (a) => a && a.filter((_, i) => lim[i]);
-    const x = cut(T.x), f = cut(T.f), every = f.length > 1 ? f[1] - f[0] : 1, hourly = !!sec.hrs;
-    const stepH = f.map((v, i) => (i ? v - f[i - 1] : every)), w = stepH.map((h) => h * 36e5 * 0.85);
-    const A = T.apcpTot ? cut(T.apcpTot).map((v) => v || 0) : null, Pinc = A ? A.map((v, i) => Math.max(0, i ? v - A[i - 1] : v)) : null;
-    const runL = runLine(sec, c, every);
-    if (k === "summary") {
-      const panels = [];
-      if (T.t2m) panels.push({ ylab: "\u00b0F", legend: "upper right", items: [{ t: "line", x, y: cut(T.t2m), color: K.WARM, lw: 2.5, label: "Temp" }, ...(T.d2m ? [{ t: "line", x, y: cut(T.d2m), color: K.RAIN, lw: 2, label: "Dew point" }] : []), { t: "hline", y: 32, label: "Freezing (32\u00b0F)", color: K.COLD, dash: "--", lw: 1.3 }] });
-      if (T.gust || T.wind) panels.push({ ylab: "mph", legend: "upper right", items: [...(T.gust ? [{ t: "line", x, y: cut(T.gust), color: K.WARM, lw: 2, label: "Gust" }] : []), ...(T.wind ? [{ t: "line", x, y: cut(T.wind), color: K.INK, lw: 1.6, label: "Sustained" }] : [])] });
-      if (A) panels.push({ ylab: "in", legend: "upper right", ylim: () => [0, Math.max(0.05, A[A.length - 1] * 1.15)], items: [{ t: "bars", x, y: Pinc, w: w[1] || w[0], color: K.RAIN, label: `${every}-hour precip` }, { t: "line", x, y: A, color: K.MEAN, lw: 2, label: `Total ${A[A.length - 1].toFixed(2)} in` }] });
-      if (T.tcc) panels.push({ ylab: "%", legend: "upper right", ylim: () => [0, 100], items: [{ t: "fill", x, lo: x.map(() => 0), hi: cut(T.tcc), color: K.MUTED, alpha: 0.6, label: "Cloud cover" }] });
-      if (!panels.length) return { empty: ["Not in this model", "This model has no surface fields at this place."] };
-      return Object.assign(base, { fig: "panels", hIn: 13.5 * panels.length / 4, hourly, title: `${name} ${sec.tag} Surface Summary`, sub: runL, panels });
+    const maxF = ensM ? ENS_HOURS : (sec.hrs || 1e9);
+    let Mem = null, Ref = null;
+    if (ensM) {
+      try { Mem = await memSeries(m, c); } catch (e) { Mem = null; }
+      if (m === "eps") Ref = await refSeries(town, c);
     }
-    if (k === "winter") {
-      if (!T.t2m && !A) return { empty: ["Not enough data", "This model has no temperature or precipitation at this place."] };
-      const panels = [];
-      if (T.t2m) panels.push({ ylab: "\u00b0F", legend: "upper left", items: [{ t: "line", x, y: cut(T.t2m), color: K.WARM, lw: 2.5, label: "Temp" }, ...(T.d2m ? [{ t: "line", x, y: cut(T.d2m), color: K.RAIN, lw: 1.8, label: "Dew point" }] : []), { t: "hline", y: 32, label: "Freezing (32\u00b0F)", color: K.COLD, dash: "--", lw: 1.3 }] });
-      if (A) {   // precip by type: the fast data has snow (water = snow / 10) and freezing rain amounts, the rest is rain
-        const sn = T.snow ? cut(T.snow) : null, fz = T.fzinc ? cut(T.fzinc) : null;
-        const sw = Pinc.map((p, i) => Math.min(p, sn ? (sn[i] || 0) / 10 : 0)), fr = Pinc.map((p, i) => Math.min(p - sw[i], fz ? fz[i] || 0 : 0)), rn = Pinc.map((p, i) => Math.max(0, p - sw[i] - fr[i]));
-        const b1 = sw, b2 = sw.map((v, i) => v + fr[i]), bw = w[1] || w[0];
-        // Benjamin 11-04 t2305u: on passes the precip axis never shrinks below 3 in, for every step length (grows above it with the data)
-        const isPass = town.pt.k === "pass", pHi = Math.max(0, ...b2.map((v, i) => v + rn[i]));
-        panels.push({ ylab: `in per ${every} h`, legend: "upper left", ...(isPass ? { ylim: () => [0, Math.max(MG_FLOORS.passPrecipIn, pHi * 1.15)] } : {}), items: [{ t: "bars", x, y: sw, w: bw, color: K.SNOW, label: "Snow" }, { t: "bars", x, y: fr, base: b1, w: bw, color: K.ICE, label: "Freezing rain" },
-          { t: "bars", x, y: x.map(() => 0), w: bw, color: K.PLUM, label: "Sleet" }, { t: "bars", x, y: rn, base: b2, w: bw, color: K.RAIN, label: "Rain" }, { t: "bars", x, y: x.map(() => 0), w: bw, color: K.MUTED, label: "Type not set" }] });
-        const SN = T.snowTot ? cut(T.snowTot).map((v) => v || 0) : null;
-        // Benjamin 10-31 ("snowfall bar graph (snow per 6 h) on the pass meteograms", same as the map page's Pass Forecaster): passes get
-        // a Snow per 6 h bar panel (each bar = the 6 h window ending at a 00/06/12/18-hour step, inches) above the running total
-        if (town.pt.k === "pass" && sn) {
-          const s6x = [], s6 = []; f.forEach((F_, i) => { if (F_ % 6 !== 0 || F_ === 0) return; let v = 0; f.forEach((g, j) => { if (g > F_ - 6 && g <= F_) v += sn[j] || 0; }); s6x.push(x[i] - 3 * 36e5); s6.push(v); });
-          const mx = Math.max(0, ...s6), tot = s6.reduce((a_, v) => a_ + v, 0);
-          if (s6.length) panels.push({ ylab: "in per 6 h", legend: "upper left", ylim: () => [0, Math.max(MG_FLOORS.passSnow6In, mx * 1.2)]   /* t2305u: at least 12 in */, items: [{ t: "bars", x: s6x, y: s6, w: 6 * 36e5 * 0.85, color: K.SNOW, label: `Snow per 6 h${T.snowEst ? " (est. 10:1 where \u2264 33\u00b0F)" : ""}  \u00b7  max ${mx.toFixed(1)} in, ${tot.toFixed(1)} in in all` }] });
-        }
-        panels.push({ ylab: "snow (in)", legend: "upper left", ylim: bottom0, items: [...(SN ? [{ t: "line", x, y: SN, color: K.SNOW, lw: 2.5, label: `Model snowfall ${SN[SN.length - 1].toFixed(1)} in` }] : []), { t: "line", x, y: A.map((v) => v * 10), color: K.MUTED, lw: 1.4, dash: "--", label: "10:1 of all precip" }] });
-      }
-      return Object.assign(base, { fig: "panels", hIn: 11 * panels.length / 3, hourly, title: `${name} ${sec.tag} Winter Weather Summary`, sub: runL + "  \u00b7  precip bars colored by the model's precip type at each hour", panels });
-    }
-    return { empty: ["Not available yet", prod.note || "This chart is not drawn on the fast site yet."] };
+    return stackedChart(sec, prod, town, T, name, base, c, maxF, Mem, Ref);
   }
+  if (!ensM) return { empty: ["Not available yet", prod.note || "This chart is not drawn on the fast site yet."] };
   // ---- ensemble (EPS / AIFS ENS): members at 47 places ----
   let M = null; try { M = await memSeries(m, c); } catch (e) { M = null; }
   if (!M) return memEmpty(sec, "Ensemble charts");
@@ -679,6 +751,18 @@ async function multiRun(sec, prod, town, runs, base) {
 }
 
 /* ---------------- page (old forecast.js renderMeteo) ---------------- */
+function meteoSpecInfo(spec, sec, prod, town) {
+  const panels = (spec.panels || []).map((P) => {
+    let ylim = P.ylim; if (typeof ylim === "function") { try { ylim = ylim(0, 50); } catch (e) { ylim = null; } }
+    return { ylab: P.ylab, legend: P.legend, ylim,
+      items: (P.items || []).map((it) => ({ t: it.t, color: it.color, label: it.label || "", lw: it.lw, dash: it.dash || "", alpha: it.alpha })) };
+  });
+  return { fig: spec.fig, title: spec.title, hIn: spec.hIn || null, hourly: !!spec.hourly,
+    floors: { passPrecipIn: MG_FLOORS.passPrecipIn, passSnow6In: MG_FLOORS.passSnow6In },
+    colors: K, font: "Montserrat", sc: MG_SC, panels,
+    sec: sec.id, prod: prod.id, kind: prod.kind, town: town.pt && town.pt.n, pass: !!(town.pt && town.pt.k === "pass") };
+}
+window.__meteoStyle = { K, FONT, MG_SC, MG_FLOORS };
 function drawSpec(spec) {
   if (spec.fig === "grid") return figGrid(spec.g);
   if (spec.fig === "snowens") return figSnowEns(spec.g);
@@ -733,7 +817,7 @@ async function render_(tok, sec) {
   let spec; try { spec = await build(sec, prod, T); } catch (e) { spec = { empty: ["Could not load", "The data for this chart failed to download. Reload the page to try again."] }; console.error(e); }
   if (tok !== S.tok) { clearTimeout(lt); return; }
   if (spec.empty) { clearTimeout(lt); ld.hidden = true; img.hidden = true; img.removeAttribute("src"); emptyState(empty, spec.empty[0], spec.empty[1], spec.sug === "mem" ? memTowns(towns) : spec.sug === "none" ? [] : altProducts(sec)); return; }
-  let cv; try { cv = drawSpec(spec); } catch (e) { console.error(e); clearTimeout(lt); ld.hidden = true; img.hidden = true; emptyState(empty, "Could not draw", "This chart could not be drawn. Reload the page to try again."); return; }
+  let cv; try { cv = drawSpec(spec); window.__meteoSpec = meteoSpecInfo(spec, sec, prod, T); } catch (e) { console.error(e); clearTimeout(lt); ld.hidden = true; img.hidden = true; emptyState(empty, "Could not draw", "This chart could not be drawn. Reload the page to try again."); return; }
   const blob = await new Promise((r) => cv.toBlob(r, "image/png"));
   clearTimeout(lt); ld.hidden = true; if (tok !== S.tok || !blob) return;
   URLS.forEach((u) => URL.revokeObjectURL(u)); const u = URL.createObjectURL(blob); URLS = [u];
