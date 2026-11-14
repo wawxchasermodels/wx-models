@@ -26,7 +26,7 @@ if (CLEAN) {
 // 11-04 (t2337u "refreshed ... and it loaded into a SNOW METEOGRAM"): the mode is per tab only: the address (?smode=, survives any
 // refresh / restore, OBS included) and this tab's sessionStorage. The shared localStorage value is no longer read, so a Studio opened or
 // re-opened without them starts on Map, never on another window's Meteogram / Observations / Pass Forecaster.
-const MODES_OK = ["map", "mg", "obs", "pass", "wafc", "alert", "cmp", "web"];
+const MODES_OK = ["map", "mg", "obs", "pass", "wafc", "alert", "cmp", "web", "tide"];
 // 11-05 (Benjamin: refresh on Observations Satellite jumped to the underlying map product, e.g. Integrated Vapor Transport):
 // mode is still address-first (?smode=). saveMode also writes sessionStorage, but MODE0 used to ignore it — so a refresh whose
 // address lost smode (iOS replaceState limit, or a write that rebuilt the query without it) fell back to Map and showed the
@@ -38,7 +38,7 @@ const MODE0 = (() => { const u = SQ.get("smode"); if (MODES_OK.includes(u)) retu
   return "map"; })();
 const saveMode = (m) => { try { sessionStorage.setItem("studio:mode", m); } catch (e) { /* private mode */ }
   if (CLEAN) return; try { const u = new URL(location); if (m === "map") u.searchParams.delete("smode"); else u.searchParams.set("smode", m); history.replaceState(null, "", u); } catch (e) { /* replaceState limit */ } };
-const MG_KINDS = ["obs", "pass", "wafc", "alert", "cmp", "web"];
+const MG_KINDS = ["obs", "pass", "wafc", "alert", "cmp", "web", "tide"];
 const MG = { on: !CLEAN && ["mg", ...MG_KINDS].includes(MODE0), kind: MG_KINDS.includes(MODE0) ? MODE0 : "mg", img: null, src: "" };
 // 11-04 (t2310u/t2311u "my fancy Washington forecast maps ... into studio view", own tab): MG.kind "wafc" = the WA Maps page (wamaps.html: the
 // posted-style NBM lows / highs, gusts, precip, snow) in a small panel iframe. Each frame crops that canvas with the same
@@ -54,6 +54,9 @@ const ALERT_ZMIN = 1 / 1.5, ALERT_ZMAX = 5;
 const alertZ = (z) => Math.min(ALERT_ZMAX, Math.max(ALERT_ZMIN, +z || 1));
 const CMPM = () => MG.on && MG.kind === "cmp";   // 11-07: Compare (compare.html) drawn into both frames
 const WEBM = () => MG.on && MG.kind === "web";   // 11-07: any page, framed with the same zoom bar and drag as the maps
+// 11-14 (Benjamin t3011u): Tides = tide/index.html (station / dates pickers) in a panel iframe; its TIDE.draw() paints the chart as vector
+// graphics straight into each 2x frame (crisp text at export size, no image crop). Frames stay Map's size (fitFrames).
+const TIDEM = () => MG.on && MG.kind === "tide";
 let cmpFrame = null;
 const CMP = { L: null, R: null, view: { L: null, R: null }, play: 0 };
 const WEB = { url: "" , mir: null };   // mir: live tab capture showing the 16:9 page in the 9:16 frame (Mirror)
@@ -801,6 +804,16 @@ function renderWafc(k, frO) {
   c.drawImage(im, f.W / 2 - r.cx * r.kk, f.H / 2 - r.cy * r.kk, IW(im) * r.kk, IH(im) * r.kk);
   window.__studio = (window.__studio || 0) + 1; window.__studioWafc = (window.__studioWafc || 0) + 1;
 }
+function renderTide(k) {
+  const f = F[k]; ssFit(f, PSS); const c = f.cv.getContext("2d"); f.zoom.min = "100"; f.zoom.max = "100"; f.zoom.value = "100";
+  c.setTransform(PSS, 0, 0, PSS, 0, 0); c.clearRect(0, 0, f.W, f.H);
+  const bg = BG === "transparent" ? "#111316" : (BG || "#15171c"); c.fillStyle = bg; c.fillRect(0, 0, f.W, f.H);
+  const T_ = MG.tide;
+  if (!T_ || !T_.draw) { c.font = `700 ${k === "v" ? 40 : 34}px Montserrat`; c.fillStyle = "#c9ced8"; c.textAlign = "center"; c.fillText(MG.msg || "Loading tides\u2026", f.W / 2, f.H / 2); c.textAlign = "left"; return; }
+  const m = k === "v" ? 40 : 34;   // safe margin inside the frame
+  c.save(); c.translate(m, m); T_.draw(c, f.W - 2 * m, f.H - 2 * m, { scale: k === "v" ? 1.55 : 1.45, bg }); c.restore();
+  window.__studio = (window.__studio || 0) + 1; window.__studioTide = (window.__studioTide || 0) + 1;
+}
 function webNormalize(raw) {
   let s = String(raw || "").trim(); if (!s) return "";
   if (!/^https?:\/\//i.test(s)) s = "https://" + s;
@@ -1049,6 +1062,7 @@ function renderCmp(k) {
   window.__studio = (window.__studio || 0) + 1; window.__studioCmp = { l: CMP.L && CMP.L.run, r: CMP.R && CMP.R.run, title };
 }
 function renderMg(k, frO) {
+  if (TIDEM()) return renderTide(k);
   if (WEBM()) return renderWeb(k, frO);
   if (CMPM()) return renderCmp(k);
   if (WAFCM()) return renderWafc(k, frO);
@@ -1312,7 +1326,7 @@ for (const k of ["v", "h"]) {
   }, true);
   f.zoom.oninput = () => { const fr = getFr(k); if (CMPM()) { f.zoom.value = "100"; return; } if (OBSM()) obsZoom(k, fr, f.zoom.value / 100); else if (ALERTM()) { fr.zoom = alertZ(f.zoom.value / 100); } else { fr.zoom = Math.max(1, f.zoom.value / 100); } setFr(k, fr); render(k); };
   cv.parentNode.querySelector(".shd").addEventListener("click", async (e) => {
-    const a = e.target.closest("button[data-a]"); if (!a || (!last && !WEBM() && !CMPM() && !WAFCM() && !OBSM())) return;
+    const a = e.target.closest("button[data-a]"); if (!a || (!last && !WEBM() && !CMPM() && !WAFCM() && !OBSM() && !TIDEM())) return;
     if (a.dataset.a === "reset") { setFr(k, { dx: 0, dy: 0, zoom: 1 }); if (f.zoom) f.zoom.value = "100"; render(k); }   // t2912u: only this frame; do not resetView / redraw the other Observations view
     if (a.dataset.a === "mp4" && (!MG.on || OBSM() || CMPM())) openMp4(k);
     if (a.dataset.a === "png" && ALERTM()) { if (!MG.img) return; const I = alertInfo(), st = I && I.t ? new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(I.t).replace(/[^0-9]/g, "") : "now";
@@ -1321,6 +1335,8 @@ for (const k of ["v", "h"]) {
     if (a.dataset.a === "png" && OBSM()) { if (!MG.img) return; const I = obsInfo(), st = I && I.t ? new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(I.t).replace(/[^0-9]/g, "") : "now";
       const nm = `obs_${I ? I.view : "pnw"}_${I ? I.on.map((l) => l[0]).join("-") : "plot"}_${st}_${F[k].cv.width}x${F[k].cv.height}.png`;
       cv.toBlob((b) => { const u = URL.createObjectURL(b), l = document.createElement("a"); l.href = u; l.download = nm; l.click(); setTimeout(() => URL.revokeObjectURL(u), 4000); }, "image/png"); return; }
+    if (a.dataset.a === "png" && TIDEM()) { if (!MG.tide) return; const st_ = (MG.tide.state() || {}).st || "tide"; const nm = `tides_${st_}_${new Date().toISOString().slice(0, 10)}_${k === "v" ? "2160x3840" : "3840x2160"}.png`;
+      cv.toBlob((b) => { if (!b) return; const u = URL.createObjectURL(b), l = document.createElement("a"); l.href = u; l.download = nm; l.click(); setTimeout(() => URL.revokeObjectURL(u), 4000); }, "image/png"); return; }
     if (a.dataset.a === "png" && WAFCM()) { if (!MG.img) return; const nm = `wa-forecast_${(MG.src || "map").replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "")}_${k === "v" ? "2160x3840" : "3840x2160"}.png`;
       cv.toBlob((b) => { const u = URL.createObjectURL(b), l = document.createElement("a"); l.href = u; l.download = nm; l.click(); setTimeout(() => URL.revokeObjectURL(u), 4000); }, "image/png"); return; }
     if (a.dataset.a === "png" && PASSM()) { if (!PF.rows) return; const nm = `pass-forecast_${PF.run.replace("/", "_")}Z_${k === "v" ? "2160x3840" : "3840x2160"}.png`;
@@ -2154,7 +2170,7 @@ if (!CLEAN) {
 }
 if (!CLEAN) {   // Studio: Map | Meteogram switch (first in the menu bar) + the meteograms page's pickers in a small iframe
   const bar = document.getElementById("bar"), sw = document.createElement("label"); sw.id = "smodel";
-  sw.innerHTML = `Studio <select id="smode"><option value="map">Map</option><option value="mg">Meteogram</option><option value="obs">Observations</option><option value="pass">Pass Forecaster</option><option value="wafc">WA Forecast Maps</option><option value="alert">Active Alerts</option><option value="cmp">Compare</option><option value="web">Web</option></select>`; bar.insertBefore(sw, bar.firstChild);
+  sw.innerHTML = `Studio <select id="smode"><option value="map">Map</option><option value="mg">Meteogram</option><option value="obs">Observations</option><option value="pass">Pass Forecaster</option><option value="wafc">WA Forecast Maps</option><option value="tide">Tides</option><option value="alert">Active Alerts</option><option value="cmp">Compare</option><option value="web">Web</option></select>`; bar.insertBefore(sw, bar.firstChild);
   const pnl = document.createElement("div"); pnl.id = "mgp"; bar.after(pnl);
   const sel = document.getElementById("smode"); sel.value = MG.on ? MG.kind : "map"; saveMode(sel.value);
   let fr_ = null, poll = 0;
@@ -2191,6 +2207,10 @@ if (!CLEAN) {   // Studio: Map | Meteogram switch (first in the menu bar) + the 
     const m_ = d.getElementById("msg"), dn = w.__drawn || 0;
     if (dn !== wdrawn && cv_.width && dn > 0) { wdrawn = dn; MG.img = cv_; MG.src = q.replace(/^\?/, "").replace(/&?run=[^&]*/, ""); MG.msg = ""; renderAll(); }
     else if (!dn && m_ && /Could not|No /.test(m_.textContent) && MG.msg !== m_.textContent) { MG.msg = m_.textContent; renderAll(); } } catch (e) { /* iframe loading */ } };
+  let td_ = null, tdrawn = -1;   // Tides panel iframe; tgrab redraws both frames each time the tide page finishes a load (window.__tideDrawn)
+  const tgrab = () => { try { const w = td_.contentWindow; if (!w || !w.TIDE) return; const dn = w.__tideDrawn || 0;
+    const q = w.location.search.replace(/[?&]studio=1/g, "").replace(/^&/, "?"); if (q) { localStorage.setItem("studio:tideq", q); try { sessionStorage.setItem("studio:tideq", q); } catch (e) { /* private */ } }
+    if (dn !== tdrawn && dn > 0) { tdrawn = dn; MG.tide = w.TIDE; MG.img = MG.img || document.createElement("canvas"); MG.src = q; MG.msg = w.TIDE.state() ? "" : "Could not load tides for this station."; renderAll(); } } catch (e) { /* iframe loading */ } };
   for (const k of ["v", "h"]) { const ov = document.createElement("div"); ov.className = "webov"; ov.hidden = true;
     const ifr = document.createElement("iframe"); ifr.title = k === "v" ? "Web page, 9:16" : "Web page, 16:9"; ifr.setAttribute("referrerpolicy", "no-referrer"); ov.appendChild(ifr);
     const bar = document.createElement("div"); bar.className = "webgrip"; bar.title = "Drag to move the page in the frame"; bar.textContent = "⠇⠇ drag to move"; ov.appendChild(bar); webGrip(k, bar);
@@ -2215,6 +2235,17 @@ if (!CLEAN) {   // Studio: Map | Meteogram switch (first in the menu bar) + the 
     if (mode !== "web") { webHide(); webMirStop(); }
     if (mode !== "cmp" && CMP.play) { clearInterval(CMP.play); CMP.play = 0; const b = document.getElementById("play"); if (b && b.textContent === "Stop") b.textContent = "Play"; }
     document.body.classList.remove("cmpmode", "webmode", "webdrag");
+    document.body.classList.remove("tidemode"); if (MG.kind === "tide" && mode !== "tide") { MG.img = null; MG.tide = null; MG.kind = "mg"; MG.on = false; }
+    if (mode === "tide") {   // 11-14 t3011u: Tides (tide/index.html pickers in the panel; chart drawn by its TIDE.draw into both frames)
+      MG.on = true; MG.kind = "tide"; MG.img = null; MG.tide = null; MG.msg = ""; tdrawn = -1; saveMode("tide"); clearInterval(poll); stopMainPlay();
+      document.body.classList.remove("mgmode", "obsmode", "passmode", "alertmode", "wafcmode"); document.body.classList.add("tidemode");
+      if (typeof Obs !== "undefined" && Obs.hide) Obs.hide(); if (typeof Alerts !== "undefined" && Alerts.hide) Alerts.hide();
+      PIN.show = false; PIN.mode = null;
+      if (!td_) { td_ = document.createElement("iframe"); td_.id = "tdf"; td_.title = "Tide station and dates";
+        td_.src = "tide/index.html" + (((() => { try { return sessionStorage.getItem("studio:tideq"); } catch (e) { return null; } })() || localStorage.getItem("studio:tideq") || "?st=9441102").replace(/[?&]studio=1/g, "").replace(/^&/, "?") || "?") + "&studio=1";
+        pnl.appendChild(td_); }
+      poll = setInterval(tgrab, 300); renderAll(); fitFrames(); return;
+    }
     if (mode === "web") {
       MG.on = true; MG.kind = "web"; MG.img = null; MG.msg = ""; saveMode("web"); clearInterval(poll); stopMainPlay();
       document.body.classList.remove("mgmode", "obsmode", "passmode", "alertmode", "wafcmode"); document.body.classList.add("webmode");

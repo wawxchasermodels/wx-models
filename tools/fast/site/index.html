@@ -40,7 +40,7 @@ canvas{display:block;width:auto;height:auto;max-width:100%;max-height:100%;touch
 @media (max-height:500px) and (min-width:701px){#bar label{font-size:0}#bar label select{font-size:12px}#bar input[type=range]{min-width:120px}}
 body.bare #bar{display:none}
 /* side-by-side frames (compare.html): no page-level extras, smaller bar */
-body.embed #share,body.embed #obsbtn,body.embed #stat,body.embed #pfbtn{display:none}
+body.embed #share,body.embed #obsbtn,body.embed #stat,body.embed #pfbtn,body.embed #tidebtn{display:none}
 body.embed #bar{gap:6px;padding:6px 8px}
 /* 11-01 (Benjamin t2027u: "move the compare views directly under the slider ... menus drop down BELOW the views so the views never change
    size or position"): in compare frames the map comes first, top-aligned, sized only by the frame width (capped to the frame height),
@@ -63,7 +63,7 @@ body.cmin #bar{display:none!important}
 html.cmpstudio,html.cmpstudio body{height:auto!important;min-height:0!important;overflow:hidden!important;background:#1d2027}
 html.cmpstudio #wrap{position:fixed!important;left:-9000px!important;top:0!important;width:1800px!important;height:1200px!important;overflow:hidden!important;padding:0!important}
 html.cmpstudio #map{max-width:none!important;max-height:none!important}
-html.cmpstudio #cgear,html.cmpstudio #dock,html.cmpstudio .lic,html.cmpstudio #stepctl,html.cmpstudio #save,html.cmpstudio #mgbtn,html.cmpstudio #share{display:none!important}
+html.cmpstudio #tidebtn,html.cmpstudio #cgear,html.cmpstudio #dock,html.cmpstudio .lic,html.cmpstudio #stepctl,html.cmpstudio #save,html.cmpstudio #mgbtn,html.cmpstudio #share{display:none!important}
 html.cmpstudio #bar{border-top:0;border-bottom:1px solid #2c3039}
 #bar #cgear{position:static;margin:0;background:#2f8cff2e;border-color:#2f8cff;font-weight:700;font-size:inherit;padding:4px 9px}
 /* 10-29 9:01 PM (Benjamin): on phones the hour slider + step buttons sit UNDER the map (thumb no longer covers it);
@@ -126,6 +126,7 @@ table.pf td small.el{color:#a7abb3;font-weight:500;font-size:11px}table.pf td.fz
   <button id="mgbtn" title="Hour-by-hour forecast for a town or pass">Meteogram</button>
   <button id="pfbtn" title="Snow, temperature and wind for every mountain pass"><span class="lg">Pass Forecaster</span><span class="sm">Passes</span></button>
   <button id="obsbtn" title="Live station observations (NWS / Environment Canada)"><span class="lg">Observations</span><span class="sm">Obs</span></button>
+  <button id="tidebtn" type="button" title="Tide predictions, observed water level and the experimental Conditional Prediction (NOAA)" onclick="location.href='tide/'">Tides</button>
   <span id="stat"></span>
 </div>
 <div id="wrap"><canvas id="map"></canvas><div id="tip" hidden></div></div>

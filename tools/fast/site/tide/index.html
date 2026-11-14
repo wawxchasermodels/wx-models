@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>WX Models: Tides</title>
+<script>if(new URLSearchParams(location.search).get("studio"))document.documentElement.classList.add("studio")</script>
+<link rel="preload" href="../fonts/Montserrat-sub.woff2" as="font" type="font/woff2" crossorigin>
+<style>
+@font-face{font-family:Montserrat;src:url(../fonts/Montserrat-sub.woff2) format("woff2");font-weight:100 900}
+html,body{margin:0;background:#15171c;color:#f4f2ee;font:14px Montserrat,system-ui,sans-serif;height:100%;overflow:hidden;overscroll-behavior:none}
+body{display:flex;flex-direction:column;height:100vh;height:100dvh}
+#bar{flex:0 0 auto;display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:8px 12px;background:#1d2027;border-bottom:1px solid #2c3039}
+#bar select,#bar button,#bar input,#bar a.btn{background:#262931;color:#f4f2ee;border:1px solid #7d828c;border-radius:6px;padding:4px 8px;font:inherit;touch-action:manipulation;text-decoration:none}
+#bar input[type=date]{color-scheme:dark;padding:3px 6px}
+#bar b{font-weight:800;letter-spacing:.02em}
+#tnote{color:#a7abb3;font-size:12px}
+#wrap{position:relative;flex:1 1 auto;min-height:0;padding:4px 8px;box-sizing:border-box}
+#tc{display:block;width:100%;height:100%;touch-action:pan-y}
+#tip{position:absolute;pointer-events:none;background:#1d2027ee;color:#fff;border:1px solid #7d828c;border-radius:6px;padding:4px 8px;font-weight:600;font-size:13px;white-space:nowrap;line-height:1.45}
+#tip[hidden]{display:none}
+#msg{position:absolute;left:0;right:0;top:40%;text-align:center;color:#c9ced8;font-weight:700;font-size:16px;pointer-events:none}
+#msg:empty{display:none}
+.lic{flex:none;font:500 10.5px/1.4 Montserrat,system-ui,sans-serif;color:#a7abb3;padding:2px 10px calc(2px + env(safe-area-inset-bottom));border-top:1px solid #2a2d34;background:#15171c}
+.lic summary{cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;list-style:none}.lic summary::-webkit-details-marker{display:none}.lic p{margin:4px 0}.lic a{color:#c9ccd2}
+@media (max-width:700px){#bar{gap:6px;padding:6px}#bar label{font-size:12px}#bar select{max-width:46vw}#tnote{display:none}}
+/* Studio panel (studio.html?smode=tide): only the pickers; Studio draws the chart into its own 16:9 / 9:16 frames */
+html.studio,html.studio body{background:#1d2027;height:auto;min-height:0}
+html.studio #bar{padding:6px 10px;border-bottom:0}
+html.studio #wrap,html.studio .lic,html.studio #home{display:none!important}
+</style></head>
+<body>
+<div id="bar">
+  <a id="home" class="btn" href="../" title="Back to the model maps">&lsaquo; Maps</a>
+  <b>Tides</b>
+  <label>Station <select id="st" aria-label="Tide station"></select></label>
+  <label>From <input id="from" type="date" aria-label="Start date"></label>
+  <label>Days <select id="days" aria-label="Number of days"></select></label>
+  <button id="today" type="button" title="2 days back, 7 days ahead">Now</button>
+  <button id="reload" type="button" title="Fetch the newest observations and guidance">Refresh</button>
+  <span id="tnote"></span>
+</div>
+<div id="wrap"><canvas id="tc" aria-label="Tide chart"></canvas><div id="tip" hidden></div><div id="msg">Loading tides&hellip;</div></div>
+<footer class="lic"><details><summary>Data: NOAA CO-OPS tide predictions and water levels &middot; NOAA STOFS-2D-Global guidance (public domain) &middot; Conditional Prediction is experimental, not an official forecast</summary>
+<p>Official prediction and observed water level: NOAA CO-OPS Data API (<a href="https://api.tidesandcurrents.noaa.gov/api/prod/">api.tidesandcurrents.noaa.gov</a>), datum MLLW, feet. Flood threshold: CO-OPS metadata API (NOS or NWS minor flood level converted to MLLW).</p>
+<p>Conditional Prediction (experimental): official prediction + forecast non-tidal residual. Residual = NOAA STOFS-2D-Global sub-tidal water level (combined minus model tide: pressure and wind surge plus its sea level anomaly), smoothed over 3 h and bias-corrected to the current observed residual (the correction fades with a 12 h e-folding time). After the STOFS run ends it relaxes (24 h) to the 30-day mean observed residual, which carries slow coastal sea level anomalies such as coastally trapped Kelvin waves / El Ni&ntilde;o. If STOFS is unavailable the current residual is persisted and relaxed to the 30-day mean. NOAA does not endorse this site.</p></details></footer>
+<script src="tide.js?v=20261114t1"></script>
+</body></html>
