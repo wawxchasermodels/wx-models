@@ -41,5 +41,5 @@ html.studio #wrap,html.studio .lic,html.studio #home{display:none!important}
 <footer class="lic"><details><summary>Data: NOAA CO-OPS tide predictions and water levels &middot; NOAA STOFS-2D-Global guidance (public domain) &middot; Conditional Prediction is experimental, not an official forecast</summary>
 <p>Official prediction and observed water level: NOAA CO-OPS Data API (<a href="https://api.tidesandcurrents.noaa.gov/api/prod/">api.tidesandcurrents.noaa.gov</a>), datum MLLW, feet. Flood threshold: CO-OPS metadata API (NOS or NWS minor flood level converted to MLLW).</p>
 <p>Conditional Prediction (experimental): official prediction + forecast non-tidal residual. Residual = NOAA STOFS-2D-Global sub-tidal water level (combined minus model tide: pressure and wind surge plus its sea level anomaly), smoothed over 3 h and bias-corrected to the current observed residual (the correction fades with a 12 h e-folding time). After the STOFS run ends it relaxes (24 h) to the 30-day mean observed residual, which carries slow coastal sea level anomalies such as coastally trapped Kelvin waves / El Ni&ntilde;o. If STOFS is unavailable the current residual is persisted and relaxed to the 30-day mean. NOAA does not endorse this site.</p></details></footer>
-<script src="tide.js?v=20261114t1"></script>
+<script src="tide.js?v=20261114t2"></script>
 </body></html>

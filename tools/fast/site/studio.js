@@ -811,7 +811,7 @@ function renderTide(k) {
   const T_ = MG.tide;
   if (!T_ || !T_.draw) { c.font = `700 ${k === "v" ? 40 : 34}px Montserrat`; c.fillStyle = "#c9ced8"; c.textAlign = "center"; c.fillText(MG.msg || "Loading tides\u2026", f.W / 2, f.H / 2); c.textAlign = "left"; return; }
   const m = k === "v" ? 40 : 34;   // safe margin inside the frame
-  c.save(); c.translate(m, m); T_.draw(c, f.W - 2 * m, f.H - 2 * m, { scale: k === "v" ? 1.55 : 1.45, bg }); c.restore();
+  c.save(); c.translate(m, m); T_.draw(c, f.W - 2 * m, f.H - 2 * m, { scale: k === "v" ? 2.2 : 1.5, bg }); c.restore();
   window.__studio = (window.__studio || 0) + 1; window.__studioTide = (window.__studioTide || 0) + 1;
 }
 function webNormalize(raw) {

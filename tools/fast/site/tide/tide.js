@@ -172,12 +172,15 @@ function drawChart(c, W, H, opt) {
   c.font = F(700, 13.5); let lx, ly; const sw = 26 * s, gap = 18 * s;
   const widths = items.map((it) => sw + 8 * s + c.measureText(it[0]).width);
   const legW = widths.reduce((a, b) => a + b, 0) + gap * (items.length - 1);
-  const legTwoRows = portrait || legW > W - 2 * pad - 380 * s;
+  c.font = F(800, 22); const titleW = c.measureText(`${D.name}  \u00b7  ${D.st}`).width; c.font = F(700, 13.5);
+  const legTwoRows = portrait || legW > W - 2 * pad - titleW - 40 * s;
   const legend = (x0, y0, list) => { let x = x0; list.forEach((it, i) => { c.strokeStyle = it[1]; c.lineWidth = Math.abs(it[2] === -1 ? 2 : it[2]) * s; c.setLineDash(it[2] === -1 ? [7 * s, 5 * s] : []);
     c.beginPath(); c.moveTo(x, y0 - 5 * s); c.lineTo(x + sw, y0 - 5 * s); c.stroke(); c.setLineDash([]); c.fillStyle = COL.text; c.fillText(it[0], x + sw + 8 * s, y0); x += widths[items.indexOf(it)] + gap; }); };
   let top;
   if (!legTwoRows) { lx = W - pad - legW; ly = y1; legend(lx, ly, items); top = y1 + 40 * s; }
-  else { const half = Math.ceil(items.length / 2); legend(pad, y1 + 50 * s, items.slice(0, half)); legend(pad, y1 + 74 * s, items.slice(half)); top = y1 + 92 * s; }
+  else {   // greedy rows that fit the width (phones / 9:16)
+    const rows = [[]]; let rw = 0; items.forEach((it, i) => { const w = widths[i]; if (rows[rows.length - 1].length && rw + gap + w > W - 2 * pad) { rows.push([]); rw = 0; } rw += (rows[rows.length - 1].length ? gap : 0) + w; rows[rows.length - 1].push(it); });
+    rows.forEach((r, i) => legend(pad, y1 + 50 * s + i * 24 * s, r)); top = y1 + 50 * s + (rows.length - 1) * 24 * s + 18 * s; }
   // info lines (bottom)
   const info = [];
   const lastObs = D.obs.length ? D.obs[D.obs.length - 1] : null;
