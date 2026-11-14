@@ -69,7 +69,8 @@ def main():
     ap.add_argument("--lookback", type=int, default=LOOKBACK_D)
     a = ap.parse_args()
     if a.f == "now":   # live: the current issue slot (same rule as tide_archive.py --issue now)
-        a.f = a.to = A.slot_floor(int(D.datetime.now(D.timezone.utc).timestamp() * 1000)).strftime("%Y%m%d%H")
+        nw = D.datetime.now(D.timezone.utc)
+        a.f = A.slot_floor(int(nw.timestamp() * 1000)).strftime("%Y%m%d%H"); a.to = nw.strftime("%Y%m%d%H")   # incl. an off-slot live snapshot
     f, t = (int(D.datetime.strptime(x, "%Y%m%d%H").replace(tzinfo=D.timezone.utc).timestamp() * 1000) for x in (a.f, a.to))
     # calibration times covering [f, t]: the 08 UTC at or before f, then daily
     c0 = D.datetime.fromtimestamp(f / 1000, D.timezone.utc).replace(hour=CAL_HOUR, minute=0, second=0, microsecond=0)

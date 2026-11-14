@@ -11,7 +11,7 @@ issue time: observations <= t and the newest STOFS cycle that had been posted, c
 Storage: an orphan branch "tide-archive" of the public GitHub repo, read by the site via raw.githubusercontent.com (CORS *).
 No keys: CO-OPS API + NOAA Open Data (noaa-gestofs-pds) are public.
 
-  python tide_archive.py --out DIR --issue now            # live snapshot (kind=archive) for the current issue slot
+  python tide_archive.py --out DIR --issue now            # live snapshot (kind=archive): current slot, or the current hour if >3 h late
   python tide_archive.py --out DIR --backfill 2026110602 2026111414   # hindcast slots in [a, b]
 """
 import argparse, datetime as D, json, math, os, re, time, urllib.parse, urllib.request
@@ -191,9 +191,12 @@ def main():
     a = ap.parse_args()
     now = int(time.time() * 1000)
     if a.issue == "now":
-        slot = slot_floor(now); slots = [slot]
-        # live only if we are within 3 h of the slot (Actions cron can lag ~1 h); otherwise it is a reconstruction
-        kind = "archive" if now - slot.timestamp() * 1000 <= 3 * HR else "hindcast"
+        # real-time snapshot: the current 6-hourly slot if we are within 3 h of it (Actions cron can lag ~1 h); a late run or a
+        # manual workflow_dispatch issues at the current hour instead, so every snapshot from this mode is computed live
+        slot = slot_floor(now)
+        if now - slot.timestamp() * 1000 > 3 * HR:
+            slot = D.datetime.fromtimestamp(now / 1000, D.timezone.utc).replace(minute=0, second=0, microsecond=0)
+        slots = [slot]; kind = "archive"
     elif a.backfill:
         f, t = (D.datetime.strptime(x, "%Y%m%d%H").replace(tzinfo=D.timezone.utc) for x in a.backfill)
         slots = []; d = f

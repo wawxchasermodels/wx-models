@@ -29,7 +29,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - name: Snapshot (live; marks itself hindcast if the run is >3 h late)
+      - name: Snapshot (live: the current slot, or the current hour if the run is >3 h late / manual)
         run: python src/tools/fast/tide_archive/tide_archive.py --out arch --issue now
       - name: Daily self-calibration, background only (new coefficients at the 08 UTC = 12 AM PST run; stored as rc/cal, not shown on the site)
         run: python src/tools/fast/tide_archive/calibrate.py --out arch --from now --to now
