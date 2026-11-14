@@ -92,6 +92,8 @@ check(/k0 = Math\.max\(f\.W \/ pan\.w, f\.H \/ pan\.h\) \/ Math\.sqrt\(WAWIDE_AR
   "wawide k0 must be the Washington cover-fit zoomed out by sqrt(WAWIDE_AREA), same panel center");
 check(!/0\.66 \* f\.W \/ t\.w/.test(studio) && !/xl = V\.fit \? 0\.27 \* f\.W/.test(studio) && !/0\.84 \* f\.W \/ t\.w/.test(studio),
   "old loose wawide framing (66 % / 27 % shift / 84 % width) must not remain");
+check(/window\.__wawideCam = \(\) =>/.test(studio), "studio must expose __wawideCam so the extent guard can read the live base() camera");
+
 
 if (fail.length) {
   fail.forEach(m => console.log("FAIL " + m));

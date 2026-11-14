@@ -124,6 +124,16 @@ function base(k) {   // camera at dx = dy = 0, zoom 1: centre (figure px) and sc
   const pan = waPanelFromState(t), k0 = Math.max(f.W / pan.w, f.H / pan.h) / Math.sqrt(WAWIDE_AREA);
   return { cx: pan.x + pan.w / 2, cy: pan.y + pan.h / 2, k0 };
 }
+window.__wawideCam = () => {
+  try {
+    if (!last || !last.cur) return { ready: false };
+    const V = last.cur.V, m = (last.cur.run || "").split("/")[0];
+    const t = V && V.studioWide ? stateRect(V, m) : null;
+    if (!t) return { ready: false, view: S.view, area: WAWIDE_AREA };
+    const pan = waPanelFromState(t);
+    return { ready: true, view: S.view, area: WAWIDE_AREA, pan, h: base("h"), v: base("v") };
+  } catch (e) { return { ready: false, err: String(e) }; }
+};
 // 11-04 (Benjamin t2264u "zoom the view out as much as I want, and move it around out over the ocean"): in Observations / satellite
 // mode the frames crop the obs module's map bitmap, so zoom stopped at 1x and drags stopped at the bitmap's edge. Below 1x the obs map
 // itself zooms out (about the frame's centre), and a drag past the edge pans the obs map; the frame zoom (1-2.5x) works as before.
