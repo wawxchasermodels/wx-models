@@ -89,10 +89,18 @@ function wideRect(m) {
 }
 // Washington's box inside the normal Washington view's area (temp_maps "wa" frame: state 242,275 1095x694 in panel 218.9,224.75 1162x778)
 const WA_IN_WAVIEW = [0.0199, 0.0646, 0.942, 0.892];
+// 11-14 (t3008u follow-up): Washington Wide should only be a hair more zoomed out than the regular
+// Washington view — 5–10 % more area, same center (was much wider: 16:9 used 66 % of the frame
+// width and a 27 % left shift). Mid of that range = 7.5 % more area → linear 1/sqrt(1.075).
+const WAWIDE_AREA = window.__WAWIDE_AREA = 1.075;
 function stateRect(V, m) {   // Washington's box in the wide view's figure px: the view's own "fit" (studio_views.py), else from WT
   if (V.fit) { const [x, y, w, h] = V.fit; return { x, y, w, h }; }
   const t = wideRect(m), q = WA_IN_WAVIEW; if (!t) return null;
   return { x: t.x + q[0] * t.w, y: t.y + q[1] * t.h, w: q[2] * t.w, h: q[3] * t.h };
+}
+function waPanelFromState(t) {   // invert WA_IN_WAVIEW: the regular Washington panel, in wide-view figure px
+  const q = WA_IN_WAVIEW, pw = t.w / q[2], ph = t.h / q[3];
+  return { x: t.x - q[0] * pw, y: t.y - q[1] * ph, w: pw, h: ph };
 }
 function mgBase(k) {   // meteogram: whole chart fitted inside the frame (9:16: centred a little above the middle)
   if (OBSM() || ALERTM()) { const f = F[k], iw = IW(MG.img), ih = IH(MG.img); return { cx: iw / 2, cy: ih / 2, k0: Math.max(f.W / iw, f.H / ih) }; }   // obs/alert: cover — map fills the frame
@@ -111,15 +119,10 @@ function base(k) {   // camera at dx = dy = 0, zoom 1: centre (figure px) and sc
   // 11-04 Coast view (t2289u): its own camera box per frame shape (studio_views.py COAST_H / COAST_V) covers the frame: ocean in the left
   // two thirds, Washington's coast ~2/3 across
   if (V.studioCoast) { const r = k === "v" && V.fitV ? V.fitV : V.fit, [x, y, w, h] = r; return { cx: x + w / 2, cy: y + h / 2, k0: Math.max(f.W / w, f.H / h) }; }
-  // wide view (10-31 7:55 PM, Benjamin: "a little tighter", whole state with a little margin): Washington fits a band between the
-  // title and the color bar. 16:9: state from y 190 to H-120 and shifted right (its left edge at 27 % of the width) so the title,
-  // top left, sits over the ocean / Vancouver Island instead of on Vancouver; 9:16: 84 % of the width, centred under the title.
-  // (HRRR / RRFS / NBM, no own view: centred, since their grid's northwest corner would show top left)
-  if (k === "h") { const y0 = 190, y1 = f.H - 120, k0 = Math.min((V.fit ? 0.66 : 0.86) * f.W / t.w, (y1 - y0) / t.h), xl = V.fit ? 0.27 * f.W : (f.W - t.w * k0) / 2;
-    return { cx: t.x + t.w / 2 - (xl + t.w * k0 / 2 - f.W / 2) / k0, cy: t.y + t.h / 2 - ((y0 + y1) / 2 - f.H / 2) / k0, k0 }; }
-  // 9:16: 84 % of the width, nudged 4 % right so the coast towns' names (Neah Bay, left of its dot) stay inside the frame
-  const y0 = f.top + 80, y1 = f.H - f.bot + 40, k0 = Math.min(0.84 * f.W / t.w, (y1 - y0) / t.h);
-  return { cx: t.x + t.w / 2 - 0.04 * f.W / k0, cy: t.y + t.h / 2 - ((y0 + y1) / 2 - f.H / 2) / k0, k0 };
+  // 11-14: same center as the regular Washington panel (cover-fit), zoomed out so the visible area is WAWIDE_AREA
+  // times that cover (7.5 %, in the 5–10 % range). Replaces the old 16:9 66 %-width / 27 % left-shift and 9:16 84 %-width framing.
+  const pan = waPanelFromState(t), k0 = Math.max(f.W / pan.w, f.H / pan.h) / Math.sqrt(WAWIDE_AREA);
+  return { cx: pan.x + pan.w / 2, cy: pan.y + pan.h / 2, k0 };
 }
 // 11-04 (Benjamin t2264u "zoom the view out as much as I want, and move it around out over the ocean"): in Observations / satellite
 // mode the frames crop the obs module's map bitmap, so zoom stopped at 1x and drags stopped at the bitmap's edge. Below 1x the obs map

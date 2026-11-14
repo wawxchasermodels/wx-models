@@ -104,7 +104,7 @@ function fieldRS(LW, LH) {
 // Town label placements (crisp text). Only URLs that exist are fetched, so a view never logs 404s: the encoder's own file when the
 // manifest names one (views[vid].labels, written by fast_encode next to the towns PNG), else the copy shipped with the site in
 // slayers/static/ (SITE_LABELS lists them), else none (the baked towns PNG is drawn as before).
-const SITE_LABELS = new Set(["bc", "ewa", "lm", "newa", "passes", "pnwhr", "pnwhr_s2", "pnwt", "pnwt_v2", "puget", "wa", "wawide_s2", "wwa"]);
+const SITE_LABELS = new Set(["bc", "ewa", "lm", "newa", "passes", "pnwhr", "pnwhr_s2", "pnwt", "pnwt_v2", "puget", "wa", "wawide_s2", "wc", "wwa"]);
 function labelURLs(townsU, man) {
   const path = String(townsU || "").split("?")[0], m = path.match(/towns_([^/?#]+)\.png$/), out = [];
   if (man && typeof DATA === "string") out.push(DATA + man);
@@ -264,10 +264,12 @@ let WAWIDE_S2 = null; const WAWIDE_FS = 0.83;
 let TOWN_AIRPORTS = {};
 const PNWT_FS = 0.83;   // Pacific NW tight only: town names + numbers ~17% smaller (still crisp canvas text)
 const PNWHR_FS = 0.78;  // Pacific NW (high-res): town names + numbers ~22% smaller (crisp canvas text; collision unchanged)
+const COAST_FS = 0.83;  // Coast view only (t3008u): town names + numbers ~17% smaller (15–20%; still crisp canvas text; preferred sides / US-border placement unchanged)
 function townFs(vid) {
   const v = vid || (typeof S !== "undefined" && S.view) || "";
   if (v === "pnwt") return PNWT_FS;
   if (v === "pnwhr") return PNWHR_FS;
+  if (v === "coast") return COAST_FS;
   return 1;
 }
 function addStudioViews(man, sv) {
@@ -1328,6 +1330,13 @@ async function render(lite) {
   // significant wave height"; t1988u: "Just make them look like the other locations in the map"): NDBC buoys on the ECMWF wave maps only
   if (WT) drawCoast(ctx, st, D, P, V, LW, LH, WT);
   window.__coastTaken = (WT && (WT.taken || WT.boxes)) ? (WT.taken || WT.boxes).slice() : [];
+  { const cv = $("map");
+    window.__labelSharp = { vid: VSRC(S.view) || S.view, view: S.view,
+      path: (WT && WT.own) ? "coast" : (drewTowns ? "live" : (!studioHold && st.towns && L2.towns && tmode !== "none" ? "png" : "none")),
+      townFs: townFs(S.view), coastFs: (WT && WT.vid === "coast") ? COAST_FS : null,
+      rs: (cv && cv._rs) || 1, dpr: window.devicePixelRatio || 1,
+      backingW: cv ? cv.width : 0, cssW: cv ? (cv.offsetWidth || 0) : 0,
+      townLive: !!townLive, labelsN: (st.labels && st.labels.length) || 0 }; }
   if (P.lows && S.lowPanel && !Q.get("studio")) paintLowPanel(ctx, st, V, S.lowPanel);   // 11-02 (Benjamin t2115u): not in Studio frames (Studio has its own dot key); kept on the viewer
   // t2772u: Studio frames label the strongest member themselves (studio.js strongestMember, per crop); drawing it here too gave two overlapping labels
   // 5. key + header text (canvas text at the display backing scale; raster key only if the product has no level metadata)
@@ -1633,7 +1642,7 @@ function seaVal(D, la, lo) {   // model value at a coast town: bilinear when the
 }
 function drawCoast(ctx, st, D, P, V, LW, LH, WT) {
   const C = WT.C; if (!C) { WT.taken = WT.boxes = WT.boxes || []; if (!WT.plainNames) drawBuoys(ctx, st, D, P, V, LW, LH, WT.taken); return; }
-  const wa = C.style === "wa", fs = WT.vid === "wawide" ? WAWIDE_FS : 1, fName = `600 ${pt((wa ? 9.5 : 8.5) * fs)}px Montserrat`, fNum = `800 ${pt((wa ? 10.5 : 9.5) * fs)}px Montserrat`, gap = pt(wa ? 3.5 : 3.0), hh = pt(6.5);
+  const wa = C.style === "wa", fs = WT.vid === "wawide" ? WAWIDE_FS : (WT.vid === "coast" ? COAST_FS : 1), fName = `600 ${pt((wa ? 9.5 : 8.5) * fs)}px Montserrat`, fNum = `800 ${pt((wa ? 10.5 : 9.5) * fs)}px Montserrat`, gap = pt(wa ? 3.5 : 3.0), hh = pt(6.5);
   const X0 = st.x0, Y0 = st.y0, X1 = st.x0 + st.W, Y1 = st.y0 + st.H, taken = WT.boxes.slice(), dots = [], resv = []; WT.taken = taken;
   const hit = (b, g = pt(2.5)) => b[0] < X0 + 2 || b[1] < Y0 + 2 || b[2] > X1 - 2 || b[3] > Y1 - 2 || taken.concat(resv).some(a => b[0] < a[2] + g && b[2] > a[0] - g && b[1] < a[3] + g && b[3] > a[1] - g);
   // the WA buoys' dots are kept free of town labels (Benjamin: those buoys matter most); the buoys themselves don't see this reserve
