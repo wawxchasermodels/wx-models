@@ -1,0 +1,45 @@
+# Tides viewer: archive the Conditional Prediction every 6 h (Benjamin t3012u/t3018u, 2026-11-14). Live since 2026-11-14.
+# Writes tools/fast/tide_archive/tide_archive.py output to the orphan branch "tide-archive" (v1/<station>/<YYYY-MM>.json +
+# v1/index.json). The site reads it from raw.githubusercontent.com (public, CORS *). No R2, no secrets: NOAA data is public and
+# the push uses this workflow's own GITHUB_TOKEN. No workflow here runs on push, so these commits trigger nothing.
+# Issue slots 02/08/14/20 UTC = ~30-60 min after each STOFS-2D-Global cycle lands (cycle + ~7.5 h).
+name: tide-archive
+on:
+  schedule:
+    - cron: "20 2,8,14,20 * * *"
+  workflow_dispatch:
+concurrency:
+  group: tide-archive
+  cancel-in-progress: false
+permissions:
+  contents: write
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: tools/fast/tide_archive
+          path: src
+      - uses: actions/checkout@v4
+        with:
+          ref: tide-archive
+          path: arch
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Snapshot (live; marks itself hindcast if the run is >3 h late)
+        run: python src/tools/fast/tide_archive/tide_archive.py --out arch --issue now
+      - name: Daily self-calibration, background only (new coefficients at the 08 UTC = 12 AM PST run; stored as rc/cal, not shown on the site)
+        run: python src/tools/fast/tide_archive/calibrate.py --out arch --from now --to now
+      - name: Commit and push
+        working-directory: arch
+        run: |
+          git config user.name "tide-archive bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add v1
+          git diff --cached --quiet && exit 0
+          git commit -q -m "tide archive $(date -u +%Y%m%dT%H%MZ)"
+          for i in 1 2 3; do git push -q origin HEAD:tide-archive && exit 0; git pull -q --rebase origin tide-archive; done
+          exit 1

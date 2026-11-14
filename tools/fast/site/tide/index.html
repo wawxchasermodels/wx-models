@@ -33,6 +33,8 @@ html.studio #wrap,html.studio .lic,html.studio #home{display:none!important}
   <label>Station <select id="st" aria-label="Tide station"></select></label>
   <label>From <input id="from" type="date" aria-label="Start date"></label>
   <label>Days <select id="days" aria-label="Number of days"></select></label>
+  <label title="Verification line: what the Conditional line said, issued this far ahead">Verify <select id="vl" aria-label="Verification lead time"></select></label>
+  <label title="Verification stats window">Stats <select id="sd" aria-label="Verification stats window"></select></label>
   <button id="today" type="button" title="2 days back, 7 days ahead">Now</button>
   <button id="reload" type="button" title="Fetch the newest observations and guidance">Refresh</button>
   <span id="tnote"></span>
@@ -40,6 +42,8 @@ html.studio #wrap,html.studio .lic,html.studio #home{display:none!important}
 <div id="wrap"><canvas id="tc" aria-label="Tide chart"></canvas><div id="tip" hidden></div><div id="msg">Loading tides&hellip;</div></div>
 <footer class="lic"><details><summary>Data: NOAA CO-OPS tide predictions and water levels &middot; NOAA STOFS-2D-Global guidance (public domain) &middot; Conditional Prediction is experimental, not an official forecast</summary>
 <p>Official prediction and observed water level: NOAA CO-OPS Data API (<a href="https://api.tidesandcurrents.noaa.gov/api/prod/">api.tidesandcurrents.noaa.gov</a>), datum MLLW, feet. Flood threshold: CO-OPS metadata API (NOS or NWS minor flood level converted to MLLW).</p>
-<p>Conditional Prediction (experimental): official prediction + forecast non-tidal residual. Residual = NOAA STOFS-2D-Global sub-tidal water level (combined minus model tide: pressure and wind surge plus its sea level anomaly), smoothed over 3 h and bias-corrected to the current observed residual (the correction fades with a 12 h e-folding time). After the STOFS run ends it relaxes (24 h) to the 30-day mean observed residual, which carries slow coastal sea level anomalies such as coastally trapped Kelvin waves / El Ni&ntilde;o. If STOFS is unavailable the current residual is persisted and relaxed to the 30-day mean. NOAA does not endorse this site.</p></details></footer>
-<script src="tide.js?v=20261114t2"></script>
+<p>Conditional Prediction (experimental): official prediction + forecast non-tidal residual. Residual = NOAA STOFS-2D-Global sub-tidal water level (combined minus model tide: pressure and wind surge plus its sea level anomaly), smoothed over 3 h and bias-corrected to the current observed residual (the correction fades with a 12 h e-folding time). After the STOFS run ends it relaxes (24 h) to the 30-day mean observed residual, which carries slow coastal sea level anomalies such as coastally trapped Kelvin waves / El Ni&ntilde;o. If STOFS is unavailable the current residual is persisted and relaxed to the 30-day mean. NOAA does not endorse this site.</p>
+<p>A daily self-calibration (10-day verification by forecast range, shrunk, capped at &plusmn;0.5 ft) is computed and archived in the background for evaluation; it is not applied to the chart or the stats.</p>
+<p>Conditional, verified (dashed): every 6 h (02/08/14/20 UTC) the Conditional Prediction is archived per station; for each past time the line shows the newest snapshot issued at least the chosen lead earlier, beside the observed line. Stats: mean absolute error and bias over hourly points (forecast &minus; observed) and the miss at the highest observed high tide, for the Conditional and the official prediction over the same hours. Before the live archive began the snapshots are a hindcast: recomputed afterwards with the same method, using only observations up to the issue time and the newest STOFS cycle posted by then.</p></details></footer>
+<script src="tide.js?v=20261114v3"></script>
 </body></html>
