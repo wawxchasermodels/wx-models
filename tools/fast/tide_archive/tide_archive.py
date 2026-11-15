@@ -20,7 +20,7 @@ from concurrent.futures import ThreadPoolExecutor
 API = "https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?application=wx_models_tides&time_zone=gmt&units=english&format=json&datum=MLLW"
 S3 = "https://noaa-gestofs-pds.s3.amazonaws.com/"
 STATIONS = {"9441102": "WPTW1", "9440910": "TOKW1", "9442396": "LAPW1", "9443090": "NEAW1", "9444090": "PTAW1", "9444900": "PTWW1",
-            "9449880": "FRDW1", "9449424": "CHYW1", "9447130": "EBSW1", "9446484": "TCNW1", "9439040": "ASTO3"}
+            "9449880": "FRDW1", "9449424": "CHYW1", "9447130": "EBSW1", "9446484": "TCNW1", "9439040": "ASTO3", "9440581": "CPTW1"}
 ALG = "c1"   # = tide.js 20261114t2 (swl 3 h mean + bias fading 12 h, relax 24 h to the 30-day mean; persistence fallback)
 # c2 = c1 + version D SST term (k * (newest 2d OISST anomaly - prior 5d), faded in 1-exp(-lead/12h)).
 # The scheduled job MUST run sst_steric.py --out DIR before this script so v1/sst.json exists; otherwise snapshots stay c1.

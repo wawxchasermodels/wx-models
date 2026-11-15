@@ -50,7 +50,7 @@ STATIONS = {
 }
 # in-situ water temp: own sensor, or mapped neighbor, or OISST (west-walked Seattle/Tacoma must not use OISST)
 SST_OWN = {"9441102", "9442396", "9443090", "9444090", "9444900", "9446484"}
-SST_MAP = {"9440910": "9441102", "9447130": "9446484", "9449880": "9444900"}  # Toke->Westport, Seattle->Tacoma, FH->PT
+SST_MAP = {"9440581": "9441102", "9440910": "9441102", "9447130": "9446484", "9449880": "9444900"}  # CD/Toke->Westport, Seattle->Tacoma, FH->PT
 SALT = {
     "9439040": 25.0,
     "9440910": 32.2, "9441102": 32.2, "9442396": 32.2, "9443090": 32.2,

@@ -16,6 +16,7 @@ import argparse, json, os, sys, time, shutil, subprocess, tempfile, datetime as 
 
 STATIONS = {
     "9439040": ("Astoria, OR", 46.207306, -123.7683),
+    "9440581": ("Cape Disappointment, WA", 46.28103, -124.04628),
     "9440910": ("Toke Point, WA", 46.7075, -123.96694),
     "9441102": ("Westport, WA", 46.90431, -124.10508),
     "9442396": ("La Push, WA", 47.912838, -124.63574),
