@@ -72,7 +72,7 @@ FLV = ("minor", "moderate", "major")
 def flood_triple_check():
     """Live triple-check against the FLOOD table in the SERVED tide.js. Returns (table, alias) or (None, None)."""
     import tempfile
-    try: src = urllib.request.urlopen(urllib.request.Request(B + "/tide/tide.js", headers=qa.HDR if hasattr(qa, "HDR") else {}), timeout=60).read().decode()
+    try: src = urllib.request.urlopen(urllib.request.Request(B + "/tide/tide.js", headers=qa.headers() if hasattr(qa, "headers") else {}), timeout=60).read().decode()
     except Exception as e: fail(f"flood: could not read {B}/tide/tide.js ({e})"); return None, None
     tf = tempfile.NamedTemporaryFile("w", suffix=".js", delete=False); tf.write(src); tf.close()
     st, alias, table = FV.stations_from_tidejs(tf.name)
