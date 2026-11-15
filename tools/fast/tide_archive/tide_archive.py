@@ -423,6 +423,9 @@ def main():
                      for st in STATIONS if os.path.isdir(os.path.join(a.out, "v1", st))}
     if kind == "archive" and "first_archive" not in idx: idx["first_archive"] = int(slots[0].timestamp() * 1000)
     if kind == "hindcast": idx["hindcast_through"] = max(idx.get("hindcast_through", 0), T1)
+    v1 = os.path.join(a.out, "v1")
+    idx["sidecars"] = {fn: True for fn in ("sst.json", "aifs_ens_msl.json", "stofs_anom.json")
+                       if os.path.exists(os.path.join(v1, fn))}
     os.makedirs(os.path.dirname(idx_fn), exist_ok=True)
     json.dump(idx, open(idx_fn + ".tmp", "w"), separators=(",", ":")); os.replace(idx_fn + ".tmp", idx_fn)
     print(json.dumps({"kind": kind, "slots": len(slots), "cycles": [f"{c:%Y%m%d%H}" for c in cycles], "stations": dict(done)}))

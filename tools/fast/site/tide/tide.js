@@ -154,8 +154,10 @@ async function loadAux() {
   if (AUX) return AUX;
   const localAux = await fetchJsonOk("tide_aux.json");
   if (localAux && localAux.H_eff_m) for (const k of Object.keys(localAux.H_eff_m)) H_EFF[k] = localAux.H_eff_m[k];
+  const idx = await loadArchIndex();
   const localA = await fetchJsonOk("aifs_ens_msl.json");
-  const archA = await fetchJsonOk(ARCH + "aifs_ens_msl.json");
+  const archAifs = archSidecarUrl(idx, "aifs_ens_msl.json");
+  const archA = archAifs ? await fetchJsonOk(archAifs) : null;
   const fromAux = localAux && (localAux.aifs || (localAux.steps && localAux.init ? localAux : null));
   const aifs = pickFresher(pickFresher(localA, fromAux), archA);
   AUX = aifs || localAux || {};
@@ -166,8 +168,10 @@ let ANOM = null;
 async function loadAnom() {
   if (ANOM) return ANOM;
   const unwrap = (j) => { const rec = (j && j.anom) ? j.anom : j; return rec && rec.stations ? rec : null; };
+  const idx = await loadArchIndex();
   const local = unwrap(await fetchJsonOk("stofs_anom.json")) || unwrap(await fetchJsonOk("tide_aux.json"));
-  const arch = unwrap(await fetchJsonOk(ARCH + "stofs_anom.json"));
+  const archAnom = archSidecarUrl(idx, "stofs_anom.json");
+  const arch = archAnom ? unwrap(await fetchJsonOk(archAnom)) : null;
   ANOM = pickFresher(local, arch) || { stations: {} };
   return ANOM;
 }
@@ -208,6 +212,16 @@ function pickFresher(a, b) {
   if (!a) return b || null;
   if (!b) return a;
   return recFreshness(b) > recFreshness(a) ? b : a;
+}
+let ARCH_IDX_P = null;
+async function loadArchIndex() {
+  if (!ARCH_IDX_P) ARCH_IDX_P = (async () => (await fetchJsonOk(ARCH + "index.json")) || { months: {}, sidecars: {} })();
+  return ARCH_IDX_P;
+}
+function archSidecarUrl(idx, name) {
+  const s = (idx && idx.sidecars) || {};
+  if (s[name] === true || s[name.replace(/\.json$/, "")] === true) return ARCH + name;
+  return null;  // do not GET a file the index does not list — a 404 would show in the console
 }
 function anomAt(st, t, cycT) {
   const rec = ANOM;
@@ -302,8 +316,10 @@ const SSTU = window.TIDE_SST || (typeof ARCH !== "undefined" ? ARCH + "sst.json"
 async function sstTerm(st, now) {
   const usable = (row) => row && (isFinite(row.W) || isFinite(row.steric_ft) || (isFinite(row.k_ft_per_c) && (isFinite(row.ssta) || isFinite(row.ssta30_c))) || (isFinite(row.adj_ft) && isFinite(row.ssta30_c)));
   const rowOf = (j) => j && (j.stations && j.stations[st] || (j.sst && j.sst[st]) || (j[st] && typeof j[st] === "object" ? j[st] : null));
+  const idx = await loadArchIndex();
   const localJ = await fetchJsonOk("sst.json");
-  const archJ = (SSTU && SSTU !== "sst.json") ? await fetchJsonOk(SSTU) : null;
+  const archSst = (SSTU && SSTU !== "sst.json") ? (archSidecarUrl(idx, "sst.json") || null) : null;
+  const archJ = archSst ? await fetchJsonOk(archSst) : null;
   const aux = await loadAux();
   const pack = pickFresher(localJ, archJ) || aux;
   const rec = usable(rowOf(pack)) ? rowOf(pack) : (usable(rowOf(aux)) ? rowOf(aux) : null);
@@ -534,8 +550,8 @@ function drawChart(c, W, H, opt) {
   if (bits.length) info.push(bits.join("  \u00b7  "));
   if (D.aifs && D.aifs.note) info.push(D.aifs.note);
   info.push(T.wind
-    ? `Conditional (Wind surge on) = the official tide prediction, plus the effect of air pressure (lower pressure raises the water; observed pressure for times already past, a European AIFS ensemble forecast ahead), plus a warm-water adjustment from sea-surface temperature compared with a typical year, plus a correction from the last few days of gauge readings (the leftover after pressure and warm water are taken out is held through the forecast, and a 12-hour fade starts the line at the latest observation). Wind-driven setup from the NOAA surge model is added on top of that, without applying the pressure or warm-water terms a second time. Experimental, not official. If a newer forecast-pressure or sea-temperature file is on the archive branch, the page uses it; otherwise it uses the copy shipped with the site. If no forecast pressure is available, the latest observed pressure is held through the forecast. If no sea-temperature file is available, the warm-water term is left at zero. A missing archive file does not break the chart.`
-    : `Conditional (default) = the official tide prediction, plus the effect of air pressure (lower pressure raises the water; observed pressure for times already past, a European AIFS ensemble forecast ahead), plus a warm-water adjustment from sea-surface temperature compared with a typical year, plus a correction from the last few days of gauge readings: the leftover after pressure and warm water are taken out is held through the forecast, and a 12-hour fade starts the line at the latest observation. Wind-driven setup from the NOAA surge model is off; turn on Wind surge to add only that wind part. Experimental, not official. If a newer forecast-pressure or sea-temperature file is on the archive branch, the page uses it; otherwise it uses the copy shipped with the site. If no forecast pressure is available, the latest observed pressure is held through the forecast. If no sea-temperature file is available, the warm-water term is left at zero. A missing archive file does not break the chart.`);
+    ? `Conditional (Wind surge on) = the official tide prediction, plus the effect of air pressure (lower pressure raises the water; observed pressure for times already past, a European AIFS ensemble forecast ahead), plus a warm-water adjustment from sea-surface temperature compared with a typical year, plus a correction from the last few days of gauge readings (the leftover after pressure and warm water are taken out is held through the forecast, and a 12-hour fade starts the line at the latest observation). Wind-driven setup from the NOAA surge model is added on top of that, without applying the pressure or warm-water terms a second time. Experimental, not official. If forecast pressure is missing, the latest observation is held; if sea temperature is missing, the warm-water term is zero.`
+    : `Conditional (default) = the official tide prediction, plus the effect of air pressure (lower pressure raises the water; observed pressure for times already past, a European AIFS ensemble forecast ahead), plus a warm-water adjustment from sea-surface temperature compared with a typical year, plus a correction from the last few days of gauge readings: the leftover after pressure and warm water are taken out is held through the forecast, and a 12-hour fade starts the line at the latest observation. Wind-driven setup from the NOAA surge model is off; turn on Wind surge to add only that wind part. Experimental, not official. If forecast pressure is missing, the latest observation is held; if sea temperature is missing, the warm-water term is zero.`);
   const infoFs = portrait ? 12.5 : 12.5, lh = 18 * s;
   // wrap info lines to width
   c.font = F(600, infoFs); const wrapped = [];
