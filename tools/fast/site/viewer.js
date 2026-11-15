@@ -605,6 +605,13 @@ const MSLPA_A80 = {"levels":[-80.0,-78.0,-76.0,-74.0,-72.0,-70.0,-68.0,-66.0,-64
 // cyan > ice, 18+ white. Viewer-side over the manifest (data unchanged: precip fields are stored to each frame's own max, nothing clipped);
 // keys "@mkeys/static/key_<m>_<pid>_q18_<view>.png" ship with the site. Made by fast_encode.py (house_style.QPF18_*, keyver _q18).
 const QPF_Q18 = {"levels": [0.01, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0, 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 3.0, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0, 7.5, 8.0, 8.5, 9.0, 9.5, 10.0, 10.5, 11.0, 11.5, 12.0, 12.5, 13.0, 13.5, 14.0, 14.5, 15.0, 15.5, 16.0, 16.5, 17.0, 17.5, 18.0], "colors": ["#d7f5cd", "#b4e8a5", "#9bdc8a", "#82d06e", "#66c15e", "#4bb24e", "#379e42", "#238a37", "#197430", "#0f5f2a", "#faf096", "#faea72", "#fae44e", "#fadc3a", "#fad236", "#fac832", "#fabe30", "#fab42e", "#faab2c", "#f8a32c", "#f89b2a", "#f6932a", "#f68b28", "#f48428", "#f27c26", "#f07626", "#ee6e24", "#ec6724", "#e85a24", "#e24626", "#dc3228", "#d22b26", "#c82525", "#be1e23", "#b21a23", "#a71623", "#9b1223", "#8f0f25", "#840d26", "#780a28", "#e141af", "#cf3cb6", "#bc37bc", "#aa32c3", "#962fb7", "#822bac", "#6e28a0", "#622aa5", "#572baa", "#4b2daf", "#4139b7", "#3744c0", "#2d50c8", "#2a5fcd", "#266ed2", "#237dd7", "#258cda", "#269bde", "#28aae1", "#35b6e3", "#43c1e4", "#50cde6", "#67d5e9", "#7fdced", "#96e4f0", "#ace9f3", "#c1eff7", "#d7f4fa"], "ticks": [0.1, 0.5, 1.0, 2.0, 3.0, 4.0, 6.0, 8.0, 10.0, 12.0, 15.0, 18.0], "over": "#ffffff"};
+// 11-15 (Benjamin t3099u: more transitional colors on significant wave height above 14 ft, ending on pink
+// at 40; then more numbers on the key between 14 and 40). 0-14 ft colors unchanged. 14-40 ft is 2 ft bins
+// through orange, red, magenta and purple, pink at 40. Ticks add 16, 18, 24, 32, 36. Viewer-side over the
+// manifest (wave fields are stored to each frame's own max, nothing clipped). Keys
+// "@mkeys/static/key_<m>_<pid>_40p_<view>.png" ship with the site. Made by fast_encode.py (keyver _40p).
+// Estimated Max Wave Height (0-85) is unchanged.
+const WAVES_40P = {"levels": [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0, 30.0, 32.0, 34.0, 36.0, 38.0, 40.0], "colors": ["#284ba2", "#2869bc", "#2886ca", "#28a1d0", "#2ab3c0", "#30ba9e", "#50c369", "#9bd241", "#d2d23a", "#e6be34", "#f0a930", "#ef912d", "#ea742c", "#e15730", "#d63f36", "#cc2e40", "#c62552", "#c31f6b", "#b91e85", "#9f249d", "#9938b4", "#ba58c4", "#e873bf"], "ticks": [0.0, 2.0, 4.0, 6.0, 8.0, 10.0, 14.0, 16.0, 18.0, 20.0, 24.0, 28.0, 32.0, 36.0, 40.0], "over": "#ff7eb6"};
 const ISO_MSLP = { every: 2, lw: 0.75, halo: 1.6 };
 const allProds = md => md._allP || (md._allP = (() => {
   const A = Object.assign({}, md.products, md.products_x || {}, md.products_p || {}, md.products_n || {}, md.products_t || {}, md.products_v || {});
@@ -612,6 +619,9 @@ const allProds = md => md._allP || (md._allP = (() => {
     { keys: Object.fromEntries(Object.entries(A.mslpa.keys || {}).map(([v, k]) => [v, "@mkeys/" + k.replace("_mslpa_", "_mslpa_a80_")])) });
   for (const pid of ["qpf", "eqpf90", "nqpftot"]) { const P = A[pid]; if (P && P.levels && P.levels[P.levels.length - 1] < 18)
     A[pid] = Object.assign({}, P, QPF_Q18, { keys: Object.fromEntries(Object.entries(P.keys || {}).map(([v, k]) => [v, "@mkeys/" + k.replace(`_${pid}_`, `_${pid}_q18_`)])) }); }
+  // 11-15 significant wave height / swell+height: new 14-40 ft colors + ticks, only if the manifest still has the 0-40 / 17-bin scale
+  for (const pid of ["waves", "swellhs"]) { const P = A[pid]; if (P && Array.isArray(P.levels) && P.levels[P.levels.length - 1] === 40 && P.levels.length < 24)
+    A[pid] = Object.assign({}, P, WAVES_40P, { keys: Object.fromEntries(Object.entries(P.keys || {}).map(([v, k]) => [v, "@mkeys/" + k.replace(`_${pid}_`, `_${pid}_40p_`)])) }); }
   // 11-04 (Benjamin t2279u "added to the high end of shorter interval like 24 hour precipitation key"): interval precip keys (1 / 3 / 6 / 12 /
   // 24 / 48 h, MSLP + precip; 0.01-12 in) get numbers up to 12 (4 6 8 10 12 after their own top tick); a label that would touch is skipped
   for (const [k, P] of Object.entries(A)) if (P && Array.isArray(P.levels) && Array.isArray(P.ticks) && P.levels[0] === 0.01 && P.levels[P.levels.length - 1] === 12 && /precip \(in\)/i.test(P.key || "")) {

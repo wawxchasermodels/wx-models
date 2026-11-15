@@ -1120,8 +1120,18 @@ def static(m, out, views_only=None, x2_only=False):
     IVT_L = [100, 150, 250, 300, 400, 500, 600, 700, 800, 1000, 1200, 1500]
     CM["ivt"] = M.ramp(IVT_L, [(100, "#e4e6ea"), (250, "#f7e28a"), (400, "#f3a64c"), (600, "#e0503a"), (800, "#b0245c"), (1200, "#6a2a8f"), (1500, "#c9a7e6")])
     WV_L = [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 40]
-    CM["waves"] = M.ramp(WV_L, [(0, "#283c96"), (2, "#2878c8"), (4, "#28afd2"), (6, "#32be8c"), (8, "#6ec846"), (10, "#c8dc3c"), (14, "#f0b432"),
-                                (20, "#e6642d"), (28, "#c82846"), (40, "#8c1e78")])
+    # 11-15 (Benjamin t3099u: "change the color scale on my significant wave height ... More transitional
+    # colors between waves, especially above 14 feet, ending on pink." Then "add more numbers on the key
+    # between 14 and 40"): Significant Wave Height and Wave Height + Swell Period only. 0-14 ft keeps the
+    # current colors. 14-40 ft adds 2 ft bins with intermediate shades through orange, red, magenta and
+    # purple, ending on pink at 40. Ticks gain 16, 18, 24, 32, 36. Estimated Max Wave Height keeps the 0-85
+    # scale (WV_L + WVX anchors below). Keys _40p; viewer overlay WAVES_40P ships keys with the site (no R2 write).
+    WV_PK_L = [0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 38, 40]
+    WV_PK_A = [(0, "#283c96"), (2, "#2878c8"), (4, "#28afd2"), (6, "#32be8c"), (8, "#6ec846"), (10, "#c8dc3c"), (14, "#f0b432"),
+               (16, "#f09e2e"), (18, "#ee842c"), (20, "#e6642d"), (22, "#dc4a32"), (24, "#d0343a"), (26, "#c82846"),
+               (28, "#c4225e"), (30, "#c21c78"), (32, "#b02092"), (34, "#8e28a8"), (36, "#a448c0"), (38, "#d068c8"), (40, "#ff7eb6")]
+    WV_PK_T = [0, 2, 4, 6, 8, 10, 14, 16, 18, 20, 24, 28, 32, 36, 40]
+    CM["waves"] = M.ramp(WV_PK_L, WV_PK_A)
     # 11-03 NOAA WW3 swell period (s): short wind-sea periods cool/pale, long-period groundswell warm to violet (surf-forecast convention)
     # 11-03 t2151u ("make wherever the swell period is a little more clear"): bold dark period lines on a wide white halo, big white
     # "14 s" labels with a dark core + tight drop shadow (viewer isobars shadow_lab), fewer / farther-apart labels, no tiny loops
@@ -1312,8 +1322,8 @@ def static(m, out, views_only=None, x2_only=False):
                     barbs=dict(u="ivtu", v="ivtv", color="#1b1d22", length=HS.BARB_LENGTH, lw=1.0, arrows=True, min=250, ref=1000),
                     extra="water vapor carried by the wind, 1000-300 mb  ·  arrows where IVT is 250 or more  ·  up to {hi} in view", pct=[1, 99.9],
                     towns="none", only=("gfs", "ifs", "aifs")),
-        "waves": dict(title="Significant Wave Height", fields=["swh", "wdu", "wdv"], key="Wave height (ft)", ticks=[0, 2, 4, 6, 8, 10, 14, 20, 28, 40],
-                      tickfmt=True, **table(WV_L, CM["waves"], "max"),
+        "waves": dict(title="Significant Wave Height", fields=["swh", "wdu", "wdv"], key="Wave height (ft)", ticks=WV_PK_T,
+                      tickfmt=True, keyver="_40p", **table(WV_PK_L, CM["waves"], "max"),
                       barbs=dict(u="wdu", v="wdv", color="#1b1d22", length=HS.BARB_LENGTH, lw=1.0, arrows=True, min=0.5, ref=1, fixed=True),
                       extra="ECMWF wave model (WAM 0.25\u00b0)  \u00b7  arrows = mean wave direction  \u00b7  up to {hi} ft in view", pct=[0, 99.9],
                       only=("ifs", "gfsw")),
@@ -1324,7 +1334,7 @@ def static(m, out, views_only=None, x2_only=False):
                       extra="time between swells (primary swell; wind-wave period where there is no swell)  \u00b7  lines every 2 s  \u00b7  arrows = swell direction"
                       "  \u00b7  up to {hi} s in view", pct=[0, 99.9], dec=0, towns="none", only=("gfsw",)),
         "swellhs": dict(title="Wave Height + Swell Period", fields=["swh", "swper", "swdu", "swdv"], fill="swh", key="Wave height (ft)", cmap_of="waves",
-                        ticks=[0, 2, 4, 6, 8, 10, 14, 20, 28, 40], tickfmt=True, **table(WV_L, CM["waves"], "max"),
+                        ticks=WV_PK_T, tickfmt=True, keyver="_40p", **table(WV_PK_L, CM["waves"], "max"),
                         barbs=dict(u="swdu", v="swdv", color="#1b1d22", length=HS.BARB_LENGTH, lw=1.0, arrows=True, min=0.5, ref=1, fixed=True),
                         isobars=SWP_ISO,
                         extra="shaded = significant wave height  \u00b7  lines = swell period every 2 s"
