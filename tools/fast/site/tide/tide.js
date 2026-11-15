@@ -566,7 +566,10 @@ function drawChart(c, W, H, opt) {
   // t3061u: phone page only — a reserved 3-line readout slot between the legend and the plot, always present so hover does not shift the chart. Studio and desktop stay as they are.
   const phoneSlotH = (!STUDIO && portrait) ? 84 : 0;
   const slotBox = phoneSlotH ? { x: pad, y: top + 2, w: W - 2 * pad, h: phoneSlotH } : null;
-  const X0 = pad + yL, X1 = W - xR, Y0 = top + (phoneSlotH ? 6 + phoneSlotH : 10 * s), Y1 = H - bottomInfo - axisH;
+  // Desktop: when the hover strip wraps (flood rows + pressure/warm-water), it sits below the
+  // x-axis labels. Reserve that band always so hover does not cover the axis or shift the chart.
+  const deskHoverH = (!STUDIO && !portrait) ? 56 : 0;
+  const X0 = pad + yL, X1 = W - xR, Y0 = top + (phoneSlotH ? 6 + phoneSlotH : 10 * s), Y1 = H - bottomInfo - axisH - deskHoverH;
   if (slotBox && !opt.hoverT) { c.save(); c.strokeStyle = "rgba(125,130,140,0.28)"; c.lineWidth = 1;
     const sx = slotBox.x + 0.5, sy = slotBox.y + 0.5, sw2 = slotBox.w - 1, sh2 = slotBox.h - 1;
     c.beginPath(); c.roundRect ? c.roundRect(sx, sy, sw2, sh2, 6) : c.rect(sx, sy, sw2, sh2); c.stroke(); c.restore(); }
@@ -745,17 +748,19 @@ function readout(t) {
 }
 function overlaps(a, b, eps) { eps = eps || 0.5; return a.x + a.w > b.x + eps && b.x + b.w > a.x + eps && a.y + a.h > b.y + eps && b.y + b.h > a.y + eps; }
 // Place the compact readout as a strip outside the plot (above it if it fits, otherwise below). Never covers the curves.
-function placeStrip(tip, box, plot, maxW) {
+function placeStrip(tip, box, plot, maxW, axisH) {
   const gap = 3;
   tip.style.maxWidth = Math.max(80, maxW) + "px";
   tip.style.left = "0px"; tip.style.top = "0px";
   const tw = tip.offsetWidth, th = tip.offsetHeight;
   let left = plot.x, top = plot.y - th - gap;
-  // One-line strips sit just above the plot (under the title/legend). Taller wrapped strips go below so they don't cover the legend.
+  // One-line strips sit just above the plot (under the title/legend). Taller wrapped strips go
+  // below the x-axis labels (not into the axis band) so they don't cover the legend or the ticks.
   const aboveOk = th <= 32 && top >= box.y + 2 && !overlaps({ x: left, y: top, w: tw, h: th }, plot);
   if (!aboveOk) {
-    top = plot.y + plot.h + gap;
-    if (top + th > box.y + box.h - 2) top = Math.max(plot.y + plot.h + 1, box.y + box.h - th - 2);
+    const skip = axisH || 0;
+    top = plot.y + plot.h + skip + gap;
+    if (top + th > box.y + box.h - 2) top = Math.max(plot.y + plot.h + skip + 1, box.y + box.h - th - 2);
   }
   if (left + tw > box.x + box.w - 4) left = Math.max(box.x + 4, box.x + box.w - tw - 4);
   if (left < box.x + 4) left = box.x + 4;
@@ -784,7 +789,7 @@ function placeTip(cssX, cssY) {
   } else {
     const plot = geom ? { x: ox + geom.X0, y: oy + geom.Y0, w: geom.X1 - geom.X0, h: geom.Y1 - geom.Y0 } : { x: ox + 8, y: oy + 80, w: cv.clientWidth - 16, h: 200 };
     const box = { x: 0, y: 0, w: wrap.clientWidth, h: wrap.clientHeight };
-    tipBox = placeStrip(tip, box, plot, plot.w);
+    tipBox = placeStrip(tip, box, plot, plot.w, geom && geom.axis ? geom.axis.h : 0);
   }
   // Guard uses canvas CSS pixels (origin at the canvas, not the wrap).
   const tipCv = { x: tipBox.x - ox, y: tipBox.y - oy, w: tipBox.w, h: tipBox.h };
