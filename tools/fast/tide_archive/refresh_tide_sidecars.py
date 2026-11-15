@@ -59,7 +59,16 @@ def refresh_sst(out, seed):
             continue
         cfg = SST.PRODUCTS[prod]
         try:
-            ser = SST.fetch_series(prod, cfg["ds"], cfg["var"], pix["lat"], pix["lon"], t0, t1, cfg.get("zlev"))
+            if prod == "oisst":
+                # The final OISST aggregate lags ~2 weeks, so a recent window can 404 there;
+                # the NRT dataset alone is then enough to refresh the station.
+                try:
+                    ser = SST.fetch_series(prod, cfg["ds"], cfg["var"], pix["lat"], pix["lon"], t0, t1, cfg.get("zlev"))
+                except Exception as e:
+                    print(f"  oisst final skip ({type(e).__name__}); NRT only")
+                    ser = {}
+            else:
+                ser = SST.fetch_series(prod, cfg["ds"], cfg["var"], pix["lat"], pix["lon"], t0, t1, cfg.get("zlev"))
             if prod == "oisst":
                 try:
                     ser.update(SST.fetch_series(prod, cfg["nrt"], cfg["var"], pix["lat"], pix["lon"], t0, t1, True))
@@ -143,7 +152,13 @@ def refresh_aifs(out, work):
     picked = None
     for c in latest_aifs_cycle():
         print(f"aifs try {c:%Y%m%d%H}", flush=True)
-        path, n, msg = AIFS.do_cycle(c, work, AIFS.STEPS)
+        try:
+            path, n, msg = AIFS.do_cycle(c, work, AIFS.STEPS)
+        except Exception as e:
+            # A cycle not posted yet (index 404 / empty / not JSON) must not stop the walk-back,
+            # and must not prevent the STOFS anomaly sidecar from refreshing later in this job.
+            print(f"  aifs {c:%Y%m%d%H} skipped: {type(e).__name__}: {e}", flush=True)
+            continue
         print(f"  {msg} -> {path}")
         rec = loadj(path)
         if not rec:
@@ -163,6 +178,19 @@ def refresh_aifs(out, work):
     if not picked:
         print("aifs: no usable cycle")
         return None
+    # Never replace the branch copy with a shorter-horizon cycle while that copy is recent
+    # (< 24 h old). Same rule as the in-run walk: a snap-back to a short extract kinks the line.
+    try:
+        cur = loadj(dest)
+        if cur and cur.get("steps"):
+            lead_cur = max(int(k) for k in cur["steps"])
+            lead_new = max(int(k) for k in picked["steps"])
+            age_h = (D.datetime.now(D.timezone.utc) - D.datetime.strptime(str(cur.get("cycle")), "%Y%m%d%H").replace(tzinfo=D.timezone.utc)).total_seconds() / 3600
+            if lead_new < lead_cur and age_h < 24:
+                print(f"aifs: keep {cur.get('cycle')} ({lead_cur} h); new {picked.get('cycle')} reaches only {lead_new} h")
+                return dest
+    except Exception as e:
+        print("aifs: compare with branch copy skipped:", e)
     savej(dest, picked)
     print("aifs wrote", dest, "cycle", picked.get("cycle"), "steps", len(picked.get("steps") or {}))
     return dest
@@ -200,12 +228,16 @@ def main():
     args = ap.parse_args()
     os.makedirs(os.path.join(args.out, "v1"), exist_ok=True)
     seed = loadj(args.seed_sst) if args.seed_sst else None
-    if not args.skip_sst:
-        refresh_sst(args.out, seed)
-    if not args.skip_aifs:
-        refresh_aifs(args.out, args.aifs_work)
-    if not args.skip_anom:
-        refresh_anom(args.out)
+    # Each sidecar is independent: one failing must not stop the others (the site keeps its shipped copy).
+    for skip, fn in ((args.skip_sst, lambda: refresh_sst(args.out, seed)),
+                     (args.skip_aifs, lambda: refresh_aifs(args.out, args.aifs_work)),
+                     (args.skip_anom, lambda: refresh_anom(args.out))):
+        if skip:
+            continue
+        try:
+            fn()
+        except Exception as e:
+            print(f"sidecar step failed (kept previous copy): {type(e).__name__}: {e}", flush=True)
     v1 = os.path.join(args.out, "v1")
     idx_fn = os.path.join(v1, "index.json")
     try:

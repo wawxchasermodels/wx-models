@@ -30,6 +30,7 @@ H6, HR, DAY = 6 * 60000, 3600000, 86400000
 TAU_BIAS, TAU_RELAX, SLOW_DAYS, LEAD_H = 12 * HR, 24 * HR, 30, 72
 ISSUE_HOURS = (2, 8, 14, 20)
 CACHE = os.environ.get("TIDE_CACHE", "/tmp/tide_archive_cache")
+FT_PER_HPA = 3.28084 / 100  # 1 cm per hPa in feet, same as tide.js ibFt
 
 
 def get(u, tries=4):
