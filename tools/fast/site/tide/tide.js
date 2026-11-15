@@ -317,6 +317,29 @@ async function gfsPressure(st) {
 }
 // SST sidecar (sst.json): shipped with the site; a newer copy on the tide-archive branch wins. A 404 there is fine.
 const SSTU = window.TIDE_SST || (typeof ARCH !== "undefined" ? ARCH + "sst.json" : "sst.json");
+function sstProductLabel(sst) {
+  const s = String((sst && (sst.src || sst.source)) || "");
+  if (/oisst/i.test(s)) return "NOAA OISST";
+  if (/geopolar/i.test(s)) return "NOAA Geo-Polar Blended";
+  if (/mur/i.test(s)) return "MUR";
+  return null;
+}
+function aifsProductLabel(aifs) {
+  if (!aifs || (!aifs.src && !aifs.run)) return null;
+  if (!aifs.src || aifs.src === "aifs-ens-mean") return "ECMWF AIFS ensemble pressure";
+  if (/aifs-single|ecmwf_aifs/i.test(aifs.src)) return "ECMWF AIFS pressure";
+  if (/ifs/i.test(aifs.src)) return "ECMWF IFS pressure";
+  return "ECMWF AIFS ensemble pressure";
+}
+function productsLine(wind, sst, aifs) {
+  const parts = ["NOAA official tide prediction", "NOAA gauge water levels and pressure"];
+  const a = aifsProductLabel(aifs);
+  if (a) parts.push(a);
+  const s = sstProductLabel(sst);
+  if (s) parts.push("sea surface temperature (" + s + ")");
+  if (wind) parts.push("NOAA STOFS wind surge");
+  return "Conditional uses: " + parts.join(", ") + ". Experimental, not official.";
+}
 async function sstTerm(st, now) {
   const usable = (row) => row && (isFinite(row.W) || isFinite(row.steric_ft) || (isFinite(row.k_ft_per_c) && (isFinite(row.ssta) || isFinite(row.ssta30_c))) || (isFinite(row.adj_ft) && isFinite(row.ssta30_c)));
   const rowOf = (j) => j && (j.stations && j.stations[st] || (j.sst && j.sst[st]) || (j[st] && typeof j[st] === "object" ? j[st] : null));
@@ -546,7 +569,6 @@ function drawChart(c, W, H, opt) {
     legendBox = { x: pad, y: legBase - 13.5 * s, w: W - 2 * pad, h: (rows.length - 1) * 24 * s + 16.5 * s }; }
   // info lines (bottom)
   const info = [];
-  if (ALIAS[D.st]) info.push(`Birch Bay has no NOAA tide gauge or prediction station of its own: all lines use Cherry Point (${ALIAS[D.st]}), the nearest NOAA gauge, about 4 mi south on the same shore.`);
   const lastObs = D.obs.length ? D.obs[D.obs.length - 1] : null;
   if (lastObs && D.rNow != null) info.push(`Latest observed ${lastObs[1].toFixed(2)} ft at ${fTime.format(new Date(lastObs[0]))}  \u00b7  residual (observed \u2212 predicted) ${sgn(D.rNow, 2)} ft`);
   const bits = [];
@@ -558,13 +580,9 @@ function drawChart(c, W, H, opt) {
     bits.push("Sea temperature unavailable; warm-water term set to 0 ft");
   }
   if (D.aifs && D.aifs.run) bits.push(`AIFS ENS ${String(D.aifs.run)}${D.aifs.src && D.aifs.src !== "aifs-ens-mean" ? " (" + D.aifs.src + " fallback)" : ""}`);
-  else if (D.aifs && D.aifs.src) bits.push(`Forecast pressure ${D.aifs.src}${D.aifs.note ? " \u2014 " + D.aifs.note : ""}`);
-  else bits.push("Forecast pressure unavailable; holding the latest observed pressure");
+  else if (D.aifs && D.aifs.src) bits.push(`Forecast pressure ${D.aifs.src}`);
   if (bits.length) info.push(bits.join("  \u00b7  "));
-  if (D.aifs && D.aifs.note) info.push(D.aifs.note);
-  info.push(T.wind
-    ? `Conditional (Wind surge on) = the official tide prediction, plus the effect of air pressure (lower pressure raises the water; observed pressure for times already past, a European AIFS ensemble forecast ahead), plus a warm-water adjustment from sea-surface temperature compared with a typical year, plus a correction from the last few days of gauge readings (the leftover after pressure and warm water are taken out is held through the forecast, and a 12-hour fade starts the line at the latest observation). Wind-driven setup from the NOAA surge model is added on top of that, without applying the pressure or warm-water terms a second time. Experimental, not official. If no forecast pressure is available, the latest observation is held; if the forecast ends before the end of the chart, the last forecast pressure is held; if sea temperature is missing, the warm-water term is zero.`
-    : `Conditional (default) = the official tide prediction, plus the effect of air pressure (lower pressure raises the water; observed pressure for times already past, a European AIFS ensemble forecast ahead), plus a warm-water adjustment from sea-surface temperature compared with a typical year, plus a correction from the last few days of gauge readings: the leftover after pressure and warm water are taken out is held through the forecast, and a 12-hour fade starts the line at the latest observation. Wind-driven setup from the NOAA surge model is off; turn on Wind surge to add only that wind part. Experimental, not official. If no forecast pressure is available, the latest observation is held; if the forecast ends before the end of the chart, the last forecast pressure is held; if sea temperature is missing, the warm-water term is zero.`);
+  info.push(productsLine(T.wind, D.sst, D.aifs));
   const infoFs = portrait ? 12.5 : 12.5, lh = 18 * s;
   // wrap info lines to width
   c.font = F(600, infoFs); const wrapped = [];
@@ -665,16 +683,26 @@ function drawChart(c, W, H, opt) {
   // now line
   window.__tideNowLabel = null;
   if (D.now >= R.start && D.now <= R.end) { const x = Math.round(X(D.now)) + 0.5; c.strokeStyle = COL.now; c.lineWidth = 1.6 * s; c.setLineDash([6 * s, 5 * s]); c.beginPath(); c.moveTo(x, Y0); c.lineTo(x, Y1); c.stroke(); c.setLineDash([]);
-    c.font = F(800, 12.5); c.textBaseline = "top"; const lab = `Now ${fTime.format(new Date(D.now))}`, tw = c.measureText(lab).width + 12 * s, th = 20 * s, lx2 = Math.min(Math.max(x - tw / 2, X0 + 2), X1 - tw - 2);
+    c.font = F(800, 12.5); c.textBaseline = "top"; const lab = `Now ${fTime.format(new Date(D.now))}`, tw = c.measureText(lab).width + 12 * s, th = 20 * s;
+    let lx2 = Math.min(Math.max(x - tw / 2, X0 + 2), X1 - tw - 2);
     // Default: just under the top of the plot. If that pill would cover a flood-stage word (typical on a
     // phone, where "Now" sits only a couple of days from the left and Moderate/Major sit high and left),
-    // drop the pill just below those words.
+    // drop the pill just below those words, or slide it to their right. Never snap back onto a word.
     let ny = Y0 + 4 * s;
+    const nowHits = (px, py) => (fLabs || []).filter((b) => px < b.x1 && b.x0 < px + tw && py < b.y1 && b.y0 < py + th);
     if (fLabs && fLabs.length) {
-      const top0 = ny, bot0 = ny + th;
-      const hits = fLabs.filter((b) => lx2 < b.x1 && b.x0 < lx2 + tw && top0 < b.y1 && b.y0 < bot0);
-      if (hits.length) ny = Math.max(...hits.map((b) => b.y1)) + 4 * s;
-      if (ny + th > Y1 - 2 * s) ny = Math.max(Y0 + 4 * s, Y1 - th - 2 * s);
+      for (let i = 0; i < 8 && nowHits(lx2, ny).length; i++) {
+        ny = Math.max(...nowHits(lx2, ny).map((b) => b.y1)) + Math.max(3, 4 * s);
+      }
+      if (ny + th > Y1 - 2 * s) {
+        const clipped = Math.max(Y0 + 4 * s, Y1 - th - 2 * s);
+        if (!nowHits(lx2, clipped).length) ny = clipped;
+        else if (nowHits(lx2, ny).length) {
+          const right = Math.max(...nowHits(lx2, Y0 + 4 * s).concat(nowHits(lx2, ny)).map((b) => b.x1)) + Math.max(3, 4 * s);
+          const lxR = Math.min(Math.max(right, X0 + 2), X1 - tw - 2);
+          if (!nowHits(lxR, Y0 + 4 * s).length) { lx2 = lxR; ny = Y0 + 4 * s; }
+        }
+      }
     }
     c.fillStyle = "rgba(21,23,28,0.85)"; c.fillRect(lx2, ny, tw, th); c.fillStyle = COL.now; c.textAlign = "left"; c.fillText(lab, lx2 + 6 * s, ny + 4 * s);
     window.__tideNowLabel = { x: lx2, y: ny, w: tw, h: th, lab }; }
@@ -895,7 +923,7 @@ window.TIDE = {
   qa: () => D ? { st: D.st, name: D.name, pred: D.pred.length, obs: D.obs.length, cond: D.cond.length, method: D.method, cycle: D.cyc ? new Date(D.cyc.t).toISOString() : null,
     rNow: D.rNow, rSlow: D.rSlow, bias: D.bias, flood: D.flood, floods: D.floods, floodSkip: D.floodSkip, floodOn: !!T.flood, floodDrawn: window.__tideFloodDrawn || [], floodLabels: window.__tideFloodLabels || [], floodLabelNote: window.__tideFloodLabelNote || null, legend: window.__tideLegend || [], hover: window.__tideHover || null, sid: D.sid, start: D.R.start, end: D.R.end, now: D.now,
     statsBox: window.__tideStatsBox || null, chrome: window.__tideChrome || null, arch: ARCH, calib: D.calib ? D.calib.c.map((b) => b.corr) : null, calibBg: D.calibBg ? { t: D.calibBg.t, c: D.calibBg.c.map((b) => b.corr) } : null, ver: D.ver.length, verHindcast: D.ver.filter((p) => !p[2]).length, issues: D.nIssues, archived: D.nArchive, vl: D.vl, sd: D.sd, stats: D.stats,
-    condAboveFrac: D.cond.length ? D.cond.filter(([t, v]) => v >= (interp(D.pred, t) || 0)).length / D.cond.length : null, sharp: window.__tideSharp || null, windOn: !!T.wind, sst: D.sst || null, aifs: D.aifs || null, windTest: window.__tideWindTest || null, nowLabel: window.__tideNowLabel || null } : { err: window.__tideErr || null },
+    condAboveFrac: D.cond.length ? D.cond.filter(([t, v]) => v >= (interp(D.pred, t) || 0)).length / D.cond.length : null, sharp: window.__tideSharp || null, windOn: !!T.wind, sst: D.sst || null, aifs: D.aifs || null, windTest: window.__tideWindTest || null, nowLabel: window.__tideNowLabel || null, products: productsLine(!!T.wind, D.sst, D.aifs) } : { err: window.__tideErr || null },
 };
 ui(); syncURL(); load();
 setInterval(() => { if (document.visibilityState === "visible") load(); }, 10 * 60000);   // new observations every 6 min; refresh every 10
