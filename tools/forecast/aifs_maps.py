@@ -34,9 +34,9 @@ VIEWS = {
     # North America view (10-24-26): centered on the Pacific Northwest and reaching out over the NE Pacific (Gulf of Alaska, Hawaii)
     # while keeping CONUS through Maine. Same 9,000 x 6,700 km frame as before (was central_longitude=-120 (10-24); now -130 (11-04), x -4.6e6..4.4e6).
     "na": dict(label="North America", size=(16, 12),
-               # 11-10 t2832u: match live _nal2 NA frame (lon0 -121, x=-6.6e6..2.4e6) so 49N is level across WA and the far Pacific stays in view
+               # 11-15 t3095u: match the Studio NA frame (GOES-West 16:9 target, east edge kept at 2.4e6)
                proj=ccrs.LambertConformal(central_longitude=-121, central_latitude=48, standard_parallels=(35, 60)),
-               extent=(-6.6e6, 2.4e6, -3.3e6, 3.4e6), cint=6),
+               extent=(-6.919425e6, 2.4e6, -3.404278e6, 3.533516e6), cint=6),
     "pnw": dict(label="Pacific Northwest", size=(16, 10.5), proj=ccrs.Mercator(central_longitude=-130),
                 ll=(-160, -103, 37, 61), cint=3),
     # Pacific NW tight: same frame as temp_maps / ens_maps (Mercator 138 W-113.5 W, 40.5-54.5 N)
