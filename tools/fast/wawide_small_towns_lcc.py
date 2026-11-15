@@ -13,7 +13,7 @@ import os, sys, json, argparse
 import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
 import fast_encode as FE
-SCALE = 0.83; VID = "pnwhr"; PNG = "static/towns_pnwhr_s2.png"
+SCALE = 1.0; VID = "pnwhr"; PNG = "static/towns_pnwhr_s2.png"  # 11-15 (t3093u): match Washington typography (was 0.83)
 
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("--manifest", required=True); ap.add_argument("--out", required=True)
@@ -77,6 +77,6 @@ def main():
         elif names != names0: raise SystemExit(f"{m}: placement differs from the shared layer")
         plt.close(fig); doc["models"][m] = dict(towns=slots, towns_png=PNG); print(m, len(slots), "slots", flush=True)
     if a.check: sys.exit(1 if bad else 0)
-    doc["lcc_note"] = "HRRR/RRFS/NBM wide view (pnwhr layer) smaller labels (t2314u), scale %.2f (wawide_small_towns_lcc.py)" % SCALE
+    doc["lcc_note"] = "HRRR/RRFS/NBM wide view (pnwhr layer) Washington typography (t3093u), scale %.2f (wawide_small_towns_lcc.py)" % SCALE
     json.dump(doc, open(jp, "w")); print("towns", names0)
 main()

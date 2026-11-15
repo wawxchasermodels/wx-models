@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""11-04 (Benjamin t2308u "Make the town names little smaller on Washington wide for loops"): the global models' Studio
-"Washington (wide, for loops)" town layer rebuilt with every label font at SCALE (0.83, ~17 % smaller: names 9.5/8.5/8 ->
-7.9/7.1/6.6 pt, numbers 9.5 -> 7.9 pt, pass names 8 -> 6.6 pt), same placement code (studio_views.town_slots + passes), dots
-unchanged. Shipped with the site (no R2 change): slayers/static/{,x2/}towns_wawide_s2.png + slayers/static/wawide_s2.json
-{models: {m: towns}}; viewer.js uses them for the wawide view only (Coast view and every other view untouched).
+"""11-15 (t3093u): Studio "Washington (wide, for loops)" town layer at Washington typography (SCALE 1: names 9.5 /
+pass names 8, weight 600, halo 2.6, dots 3.6 / 4.6). Was 0.83 (t2308u). Same placement code (studio_views.town_slots +
+passes). Shipped with the site: slayers/static/{,x2/}towns_wawide_s2.png + slayers/static/wawide_s2.json. Studio paints
+these at the same on-screen size as the Washington view (paintStudioTowns typ). Coast view untouched.
 
   STUDIO_VIEW=wawide wawide_small_towns.py --manifest M --sv studio_views.json --out site/slayers
 """
@@ -11,7 +10,7 @@ import os, sys, json, argparse
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
 os.environ["STUDIO_VIEW"] = "wawide"
 import studio_views as SV, fast_encode as FE
-SCALE = 0.83; PNG = "static/towns_wawide_s2.png"
+SCALE = 1.0; PNG = "static/towns_wawide_s2.png"  # 11-15 (t3093u): match Washington typography (was 0.83)
 
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("--manifest", required=True); ap.add_argument("--sv", required=True); ap.add_argument("--out", required=True); a = ap.parse_args()
@@ -40,6 +39,6 @@ def main():
         if "wawide" in e and m not in out:
             src = next((k for k in out if man["models"].get(k, {}).get("crop") == man["models"].get(m, {}).get("crop")), None)
             if src: out[m] = out[src]; print(m, "copied from", src)
-    json.dump(dict(note="Studio wawide smaller town labels (t2308u), scale %.2f" % SCALE, png=PNG, models=out), open(f"{a.out}/static/wawide_s2.json", "w"))
+    json.dump(dict(note="Studio wawide town labels match Washington typography (t3093u), scale %.2f" % SCALE, png=PNG, models=out), open(f"{a.out}/static/wawide_s2.json", "w"))
     print("towns", names0)
 main()

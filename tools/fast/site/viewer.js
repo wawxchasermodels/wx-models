@@ -257,10 +257,10 @@ function mergeRunsX(man) {
 // 11-02 (Benjamin t2105u "Passes need to be added to maps on Washington wide for loops"): the global models' wide view uses a town
 // layer with the Washington view's 9 passes (plum triangle + italic name; studio_views.py --passes), shipped with the site ("@").
 const WAWIDE_PASSES_PNG = "@slayers/static/towns_wawide_p1.png";
-// 11-04 (Benjamin t2308u "Make the town names little smaller on Washington wide for loops"): town / pass labels ~17 % smaller on the
-// wide view (studio_views wawide_small_towns.py: towns_wawide_s2.png + its number slots, shipped with the site); wave maps' coast labels too
-// 11-04 (t2314u "yes rebuild those too"): HRRR / RRFS / NBM wide view (pnwhr) too: wawide_s2.json models.{hrrr,rrfs,nbm} = {towns, towns_png}
-let WAWIDE_S2 = null; const WAWIDE_FS = 0.83;
+// 11-04 (t2308u / t2314u): Wide labels were ~17 % smaller (wawide_s2 / towns_pnwhr_s2). 11-15 (t3093u): they match the
+// Washington view's typography (names 9.5 / 8.0, weight 600, halo 2.6, dots 3.6 / 4.6; numbers 10.5). Studio paints them
+// at the same on-screen size as Washington (paintStudioTowns typ). Coast view is unchanged (still 0.83).
+let WAWIDE_S2 = null; const WAWIDE_FS = 1;   // 11-15 (t3093u): Wide labels match Washington size; 0.83 was the 11-04 shrink
 let TOWN_AIRPORTS = {};
 const PNWT_FS = 0.83;   // Pacific NW tight only: town names + numbers ~17% smaller (still crisp canvas text)
 const PNWHR_FS = 0.78;  // Pacific NW (high-res): town names + numbers ~22% smaller (crisp canvas text; collision unchanged)
@@ -272,6 +272,24 @@ function townFs(vid) {
   if (v === "coast") return COAST_FS;
   return 1;
 }
+// 11-15 (t3093u): drop the redundant "4 AM" / "4 PM" on 12-hour high/low temperature products (NBM nmaxt / nmint
+// and any other model whose title is a 12 h high or low). The product name stays ("12 h High Temperature");
+// a valid-time stamp keeps its date and loses only that clock time. Other products are unchanged.
+function is12hHiLo(pid, title) {
+  if (pid === "nmaxt" || pid === "nmint") return true;
+  return /12\s*h(?:ou)?r?s?\s+(high|low)\b/i.test(title || "");
+}
+function prodTitle(pid, title) {
+  let t = title || "";
+  if (!is12hHiLo(pid, t)) return t;
+  return t.replace(/\s*[\(\[\{,;:\u00b7\-|/]*\s*4\s*(A\.?M\.?|P\.?M\.?)\s*(PT)?\s*[\)\]\}]*/gi, " ").replace(/\s{2,}/g, " ").trim();
+}
+function prodValid(pid, title, line) {
+  if (!line || !is12hHiLo(pid, title)) return line || "";
+  let s = String(line).replace(/(?:^|\s|[\u00b7|,;])\s*4\s*(A\.?M\.?|P\.?M\.?)\s*(PT)?/gi, " ");
+  return s.replace(/\s*[\u00b7|,;]\s*$/g, "").replace(/\s{2,}/g, " ").trim();
+}
+window.prodTitle = prodTitle; window.prodValid = prodValid; window.is12hHiLo = is12hHiLo;
 function addStudioViews(man, sv) {
   // 10-31 7:55 PM (Benjamin: "city labels on the new washington wide are way too big"): the global models now get a real view
   // made for Studio (tools/fast/studio_views.py -> static/studio_views.json, not in manifest.json): its own basemap and town layer
@@ -797,7 +815,7 @@ function setLists() {   // products this run carries (all their fields present),
     S.tab = t[0]; S.prod = t[2].some(([k]) => k === keep) ? keep : t[2][0][0]; setLists(); draw(); };
   if (!V[S.view]) S.view = V.wa ? "wa" : Object.keys(V)[0];
   const wavy = WAVE_PIDS.test(S.prod); if (V[S.view].waveOnly && !wavy) S.view = V.pnw ? "pnw" : "wa";
-  fill($("prod"), tabs.find(t => t[0] === cur)[2].map(([k, p]) => [k, p.title]), S.prod);
+  fill($("prod"), tabs.find(t => t[0] === cur)[2].map(([k, p]) => [k, prodTitle(k, p.title)]), S.prod);
   fill($("view"), Object.entries(V).filter(([k, v]) => !v.waveOnly || wavy).map(([k, v]) => [k, v.label]), S.view);
   $("step").max = R_.steps.length - 1; S.i = Math.min(S.i, R_.steps.length - 1);
   S.runMenu && S.runMenu();   // 11-03 (t2228u): Runs picker follows the open tab
@@ -1220,8 +1238,8 @@ async function render(lite) {
     if (!V) return;
     const ctx = sizeMap(cv, V, lite), [LW, LH] = V.fig; ctx.fillStyle = S.man.style.BG; ctx.fillRect(0, 0, LW, LH); ctx.drawImage(layer(st2.base, st2.baseU, cv._rs), 0, 0, LW, LH);
     const miss = `${S.runs[run].runline}  \u00b7  ${V.label}  \u00b7  ${window.__vjNoJump || S.dragging ? "no map at this hour" : "not in this model run"}`;
-    if (!coastShown(V)) header(ctx, V, PRODS()[pid].title, step.valid_line, miss, step.badge);
-    showCoast(cv, V, { title: PRODS()[pid].title, valid: step.valid_line, sub: miss, badge: step.badge, P: PRODS()[pid], pid, towns: true });
+    if (!coastShown(V)) header(ctx, V, prodTitle(pid, PRODS()[pid].title), prodValid(pid, PRODS()[pid].title, step.valid_line), miss, step.badge);
+    showCoast(cv, V, { title: prodTitle(pid, PRODS()[pid].title), valid: prodValid(pid, PRODS()[pid].title, step.valid_line), sub: miss, badge: step.badge, P: PRODS()[pid], pid, towns: true });
     S.cur = null; window.__drawn = `${pid}/${vid}/${f}`; if (window.onStudioSkip) window.onStudioSkip();
     postCompare(run, pid, vid, step);   // 10-31: still report to the side-by-side page (else sync never starts when a frame opens on such an hour)
     return;
@@ -1351,7 +1369,7 @@ async function render(lite) {
   let extra = (P.isobars && !D.iso && P.extra_noh ? P.extra_noh : P.extra).replace("{lo}", pc(P.pct[0]).toFixed(P.dec || 0)).replace("{hi}", pc(P.pct[1]).toFixed(P.dec || 0));
   if (pid === "gust10" && run.startsWith("eps/") && f <= 144 && f % 3 === 0) extra = extra.replace("in the 6 h ending", "in the 3 h ending");   // 10-31 EPS 3-hourly to F+144
   const coastNow = coastShown(V);
-  if (!coastNow) header(ctx, V, P.title, step.valid_line, `${S.runs[run].runline}  \u00b7  ${V.label}  \u00b7  ${extra}`, step.badge);
+  if (!coastNow) header(ctx, V, prodTitle(pid, P.title), prodValid(pid, P.title, step.valid_line), `${S.runs[run].runline}  \u00b7  ${V.label}  \u00b7  ${extra}`, step.badge);
   S.peak = GUST_PIDS.test(pid) ? drawPeak(ctx, st, vals) : null;
   // 11-01 7:43 AM (Benjamin: "Add a 'max height:80ft' just underneath the bottom right of the graphic"): max wave maps show the tallest
   // value in this frame and view (true grid max over the view's rows/cols, nearest whole ft), right-aligned under the map's bottom-right corner
@@ -1376,7 +1394,7 @@ async function render(lite) {
   S.last = { data_ms: t1 - t0, fill_ms: t2 - t1, overlay_ms: t3 - t2, total_ms: t3 - t0 };
   $("stat").textContent = `F+${f}  data ${S.last.data_ms.toFixed(0)} ms · fill ${S.last.fill_ms.toFixed(0)} ms · lines/labels ${S.last.overlay_ms.toFixed(0)} ms`;
   window.__drawn = `${pid}/${vid}/${f}` + (lite ? "~" : ""); window.__rs = rs;
-  showCoast(cv, V, { title: P.title, valid: step.valid_line, sub: `${S.runs[run].runline}  \u00b7  ${V.label}  \u00b7  ${extra}`, badge: step.badge, P, pid, maxv, towns: !!(haveTowns && tmode !== "none") });
+  showCoast(cv, V, { title: prodTitle(pid, P.title), valid: prodValid(pid, P.title, step.valid_line), sub: `${S.runs[run].runline}  \u00b7  ${V.label}  \u00b7  ${extra}`, badge: step.badge, P, pid, maxv, towns: !!(haveTowns && tmode !== "none") });
   if (coastNow && P.lows && S.lowPanel) paintCoastStrongLow(cv, V, S.lowPanel, { maxv });
   postCompare(run, pid, vid, step);
   if (lite) { if (window.onStudioDraw && Q.get("studio")) window.onStudioDraw(cv_(), S.cur, step, true); return; }

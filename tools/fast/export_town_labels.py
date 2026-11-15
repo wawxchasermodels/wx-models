@@ -65,14 +65,14 @@ def main():
         path = os.path.join(static, f"labels_{vid}.json")
         wrote = FE.write_town_labels(path, items)
         print(f"{vid}: {sum(1 for i in items if i['k']=='t')} names, {sum(1 for i in items if i['k']=='m')} markers" + ("" if wrote else " (none)"))
-    # HRRR / RRFS / NBM wide view: pnwhr towns at the smaller loop size (wawide_small_towns_lcc.py, scale 0.83)
-    items = render(TM, "pnwhr", scale=0.83)
+    # HRRR / RRFS / NBM wide view: pnwhr towns at Washington typography (t3093u; was scale 0.83)
+    items = render(TM, "pnwhr", scale=1.0)
     FE.write_town_labels(os.path.join(slayers, "labels_pnwhr_s2.json"), items)
     print(f"pnwhr_s2: {sum(1 for i in items if i['k']=='t')} names")
-    # Global wide view: studio_views wawide placement, then the 0.83 scale + passes (wawide_small_towns.py)
+    # Global wide view: studio_views wawide placement at Washington typography + passes
     import studio_views as SV
     TM, HS, _ccrs = SV.setup()
-    items = render(TM, SV.VID, scale=0.83, passes=True)
+    items = render(TM, SV.VID, scale=1.0, passes=True)
     FE.write_town_labels(os.path.join(slayers, "labels_wawide_s2.json"), items)
     print(f"wawide_s2: {sum(1 for i in items if i['k']=='t')} names")
     # Pacific NW tight override (towns_pnwt_v2.png) uses the same placement as the unscaled pnwt pass above,

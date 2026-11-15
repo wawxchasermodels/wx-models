@@ -81,11 +81,16 @@ for (const v of ["wa", "wwa", "puget", "ewa", "passes", "newa", "lm", "bc", "pnw
 check(api.SITE_LABELS.has("wc") && api.SITE_LABELS.has("wa") && api.SITE_LABELS.has("pnwt"), "runtime SITE_LABELS has wc, wa, pnwt");
 
 
-// Washington Wide camera (11-14): 5–10 % more area than the Washington view, same center.
+// Washington Wide camera (11-15 t3093u): 10–15 % wider E-W than the previous Wide (that
+// previous camera was 7.5 % more area than Washington), same center. Mid = 12.5 %.
 // Compared against: layout_test / refresh_test (they open the wawide menu entry but do not
 // pin the visible area or the 16:9 66 %-width / 27 % left-shift camera).
-check(/const WAWIDE_AREA = window\.__WAWIDE_AREA = 1\.075/.test(studio), "WAWIDE_AREA must be 1.075 (7.5 % more area, mid of 5–10 %)");
-check(1.05 <= 1.075 && 1.075 <= 1.10, "WAWIDE_AREA stays inside the 5–10 % band");
+check(/const WAWIDE_EW = 1\.125/.test(studio), "WAWIDE_EW must be 1.125 (12.5 % wider E-W than the previous Wide, mid of 10–15 %)");
+check(/const WAWIDE_AREA = window\.__WAWIDE_AREA = 1\.075 \* WAWIDE_EW \* WAWIDE_EW/.test(studio.replace(/\s+/g, " ")),
+  "WAWIDE_AREA must be 1.075 * WAWIDE_EW * WAWIDE_EW");
+const wawideArea = 1.075 * 1.125 * 1.125;
+check(1.075 * 1.10 * 1.10 <= wawideArea && wawideArea <= 1.075 * 1.15 * 1.15,
+  "WAWIDE_AREA stays inside the 10–15 % E-W-wider band");
 check(/function waPanelFromState\(/.test(studio), "wawide camera must rebuild the Washington panel from the state box");
 check(/k0 = Math\.max\(f\.W \/ pan\.w, f\.H \/ pan\.h\) \/ Math\.sqrt\(WAWIDE_AREA\)/.test(studio.replace(/\s+/g, " ")) ||
       /Math\.max\(f\.W \/ pan\.w, f\.H \/ pan\.h\) \/ Math\.sqrt\(WAWIDE_AREA\)/.test(studio),
@@ -93,6 +98,8 @@ check(/k0 = Math\.max\(f\.W \/ pan\.w, f\.H \/ pan\.h\) \/ Math\.sqrt\(WAWIDE_AR
 check(!/0\.66 \* f\.W \/ t\.w/.test(studio) && !/xl = V\.fit \? 0\.27 \* f\.W/.test(studio) && !/0\.84 \* f\.W \/ t\.w/.test(studio),
   "old loose wawide framing (66 % / 27 % shift / 84 % width) must not remain");
 check(/window\.__wawideCam = \(\) =>/.test(studio), "studio must expose __wawideCam so the extent guard can read the live base() camera");
+check(/typ = Math\.max\(f\.W \/ wp\[2\], f\.H \/ wp\[3\]\) \/ kk/.test(studio.replace(/\s+/g, " ")),
+  "paintStudioTowns must scale Wide labels to the Washington view's on-screen size");
 
 
 if (fail.length) {

@@ -92,10 +92,12 @@ function wideRect(m) {
 }
 // Washington's box inside the normal Washington view's area (temp_maps "wa" frame: state 242,275 1095x694 in panel 218.9,224.75 1162x778)
 const WA_IN_WAVIEW = [0.0199, 0.0646, 0.942, 0.892];
-// 11-14 (t3008u follow-up): Washington Wide should only be a hair more zoomed out than the regular
-// Washington view — 5–10 % more area, same center (was much wider: 16:9 used 66 % of the frame
-// width and a 27 % left shift). Mid of that range = 7.5 % more area → linear 1/sqrt(1.075).
-const WAWIDE_AREA = window.__WAWIDE_AREA = 1.075;
+// 11-14 (t3008u follow-up): Washington Wide used the regular Washington cover-fit zoomed out
+// 7.5 % more area, same center (was much wider: 16:9 used 66 % of the frame width and a 27 % left shift).
+// 11-15 (t3093u): a little wider east-west for loops — 10–15 % wider than that previous Wide
+// camera (mid 12.5 %), still centered on WA, same 16:9 / 9:16 cover-fit aspect. Regular Washington is unchanged.
+const WAWIDE_EW = 1.125;
+const WAWIDE_AREA = window.__WAWIDE_AREA = 1.075 * WAWIDE_EW * WAWIDE_EW;
 function stateRect(V, m) {   // Washington's box in the wide view's figure px: the view's own "fit" (studio_views.py), else from WT
   if (V.fit) { const [x, y, w, h] = V.fit; return { x, y, w, h }; }
   const t = wideRect(m), q = WA_IN_WAVIEW; if (!t) return null;
@@ -122,8 +124,9 @@ function base(k) {   // camera at dx = dy = 0, zoom 1: centre (figure px) and sc
   // 11-04 Coast view (t2289u): its own camera box per frame shape (studio_views.py COAST_H / COAST_V) covers the frame: ocean in the left
   // two thirds, Washington's coast ~2/3 across
   if (V.studioCoast) { const r = k === "v" && V.fitV ? V.fitV : V.fit, [x, y, w, h] = r; return { cx: x + w / 2, cy: y + h / 2, k0: Math.max(f.W / w, f.H / h) }; }
-  // 11-14: same center as the regular Washington panel (cover-fit), zoomed out so the visible area is WAWIDE_AREA
-  // times that cover (7.5 %, in the 5–10 % range). Replaces the old 16:9 66 %-width / 27 % left-shift and 9:16 84 %-width framing.
+  // 11-14 / 11-15 (t3093u): same center as the regular Washington panel (cover-fit), zoomed out so the
+  // visible area is WAWIDE_AREA times that cover (prior 7.5 %, now 12.5 % wider E-W than that). Replaces the old
+  // 16:9 66 %-width / 27 % left-shift and 9:16 84 %-width framing.
   const pan = waPanelFromState(t), k0 = Math.max(f.W / pan.w, f.H / pan.h) / Math.sqrt(WAWIDE_AREA);
   return { cx: pan.x + pan.w / 2, cy: pan.y + pan.h / 2, k0 };
 }
@@ -445,8 +448,9 @@ function lowerThird(k, c) {
   let tx = x + 28; const ls = h - 30;
   if (lg) { c.drawImage(lg, tx, y + 15, ls, ls); tx += ls + 22; }
   const cmpWhen = CMPM() ? (CMP.view.R || CMP.view.L) : null;
-  const l1 = BR.storm || BR.title || (cmpWhen ? cmpHeadTitle() : (last && last.cur.P.title)) || "";
-  const l2 = cmpWhen ? [cmpWhen.site, cmpWhen.step && String(cmpWhen.step.valid_line || "").replace(/^Valid /, "")].filter(Boolean).join("  \u00b7  ") : (step ? `${runText()} \u00b7 ${ptTime(step.valid, { weekday: "short", month: "short", day: "numeric", hour: "numeric" })} PT` : "");
+  const l1 = BR.storm || BR.title || (cmpWhen ? cmpHeadTitle() : (last && last.cur && (typeof prodTitle === "function" ? prodTitle(last.cur.pid, last.cur.P.title) : last.cur.P.title))) || "";
+  const l2v = step ? (typeof prodValid === "function" && last && last.cur ? prodValid(last.cur.pid, last.cur.P && last.cur.P.title, ptTime(step.valid, { weekday: "short", month: "short", day: "numeric", hour: "numeric" }) + " PT") : (ptTime(step.valid, { weekday: "short", month: "short", day: "numeric", hour: "numeric" }) + " PT")) : "";
+  const l2 = cmpWhen ? [cmpWhen.site, cmpWhen.step && String(cmpWhen.step.valid_line || "").replace(/^Valid /, "")].filter(Boolean).join("  \u00b7  ") : (step ? `${runText()} \u00b7 ${l2v}` : "");
   c.fillStyle = "#fff"; c.font = `800 ${k === "v" ? 46 : 40}px Montserrat`; c.textBaseline = "alphabetic";
   let t1 = l1; while (c.measureText(t1).width > x + w - tx - 24 && t1.length > 4) t1 = t1.slice(0, -2); if (t1 !== l1) t1 += "\u2026";
   c.fillText(t1, tx, y + h * 0.5); c.font = `600 ${k === "v" ? 28 : 25}px Montserrat`; c.fillStyle = "#ffc24d"; c.fillText(l2, tx, y + h * 0.5 + (k === "v" ? 44 : 38));
@@ -458,14 +462,14 @@ function titleCard(k, c, alpha, a0, a1) {   // over the first map; a0 / a1 = fir
   const ls = k === "v" ? 380 : 300, cx = f.W / 2; let y = k === "v" ? 520 : 150;
   if (lg) { c.drawImage(lg, cx - ls / 2, y, ls, ls); y += ls + (k === "v" ? 110 : 90); } else y += k === "v" ? 300 : 220;
   c.textAlign = "center"; c.fillStyle = "#fff"; c.font = `900 ${k === "v" ? 76 : 80}px Montserrat`;
-  const OI = OBSM() ? obsInfo() : null, words = (BR.title || BR.storm || (OI ? OI.title : (CMPM() ? cmpHeadTitle() : last.cur.P.title))).split(" "), maxW = f.W - 2 * f.pad, lines = []; let line = "";
+  const OI = OBSM() ? obsInfo() : null, words = (BR.title || BR.storm || (OI ? OI.title : (CMPM() ? cmpHeadTitle() : (typeof prodTitle === "function" ? prodTitle(last.cur.pid, last.cur.P.title) : last.cur.P.title)))).split(" "), maxW = f.W - 2 * f.pad, lines = []; let line = "";
   for (const w_ of words) { const t = line ? line + " " + w_ : w_; if (c.measureText(t).width > maxW && line) { lines.push(line); line = w_; } else line = t; } lines.push(line);
   lines.slice(0, 3).forEach((t, i) => c.fillText(t, cx, y + i * (k === "v" ? 86 : 88))); y += (Math.min(3, lines.length) - 1) * (k === "v" ? 86 : 88) + (k === "v" ? 80 : 74);
   if (BR.storm && BR.title) { c.font = `800 ${k === "v" ? 48 : 46}px Montserrat`; c.fillStyle = "#ffc24d"; c.fillText(BR.storm, cx, y); y += k === "v" ? 70 : 64; }
   c.font = `600 ${k === "v" ? 38 : 36}px Montserrat`; c.fillStyle = "#cfd3da";
   if (OI) { c.fillText(`Station reports \u00b7 ${OI.when}`, cx, y); c.restore(); return; }
   if (CMPM()) { const when = CMP.view.R || CMP.view.L; c.fillText(when ? `${when.site}  \u00b7  ${when.title}` : "Compare", cx, y); c.restore(); return; }
-  c.fillText(`${runText()} \u00b7 ${last.cur.P.title}`, cx, y); y += k === "v" ? 58 : 54;
+  c.fillText(`${runText()} \u00b7 ${(typeof prodTitle === "function" ? prodTitle(last.cur.pid, last.cur.P.title) : last.cur.P.title)}`, cx, y); y += k === "v" ? 58 : 54;
   if (a0 && a1) c.fillText(`${ptTime(a0.valid, { weekday: "short", month: "short", day: "numeric", hour: "numeric" })} \u2013 ${ptTime(a1.valid, { weekday: "short", month: "short", day: "numeric", hour: "numeric" })} PT`, cx, y);
   c.restore();
 }
@@ -1145,6 +1149,16 @@ function paintStudioTowns(c, k, r, top, bot) {
   const src = window.__studioTownSrc;
   if (!src || !src.items || !src.items.length || !r || !r.sw || !r.rs) { window.__studioTownBoxes = []; return; }
   const f = F[k], rs = r.rs, sc = f.W / r.sw, dpi = src.dpi || 100, kk = sc * rs;
+  // 11-15 (t3093u): Washington typography (9.5 / 8.0 pt, weight 600, halo 2.6, dots 3.6 / 4.6) is
+  // stored on the Wide labels; the two views use different figure scales, so a bare camera scale
+  // would make Wide labels larger on screen. typ brings a 9.5 pt name to the same frame-pixel
+  // size as on the Washington view. Collision uses these boxes and drops a label that still overlaps.
+  let typ = 1;
+  if ((typeof S !== "undefined" ? S.view : "") === "wawide") {
+    const m = (last && last.cur && last.cur.run || "").split("/")[0];
+    const wp = (((((S.man || {}).models || {})[m] || {}).views || {}).wa || {}).panel;
+    if (wp && wp[2] && wp[3] && kk) typ = Math.max(f.W / wp[2], f.H / wp[3]) / kk;
+  }
   const toF = (figX, figY) => [(figX * rs - r.sx) * sc, (figY * rs - r.sy) * (f.H / r.sh)];
   const margin = 8, hits = (b) => b[0] < margin || b[1] < top || b[2] > f.W - margin || b[3] > bot;
   const shifts = [[0, 0], [0, -18], [0, -36], [20, 0], [-20, 0], [0, 16], [32, -14], [-32, -14], [0, -54]];
@@ -1152,7 +1166,7 @@ function paintStudioTowns(c, k, r, top, bot) {
   const placed = [], overlap = (b) => placed.some((a) => b[0] < a[2] + 2 && b[2] > a[0] - 2 && b[1] < a[3] + 2 && b[3] > a[1] - 2);
   const kept = new Map();
   for (const it of src.items) if (it.k === "t") {
-    const [x0, y0] = toF(it.x * src.LW, it.y * src.LH), fs = it.size * dpi / 72 * kk;
+    const [x0, y0] = toF(it.x * src.LW, it.y * src.LH), fs = it.size * dpi / 72 * kk * typ;
     const font = `${it.style === "italic" ? "italic " : ""}${it.w || 600} ${fs}px Montserrat`;
     c.font = font; const tw = c.measureText(it.t).width, hh = fs * 0.55, base = [x0, y0 - hh, x0 + tw, y0 + hh * 0.75];
     let shift = null;
@@ -1160,23 +1174,23 @@ function paintStudioTowns(c, k, r, top, bot) {
     if (!shift) continue;
     kept.set(it.t, shift); placed.push(shift[2]);
     c.font = font; c.textAlign = "left"; c.textBaseline = "middle"; c.lineJoin = "round";
-    c.lineWidth = Math.max(1, (it.halo == null ? 2.6 : it.halo) * dpi / 72 * kk); c.strokeStyle = "#ffffff";
+    c.lineWidth = Math.max(1, (it.halo == null ? 2.6 : it.halo) * dpi / 72 * kk * typ); c.strokeStyle = "#ffffff";
     c.strokeText(it.t, x0 + shift[0], y0 + shift[1]); c.fillStyle = it.fill || "#1b1d22"; c.fillText(it.t, x0 + shift[0], y0 + shift[1]);
   }
   for (const it of src.items) if (it.k === "m") {
     const [x, y] = toF(it.x * src.LW, it.y * src.LH);
     if (x < margin || y < top || x > f.W - margin || y > bot) continue;
-    const rad = (it.ms || 3.6) / 2 * dpi / 72 * kk;
+    const rad = (it.ms || 3.6) / 2 * dpi / 72 * kk * typ;
     c.beginPath();
     if (it.mk === "^") { const h = rad * 1.15; c.moveTo(x, y - h); c.lineTo(x + h * 0.95, y + h * 0.75); c.lineTo(x - h * 0.95, y + h * 0.75); c.closePath(); }
     else c.arc(x, y, Math.max(1, rad), 0, 2 * Math.PI);
-    c.fillStyle = it.fill || "#1b1d22"; c.strokeStyle = it.stroke || "#ffffff"; c.lineWidth = (it.mew || 0) * dpi / 72 * kk;
+    c.fillStyle = it.fill || "#1b1d22"; c.strokeStyle = it.stroke || "#ffffff"; c.lineWidth = (it.mew || 0) * dpi / 72 * kk * typ;
     if (it.mew) c.stroke(); c.fill();
   }
   for (const n of src.nums || []) {
     if (src.items.some((t) => t.k === "t" && t.t === n.name) && !kept.has(n.name)) continue;
     const sh = kept.get(n.name), [x0, y0] = toF(n.x * src.LW, n.y * src.LH), dx = sh ? sh[0] : 0, dy = sh ? sh[1] : 0;
-    const fs = n.size * dpi / 72 * kk; c.font = `800 ${fs}px Montserrat`;
+    const fs = n.size * dpi / 72 * kk * typ; c.font = `800 ${fs}px Montserrat`;
     const tw = c.measureText(n.text).width, hh = fs * 0.55, b = [x0 + dx, y0 + dy - hh, x0 + dx + tw, y0 + dy + hh * 0.75];
     if (hits(b) || overlap(b)) continue;
     placed.push(b); c.textAlign = "left"; c.textBaseline = "middle"; c.lineJoin = "round";
@@ -1204,15 +1218,17 @@ async function render(k, frO) {   // frO: camera override (MP4 storm-track pan)
   c.font = `600 ${f.run}px Montserrat`; c.fillStyle = "#c9ced8"; c.fillText(m === "oisst" ? "daily analysis" : `${cur.run.split("/")[1].slice(8)}Z run`, x + pw + 14, y + f.run * 1.08);
   y += f.run * 1.55 + f.title * 1.02;
   c.font = `800 ${f.title}px Montserrat`; c.fillStyle = "#fff";
-  const words = P.title.split(" "), maxW = f.W - 2 * f.pad - (k === "h" ? 260 : BR.corner && BR.cpos === "tr" && LOGOS[BR.logo] ? Math.round(f.W * 0.10) + 24 : 0); let line = "", lines = [];   // 9:16: keep the title clear of a top-right logo
+  const pTitle = (typeof prodTitle === "function" ? prodTitle(cur.pid, P.title) : P.title);
+  const pValid = (typeof prodValid === "function" ? prodValid(cur.pid, P.title, step.valid_line || "") : (step.valid_line || ""));
+  const words = pTitle.split(" "), maxW = f.W - 2 * f.pad - (k === "h" ? 260 : BR.corner && BR.cpos === "tr" && LOGOS[BR.logo] ? Math.round(f.W * 0.10) + 24 : 0); let line = "", lines = [];   // 9:16: keep the title clear of a top-right logo
   for (const w_ of words) { const t = line ? line + " " + w_ : w_; if (c.measureText(t).width > maxW && line) { lines.push(line); line = w_; } else line = t; } lines.push(line);
   lines.forEach((t, i) => c.fillText(t, x, y + i * f.title * 1.08)); y += (lines.length - 1) * f.title * 1.08 + f.day * 1.3;
   // t2111u: the day / time line 27 % bigger (v 40 -> 51 px, h 36 -> 46 px) and extra bold, still under the title (64 / 58 px)
-  c.font = `800 ${f.day}px Montserrat`; c.fillStyle = "#ffc24d"; c.fillText((step.valid_line || "").replace(/^Valid /, ""), x, y);
+  c.font = `800 ${f.day}px Montserrat`; c.fillStyle = "#ffc24d"; c.fillText(pValid.replace(/^Valid /, ""), x, y);
   const headBot = y + f.day * 0.45;
   // 11-03 small fixes: header box (pill + run, title lines, day line) kept for studioLabelHidden, so map line labels never sit under it
   { let hw = 0; c.font = `800 ${f.title}px Montserrat`; for (const t of lines) hw = Math.max(hw, c.measureText(t).width);
-    c.font = `800 ${f.day}px Montserrat`; hw = Math.max(hw, c.measureText((step.valid_line || "").replace(/^Valid /, "")).width);
+    c.font = `800 ${f.day}px Montserrat`; hw = Math.max(hw, c.measureText(pValid.replace(/^Valid /, "")).width);
     c.font = `600 ${f.run}px Montserrat`; hw = Math.max(hw, pw + 14 + c.measureText("daily analysis").width);
     f.hdr = [x - 12, (k === "v" ? 120 : 34) - 12, x + hw + 16, headBot + 14]; }
   // F+ badge (top right) — hidden on vertical 9:16 (t2495u) and on horizontal 16:9 (t2567u); OISST date badge kept
@@ -1878,7 +1894,7 @@ window.studioLabelHidden = (x, y, ex = 0, ey = 0) => {   // ex / ey: the label's
 function bxFill() {
   const ck = (id, v, t, on) => `<label><input type="checkbox" data-g="${id}" value="${v}"${on ? " checked" : ""}> ${t}</label>`, [m0] = S.run.split("/"), R_ = S.runs[S.run];
   $s("bxm").innerHTML = MORDER.filter((m) => S.man.models[m] && (S.man.runs[m] || []).length).map((m) => ck("m", m, S.man.models[m].site || m, m === m0)).join("");
-  $s("bxp").innerHTML = Object.entries(PRODS()).filter(([, p]) => p.fields.every((fl) => R_.fields.includes(fl))).map(([k, p]) => ck("p", k, p.title, k === S.prod)).join("");
+  $s("bxp").innerHTML = Object.entries(PRODS()).filter(([, p]) => p.fields.every((fl) => R_.fields.includes(fl))).map(([k, p]) => ck("p", k, (typeof prodTitle === "function" ? prodTitle(k, p.title) : p.title), k === S.prod)).join("");
   $s("bxv").innerHTML = Object.entries(typeof rrfsMenuViews === "function" ? rrfsMenuViews() : VIEWS()).map(([k, v]) => ck("v", k, v.label, k === S.view)).join(""); bxCount();
 }
 const bxSel = (g) => [...document.querySelectorAll(`#mpbatch input[data-g="${g}"]:checked`)].map((e) => e.value);
@@ -2166,7 +2182,7 @@ if (!CLEAN) {
     if (CMPM()) { cmpScrub(); return; }
     const R_ = S.runs[S.run]; if (!R_ || !R_.steps) return; const st = R_.steps, n = st.length, s = st[S.i] || {};
     sl.max = Math.max(0, n - 1); sl.value = S.i;
-    lab.textContent = `F+${s.f}` + (s.valid_line ? `  \u00b7  ${s.valid_line.replace(/^Valid /, "")}` : "");
+    lab.textContent = `F+${s.f}` + (s.valid_line ? `  \u00b7  ${(typeof prodValid === "function" ? prodValid(S.prod, (typeof PRODS === "function" && PRODS()[S.prod] || {}).title, s.valid_line) : s.valid_line).replace(/^Valid /, "")}` : "");
     const key = S.run + ":" + n; if (key === tkKey) return; tkKey = key;   // tick labels every 24 h (by forecast hour), rebuilt per run / new hours
     fixShourW(st.map(x => `F+${x.f}` + (x.valid_line ? `  \u00b7  ${x.valid_line.replace(/^Valid /, "")}` : "")));   // t2775u: fixed readout width per run
     tk.innerHTML = st.map((x, i) => x.f % 24 === 0 && (x.f % 48 === 0 || st[n - 1].f <= 168) ? `<span style="left:calc(9px + (100% - 18px) * ${n > 1 ? i / (n - 1) : 0})">${x.f}</span>` : "").join("");
