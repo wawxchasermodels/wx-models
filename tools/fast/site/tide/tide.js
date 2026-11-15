@@ -301,23 +301,45 @@ function drawChart(c, W, H, opt) {
   c.save(); c.beginPath(); c.rect(X0, Y0, X1 - X0, Y1 - Y0); c.clip();
   window.__tideFloodDrawn = []; window.__tideFloodLabels = []; window.__tideFloodLabelNote = null; const fTag = [];
   const fOn = D.floods.filter((f) => f.v >= lo && f.v <= hi);
-  // t3052u: ~9.5 CSS px on the page (>= 9 on phones). Studio uses 9.5*s so type scales with the frame.
-  // Close levels are staggered left-to-right (Minor, Moderate, Major); each word sits on top of its own line
-  // and that line starts at the word so it cannot run through a neighbor.
-  const fCss = (s > 1.35) ? Math.round(9.5 * s * 10) / 10 : 9.5;
-  const fGapY = 2, fHalo = Math.max(2, 1.2 * s), fPadX = 6 * s, xGap = Math.max(8, 6 * s);
-  c.font = `700 ${fCss}px Montserrat, system-ui, sans-serif`;
-  const fLabs = []; let fX = X0 + fPadX;
-  for (const f of fOn) {
-    const y = Y(f.v), tw = c.measureText(f.lab).width;
-    const asc = fCss * 0.92, desc = fCss * 0.08, y1b = y - fGapY, base = y1b - desc - fHalo / 2, y0 = base - asc - fHalo / 2;
-    fLabs.push({ k: f.k, lab: f.lab, x0: fX, x1: fX + tw, y0, y1: y1b, base, ly: y, lineX0: fX, lineX1: X1, fontCss: fCss, lineW: 2 * s, s, plotX0: X0, plotX1: X1 });
-    fX += tw + xGap;
+  // t3052u: every flood line spans the full plot. Names sit at the far left, 9.5 CSS px (Studio: 9.5*s),
+  // bottom 2 px above their own line. If another line would run through a word, knock out a short gap
+  // in that line only (chart-bg, a few px past the box). Shrink to 9 px if words overlap; only then shift the higher word right.
+  const fTarget = (s > 1.35) ? Math.round(9.5 * s * 10) / 10 : 9.5;
+  const fMin = (s > 1.35) ? Math.round(9 * s * 10) / 10 : 9;
+  const fLineW = 2 * s, fHalo = Math.max(2, 1.2 * s), fPadX = 6 * s, fKo = 3, fShift = 4;
+  const fGapY = Math.min(3, Math.max(2, fLineW / 2 + 1));
+  const fFont = (fs) => `700 ${fs}px Montserrat, system-ui, sans-serif`;
+  const boxAt = (f, fs, x) => {
+    c.font = fFont(fs); const tw = c.measureText(f.lab).width, y = Y(f.v);
+    const asc = fs * 0.92, desc = fs * 0.08, y1b = y - fGapY, base = y1b - desc - fHalo / 2, y0 = base - asc - fHalo / 2;
+    return { k: f.k, lab: f.lab, x0: x, x1: x + tw, y0, y1: y1b, base, ly: y, tw, fontCss: fs, lineW: fLineW, s, plotX0: X0, plotX1: X1, lineX0: X0, lineX1: X1, offset: false, knockouts: [] };
+  };
+  const yOverlap = (a, b) => a.y0 < b.y1 && b.y0 < a.y1;
+  const anyVertOverlap = (a) => { for (let i = 0; i < a.length; i++) for (let j = i + 1; j < a.length; j++) if (yOverlap(a[i], a[j]) && a[i].x0 < a[j].x1 && a[j].x0 < a[i].x1) return true; return false; };
+  const placeLeft = (fs) => fOn.map((f) => boxAt(f, fs, X0 + fPadX));
+  let fCss = fTarget, fLabs = placeLeft(fCss);
+  while (fCss > fMin + 0.01 && anyVertOverlap(fLabs)) { fCss = Math.max(fMin, Math.round((fCss - 0.5) * 10) / 10); fLabs = placeLeft(fCss); }
+  const shifted = [];
+  if (anyVertOverlap(fLabs)) {
+    const laid = [];
+    fLabs = fOn.map((f) => {
+      let b = boxAt(f, fCss, X0 + fPadX);
+      for (const o of laid) if (yOverlap(b, o) && b.x0 < o.x1 && o.x0 < b.x1) { b = boxAt(f, fCss, o.x1 + fShift); b.offset = true; shifted.push(b.k); }
+      laid.push(b); return b;
+    });
+    if (shifted.length) window.__tideFloodLabelNote = `${D.name}: offset ${shifted.join(", ")} at ${fCss}px (min type, lines still too close vertically)`;
   }
-  for (const b of fLabs) { c.strokeStyle = FCOL[b.k]; c.lineWidth = 2 * s; c.setLineDash([9 * s, 6 * s]); c.beginPath(); c.moveTo(b.lineX0, b.ly); c.lineTo(b.lineX1, b.ly); c.stroke(); c.setLineDash([]); }
-  fTag.push(() => { c.setLineDash([]); c.textAlign = "left"; c.textBaseline = "alphabetic"; c.font = `700 ${fCss}px Montserrat, system-ui, sans-serif`;
+  const lineHitsLabel = (ln, lab) => ln.k !== lab.k && lab.y0 < ln.ly + fLineW / 2 + 0.5 && lab.y1 > ln.ly - fLineW / 2 - 0.5;
+  for (const ln of fLabs) ln.knockouts = fLabs.filter((lab) => lineHitsLabel(ln, lab)).map((lab) => ({ k: lab.k, x0: lab.x0 - fKo, x1: lab.x1 + fKo }));
+  const dashSeg = (x0, y, x1, col) => { if (x1 - x0 < 0.5) return; c.strokeStyle = col; c.lineWidth = fLineW; c.setLineDash([9 * s, 6 * s]); c.beginPath(); c.moveTo(x0, y); c.lineTo(x1, y); c.stroke(); c.setLineDash([]); };
+  for (const b of fLabs) {
+    const kos = b.knockouts.slice().sort((a, z) => a.x0 - z.x0); let x = X0;
+    for (const k of kos) { dashSeg(x, b.ly, Math.min(k.x0, X1), FCOL[b.k]); c.fillStyle = COL.bg; c.fillRect(k.x0, b.ly - fLineW / 2 - 1, Math.max(0, k.x1 - k.x0), fLineW + 2); x = Math.max(x, k.x1); }
+    dashSeg(x, b.ly, X1, FCOL[b.k]);
+  }
+  fTag.push(() => { c.setLineDash([]); c.textAlign = "left"; c.textBaseline = "alphabetic"; c.font = fFont(fCss);
     for (const b of fLabs) { c.lineWidth = fHalo; c.strokeStyle = COL.bg; c.strokeText(b.lab, b.x0, b.base); c.fillStyle = FCOL[b.k]; c.fillText(b.lab, b.x0, b.base); } });
-  window.__tideFloodLabels = fLabs.map((b) => ({ k: b.k, x0: b.x0, x1: b.x1, y0: b.y0, y1: b.y1, ly: b.ly, lineX0: b.lineX0, lineX1: b.lineX1, plotX0: b.plotX0, plotX1: b.plotX1, fontCss: b.fontCss, lineW: b.lineW, s: b.s }));
+  window.__tideFloodLabels = fLabs.map((b) => ({ k: b.k, x0: b.x0, x1: b.x1, y0: b.y0, y1: b.y1, ly: b.ly, lineX0: b.lineX0, lineX1: b.lineX1, knockouts: b.knockouts, offset: b.offset, plotX0: b.plotX0, plotX1: b.plotX1, fontCss: b.fontCss, lineW: b.lineW, s: b.s }));
   window.__tideFloodDrawn = fOn.map((f) => f.k);
   const line = (pts, col, w, gapMs) => { if (!pts.length) return; c.strokeStyle = col; c.lineWidth = w * s; c.lineJoin = "round"; c.lineCap = "round"; c.beginPath(); let pen = false, lt = 0;
     for (const [t, v] of pts) { const x = X(t), y = Y(v); if (!pen || (gapMs && t - lt > gapMs)) { c.moveTo(x, y); pen = true; } else c.lineTo(x, y); lt = t; } c.stroke(); };

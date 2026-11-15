@@ -19,12 +19,13 @@ pass_chart_guard.py and label_sharpness_guard.py (towns only). Checks:
     dashboard file, NWS NWPS gauge) agrees with the FLOOD table in the served tide.js within 0.05 ft and no source disagrees;
     on every station the page's minor/moderate/major lines equal that table, nothing unverified is drawn, every level within
     3 ft of the data is drawn, and the three flood colors are painted where all three are in range (Westport, Cherry Point);
-    each name sits on top of its own line (bottom 0-3 px above), on the left of the plot; close levels are staggered
-    left-to-right (Minor, Moderate, Major); a label's box must not overlap another label or any other flood line
-    (the previous stacked Westport crop failed this); type is ~9.5 CSS px on desktop and at least 9 CSS px on phones;
-    the same label rules are checked at 1440x900, 1920x1080 and 390x844 for Westport, Seattle, Tacoma, Friday Harbor,
-    Port Townsend, Cherry Point and Birch Bay; the legend does not include flood-stage rows (those are on the lines
-    and in the hover readout)
+    each name sits at the far left (X0 + small pad) with its bottom 0-3 px above its own line, ~9.5 CSS px
+    (at least 9 if close stages would overlap; only then may the higher word shift right, and that station is noted);
+    every flood line spans the full plot (>= 95% of plot width) with knockouts no wider than the intersecting
+    label box + 6 px where another line would run through a word; no visible line pixels inside any label box
+    and no label-label overlap. The 623f9aa truncated-line layout must fail this. The same label rules are checked
+    at 1440x900, 1920x1080 and 390x844 for Westport, Seattle, Tacoma, Friday Harbor, Port Townsend, Cherry Point
+    and Birch Bay; the legend does not include flood-stage rows (those are on the lines and in the hover readout)
   8 (t3052u) hover readout: on the desktop page, moving the pointer over the plot shows a tooltip and a vertical crosshair
     with the time in Pacific, values of the visible series, and the station's flood stages; on the phone a tap does the same;
     Studio > Tides 16:9 frame also shows the readout on hover
@@ -100,7 +101,7 @@ def flood_triple_check():
 FLABEL_ORDER = ("minor", "moderate", "major")
 
 def check_flood_labels(tag, q, phone=False):
-    """Label geometry: sit on their own line, staggered on the left, no line through a word, readable type."""
+    """Full-width flood lines with far-left names; knockouts only where a line would run through a word."""
     labs = q.get("floodLabels") or []
     exp = sorted(q.get("floodDrawn") or [])
     if sorted(l["k"] for l in labs) != exp:
@@ -111,6 +112,7 @@ def check_flood_labels(tag, q, phone=False):
     s = labs[0].get("s") or 1
     plotX0 = labs[0].get("plotX0", 0)
     plotX1 = labs[0].get("plotX1")
+    plotW = (plotX1 - plotX0) if plotX1 is not None else None
     for l in labs:
         if "y1" not in l or "ly" not in l:
             fail(f"flood: {tag} {l.get('k')} label missing y1/ly ({l})"); continue
@@ -124,54 +126,113 @@ def check_flood_labels(tag, q, phone=False):
             fail(f"flood: {tag} {l['k']} fontCss {css} is below 9px")
         elif (not phone) and s <= 1.35 and not (9.0 <= css <= 10.5):
             fail(f"flood: {tag} {l['k']} fontCss {css} is not ~9.5px on desktop")
-    left = min(labs, key=lambda l: l["x0"])
-    pad = left["x0"] - plotX0
-    if pad < 3 * s or pad > 10 * s:
-        fail(f"flood: {tag} leftmost {left['k']} is not at the far left (x0-plotX0={pad:.1f}, s={s})")
-    if plotX1 is not None:
-        mid = plotX0 + 0.5 * (plotX1 - plotX0)
-        for l in labs:
-            if l["x1"] > mid:
-                fail(f"flood: {tag} {l['k']} is not on the left side of the plot (x1={l['x1']:.1f}, mid={mid:.1f})")
-    present = [k for k in FLABEL_ORDER if any(l["k"] == k for l in labs)]
-    byk = {l["k"]: l for l in labs}
-    for a, b_ in zip(present, present[1:]):
-        if byk[a]["x0"] > byk[b_]["x0"] - 1:
-            fail(f"flood: {tag} labels not staggered left-to-right ({a} then {b_})")
+        lx0 = l.get("lineX0", plotX0)
+        lx1 = l.get("lineX1", plotX1 if plotX1 is not None else lx0)
+        if plotW and plotW > 0:
+            if lx0 > plotX0 + 2 or lx1 < plotX1 - 2:
+                fail(f"flood: {tag} {l['k']} line does not start/end at the plot edge (line {lx0:.1f}-{lx1:.1f}, plot {plotX0:.1f}-{plotX1:.1f})")
+            span = (lx1 - lx0) / plotW
+            if span < 0.95:
+                fail(f"flood: {tag} {l['k']} line spans {100*span:.1f}% of the plot (need >= 95%)")
+        byk = {x["k"]: x for x in labs}
+        for ko in (l.get("knockouts") or []):
+            src = byk.get(ko.get("k"))
+            width = ko["x1"] - ko["x0"]
+            maxw = ((src["x1"] - src["x0"]) + 6) if src else 6
+            if width > maxw + 0.55:
+                fail(f"flood: {tag} {l['k']} knockout for {ko.get('k')} is {width:.1f}px wide (max {maxw:.1f})")
+    # far left: every non-offset word; offset is allowed only when noted
+    for l in labs:
+        pad = l["x0"] - plotX0
+        if l.get("offset"):
+            if not (q.get("floodLabelNote") or ""):
+                fail(f"flood: {tag} {l['k']} is offset but no floodLabelNote was set")
+            if plotW and l["x1"] > plotX0 + 0.5 * plotW:
+                fail(f"flood: {tag} offset {l['k']} is not on the left side of the plot")
+        elif pad < 3 * s or pad > 10 * s:
+            fail(f"flood: {tag} {l['k']} is not at the far left (x0-plotX0={pad:.1f}, s={s})")
+    if q.get("floodLabelNote"):
+        print(f"  note {tag}: {q.get('floodLabelNote')}")
     for i, a_ in enumerate(labs):
         for b_ in labs[i + 1:]:
             if a_["x0"] < b_["x1"] and b_["x0"] < a_["x1"] and a_["y0"] < b_["y1"] and b_["y0"] < a_["y1"]:
                 fail(f"flood: {tag} labels {a_['k']}/{b_['k']} overlap")
+    # a line may not run through another word unless that x-range is knocked out
     for l in labs:
         for o in labs:
             if o["k"] == l["k"]:
                 continue
             half = (o.get("lineW") or 2) / 2
-            lx0 = o.get("lineX0", o.get("plotX0", 0))
-            lx1 = o.get("lineX1", o.get("plotX1", 1e9))
-            if l["x0"] < lx1 and l["x1"] > lx0 and l["y0"] < o["ly"] + half + 0.5 and l["y1"] > o["ly"] - half - 0.5:
-                fail(f"flood: {tag} {o['k']} line passes through {l['k']} label")
+            if not (l["y0"] < o["ly"] + half + 0.5 and l["y1"] > o["ly"] - half - 0.5):
+                continue
+            covered = False
+            for ko in (o.get("knockouts") or []):
+                if ko["x0"] <= l["x0"] + 0.5 and ko["x1"] >= l["x1"] - 0.5:
+                    covered = True; break
+            if not covered:
+                fail(f"flood: {tag} {o['k']} line passes through {l['k']} label without a knockout")
 
-def old_stacked_westport_would_fail():
-    """The pre-stagger Westport crop (Major line through Moderate) must fail the new check."""
-    # Reported boxes from the failing 1920x1080 crop load, plus full-width lines as actually drawn then.
-    # Pixel sampling of crop_westport_flood_labels@2x.png showed the purple line and "Moderate" sharing a row.
-    old = [
-        {"k": "minor", "x0": 82.5, "x1": 118.5, "y0": 226.46, "y1": 237.46, "ly": 239.46, "plotX0": 75, "plotX1": 1400, "fontCss": 7.4, "lineW": 2.5, "s": 1.25, "lineX0": 75, "lineX1": 1400},
-        {"k": "moderate", "x0": 82.5, "x1": 142.5, "y0": 208.06, "y1": 218.06, "ly": 220.06, "plotX0": 75, "plotX1": 1400, "fontCss": 7.4, "lineW": 2.5, "s": 1.25, "lineX0": 75, "lineX1": 1400},
-        {"k": "major", "x0": 82.5, "x1": 117.5, "y0": 185.65, "y1": 198.65, "ly": 200.65, "plotX0": 75, "plotX1": 1400, "fontCss": 7.4, "lineW": 2.5, "s": 1.25, "lineX0": 75, "lineX1": 1400},
-    ]
-    # Inflate to the visual ink seen in the crop: the Major line sits inside Moderate's letters (~8 CSS px of overlap in the @2x png).
-    old[1]["y0"] = 198.0  # visual top of "Moderate" at or above the Major line (200.65)
+def _regression_must_fail(name, q, expect_sub):
     n0 = len(fails)
-    check_flood_labels("regression-old-westport-crop", {"floodLabels": old, "floodDrawn": ["major", "minor", "moderate"]})
+    check_flood_labels(name, q)
     new_fails = fails[n0:]
-    # undo the recorded fails so the guard result reflects the live page only, but REQUIRE that the old crop was caught
     del fails[n0:]
-    if not new_fails:
-        fail("flood: guard would still pass the old Westport crop (Major line through Moderate) — intersection check is too weak")
+    text = "; ".join(m for m, _ in new_fails)
+    if not new_fails or not any(s in text for s in expect_sub):
+        fail(f"flood: guard would still pass {name} (got: {text or 'no fails'})")
     else:
-        print("  regression: old stacked Westport crop correctly FAILs: " + "; ".join(m for m, _ in new_fails))
+        print(f"  regression: {name} correctly FAILs: {text}")
+
+def old_layout_regressions():
+    """623f9aa truncated lines, and the earlier stacked crop with a line through Moderate, must both fail."""
+    # 623f9aa Westport 1920x1080: lines started at the word, so Major/Moderate did not span the hindcast.
+    trunc = [
+        {"k": "minor", "x0": 82.5, "x1": 113.5, "y0": 225.96, "y1": 237.46, "ly": 239.46, "plotX0": 75, "plotX1": 1876.5, "fontCss": 9.5, "lineW": 2.5, "s": 1.25, "lineX0": 82.5, "lineX1": 1876.5, "offset": False, "knockouts": []},
+        {"k": "moderate", "x0": 121.5, "x1": 171.5, "y0": 206.56, "y1": 218.06, "ly": 220.06, "plotX0": 75, "plotX1": 1876.5, "fontCss": 9.5, "lineW": 2.5, "s": 1.25, "lineX0": 121.5, "lineX1": 1876.5, "offset": False, "knockouts": []},
+        {"k": "major", "x0": 179.5, "x1": 209.5, "y0": 187.15, "y1": 198.65, "ly": 200.65, "plotX0": 75, "plotX1": 1876.5, "fontCss": 9.5, "lineW": 2.5, "s": 1.25, "lineX0": 179.5, "lineX1": 1876.5, "offset": False, "knockouts": []},
+    ]
+    _regression_must_fail("regression-623f9aa-truncated-lines",
+                          {"floodLabels": trunc, "floodDrawn": ["major", "minor", "moderate"]},
+                          ["does not start/end at the plot edge", "spans "])
+    # Earlier stacked layout: full-width lines, Major line through Moderate, no knockout.
+    stacked = [
+        {"k": "minor", "x0": 82.5, "x1": 118.5, "y0": 226.46, "y1": 237.46, "ly": 239.46, "plotX0": 75, "plotX1": 1400, "fontCss": 9.5, "lineW": 2.5, "s": 1.25, "lineX0": 75, "lineX1": 1400, "offset": False, "knockouts": []},
+        {"k": "moderate", "x0": 82.5, "x1": 142.5, "y0": 198.0, "y1": 218.06, "ly": 220.06, "plotX0": 75, "plotX1": 1400, "fontCss": 9.5, "lineW": 2.5, "s": 1.25, "lineX0": 75, "lineX1": 1400, "offset": False, "knockouts": []},
+        {"k": "major", "x0": 82.5, "x1": 117.5, "y0": 185.65, "y1": 198.65, "ly": 200.65, "plotX0": 75, "plotX1": 1400, "fontCss": 9.5, "lineW": 2.5, "s": 1.25, "lineX0": 75, "lineX1": 1400, "offset": False, "knockouts": []},
+    ]
+    _regression_must_fail("regression-stacked-line-through-word",
+                          {"floodLabels": stacked, "floodDrawn": ["major", "minor", "moderate"]},
+                          ["passes through", "overlap"])
+
+PIXEL_OTHER_LINE = """() => {
+  const q = window.TIDE.qa(), labs = q.floodLabels || [];
+  const c = document.getElementById('tc'); if (!c) return {err: 'no canvas'};
+  const g = c.getContext('2d');
+  const dpr = (window.__tideSharp && window.__tideSharp.dpr) || 1;
+  const cols = {minor:[255,122,69], moderate:[230,25,75], major:[199,75,255]};
+  const near = (p, t) => Math.abs(p[0]-t[0])<18 && Math.abs(p[1]-t[1])<18 && Math.abs(p[2]-t[2])<18;
+  const hits = [];
+  for (const l of labs) {
+    const x0 = Math.max(0, Math.floor(l.x0 * dpr) + 1), x1 = Math.min(c.width, Math.ceil(l.x1 * dpr) - 1);
+    const y0 = Math.max(0, Math.floor(l.y0 * dpr) + 1), y1 = Math.min(c.height, Math.ceil(l.y1 * dpr) - 1);
+    if (x1 <= x0 || y1 <= y0) continue;
+    const d = g.getImageData(x0, y0, x1 - x0, y1 - y0).data;
+    const count = {minor:0, moderate:0, major:0};
+    for (let i = 0; i < d.length; i += 4) {
+      for (const k of Object.keys(cols)) if (k !== l.k && near([d[i], d[i+1], d[i+2]], cols[k])) count[k]++;
+    }
+    const bad = Object.entries(count).filter(([, n]) => n > 8);
+    if (bad.length) hits.push({k: l.k, bad});
+  }
+  return {hits};
+}"""
+
+async def check_label_pixels(pg, tag):
+    hit = await pg.evaluate(PIXEL_OTHER_LINE)
+    if hit.get("err"):
+        fail(f"flood: {tag} pixel check {hit['err']}")
+    elif hit.get("hits"):
+        fail(f"flood: {tag} visible other-line pixels inside label(s) {hit['hits']}")
 
 async def label_viewports_check(br):
     """Extra sizes for the close-level stations (1440x900 is already covered in stations_check)."""
@@ -192,7 +253,8 @@ async def label_viewports_check(br):
             await pg.wait_for_timeout(250)
             q = await pg.evaluate("() => window.TIDE.qa()")
             check_flood_labels(tag, q, phone=phone)
-            print(f"  labels {tag}: fontCss={(q.get('floodLabels') or [{}])[0].get('fontCss')} labels={[l['k'] for l in (q.get('floodLabels') or [])]}")
+            await check_label_pixels(pg, tag)
+            print(f"  labels {tag}: fontCss={(q.get('floodLabels') or [{}])[0].get('fontCss')} offset={[l['k'] for l in (q.get('floodLabels') or []) if l.get('offset')]} note={q.get('floodLabelNote')} labels={[l['k'] for l in (q.get('floodLabels') or [])]}")
         await ctx.close()
 
 async def stations_check(br, table, alias):
@@ -232,8 +294,9 @@ async def stations_check(br, table, alias):
             if extra: fail(f"flood: {nm} draws unverified levels {extra}")
         exp = sorted(k for k, v in got.items() if v < q["dataHi"] + 3)
         if sorted(q.get("floodDrawn") or []) != exp: fail(f"flood: {nm} lines drawn {q.get('floodDrawn')} but in range {exp}")
-        # t3052u: sit on their own line, staggered on the left, no line through a word, readable type
+        # t3052u: full-width lines, far-left names, knockouts, no line pixels in a word
         check_flood_labels(nm, q, phone=False)
+        await check_label_pixels(pg, nm)
         leg = q.get("legend") or []
         if any("flood" in (x or "").lower() for x in leg): fail(f"flood: {nm} legend still has flood rows {leg}")
         if not any("Official prediction" in (x or "") for x in leg): fail(f"flood: {nm} legend missing Official prediction ({leg})")
@@ -414,7 +477,7 @@ async def main():
         await tide_page(br, 1440, 900, 2, False, "desk")
         await tide_page(br, 390, 844, 3, True, "phone")
         table, alias = flood_triple_check()
-        old_stacked_westport_would_fail()
+        old_layout_regressions()
         await stations_check(br, table, alias or {})
         await label_viewports_check(br)
         await studio(br)
