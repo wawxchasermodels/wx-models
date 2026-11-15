@@ -57,13 +57,31 @@ async def main():
         await load(pg, "st=9441102&days=9")
         await crop_legend(pg, O / "crop_westport_legend_no_flood_rows@2x.png")
         await crop_labels(pg, O / "crop_westport_flood_labels@2x.png")
-        # desktop hover
-        box = await pg.evaluate("() => { const r = document.getElementById('tc').getBoundingClientRect(); return {x: r.left + r.width * 0.55, y: r.top + r.height * 0.42}; }")
+        # desktop flood ON (default) and OFF
+        await pg.screenshot(path=str(O / "web_westport_flood_on_1920x1080@2x.png"))
+        await pg.click("#floodtog"); await pg.wait_for_timeout(200)
+        off = await pg.evaluate("() => ({ on: TIDE.qa().floodOn, drawn: TIDE.qa().floodDrawn, pressed: document.getElementById('floodtog').getAttribute('aria-pressed') })")
+        print("desktop flood off", off)
+        await pg.screenshot(path=str(O / "web_westport_flood_off_1920x1080@2x.png"))
+        await pg.click("#floodtog"); await pg.wait_for_timeout(200)
+        # desktop hover at a high tide (not a mid-range point that buries the curves)
+        box = await pg.evaluate("""() => {
+          const g = TIDE.geom(), D = TIDE.state(), r = document.getElementById('tc').getBoundingClientRect();
+          let best = null;
+          for (const [t, v] of D.pred) {
+            if (t < D.R.start || t > D.R.end) continue;
+            if (!best || v > best.v) best = {t, v};
+          }
+          const x = r.left + g.X(best.t);
+          const y = r.top + (g.Y0 + g.Y1) / 2;
+          return {x, y, t: best.t, v: best.v};
+        }""")
+        print("desktop high tide target", box)
         await pg.mouse.move(box["x"], box["y"]); await pg.wait_for_timeout(300)
         hov = await pg.evaluate("() => ({ text: document.getElementById('tip').innerText, hidden: document.getElementById('tip').hidden, h: window.__tideHover })")
-        print("desktop hover", json.dumps(hov)[:500])
+        print("desktop hover", json.dumps(hov)[:800])
         await pg.screenshot(path=str(O / "web_westport_hover_1920x1080@2x.png"))
-        # close crop of tooltip
+        # close crop of the readout strip (and a little of the chart above the plot)
         tip = await pg.evaluate("""() => { const t = document.getElementById('tip'); const r = t.getBoundingClientRect();
           return {x: Math.max(0,r.left-16), y: Math.max(0,r.top-16), width: r.width+32, height: r.height+32, hidden: t.hidden}; }""")
         if not tip["hidden"]:
@@ -74,12 +92,25 @@ async def main():
         for st, nm in STS:
             await load(ph, f"st={st}&days=9")
             await ph.screenshot(path=str(O / f"phone_{nm}_floodlines_390x844@3x.png"))
-        # phone tooltip via tap
+        # phone flood OFF
         await load(ph, "st=9441102&days=9")
-        box = await ph.evaluate("() => { const r = document.getElementById('tc').getBoundingClientRect(); return {x: r.left + r.width * 0.55, y: r.top + r.height * 0.42}; }")
+        await ph.click("#floodtog"); await ph.wait_for_timeout(200)
+        print("phone flood off", await ph.evaluate("() => ({ on: TIDE.qa().floodOn, drawn: TIDE.qa().floodDrawn })"))
+        await ph.screenshot(path=str(O / "phone_westport_flood_off_390x844@3x.png"))
+        await ph.click("#floodtog"); await ph.wait_for_timeout(200)
+        # phone tooltip via tap at a high tide
+        box = await ph.evaluate("""() => {
+          const g = TIDE.geom(), D = TIDE.state(), r = document.getElementById('tc').getBoundingClientRect();
+          let best = null;
+          for (const [t, v] of D.pred) {
+            if (t < D.R.start || t > D.R.end) continue;
+            if (!best || v > best.v) best = {t, v};
+          }
+          return {x: r.left + g.X(best.t), y: r.top + (g.Y0 + g.Y1) / 2, t: best.t, v: best.v};
+        }""")
         await ph.touchscreen.tap(box["x"], box["y"]); await ph.wait_for_timeout(400)
         hov = await ph.evaluate("() => ({ text: document.getElementById('tip').innerText, hidden: document.getElementById('tip').hidden, h: window.__tideHover })")
-        print("phone hover", json.dumps(hov)[:500])
+        print("phone hover", json.dumps(hov)[:800])
         await ph.screenshot(path=str(O / "phone_westport_tooltip_390x844@3x.png"))
 
         # Studio

@@ -816,16 +816,17 @@ function renderTide(k) {
   MG.tideGeom = MG.tideGeom || {}; MG.tideGeom[k] = g;
   window.__studio = (window.__studio || 0) + 1; window.__studioTide = (window.__studioTide || 0) + 1;
 }
-// t3052u: hover / tap readout on Studio tide frames (same values as the tide page)
+// t3052u / t3060u: hover / tap readout on Studio tide frames, as a strip outside the plot (never over the curves)
 function bindTideHover() {
   for (const k of ["v", "h"]) {
     const cv = F[k].cv; if (!cv || cv._tideHoverBound) continue; cv._tideHoverBound = true;
     const tip = document.createElement("div"); tip.className = "tide-tip"; tip.hidden = true;
-    tip.style.cssText = "position:absolute;pointer-events:none;z-index:5;background:#1d2027ee;color:#fff;border:1px solid #7d828c;border-radius:6px;padding:4px 8px;font:600 13px Montserrat,system-ui,sans-serif;white-space:nowrap;line-height:1.45";
+    tip.style.cssText = "position:absolute;pointer-events:none;z-index:5;background:#1d2027f2;color:#fff;border:1px solid #7d828c;border-radius:6px;padding:3px 8px;font:600 12.5px Montserrat,system-ui,sans-serif;line-height:1.35;display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 8px;box-sizing:border-box;max-width:calc(100% - 16px)";
+    if (!document.getElementById("tideTipCSS")) { const st = document.createElement("style"); st.id = "tideTipCSS"; st.textContent = ".tide-tip .tt,.tide-tip .tv{white-space:nowrap}"; document.head.appendChild(st); }
     cv.parentNode.appendChild(tip); F[k].tideTip = tip;
     const at = (e) => {
       if (!TIDEM() || !MG.tide) { tip.hidden = true; return; }
-      const f = F[k], b = cv.getBoundingClientRect();
+      const f = F[k], b = cv.getBoundingClientRect(), pr = cv.parentNode.getBoundingClientRect();
       const x = (e.clientX - b.left) * (f.W / Math.max(1, b.width)), y = (e.clientY - b.top) * (f.H / Math.max(1, b.height));
       const m = k === "v" ? 40 : 34, g = MG.tideGeom && MG.tideGeom[k], st = MG.tide.state && MG.tide.state();
       if (!g || !st || x < m + g.X0 || x > m + g.X1 || y < m + g.Y0 || y > m + g.Y1) {
@@ -837,13 +838,21 @@ function bindTideHover() {
       if (MG.tideHover[k] !== tt) { MG.tideHover[k] = tt; render(k); }
       const info = MG.tide.readout && MG.tide.readout(tt);
       if (!info) { tip.hidden = true; return; }
+      const sx = b.width / Math.max(1, f.W), sy = b.height / Math.max(1, f.H);
+      const plot = { x: (b.left - pr.left) + (m + g.X0) * sx, y: (b.top - pr.top) + (m + g.Y0) * sy, w: (g.X1 - g.X0) * sx, h: (g.Y1 - g.Y0) * sy };
       tip.innerHTML = info.html; tip.hidden = false;
-      const tw = tip.offsetWidth, th = tip.offsetHeight;
-      let lx = e.clientX - b.left + 14, ly = e.clientY - b.top - th - 10;
-      if (lx + tw > b.width - 4) lx = e.clientX - b.left - tw - 12;
-      if (lx < 4) lx = 4; if (ly < 4) ly = e.clientY - b.top + 14;
+      tip.style.maxWidth = Math.max(80, plot.w) + "px";
+      tip.style.left = "0px"; tip.style.top = "0px";
+      const tw = tip.offsetWidth, th = tip.offsetHeight, gap = 3;
+      let lx = plot.x, ly = plot.y - th - gap;
+      const parentH = pr.height, parentW = pr.width;
+      const overlap = (x0, y0) => x0 + tw > plot.x + 0.5 && plot.x + plot.w > x0 + 0.5 && y0 + th > plot.y + 0.5 && plot.y + plot.h > y0 + 0.5;
+      if (th > 32 || ly < 2 || overlap(lx, ly)) { ly = plot.y + plot.h + gap; if (ly + th > parentH - 2) ly = Math.max(plot.y + plot.h + 1, parentH - th - 2); }
+      if (lx + tw > parentW - 4) lx = Math.max(4, parentW - tw - 4);
+      if (lx < 4) lx = 4;
       tip.style.left = lx + "px"; tip.style.top = ly + "px";
-      if (k === "h") window.__studioTideHover = { t: tt, frame: "h", rows: info.rows, x: g.X(tt) };
+      const tipBox = { x: lx, y: ly, w: tip.offsetWidth, h: tip.offsetHeight };
+      if (k === "h") window.__studioTideHover = { t: tt, frame: "h", rows: info.rows, x: g.X(tt), tip: tipBox, plot };
     };
     cv.addEventListener("pointermove", (e) => { if (!TIDEM() || e.pointerType === "touch") return; at(e); });
     cv.addEventListener("pointerleave", () => {

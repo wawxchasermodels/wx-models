@@ -38,11 +38,15 @@ const TAU_BIAS = 12 * HR, TAU_RELAX = 24 * HR, SLOW_DAYS = 30;
 const Q = new URLSearchParams(location.search), STUDIO = !!Q.get("studio");
 const $ = (id) => document.getElementById(id);
 const T = { st: Q.get("st") || localStorage.getItem("tide:st") || "9441102", from: Q.get("from") || "", days: +(Q.get("days") || 9),
-  vl: +(Q.get("vl") ?? 24), sd: +(Q.get("sd") || 7) };
+  vl: +(Q.get("vl") ?? 24), sd: +(Q.get("sd") || 7), flood: true };
 if (!LEADS.includes(T.vl)) T.vl = 24;
 if (!SDAYS.includes(T.sd)) T.sd = 7;
 if (!STATIONS.some((s) => s[0] === T.st)) T.st = "9441102";
 if (!DAYS.includes(T.days)) T.days = 9;
+{ const qf = Q.get("flood");
+  if (qf === "0" || qf === "off") T.flood = false;
+  else if (qf === "1" || qf === "on") T.flood = true;
+  else { try { if (localStorage.getItem("tide:flood") === "0") T.flood = false; } catch (e) { /* private */ } } }
 let D = null, seq = 0;
 window.__tideDrawn = 0;
 
@@ -281,7 +285,7 @@ function drawChart(c, W, H, opt) {
   const X0 = pad + yL, X1 = W - xR, Y0 = top + 10 * s, Y1 = H - bottomInfo - axisH;
   // y range
   let lo = Infinity, hi = -Infinity; const scan = (a) => { for (const [, v] of a) { if (v < lo) lo = v; if (v > hi) hi = v; } };
-  scan(D.pred); scan(D.obs); scan(D.cond); scan(D.ver); { const hd = hi; for (const f of D.floods) if (f.v < hd + 3) hi = Math.max(hi, f.v); }   // same rule as minor, per level
+  scan(D.pred); scan(D.obs); scan(D.cond); scan(D.ver); if (T.flood) { const hd = hi; for (const f of D.floods) if (f.v < hd + 3) hi = Math.max(hi, f.v); }   // same rule as minor, per level; skipped when Flood levels is off
   const padY = (hi - lo) * 0.08 + 0.3; lo -= padY; hi += padY;
   const ys = niceStep(hi - lo, portrait ? 10 : 7); lo = Math.floor(lo / ys) * ys; hi = Math.ceil(hi / ys) * ys;
   const X = (t) => X0 + (t - R.start) / (R.end - R.start) * (X1 - X0), Y = (v) => Y1 - (v - lo) / (hi - lo) * (Y1 - Y0);
@@ -300,7 +304,7 @@ function drawChart(c, W, H, opt) {
   // clip plot
   c.save(); c.beginPath(); c.rect(X0, Y0, X1 - X0, Y1 - Y0); c.clip();
   window.__tideFloodDrawn = []; window.__tideFloodLabels = []; window.__tideFloodLabelNote = null; const fTag = [];
-  const fOn = D.floods.filter((f) => f.v >= lo && f.v <= hi);
+  const fOn = T.flood ? D.floods.filter((f) => f.v >= lo && f.v <= hi) : [];
   // t3052u: every flood line spans the full plot. Names sit at the far left, 9.5 CSS px (Studio: 9.5*s),
   // bottom 2 px above their own line. If another line would run through a word, knock out a short gap
   // in that line only (chart-bg, a few px past the box). Shrink to 9 px if words overlap; only then shift the higher word right.
@@ -417,25 +421,45 @@ function readout(t) {
   if (o != null) rows.push({ k: "obs", lab: "Observed", col: COL.obs, v: o });
   if (vv != null) rows.push({ k: "ver", lab: "Conditional, verified", col: COL.ver, v: vv });
   if (cc != null) rows.push({ k: "cond", lab: "Conditional Prediction", col: COL.cond, v: cc });
-  for (const f of D.floods) rows.push({ k: "flood-" + f.k, lab: f.lab + " flood", col: FCOL[f.k], v: f.v, flood: true });
-  const html = `${fDay.format(new Date(t))} ${fTime.format(new Date(t))} ${zoneName(t)}` +
-    rows.map((r) => `<br><span style="color:${r.col}">${r.lab} ${r.v.toFixed(2)} ft</span>`).join("");
+  if (T.flood) for (const f of D.floods) rows.push({ k: "flood-" + f.k, lab: f.lab + " flood", col: FCOL[f.k], v: f.v, flood: true });
+  const time = `${fDay.format(new Date(t))} ${fTime.format(new Date(t))} ${zoneName(t)}`;
+  const bits = rows.map((r) => `<span class="tv" style="color:${r.col}">${r.lab} ${r.v.toFixed(2)} ft</span>`);
+  const html = `<span class="tt">${time}</span>` + bits.join("");
   return { t, rows, html };
+}
+function overlaps(a, b, eps) { eps = eps || 0.5; return a.x + a.w > b.x + eps && b.x + b.w > a.x + eps && a.y + a.h > b.y + eps && b.y + b.h > a.y + eps; }
+// Place the compact readout as a strip outside the plot (above it if it fits, otherwise below). Never covers the curves.
+function placeStrip(tip, box, plot, maxW) {
+  const gap = 3;
+  tip.style.maxWidth = Math.max(80, maxW) + "px";
+  tip.style.left = "0px"; tip.style.top = "0px";
+  const tw = tip.offsetWidth, th = tip.offsetHeight;
+  let left = plot.x, top = plot.y - th - gap;
+  // One-line strips sit just above the plot (under the title/legend). Taller wrapped strips go below so they don't cover the legend.
+  const aboveOk = th <= 32 && top >= box.y + 2 && !overlaps({ x: left, y: top, w: tw, h: th }, plot);
+  if (!aboveOk) {
+    top = plot.y + plot.h + gap;
+    if (top + th > box.y + box.h - 2) top = Math.max(plot.y + plot.h + 1, box.y + box.h - th - 2);
+  }
+  if (left + tw > box.x + box.w - 4) left = Math.max(box.x + 4, box.x + box.w - tw - 4);
+  if (left < box.x + 4) left = box.x + 4;
+  tip.style.left = left + "px"; tip.style.top = top + "px";
+  return { x: left, y: top, w: tip.offsetWidth, h: tip.offsetHeight };
 }
 function placeTip(cssX, cssY) {
   const tip = $("tip"), cv = $("tc"), wrap = $("wrap"); if (!tip || !cv || !wrap || STUDIO) return;
   const info = readout(hoverT);
   if (!info) { tip.hidden = true; window.__tideHover = null; return; }
   tip.innerHTML = info.html; tip.hidden = false;
-  const ox = cv.offsetLeft, oy = cv.offsetTop, tw = tip.offsetWidth, th = tip.offsetHeight;
-  let left = ox + cssX + 14, top = oy + cssY - th - 8;
-  if (left + tw > wrap.clientWidth - 4) left = ox + cssX - tw - 12;
-  if (left < 4) left = 4;
-  if (top < 4) top = oy + cssY + 14;
-  if (top + th > wrap.clientHeight - 4) top = Math.max(4, wrap.clientHeight - th - 4);
-  tip.style.left = left + "px"; tip.style.top = top + "px";
+  const ox = cv.offsetLeft, oy = cv.offsetTop;
+  const plot = geom ? { x: ox + geom.X0, y: oy + geom.Y0, w: geom.X1 - geom.X0, h: geom.Y1 - geom.Y0 } : { x: ox + 8, y: oy + 80, w: cv.clientWidth - 16, h: 200 };
+  const box = { x: 0, y: 0, w: wrap.clientWidth, h: wrap.clientHeight };
+  const tipBox = placeStrip(tip, box, plot, plot.w);
+  // Guard uses canvas CSS pixels (origin at the canvas, not the wrap).
+  const tipCv = { x: tipBox.x - ox, y: tipBox.y - oy, w: tipBox.w, h: tipBox.h };
+  const plotCv = geom ? { x: geom.X0, y: geom.Y0, w: geom.X1 - geom.X0, h: geom.Y1 - geom.Y0 } : null;
   const x = geom ? geom.X(hoverT) : cssX;
-  window.__tideHover = { t: hoverT, x, y0: geom ? geom.Y0 : 0, y1: geom ? geom.Y1 : 0, rows: info.rows };
+  window.__tideHover = { t: hoverT, x, y0: geom ? geom.Y0 : 0, y1: geom ? geom.Y1 : 0, rows: info.rows, tip: tipCv, plot: plotCv };
 }
 function clearHover() { hoverT = null; window.__tideHover = null; const tip = $("tip"); if (tip) tip.hidden = true; if (!STUDIO) draw(); }
 function applyHover(clientX, clientY, fromTouch) {
@@ -467,6 +491,10 @@ function ui() {
   const vl = $("vl"), sd = $("sd");
   if (vl) { vl.innerHTML = LEADS.map((l) => `<option value="${l}">${l ? `${l}\u2013${l + 6} h` : "Off"}</option>`).join(""); vl.value = String(T.vl); vl.onchange = () => { T.vl = +vl.value; syncURL(); load(); }; }
   if (sd) { sd.innerHTML = SDAYS.map((d) => `<option value="${d}">${d} days</option>`).join(""); sd.value = String(T.sd); sd.onchange = () => { T.sd = +sd.value; syncURL(); load(); }; }
+  const floodChip = () => { const b = $("floodtog"); if (!b) return; b.setAttribute("aria-pressed", T.flood ? "true" : "false"); b.title = T.flood ? "Hide the NWS flood stage lines" : "Show the NWS flood stage lines"; };
+  floodChip();
+  const ft = $("floodtog");
+  if (ft) ft.onclick = () => { T.flood = !T.flood; try { localStorage.setItem("tide:flood", T.flood ? "1" : "0"); } catch (e) { /* private */ } floodChip(); draw(); window.__tideDrawn++; if (hoverT != null) { const cv = $("tc"), b = cv.getBoundingClientRect(); placeTip((geom.X0 + geom.X1) / 2, (geom.Y0 + geom.Y1) / 2); } };
   st.onchange = () => { T.st = st.value; syncURL(); load(); };
   ds.onchange = () => { T.days = +ds.value; syncURL(); load(); };
   fr.onchange = () => { if (/^\d{4}-\d{2}-\d{2}$/.test(fr.value)) { T.from = fr.value; syncURL(); load(); } };
@@ -507,7 +535,7 @@ window.TIDE = {
   draw: (c, W, H, opt) => drawChart(c, W, H, opt),
   state: () => D, stations: STATIONS, readout, geom: () => geom,
   qa: () => D ? { st: D.st, name: D.name, pred: D.pred.length, obs: D.obs.length, cond: D.cond.length, method: D.method, cycle: D.cyc ? new Date(D.cyc.t).toISOString() : null,
-    rNow: D.rNow, rSlow: D.rSlow, bias: D.bias, flood: D.flood, floods: D.floods, floodSkip: D.floodSkip, floodDrawn: window.__tideFloodDrawn || [], floodLabels: window.__tideFloodLabels || [], floodLabelNote: window.__tideFloodLabelNote || null, legend: window.__tideLegend || [], hover: window.__tideHover || null, sid: D.sid, start: D.R.start, end: D.R.end, now: D.now,
+    rNow: D.rNow, rSlow: D.rSlow, bias: D.bias, flood: D.flood, floods: D.floods, floodSkip: D.floodSkip, floodOn: !!T.flood, floodDrawn: window.__tideFloodDrawn || [], floodLabels: window.__tideFloodLabels || [], floodLabelNote: window.__tideFloodLabelNote || null, legend: window.__tideLegend || [], hover: window.__tideHover || null, sid: D.sid, start: D.R.start, end: D.R.end, now: D.now,
     statsBox: window.__tideStatsBox || null, arch: ARCH, calib: D.calib ? D.calib.c.map((b) => b.corr) : null, calibBg: D.calibBg ? { t: D.calibBg.t, c: D.calibBg.c.map((b) => b.corr) } : null, ver: D.ver.length, verHindcast: D.ver.filter((p) => !p[2]).length, issues: D.nIssues, archived: D.nArchive, vl: D.vl, sd: D.sd, stats: D.stats,
     condAboveFrac: D.cond.length ? D.cond.filter(([t, v]) => v >= (interp(D.pred, t) || 0)).length / D.cond.length : null, sharp: window.__tideSharp || null } : { err: window.__tideErr || null },
 };

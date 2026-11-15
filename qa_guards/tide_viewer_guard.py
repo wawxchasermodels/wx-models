@@ -26,9 +26,13 @@ pass_chart_guard.py and label_sharpness_guard.py (towns only). Checks:
     and no label-label overlap. The 623f9aa truncated-line layout must fail this. The same label rules are checked
     at 1440x900, 1920x1080 and 390x844 for Westport, Seattle, Tacoma, Friday Harbor, Port Townsend, Cherry Point
     and Birch Bay; the legend does not include flood-stage rows (those are on the lines and in the hover readout)
-  8 (t3052u) hover readout: on the desktop page, moving the pointer over the plot shows a tooltip and a vertical crosshair
-    with the time in Pacific, values of the visible series, and the station's flood stages; on the phone a tap does the same;
-    Studio > Tides 16:9 frame also shows the readout on hover
+  8 (t3052u, placement t3059u) hover readout: on the desktop page, moving the pointer over the plot shows a compact
+    readout strip outside the plot (never intersecting the plot rect) and a vertical crosshair, with the time in Pacific,
+    values of the visible series, and the station's flood stages; on the phone a tap does the same;
+    Studio > Tides 16:9 frame also shows the readout on hover, still outside the plot, and it is not drawn into exported
+    frames unless hovering
+  9 (t3060u) Flood levels toggle: a "Flood levels" chip in the bar, default ON, same on desktop / phone / Studio;
+    off hides all flood lines, labels, and flood rows in the readout; on restores them; the choice persists in localStorage
   7 (t3044u) station list: Birch Bay present (alias of Cherry Point 9449424, loads with all lines and no errors), the
     dropdown is A to Z by name and matches TIDE.stations, the default is still Westport 9441102
 Code failures always block. If NOAA's own APIs are unreachable from this box the failure is recorded as a data outage
@@ -375,7 +379,72 @@ async def tide_page(br, W, H, dpr, phone, tag):
                 if need.lower() not in txt.lower(): fail(f"{tag}: hover readout missing {need!r} ({hov.get('text')!r})")
             hx, y0, y1 = hov["h"].get("x"), hov["h"].get("y0"), hov["h"].get("y1")
             if hx is None or y0 is None or y1 is None or y1 <= y0: fail(f"{tag}: hover crosshair geometry missing ({hov.get('h')})")
-            print(f"  {tag}: hover readout ok t={hov['h'].get('t')} rows={len(hov['h'].get('rows') or [])}")
+            tip, plot = hov["h"].get("tip"), hov["h"].get("plot")
+            if not tip or not plot: fail(f"{tag}: hover readout missing tip/plot rects ({hov.get('h')})")
+            elif (tip["x"] + tip["w"] > plot["x"] + 0.5 and plot["x"] + plot["w"] > tip["x"] + 0.5 and
+                  tip["y"] + tip["h"] > plot["y"] + 0.5 and plot["y"] + plot["h"] > tip["y"] + 0.5):
+                fail(f"{tag}: hover readout intersects the plot (tip={tip} plot={plot})")
+            print(f"  {tag}: hover readout ok t={hov['h'].get('t')} rows={len(hov['h'].get('rows') or [])} tip={tip}")
+        # t3060u: Flood levels chip default ON, off hides lines+labels+readout rows, on restores, persists
+        tog = await pg.evaluate("() => { const b = document.getElementById('floodtog'); const q = window.TIDE.qa(); return { exists: !!b, pressed: b && b.getAttribute('aria-pressed'), text: b && b.textContent, floodOn: q.floodOn, drawn: q.floodDrawn, nlab: (q.floodLabels || []).length }; }")
+        if not tog or not tog.get("exists") or "Flood levels" not in (tog.get("text") or ""):
+            fail(f"{tag}: Flood levels toggle chip missing ({tog})")
+        elif tog.get("pressed") != "true" or not tog.get("floodOn") or not tog.get("drawn"):
+            fail(f"{tag}: Flood levels toggle is not on by default ({tog})")
+        n0 = await pg.evaluate("() => window.__tideDrawn")
+        await pg.click("#floodtog")
+        try: await pg.wait_for_function("(n) => window.__tideDrawn > n", arg=n0, timeout=10000)
+        except Exception as e: fail(f"{tag}: Flood levels off did not redraw ({e})")
+        await pg.wait_for_timeout(150)
+        qoff = await pg.evaluate("() => { const q = window.TIDE.qa(), b = document.getElementById('floodtog'); return { floodOn: q.floodOn, drawn: q.floodDrawn, labels: q.floodLabels, pressed: b && b.getAttribute('aria-pressed'), ls: localStorage.getItem('tide:flood') }; }")
+        if qoff.get("floodOn") or qoff.get("drawn") or qoff.get("labels") or qoff.get("pressed") != "false":
+            fail(f"{tag}: Flood levels off still shows lines/labels ({qoff})")
+        if qoff.get("ls") != "0": fail(f"{tag}: Flood levels off did not persist to localStorage ({qoff.get('ls')!r})")
+        # re-hover / re-tap and confirm flood rows are gone, readout still outside the plot
+        if not phone:
+            await pg.mouse.move(box["x"], box["y"]); await pg.wait_for_timeout(250)
+        else:
+            await pg.touchscreen.tap(box["x"], box["y"]); await pg.wait_for_timeout(350)
+        hoff = await pg.evaluate("() => { const tip = document.getElementById('tip'); return { hidden: !tip || tip.hidden, text: tip ? tip.innerText : '', h: window.__tideHover }; }")
+        if hoff.get("hidden") or not (hoff.get("h") or {}).get("t"):
+            fail(f"{tag}: hover/tap readout missing after Flood levels off ({hoff})")
+        else:
+            labs = " ".join(r.get("lab", "") for r in ((hoff.get("h") or {}).get("rows") or []))
+            if "flood" in labs.lower() or "Minor flood" in (hoff.get("text") or ""):
+                fail(f"{tag}: flood rows still in the readout after Flood levels off ({labs!r} text={hoff.get('text')!r})")
+            tip, plot = (hoff["h"] or {}).get("tip"), (hoff["h"] or {}).get("plot")
+            if tip and plot and (tip["x"] + tip["w"] > plot["x"] + 0.5 and plot["x"] + plot["w"] > tip["x"] + 0.5 and
+                                 tip["y"] + tip["h"] > plot["y"] + 0.5 and plot["y"] + plot["h"] > tip["y"] + 0.5):
+                fail(f"{tag}: hover readout intersects the plot after Flood levels off (tip={tip} plot={plot})")
+        n1 = await pg.evaluate("() => window.__tideDrawn")
+        await pg.click("#floodtog")
+        try: await pg.wait_for_function("(n) => window.__tideDrawn > n", arg=n1, timeout=10000)
+        except Exception as e: fail(f"{tag}: Flood levels on did not redraw ({e})")
+        qon = await pg.evaluate("() => { const q = window.TIDE.qa(), b = document.getElementById('floodtog'); return { floodOn: q.floodOn, drawn: q.floodDrawn, labels: q.floodLabels, pressed: b && b.getAttribute('aria-pressed'), ls: localStorage.getItem('tide:flood') }; }")
+        if not qon.get("floodOn") or not qon.get("drawn") or not qon.get("labels") or qon.get("pressed") != "true":
+            fail(f"{tag}: Flood levels on did not restore lines/labels ({ {k: qon.get(k) for k in ('floodOn','drawn','pressed','ls')} })")
+        check_flood_labels(f"{tag} flood-on", {"floodLabels": qon.get("labels"), "floodDrawn": qon.get("drawn"), "floodLabelNote": (await pg.evaluate('() => window.TIDE.qa().floodLabelNote'))}, phone=phone)
+        # persist across reload
+        n2 = await pg.evaluate("() => window.__tideDrawn")
+        await pg.click("#floodtog")
+        try: await pg.wait_for_function("(n) => window.__tideDrawn > n", arg=n2, timeout=10000)
+        except Exception as e: fail(f"{tag}: Flood levels off (persist) did not redraw ({e})")
+        await pg.reload(wait_until="load")
+        try:
+            await pg.wait_for_function("() => window.__tideDrawn > 0", timeout=90000)
+            qls = await pg.evaluate("() => { const q = window.TIDE.qa(), b = document.getElementById('floodtog'); return { st: q.st, floodOn: q.floodOn, drawn: q.floodDrawn, labels: q.floodLabels, pressed: b && b.getAttribute('aria-pressed'), ls: localStorage.getItem('tide:flood') }; }")
+            if qls.get("floodOn") or qls.get("drawn") or qls.get("labels") or qls.get("pressed") != "false" or qls.get("ls") != "0":
+                fail(f"{tag}: Flood levels off did not survive reload ({qls})")
+            else:
+                print(f"  {tag}: Flood levels toggle off/on/persist ok")
+        except Exception as e:
+            fail(f"{tag}: reload after Flood levels off failed ({e})")
+        # restore ON so later steps in this page (desk station switch) start from the default
+        if await pg.evaluate("() => window.TIDE.qa().floodOn") is False:
+            n3 = await pg.evaluate("() => window.__tideDrawn")
+            await pg.click("#floodtog")
+            try: await pg.wait_for_function("(n) => window.__tideDrawn > n && window.TIDE.qa().floodOn", arg=n3, timeout=10000)
+            except Exception as e: fail(f"{tag}: could not restore Flood levels on ({e})")
     if phone:
         sw = await pg.evaluate("document.documentElement.scrollWidth")
         if sw > W + 1: fail(f"{tag}: horizontal overflow scrollWidth={sw} > {W}")
@@ -444,7 +513,42 @@ async def studio(br):
     else:
         labs = " ".join(r.get("lab","") for r in (shov.get("rows") or []))
         if "Official prediction" not in labs or "Minor flood" not in labs: fail(f"studio tide: hover rows missing expected series ({labs!r})")
-        print(f"  studio hover: t={shov.get('t')} rows={labs}")
+        tip, plot = shov.get("tip"), shov.get("plot")
+        if not tip or not plot: fail(f"studio tide: hover readout missing tip/plot rects ({shov})")
+        elif (tip["x"] + tip["w"] > plot["x"] + 0.5 and plot["x"] + plot["w"] > tip["x"] + 0.5 and
+              tip["y"] + tip["h"] > plot["y"] + 0.5 and plot["y"] + plot["h"] > tip["y"] + 0.5):
+            fail(f"studio tide: hover readout intersects the plot (tip={tip} plot={plot})")
+        print(f"  studio hover: t={shov.get('t')} rows={labs} tip={tip}")
+    # t3060u: Flood levels chip in the Studio panel iframe
+    fr = pg.frame_locator("#tdf")
+    tog = await pg.evaluate("() => { const w = document.getElementById('tdf').contentWindow; const b = w.document.getElementById('floodtog'); const q = w.TIDE.qa(); return { exists: !!b, pressed: b && b.getAttribute('aria-pressed'), text: b && b.textContent, floodOn: q.floodOn, drawn: q.floodDrawn }; }")
+    if not tog or not tog.get("exists") or tog.get("pressed") != "true" or not tog.get("floodOn") or not tog.get("drawn"):
+        fail(f"studio tide: Flood levels toggle missing or not on ({tog})")
+    nT = await pg.evaluate("() => window.__studioTide")
+    await fr.locator("#floodtog").click()
+    try: await pg.wait_for_function("""(n) => {
+      const w = document.getElementById('tdf') && document.getElementById('tdf').contentWindow;
+      const q = w && w.TIDE && w.TIDE.qa();
+      return window.__studioTide > n && q && q.floodOn === false && !(q.floodDrawn || []).length && !(q.floodLabels || []).length;
+    }""", arg=nT, timeout=20000)
+    except Exception as e: fail(f"studio tide: Flood levels off did not redraw the frames ({e})")
+    sqoff = await pg.evaluate("() => document.getElementById('tdf').contentWindow.TIDE.qa()")
+    if sqoff.get("floodOn") or sqoff.get("floodDrawn") or sqoff.get("floodLabels"):
+        fail(f"studio tide: Flood levels off still shows lines ({ {k: sqoff.get(k) for k in ('floodOn','floodDrawn')} })")
+    await pg.mouse.move(box["x"], box["y"]); await pg.wait_for_timeout(300)
+    shoff = await pg.evaluate("() => window.__studioTideHover")
+    labs_off = " ".join(r.get("lab","") for r in ((shoff or {}).get("rows") or []))
+    if shoff and "flood" in labs_off.lower():
+        fail(f"studio tide: flood rows still in the 16:9 readout after Flood levels off ({labs_off!r})")
+    nT2 = await pg.evaluate("() => window.__studioTide")
+    await fr.locator("#floodtog").click()
+    try: await pg.wait_for_function("""(n) => {
+      const w = document.getElementById('tdf') && document.getElementById('tdf').contentWindow;
+      const q = w && w.TIDE && w.TIDE.qa();
+      return window.__studioTide > n && q && q.floodOn === true && (q.floodDrawn || []).length;
+    }""", arg=nT2, timeout=20000)
+    except Exception as e: fail(f"studio tide: Flood levels on did not restore the frames ({e})")
+    print("  studio: Flood levels toggle off/on ok")
     if SHOT: await pg.screenshot(path=str(Path(SHOT) / "studio_tide.png"))
     # station change in the panel iframe -> both frames redraw on that station
     fr = pg.frame_locator("#tdf")
