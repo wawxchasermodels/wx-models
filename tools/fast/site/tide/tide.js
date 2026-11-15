@@ -152,25 +152,23 @@ const H_EFF = {"9439040":0,"9440910":0,"9441102":0,"9442396":0,"9443090":0,"9444
 let AUX = null;
 async function loadAux() {
   if (AUX) return AUX;
-  for (const u of ["tide_aux.json", "aifs_ens_msl.json"]) {
-    try { const r = await fetch(u, { cache: "no-store" }); if (r.ok) { AUX = await r.json(); break; } } catch (e) { /* missing is fine */ }
-  }
-  if (AUX && AUX.H_eff_m) for (const k of Object.keys(AUX.H_eff_m)) H_EFF[k] = AUX.H_eff_m[k];
+  const localAux = await fetchJsonOk("tide_aux.json");
+  if (localAux && localAux.H_eff_m) for (const k of Object.keys(localAux.H_eff_m)) H_EFF[k] = localAux.H_eff_m[k];
+  const localA = await fetchJsonOk("aifs_ens_msl.json");
+  const archA = await fetchJsonOk(ARCH + "aifs_ens_msl.json");
+  const fromAux = localAux && (localAux.aifs || (localAux.steps && localAux.init ? localAux : null));
+  const aifs = pickFresher(pickFresher(localA, fromAux), archA);
+  AUX = aifs || localAux || {};
+  if (localAux && localAux.H_eff_m) AUX.H_eff_m = localAux.H_eff_m;
   return AUX;
 }
 let ANOM = null;
 async function loadAnom() {
   if (ANOM) return ANOM;
-  const urls = ["stofs_anom.json", "tide_aux.json"];
-  for (const u of urls) {
-    try {
-      const r = await fetch(u, { cache: "no-store" }); if (!r.ok) continue;
-      const j = await r.json();
-      const rec = (j && j.anom) ? j.anom : j;
-      if (rec && rec.stations) { ANOM = rec; break; }
-    } catch (e) { /* missing is fine */ }
-  }
-  if (!ANOM) ANOM = { stations: {} };
+  const unwrap = (j) => { const rec = (j && j.anom) ? j.anom : j; return rec && rec.stations ? rec : null; };
+  const local = unwrap(await fetchJsonOk("stofs_anom.json")) || unwrap(await fetchJsonOk("tide_aux.json"));
+  const arch = unwrap(await fetchJsonOk(ARCH + "stofs_anom.json"));
+  ANOM = pickFresher(local, arch) || { stations: {} };
   return ANOM;
 }
 function cycleMs(rec) {
@@ -186,6 +184,30 @@ function cycleMs(rec) {
     return Date.UTC(+c.slice(0, 4), +c.slice(4, 6) - 1, +c.slice(6, 8), +c.slice(8, 10));
   }
   return null;
+}
+async function fetchJsonOk(u) {
+  // A missing archive or sidecar file must not throw: keep the copy shipped with the site, or the 0 / persist fallbacks.
+  try { const r = await fetch(u, { cache: "no-store" }); if (r.ok) return await r.json(); } catch (e) { /* 404 / CORS / offline is fine */ }
+  return null;
+}
+function recFreshness(rec) {
+  if (!rec) return -1;
+  const c = cycleMs(rec);
+  if (c != null) return c;
+  if (rec.refreshed_at) { const t = Date.parse(rec.refreshed_at); if (isFinite(t)) return t; }
+  if (rec.last_day) { const t = Date.parse(rec.last_day + "T00:00:00Z"); if (isFinite(t)) return t; }
+  let last = -1;
+  if (rec.stations) {
+    for (const row of Object.values(rec.stations)) {
+      if (row && row.last_day) { const t = Date.parse(row.last_day + "T00:00:00Z"); if (isFinite(t) && t > last) last = t; }
+    }
+  }
+  return last;
+}
+function pickFresher(a, b) {
+  if (!a) return b || null;
+  if (!b) return a;
+  return recFreshness(b) > recFreshness(a) ? b : a;
 }
 function anomAt(st, t, cycT) {
   const rec = ANOM;
@@ -275,20 +297,17 @@ async function gfsPressure(st) {
   try { const r = await openMeteoPressure(lat, lon, "gfs_global", 2); if (r.n) return r.pts; } catch (e) { /* none */ }
   return [];
 }
-// SST sidecar (sst.json): per-station anomaly vs a consistent 2019-2024 climatology, k, and W = k*ssta.
+// SST sidecar (sst.json): shipped with the site; a newer copy on the tide-archive branch wins. A 404 there is fine.
 const SSTU = window.TIDE_SST || (typeof ARCH !== "undefined" ? ARCH + "sst.json" : "sst.json");
 async function sstTerm(st, now) {
-  const tryUrls = ["sst.json", SSTU, "tide_aux.json"];  // local mock sidecar first
-  let rec = null, src = null;
-  const aux = await loadAux();
   const usable = (row) => row && (isFinite(row.W) || isFinite(row.steric_ft) || (isFinite(row.k_ft_per_c) && (isFinite(row.ssta) || isFinite(row.ssta30_c))) || (isFinite(row.adj_ft) && isFinite(row.ssta30_c)));
-  for (const u of tryUrls) {
-    try {
-      const j = u === "tide_aux.json" ? aux : await getJSON(u);
-      const row = j && (j.stations && j.stations[st] || (j.sst && j.sst[st]) || (j[st]));
-      if (usable(row)) { rec = row; src = u; break; }
-    } catch (e) { /* next */ }
-  }
+  const rowOf = (j) => j && (j.stations && j.stations[st] || (j.sst && j.sst[st]) || (j[st] && typeof j[st] === "object" ? j[st] : null));
+  const localJ = await fetchJsonOk("sst.json");
+  const archJ = (SSTU && SSTU !== "sst.json") ? await fetchJsonOk(SSTU) : null;
+  const aux = await loadAux();
+  const pack = pickFresher(localJ, archJ) || aux;
+  const rec = usable(rowOf(pack)) ? rowOf(pack) : (usable(rowOf(aux)) ? rowOf(aux) : null);
+  const src = rec ? (pack === archJ ? SSTU : (pack === localJ ? "sst.json" : "tide_aux.json")) : "none";
   if (!rec) return { adj: 0, dT: 0, ssta30: null, ssta: null, k: 0, W: 0, src: "none" };
   const ssta = rec.ssta != null ? +rec.ssta : (rec.ssta30_c != null ? +rec.ssta30_c : 0);
   const k = rec.k_ft_per_c != null ? +rec.k_ft_per_c : 0;
@@ -506,14 +525,17 @@ function drawChart(c, W, H, opt) {
   if (D.sst && D.sst.src && D.sst.src !== "none") {
     const a30 = D.sst.ssta30, Wft = D.sst.W;
     if (a30 != null) bits.push(`Sea temperature ${sgn(a30, 2)} \u00b0C (${sgn(a30 * 1.8, 1)} \u00b0F) vs a typical year${Wft != null ? ", adding " + sgn(Wft, 2) + " ft" : ""}`);
+  } else if (D.sst && D.sst.src === "none") {
+    bits.push("Sea temperature unavailable; warm-water term set to 0 ft");
   }
   if (D.aifs && D.aifs.run) bits.push(`AIFS ENS ${String(D.aifs.run)}${D.aifs.src && D.aifs.src !== "aifs-ens-mean" ? " (" + D.aifs.src + " fallback)" : ""}`);
   else if (D.aifs && D.aifs.src) bits.push(`Forecast pressure ${D.aifs.src}${D.aifs.note ? " \u2014 " + D.aifs.note : ""}`);
+  else bits.push("Forecast pressure unavailable; holding the latest observed pressure");
   if (bits.length) info.push(bits.join("  \u00b7  "));
   if (D.aifs && D.aifs.note) info.push(D.aifs.note);
   info.push(T.wind
-    ? `Conditional (Wind surge on) = the official tide prediction, plus the effect of air pressure (lower pressure raises the water; observed pressure for times already past, a European AIFS ensemble forecast ahead), plus a warm-water adjustment from sea-surface temperature compared with a typical year, plus a correction from the last few days of gauge readings (the leftover after pressure and warm water are taken out is held through the forecast, and a 12-hour fade starts the line at the latest observation). Wind-driven setup from the NOAA surge model is added on top of that, without applying the pressure or warm-water terms a second time. Experimental, not official.`
-    : `Conditional (default) = the official tide prediction, plus the effect of air pressure (lower pressure raises the water; observed pressure for times already past, a European AIFS ensemble forecast ahead), plus a warm-water adjustment from sea-surface temperature compared with a typical year, plus a correction from the last few days of gauge readings: the leftover after pressure and warm water are taken out is held through the forecast, and a 12-hour fade starts the line at the latest observation. Wind-driven setup from the NOAA surge model is off; turn on Wind surge to add only that wind part. Experimental, not official.`);
+    ? `Conditional (Wind surge on) = the official tide prediction, plus the effect of air pressure (lower pressure raises the water; observed pressure for times already past, a European AIFS ensemble forecast ahead), plus a warm-water adjustment from sea-surface temperature compared with a typical year, plus a correction from the last few days of gauge readings (the leftover after pressure and warm water are taken out is held through the forecast, and a 12-hour fade starts the line at the latest observation). Wind-driven setup from the NOAA surge model is added on top of that, without applying the pressure or warm-water terms a second time. Experimental, not official. If a newer forecast-pressure or sea-temperature file is on the archive branch, the page uses it; otherwise it uses the copy shipped with the site. If no forecast pressure is available, the latest observed pressure is held through the forecast. If no sea-temperature file is available, the warm-water term is left at zero. A missing archive file does not break the chart.`
+    : `Conditional (default) = the official tide prediction, plus the effect of air pressure (lower pressure raises the water; observed pressure for times already past, a European AIFS ensemble forecast ahead), plus a warm-water adjustment from sea-surface temperature compared with a typical year, plus a correction from the last few days of gauge readings: the leftover after pressure and warm water are taken out is held through the forecast, and a 12-hour fade starts the line at the latest observation. Wind-driven setup from the NOAA surge model is off; turn on Wind surge to add only that wind part. Experimental, not official. If a newer forecast-pressure or sea-temperature file is on the archive branch, the page uses it; otherwise it uses the copy shipped with the site. If no forecast pressure is available, the latest observed pressure is held through the forecast. If no sea-temperature file is available, the warm-water term is left at zero. A missing archive file does not break the chart.`);
   const infoFs = portrait ? 12.5 : 12.5, lh = 18 * s;
   // wrap info lines to width
   c.font = F(600, infoFs); const wrapped = [];

@@ -126,6 +126,156 @@ def load_sst(out):
     except Exception:
         return None
 
+def ib_ft(p):
+    try:
+        p = float(p)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(p):
+        return None
+    return (1013.25 - p) * FT_PER_HPA
+
+def load_v1(out, name):
+    fn = os.path.join(out, "v1", name)
+    try:
+        return json.load(open(fn)) if os.path.exists(fn) else None
+    except Exception:
+        return None
+
+def parse_init_ms(raw):
+    if not raw:
+        return None
+    raw = str(raw)
+    try:
+        if "T" in raw:
+            s = (raw if len(raw) > 16 else raw + ":00").replace("Z", "")
+            d = D.datetime.fromisoformat(s)
+            if d.tzinfo is None:
+                d = d.replace(tzinfo=D.timezone.utc)
+            return int(d.timestamp() * 1000)
+        if len(raw) >= 10:
+            d = D.datetime.strptime(raw[:10], "%Y%m%d%H").replace(tzinfo=D.timezone.utc)
+            return int(d.timestamp() * 1000)
+    except ValueError:
+        return None
+    return None
+
+def aifs_hourly(rec, sid):
+    if not rec:
+        return []
+    init = parse_init_ms(rec.get("init") or rec.get("cycle"))
+    steps = rec.get("steps") or {}
+    if init is None or not steps:
+        return []
+    def val(h):
+        row = steps.get(str(h)) or steps.get(h) or {}
+        v = (row.get("msl_hpa") or {}).get(sid)
+        return float(v) if v is not None else None
+    hs = [h for h in sorted({int(k) for k in steps}) if val(h) is not None]
+    if not hs:
+        return []
+    out, last = [], hs[-1]
+    for h in range(hs[0], last + 1):
+        t = init + h * HR
+        if val(h) is not None:
+            out.append((t, val(h))); continue
+        a = max(x for x in hs if x <= h)
+        nxt = [x for x in hs if x >= h]
+        b = nxt[0] if nxt else a
+        va, vb = val(a), val(b)
+        out.append((t, va if b == a else va + (vb - va) * (h - a) / (b - a)))
+    return out
+
+def coops_metric_pressure(st, b, e):
+    url = (API.replace("units=english", "units=metric")
+           + f"&product=air_pressure&station={st}&begin_date={gmt(b)}&end_date={gmt(e)}&interval=h")
+    try:
+        j = json.loads(get(url))
+    except Exception:
+        return []
+    out = []
+    for p in j.get("data") or []:
+        try:
+            out.append((parse_t(p["t"]), float(p["v"])))
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out
+
+def p_at(obs_pts, fc_pts, t, now_t):
+    if t <= now_t:
+        v = interp(obs_pts, t)
+        if v is not None:
+            return v
+    return interp(fc_pts, t)
+
+def conditional_free(T, pred, obs, air, aifs_rec, sst_st, sid, now_t=None):
+    """STOFS-free default residual, matching site/tide/tide.js (wind off).
+
+    resid = IB(t) + W + offset5 + leftover * exp(-lead/12h).
+    Forecast hours use AIFS ENS pressure when present; otherwise the issue-time
+    observed pressure is held (same fallback as the page).
+    """
+    now_t = now_t if now_t is not None else T
+    pmap = dict(pred)
+    obs = [(t, v) for t, v in obs if t <= T]
+    res = [(t, v - pmap[t]) for t, v in obs if t in pmap]
+    t_obs = obs[-1][0] if obs else None
+    r_now = None
+    if t_obs is not None and T - t_obs < 6 * HR:
+        recent = [r[1] for r in res if r[0] >= t_obs - HR]
+        if recent:
+            r_now = sum(recent) / len(recent)
+    if r_now is None and res:
+        r_now = res[-1][1]
+    if r_now is None:
+        return None
+    t0c = t_obs if t_obs is not None else T
+    W = 0.0
+    if sst_st:
+        if sst_st.get("W") is not None:
+            try:
+                W = float(sst_st["W"])
+            except (TypeError, ValueError):
+                W = 0.0
+        elif sst_st.get("k_ft_per_c") is not None:
+            ssta = sst_st.get("ssta30_c")
+            if ssta is None:
+                ssta = sst_st.get("ssta")
+            if ssta is not None:
+                W = float(sst_st["k_ft_per_c"]) * float(ssta)
+    fc_pts = aifs_hourly(aifs_rec, sid)
+    ib0 = ib_ft(p_at(air, fc_pts, t0c, now_t)) or 0.0
+    # 5-day unexplained offset: mean(r_obs - IB - W) on hours with residual + pressure
+    t5 = t0c - 5 * DAY
+    acc, n = 0.0, 0
+    t = t5
+    rmap = dict(res)
+    while t <= t0c:
+        rr = interp(res, t)
+        if rr is not None:
+            ibh = ib_ft(p_at(air, fc_pts, t, now_t))
+            if ibh is not None:
+                acc += rr - ibh - W
+                n += 1
+        t += HR
+    offset5 = (acc / n) if n else 0.0
+    leftover = r_now - ib0 - W - offset5
+    def resid(t):
+        dt = t - t0c
+        p = p_at(air, fc_pts, t, now_t)
+        ib = ib_ft(p)
+        if ib is None:
+            ib = ib0
+        return ib + W + offset5 + leftover * math.exp(-max(0.0, dt) / TAU_BIAS)
+    rr = lambda x: None if x is None else round(x, 3)
+    snap = {"t": T, "alg": ALG, "method": "stofs-free", "t0": t0c,
+            "rNow": rr(r_now), "rSlow": rr(offset5), "bias": rr(leftover),
+            "r": [round(resid(T + k * HR), 3) for k in range(LEAD_H + 1)],
+            "offset5": rr(offset5), "W": rr(W)}
+    if sst_st:
+        snap["sst"] = {k: sst_st.get(k) for k in ("last_day", "ssta30_c", "ssta", "k_ft_per_c", "W", "source", "chosen_sat")}
+    return snap
+
 
 def conditional(T, pred, obs, sto, sst_st=None):
     """Port of tide.js load(): returns the snapshot dict for issue time T (ms) or None.
@@ -239,21 +389,25 @@ def main():
     T0 = int(slots[0].timestamp() * 1000); T1 = int(slots[-1].timestamp() * 1000)
     obs_end = min(now, T1) + H6
     sst = load_sst(a.out)
+    aifs = load_v1(a.out, "aifs_ens_msl.json")
     if not sst:
-        print("note: v1/sst.json missing — snapshots stay alg=c1. Run sst_steric.py --out DIR first for c2 (version D SST term).")
+        print("note: v1/sst.json missing — SST term W=0 (same fallback as the page)")
+    if not aifs:
+        print("note: v1/aifs_ens_msl.json missing — forecast pressure holds the issue-time observation (same fallback as the page)")
 
     def one(item):
         st, sid = item
         pred = coops("predictions", st, T0 - SLOW_DAYS * DAY - DAY, T1 + (LEAD_H + 3) * HR, "&interval=6")
         obs = coops("water_level", st, T0 - SLOW_DAYS * DAY - DAY, obs_end)
+        air = coops_metric_pressure(st, T0 - 6 * DAY, obs_end)
         snaps = []
         for s in slots:
             T = int(s.timestamp() * 1000)
             c = cyc_of.get(s)
-            sto = shef_series(texts[c], sid) if c else None
-            snap = conditional(T, pred, obs, sto, (sst and (sst.get("stations") or {}).get(st)))
+            snap = conditional_free(T, pred, obs, air, aifs, (sst and (sst.get("stations") or {}).get(st)), st, now)
             if snap:
-                snap["kind"] = kind; snap["cycle"] = f"{c:%Y%m%d%H}" if (c and snap["method"] == "stofs") else None
+                snap["kind"] = kind
+                snap["cycle"] = f"{c:%Y%m%d%H}" if c else (aifs or {}).get("cycle")
                 if kind == "archive": snap["made"] = now
                 snaps.append(snap)
         write(a.out, st, snaps)

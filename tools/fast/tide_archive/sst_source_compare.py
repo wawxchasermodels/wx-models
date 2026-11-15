@@ -275,6 +275,8 @@ def main():
         # prefer 30-day mean anomaly for the steric term (less noisy); also store latest
         use = ssta30 if ssta30 is not None else (ssta if ssta is not None else 0.0)
         W = k * use
+        pix = ((pixels.get(compare.get(sid, {}).get("chosen_sat") or "") or {}).get(sid)
+               or (pixels.get("mur") or {}).get(sid))
         stations_out[sid] = {
             "name": meta["name"],
             "source": compare.get(sid, {}).get("chosen"),
@@ -286,6 +288,8 @@ def main():
             "steric_ft": round(W, 4),
             "last_day": compare.get(sid, {}).get("last_day"),
             "clim": "2019-2024 DOY ±3d mean of the operational (blended) series",
+            "clim_doy": {str(d): round(v, 3) for d, v in (clim_op.get(sid) or {}).items()},
+            "pixel": pix,
             "blend": compare.get(sid, {}).get("chosen"),
             "sat_bias_removed_C": None if compare.get(sid, {}).get("sat_bias_removed_C") is None else round(compare[sid]["sat_bias_removed_C"], 3),
         }
