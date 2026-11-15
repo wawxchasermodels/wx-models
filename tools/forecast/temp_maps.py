@@ -51,11 +51,13 @@ CREDIT = "{name}: ECMWF open data, CC BY 4.0. Modified. \u00a9 ECMWF, www.ecmwf.
 CREDIT_NOAA = "Basemap: Natural Earth."
 VIEWS = {   # same NA / PNW frames as the AIFS upper-air maps, plus a Washington frame
     "na": dict(label="North America", size=(16, 12),
-               # 11-15 t3095u: Studio NA framed to Benjamin's GOES-West 16:9 shot (west/north/south),
-               # east edge kept at the live x1=2.4e6. lon0 stays -121 so 49N is level across WA.
-               # 4:3 panel is sized so Studio's 16:9 cover-crop matches that shot.
+               # 11-15 t3095u / t3096u mock (not live): 16:9 window fitted to labeled-town
+               # pixels in Benjamin's GOES-West shot, in this NA projection (lon0=-121,
+               # parallels 35/60). East follows the shot (Thunder Bay / Minneapolis /
+               # San Antonio just inside), so x1 moves 66 mi east of live 2.4e6.
+               # 4:3 panel is sized so Studio's 16:9 cover-crop equals that window.
                proj=ccrs.LambertConformal(central_longitude=-121, central_latitude=48, standard_parallels=(35, 60)),
-               extent=(-6.919425e6, 2.4e6, -3.404278e6, 3.533516e6), box=(-220, -5, -2, 88)),
+               extent=(-6.870639e6, 2.505912e6, -3.462586e6, 3.517735e6), box=(-220, -5, -2, 88)),
     "pnw": dict(label="Pacific Northwest", size=(16, 10.5), proj=ccrs.Mercator(central_longitude=-130), ll=(-160, -103, 37, 61), box=(-165, -98, 32, 66)),
     "wa": dict(label="Washington", size=(16, 10.5), proj=ccrs.LambertConformal(central_longitude=-120.5, central_latitude=47.3, standard_parallels=(45, 49)),
                ll=(-125.0, -116.6, 45.3, 49.25), box=(-127, -114.5, 44.3, 50.3)),
