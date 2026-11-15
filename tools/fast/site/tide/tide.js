@@ -13,13 +13,17 @@ const TZ = "America/Los_Angeles";
 // Benjamin t3044u: list A to Z by name (default stays Westport 9441102). Birch Bay has no NOAA gauge, prediction station or
 // STOFS point of its own (CO-OPS metadata, 11-14); it uses Cherry Point 9449424, the nearest NOAA gauge, about 4 mi south on the same shore.
 const STATIONS = [
-  ["9439040", "Astoria, OR"], ["birchbay", "Birch Bay, WA"], ["9449424", "Cherry Point, WA"], ["9449880", "Friday Harbor, WA"],
+  ["9439040", "Astoria, OR"], ["birchbay", "Birch Bay, WA"], ["9440581", "Cape Disappointment, WA"], ["9449424", "Cherry Point, WA"], ["9449880", "Friday Harbor, WA"],
   ["9442396", "La Push, WA"], ["9443090", "Neah Bay, WA"], ["9444090", "Port Angeles, WA"], ["9444900", "Port Townsend, WA"],
   ["9447130", "Seattle, WA"], ["9446484", "Tacoma, WA"], ["9440910", "Toke Point, WA"], ["9441102", "Westport, WA"],
 ];
 const ALIAS = {"birchbay": "9449424"};
 const sidOf = (k) => ALIAS[k] || k;
 const stLabel = (k) => ALIAS[k] ? `Cherry Point ${ALIAS[k]}` : k;
+// 9440581 is NOAA's official "Cape Disappointment" harmonic / PORTS gauge (CPTW1): live water levels and
+// official predictions. It has no air-pressure sensor; observed pressure is borrowed from Toke Point,
+// then Westport (same fallback as Astoria). SST uses the Westport OISST pixel (SST_MAP). No official
+// NWS flood stages (mdapi and the inundation dashboard have only an "action" value, not drawn).
 // Official NWS coastal flood levels, ft MLLW, triple-checked 2026-11-14 by tools/fast/tide_archive/flood_verify.py:
 // S1 CO-OPS mdapi nws_* (with datums.json), S2 Tides & Currents inundation dashboard file, S3 NWS NWPS gauge where one exists.
 // A level is drawn only when the live mdapi value still matches this table within 0.05 ft. NOS derived thresholds are not drawn.
@@ -143,12 +147,12 @@ function rhoUnesco(T, S) {
 }
 function alphaThermal(T, S) { const dT = 0.05, r1 = rhoUnesco(T - dT, S), r2 = rhoUnesco(T + dT, S); return -(r2 - r1) / (2 * dT) / ((r1 + r2) / 2); }
 function Wft(dT, T, S, He) { if (dT == null || T == null || !He) return 0; return alphaThermal(T, S) * dT * He * FT_PER_M; }
-const COORDS = {"9439040":[46.207306,-123.7683],"9440910":[46.7075,-123.96694],"9441102":[46.90431,-124.10508],"9442396":[47.912838,-124.63574],"9443090":[48.370724,-124.601585],"9444090":[48.125,-123.44],"9444900":[48.11122,-122.759674],"9449880":[48.545277,-123.0125],"9449424":[48.862717,-122.75858],"9447130":[47.60264,-122.3393],"9446484":[47.2667,-122.4133]};
-const SALT = {"9439040":25,"9440910":32.2,"9441102":32.2,"9442396":32.2,"9443090":32.2,"9444090":31,"9444900":31,"9449880":31,"9449424":31,"9447130":30,"9446484":30};
-const SST_MAP = {"9440910":"9441102","9447130":"9446484","9449880":"9444900"};
+const COORDS = {"9439040":[46.207306,-123.7683],"9440581":[46.28103,-124.04628],"9440910":[46.7075,-123.96694],"9441102":[46.90431,-124.10508],"9442396":[47.912838,-124.63574],"9443090":[48.370724,-124.601585],"9444090":[48.125,-123.44],"9444900":[48.11122,-122.759674],"9449880":[48.545277,-123.0125],"9449424":[48.862717,-122.75858],"9447130":[47.60264,-122.3393],"9446484":[47.2667,-122.4133]};
+const SALT = {"9439040":25,"9440581":32.2,"9440910":32.2,"9441102":32.2,"9442396":32.2,"9443090":32.2,"9444090":31,"9444900":31,"9449880":31,"9449424":31,"9447130":30,"9446484":30};
+const SST_MAP = {"9440581":"9441102","9440910":"9441102","9447130":"9446484","9449880":"9444900"};
 const SST_OWN = {9441102:1,9442396:1,9443090:1,9444090:1,9444900:1,9446484:1};
-const P_FALLBACK = {"9439040":["9440910","9441102"]};
-const H_EFF = {"9439040":0,"9440910":0,"9441102":0,"9442396":0,"9443090":0,"9444090":0,"9444900":0,"9449880":0,"9449424":0,"9447130":0,"9446484":0};   // filled from backtest (m); 0 means no SST height until calibrated
+const P_FALLBACK = {"9439040":["9440910","9441102"],"9440581":["9440910","9441102"]};
+const H_EFF = {"9439040":0,"9440581":0,"9440910":0,"9441102":0,"9442396":0,"9443090":0,"9444090":0,"9444900":0,"9449880":0,"9449424":0,"9447130":0,"9446484":0};   // filled from backtest (m); 0 means no SST height until calibrated
 let AUX = null;
 async function loadAux() {
   if (AUX) return AUX;
@@ -331,8 +335,15 @@ function aifsProductLabel(aifs) {
   if (/ifs/i.test(aifs.src)) return "ECMWF IFS pressure";
   return "ECMWF AIFS ensemble pressure";
 }
-function productsLine(wind, sst, aifs) {
-  const parts = ["NOAA official tide prediction", "NOAA gauge water levels and pressure"];
+function productsLine(wind, sst, aifs, obsP, st) {
+  const parts = ["NOAA official tide prediction"];
+  const pSid = obsP && obsP.sid;
+  if (pSid && st && pSid !== st) {
+    const raw = (STATIONS.find((s) => s[0] === pSid) || [pSid, pSid])[1];
+    parts.push("NOAA gauge water levels", raw.replace(/, (WA|OR)$/, "") + " gauge pressure");
+  } else {
+    parts.push("NOAA gauge water levels and pressure");
+  }
   const a = aifsProductLabel(aifs);
   if (a) parts.push(a);
   const s = sstProductLabel(sst);
@@ -341,8 +352,9 @@ function productsLine(wind, sst, aifs) {
   return "Conditional uses: " + parts.join(", ") + ". Experimental, not official.";
 }
 async function sstTerm(st, now) {
+  const sstId = SST_MAP[st] || st;
   const usable = (row) => row && (isFinite(row.W) || isFinite(row.steric_ft) || (isFinite(row.k_ft_per_c) && (isFinite(row.ssta) || isFinite(row.ssta30_c))) || (isFinite(row.adj_ft) && isFinite(row.ssta30_c)));
-  const rowOf = (j) => j && (j.stations && j.stations[st] || (j.sst && j.sst[st]) || (j[st] && typeof j[st] === "object" ? j[st] : null));
+  const rowOf = (j) => j && (j.stations && j.stations[sstId] || (j.sst && j.sst[sstId]) || (j[sstId] && typeof j[sstId] === "object" ? j[sstId] : null));
   const idx = await loadArchIndex();
   const localJ = await fetchJsonOk("sst.json");
   const archSst = (SSTU && SSTU !== "sst.json") ? (archSidecarUrl(idx, "sst.json") || null) : null;
@@ -582,7 +594,7 @@ function drawChart(c, W, H, opt) {
   if (D.aifs && D.aifs.run) bits.push(`AIFS ENS ${String(D.aifs.run)}${D.aifs.src && D.aifs.src !== "aifs-ens-mean" ? " (" + D.aifs.src + " fallback)" : ""}`);
   else if (D.aifs && D.aifs.src) bits.push(`Forecast pressure ${D.aifs.src}`);
   if (bits.length) info.push(bits.join("  \u00b7  "));
-  info.push(productsLine(T.wind, D.sst, D.aifs));
+  info.push(productsLine(T.wind, D.sst, D.aifs, D.obsP, D.sid));
   const infoFs = portrait ? 12.5 : 12.5, lh = 18 * s;
   // wrap info lines to width
   c.font = F(600, infoFs); const wrapped = [];
@@ -923,7 +935,7 @@ window.TIDE = {
   qa: () => D ? { st: D.st, name: D.name, pred: D.pred.length, obs: D.obs.length, cond: D.cond.length, method: D.method, cycle: D.cyc ? new Date(D.cyc.t).toISOString() : null,
     rNow: D.rNow, rSlow: D.rSlow, bias: D.bias, flood: D.flood, floods: D.floods, floodSkip: D.floodSkip, floodOn: !!T.flood, floodDrawn: window.__tideFloodDrawn || [], floodLabels: window.__tideFloodLabels || [], floodLabelNote: window.__tideFloodLabelNote || null, legend: window.__tideLegend || [], hover: window.__tideHover || null, sid: D.sid, start: D.R.start, end: D.R.end, now: D.now,
     statsBox: window.__tideStatsBox || null, chrome: window.__tideChrome || null, arch: ARCH, calib: D.calib ? D.calib.c.map((b) => b.corr) : null, calibBg: D.calibBg ? { t: D.calibBg.t, c: D.calibBg.c.map((b) => b.corr) } : null, ver: D.ver.length, verHindcast: D.ver.filter((p) => !p[2]).length, issues: D.nIssues, archived: D.nArchive, vl: D.vl, sd: D.sd, stats: D.stats,
-    condAboveFrac: D.cond.length ? D.cond.filter(([t, v]) => v >= (interp(D.pred, t) || 0)).length / D.cond.length : null, sharp: window.__tideSharp || null, windOn: !!T.wind, sst: D.sst || null, aifs: D.aifs || null, windTest: window.__tideWindTest || null, nowLabel: window.__tideNowLabel || null, products: productsLine(!!T.wind, D.sst, D.aifs) } : { err: window.__tideErr || null },
+    condAboveFrac: D.cond.length ? D.cond.filter(([t, v]) => v >= (interp(D.pred, t) || 0)).length / D.cond.length : null, sharp: window.__tideSharp || null, windOn: !!T.wind, sst: D.sst || null, aifs: D.aifs || null, windTest: window.__tideWindTest || null, nowLabel: window.__tideNowLabel || null, products: productsLine(!!T.wind, D.sst, D.aifs, D.obsP, D.sid) } : { err: window.__tideErr || null },
 };
 ui(); syncURL(); load();
 setInterval(() => { if (document.visibilityState === "visible") load(); }, 10 * 60000);   // new observations every 6 min; refresh every 10

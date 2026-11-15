@@ -22,6 +22,7 @@ OUT_DEFAULT = "/tmp/sst_work/hires"
 
 STATIONS = {
     "9439040": {"name": "Astoria, OR", "lat": 46.207306, "lon": -123.7683, "sound": False, "ndbc": ["ASTO3", "46029"]},
+    "9440581": {"name": "Cape Disappointment, WA", "lat": 46.28103, "lon": -124.04628, "sound": False, "ndbc": ["CPTW1", "46029"]},
     "9440910": {"name": "Toke Point, WA", "lat": 46.7075, "lon": -123.96694, "sound": False, "ndbc": ["TOKW1", "46041"]},
     "9441102": {"name": "Westport, WA", "lat": 46.90431, "lon": -124.10508, "sound": False, "ndbc": ["WPTW1", "46041"]},
     "9442396": {"name": "La Push, WA", "lat": 47.912838, "lon": -124.63574, "sound": False, "ndbc": ["LAPW1"]},
