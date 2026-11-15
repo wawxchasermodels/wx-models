@@ -3,7 +3,8 @@
 
 AIFS ENS open data publishes control (cf) and 50 perturbed (pf) members, not a pre-made
 -ep / type=em file (checked 2026-11-14 18Z on AWS and data.ecmwf.int). The ensemble mean
-is the mean of those 51 members. Byte-range only the msl messages. 6-hourly steps 0-72 h.
+is the mean of those 51 members. Byte-range only the msl messages. 6-hourly steps 0-360 h
+(the AIFS ENS open-data horizon; 72 h was too short for a 9-day tide chart and snapped the Conditional line).
 
 If a run or lead is missing, fall back to AIFS single (oper/fc) then IFS oper/fc, and record it.
 
@@ -30,7 +31,7 @@ HOSTS = [
     "https://ecmwf-forecasts.s3.eu-central-1.amazonaws.com",
     "https://data.ecmwf.int/forecasts",
 ]
-STEPS = list(range(0, 73, 6))
+STEPS = list(range(0, 361, 6))
 MIN_MEM = 40
 
 def log(msg):
@@ -136,15 +137,21 @@ def fetch_ranges(grib_url, messages, tmp, parallel=12):
     for i, x in enumerate(messages):
         dest = os.path.join(tmp, f"{i:03d}.bin")
         paths.append((dest, x))
+    def ok(dest, x):
+        return os.path.exists(dest) and os.path.getsize(dest) == x["_length"]
     def one(dest, x):
         cmd = ["curl", "-sS", "-L", "--retry", "5", "--retry-delay", "2", "--retry-all-errors",
                "--connect-timeout", "20", "--max-time", "180", "-A", "wx-models-tides",
                "-H", f"Range: bytes={x['_offset']}-{x['_offset'] + x['_length'] - 1}",
                "-o", dest, grib_url]
-        r = subprocess.run(cmd, stderr=subprocess.PIPE)
-        if r.returncode != 0 or not os.path.exists(dest) or os.path.getsize(dest) == 0:
-            raise RuntimeError(f"curl {r.returncode} {dest} {r.stderr[-200:]!r}")
-        return dest
+        last = b""
+        for attempt in range(3):
+            r = subprocess.run(cmd, stderr=subprocess.PIPE)
+            last = r.stderr or b""
+            if r.returncode == 0 and ok(dest, x):
+                return dest
+        got = os.path.getsize(dest) if os.path.exists(dest) else 0
+        raise RuntimeError(f"curl {dest} got {got} want {x['_length']} {last[-200:]!r}")
     # wave of `parallel` processes
     i = 0
     while i < len(paths):
@@ -157,12 +164,12 @@ def fetch_ranges(grib_url, messages, tmp, parallel=12):
                    "-o", dest, grib_url]
             procs.append((dest, x, subprocess.Popen(cmd, stderr=subprocess.PIPE)))
         for dest, x, proc in procs:
-            err = proc.communicate()[1]
-            if proc.returncode != 0 or not os.path.exists(dest) or os.path.getsize(dest) == 0:
-                # one retry sequential
+            proc.communicate()
+            if not ok(dest, x):
+                # truncated or failed range: retry sequentially with a size check
                 one(dest, x)
         i += parallel
-    missing = [p for p, _ in paths if not os.path.exists(p) or os.path.getsize(p) == 0]
+    missing = [p for p, x in paths if not ok(p, x)]
     if missing:
         raise RuntimeError(f"missing {len(missing)} range files")
     return paths
@@ -218,31 +225,41 @@ def extract_single_file(path_base, tmp, idxs_hint=None):
     return msl_h, glatlon, n, grid, url
 
 def extract_ens_step(c, s, tmp):
-    """Return dict for one step, with source tag."""
+    """Return dict for one step, with source tag.
+
+    Retry the 51-member ENS mean a few times before falling back to AIFS single
+    or IFS. A truncated range or a short-lived S3 blip is not "ENS unavailable."
+    """
     note = None
-    try:
-        pf_rows, pf_url = load_index(aifs_ens_path(c, s, "pf"))
-        cf_rows, cf_url = load_index(aifs_ens_path(c, s, "cf"))
-        pf_m = [x for x in pf_rows if x.get("param") == "msl"]
-        cf_m = [x for x in cf_rows if x.get("param") == "msl"]
-        if len(pf_m) + len(cf_m) < MIN_MEM:
-            raise RuntimeError(f"only {len(pf_m)+len(cf_m)} msl members")
-        # same grib url per kind
-        tdir = os.path.join(tmp, "ens")
-        os.makedirs(tdir, exist_ok=True)
-        paths = []
-        if pf_m:
-            paths += fetch_ranges(pf_url + ".grib2", pf_m, os.path.join(tmp, "pf"), parallel=12)
-        if cf_m:
-            paths += fetch_ranges(cf_url + ".grib2", cf_m, os.path.join(tmp, "cf"), parallel=2)
-        msl, glatlon, n, grid = mean_from_members(paths)
-        if n < MIN_MEM:
-            raise RuntimeError(f"decoded {n} members")
-        return {"source": "aifs-ens-mean", "n_members": n, "msl_hpa": msl,
-                "grid": {sid: list(glatlon[sid]) for sid in STATIONS},
-                "grid_spec": list(grid), "note": note}
-    except Exception as e:
-        note = f"aifs-ens failed ({type(e).__name__}: {e})"
+    last_err = None
+    for attempt in range(3):
+        try:
+            pf_rows, pf_url = load_index(aifs_ens_path(c, s, "pf"))
+            cf_rows, cf_url = load_index(aifs_ens_path(c, s, "cf"))
+            pf_m = [x for x in pf_rows if x.get("param") == "msl"]
+            cf_m = [x for x in cf_rows if x.get("param") == "msl"]
+            if len(pf_m) + len(cf_m) < MIN_MEM:
+                raise RuntimeError(f"only {len(pf_m)+len(cf_m)} msl members")
+            tdir = os.path.join(tmp, "ens")
+            # fresh member files each attempt
+            shutil.rmtree(os.path.join(tmp, "pf"), ignore_errors=True)
+            shutil.rmtree(os.path.join(tmp, "cf"), ignore_errors=True)
+            os.makedirs(tdir, exist_ok=True)
+            paths = []
+            if pf_m:
+                paths += fetch_ranges(pf_url + ".grib2", pf_m, os.path.join(tmp, "pf"), parallel=12)
+            if cf_m:
+                paths += fetch_ranges(cf_url + ".grib2", cf_m, os.path.join(tmp, "cf"), parallel=2)
+            msl, glatlon, n, grid = mean_from_members(paths)
+            if n < MIN_MEM:
+                raise RuntimeError(f"decoded {n} members")
+            return {"source": "aifs-ens-mean", "n_members": n, "msl_hpa": msl,
+                    "grid": {sid: list(glatlon[sid]) for sid in STATIONS},
+                    "grid_spec": list(grid), "note": note}
+        except Exception as e:
+            last_err = e
+            log(f"  ens attempt {attempt+1}/3 for f{s:03d} failed: {type(e).__name__}: {e}")
+    note = f"aifs-ens failed after 3 attempts ({type(last_err).__name__}: {last_err})"
     # fallback AIFS single
     try:
         msl, glatlon, n, grid, url = extract_single_file(aifs_single_path(c, s), os.path.join(tmp, "single"))
@@ -324,7 +341,7 @@ def main():
     ap.add_argument("--start", default="2026-10-01T00:00:00Z")
     ap.add_argument("--end", default="2026-11-14T18:00:00Z")
     ap.add_argument("--cycle", help="single cycle YYYYMMDDHH")
-    ap.add_argument("--steps", default="0-72")
+    ap.add_argument("--steps", default="0-360")
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
     a, b = args.steps.split("-")
