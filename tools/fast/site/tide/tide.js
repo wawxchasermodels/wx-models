@@ -255,11 +255,14 @@ function drawChart(c, W, H, opt) {
   const legTwoRows = portrait || legW > W - 2 * pad - titleW - 40 * s;
   const legend = (x0, y0, list) => { let x = x0; list.forEach((it, i) => { c.strokeStyle = it[1]; c.lineWidth = (it[2] === -1 ? 2 : it[2] === -2 ? 2 : it[2]) * s; c.setLineDash(it[2] === -1 ? [7 * s, 5 * s] : it[2] === -2 ? [5 * s, 4 * s] : []);
     c.beginPath(); c.moveTo(x, y0 - 5 * s); c.lineTo(x + sw, y0 - 5 * s); c.stroke(); c.setLineDash([]); c.fillStyle = COL.text; c.fillText(it[0], x + sw + 8 * s, y0); x += widths[items.indexOf(it)] + gap; }); };
-  let top;
-  if (!legTwoRows) { lx = W - pad - legW; ly = y1; legend(lx, ly, items); top = y1 + 40 * s; }
+  let top, legendBox;
+  if (!legTwoRows) { lx = W - pad - legW; ly = y1; legend(lx, ly, items); top = y1 + 40 * s;
+    legendBox = { x: lx, y: ly - 13.5 * s, w: legW, h: 16.5 * s }; }
   else {   // greedy rows that fit the width (phones / 9:16)
     const rows = [[]]; let rw = 0; items.forEach((it, i) => { const w = widths[i]; if (rows[rows.length - 1].length && rw + gap + w > W - 2 * pad) { rows.push([]); rw = 0; } rw += (rows[rows.length - 1].length ? gap : 0) + w; rows[rows.length - 1].push(it); });
-    rows.forEach((r, i) => legend(pad, y1 + 50 * s + i * 24 * s, r)); top = y1 + 50 * s + (rows.length - 1) * 24 * s + 18 * s; }
+    rows.forEach((r, i) => legend(pad, y1 + 50 * s + i * 24 * s, r)); top = y1 + 50 * s + (rows.length - 1) * 24 * s + 18 * s;
+    const legBase = y1 + 50 * s;
+    legendBox = { x: pad, y: legBase - 13.5 * s, w: W - 2 * pad, h: (rows.length - 1) * 24 * s + 16.5 * s }; }
   // info lines (bottom)
   const info = [];
   if (ALIAS[D.st]) info.push(`Birch Bay has no NOAA tide gauge or prediction station of its own: all lines use Cherry Point (${ALIAS[D.st]}), the nearest NOAA gauge, about 4 mi south on the same shore.`);
@@ -282,7 +285,13 @@ function drawChart(c, W, H, opt) {
     for (const l of info) { const words = l.split(" "); let cur = ""; for (const w of words) { const t = cur ? cur + " " + w : w; if (c.measureText(t).width > maxW && cur) { wrapped.push(cur); cur = w; } else cur = t; } if (cur) wrapped.push(cur); } }
   const bottomInfo = SB ? (portrait ? wrapped.length * lh + SB.h + 18 * s : Math.max(wrapped.length * lh, SB.h) + 10 * s) : wrapped.length * lh + 8 * s;
   const axisH = 40 * s, yL = 46 * s, xR = pad + 8 * s;
-  const X0 = pad + yL, X1 = W - xR, Y0 = top + 10 * s, Y1 = H - bottomInfo - axisH;
+  // t3061u: phone page only — a reserved 3-line readout slot between the legend and the plot, always present so hover does not shift the chart. Studio and desktop stay as they are.
+  const phoneSlotH = (!STUDIO && portrait) ? 84 : 0;
+  const slotBox = phoneSlotH ? { x: pad, y: top + 2, w: W - 2 * pad, h: phoneSlotH } : null;
+  const X0 = pad + yL, X1 = W - xR, Y0 = top + (phoneSlotH ? 6 + phoneSlotH : 10 * s), Y1 = H - bottomInfo - axisH;
+  if (slotBox && !opt.hoverT) { c.save(); c.strokeStyle = "rgba(125,130,140,0.28)"; c.lineWidth = 1;
+    const sx = slotBox.x + 0.5, sy = slotBox.y + 0.5, sw2 = slotBox.w - 1, sh2 = slotBox.h - 1;
+    c.beginPath(); c.roundRect ? c.roundRect(sx, sy, sw2, sh2, 6) : c.rect(sx, sy, sw2, sh2); c.stroke(); c.restore(); }
   // y range
   let lo = Infinity, hi = -Infinity; const scan = (a) => { for (const [, v] of a) { if (v < lo) lo = v; if (v > hi) hi = v; } };
   scan(D.pred); scan(D.obs); scan(D.cond); scan(D.ver); if (T.flood) { const hd = hi; for (const f of D.floods) if (f.v < hd + 3) hi = Math.max(hi, f.v); }   // same rule as minor, per level; skipped when Flood levels is off
@@ -380,8 +389,13 @@ function drawChart(c, W, H, opt) {
   wrapped.forEach((l, i) => c.fillText(l, pad, infoTop + (i + 1) * lh - 2 * s));
   if (SB) { const sx = portrait ? pad : W - pad - SB.w, sy = H - bottomInfo + 6 * s; statsBox(c, sx, sy, SB.w, SB.h, s, F); window.__tideStatsBox = { x: sx, y: sy, w: SB.w, h: SB.h, W, H }; }
   else window.__tideStatsBox = null;
+  const axisBox = { x: X0, y: Y1, w: X1 - X0, h: axisH };
+  const axisYBox = { x: 0, y: Y0, w: X0, h: Y1 - Y0 };
+  const notesBox = { x: pad, y: infoTop, w: W - 2 * pad, h: wrapped.length * lh };
+  const layout = { X0, X1, Y0, Y1, W, H, slotH: phoneSlotH };
+  window.__tideChrome = { slot: slotBox, legend: legendBox, axis: axisBox, axisY: axisYBox, stats: window.__tideStatsBox, notes: notesBox, layout };
   c.restore();
-  return { X0, X1, Y0, Y1, X, Y, lo, hi };
+  return { X0, X1, Y0, Y1, X, Y, lo, hi, slot: slotBox, legend: legendBox, axis: axisBox, axisY: axisYBox, stats: window.__tideStatsBox, notes: notesBox, layout };
 }
 
 function statsBox(c, x, y, w, h, s, F) {
@@ -452,14 +466,29 @@ function placeTip(cssX, cssY) {
   if (!info) { tip.hidden = true; window.__tideHover = null; return; }
   tip.innerHTML = info.html; tip.hidden = false;
   const ox = cv.offsetLeft, oy = cv.offsetTop;
-  const plot = geom ? { x: ox + geom.X0, y: oy + geom.Y0, w: geom.X1 - geom.X0, h: geom.Y1 - geom.Y0 } : { x: ox + 8, y: oy + 80, w: cv.clientWidth - 16, h: 200 };
-  const box = { x: 0, y: 0, w: wrap.clientWidth, h: wrap.clientHeight };
-  const tipBox = placeStrip(tip, box, plot, plot.w);
+  let tipBox;
+  if (geom && geom.slot) {
+    const sl = geom.slot;
+    tip.style.maxWidth = Math.max(80, sl.w) + "px";
+    tip.style.left = "0px"; tip.style.top = "0px";
+    const tw = tip.offsetWidth, th = tip.offsetHeight;
+    let left = ox + sl.x, top = oy + sl.y + Math.max(0, (sl.h - th) / 2);
+    if (top < oy + sl.y) top = oy + sl.y;
+    if (top + th > oy + sl.y + sl.h) top = oy + sl.y + Math.max(0, sl.h - th);
+    if (left + tw > ox + sl.x + sl.w) left = ox + sl.x + Math.max(0, sl.w - tw);
+    if (left < ox + sl.x) left = ox + sl.x;
+    tip.style.left = left + "px"; tip.style.top = top + "px";
+    tipBox = { x: left, y: top, w: tip.offsetWidth, h: tip.offsetHeight };
+  } else {
+    const plot = geom ? { x: ox + geom.X0, y: oy + geom.Y0, w: geom.X1 - geom.X0, h: geom.Y1 - geom.Y0 } : { x: ox + 8, y: oy + 80, w: cv.clientWidth - 16, h: 200 };
+    const box = { x: 0, y: 0, w: wrap.clientWidth, h: wrap.clientHeight };
+    tipBox = placeStrip(tip, box, plot, plot.w);
+  }
   // Guard uses canvas CSS pixels (origin at the canvas, not the wrap).
   const tipCv = { x: tipBox.x - ox, y: tipBox.y - oy, w: tipBox.w, h: tipBox.h };
   const plotCv = geom ? { x: geom.X0, y: geom.Y0, w: geom.X1 - geom.X0, h: geom.Y1 - geom.Y0 } : null;
   const x = geom ? geom.X(hoverT) : cssX;
-  window.__tideHover = { t: hoverT, x, y0: geom ? geom.Y0 : 0, y1: geom ? geom.Y1 : 0, rows: info.rows, tip: tipCv, plot: plotCv };
+  window.__tideHover = { t: hoverT, x, y0: geom ? geom.Y0 : 0, y1: geom ? geom.Y1 : 0, rows: info.rows, tip: tipCv, plot: plotCv, layout: geom && geom.layout, regions: geom ? { plot: plotCv, legend: geom.legend, axis: geom.axis, axisY: geom.axisY, stats: geom.stats, notes: geom.notes, slot: geom.slot } : null };
 }
 function clearHover() { hoverT = null; window.__tideHover = null; const tip = $("tip"); if (tip) tip.hidden = true; if (!STUDIO) draw(); }
 function applyHover(clientX, clientY, fromTouch) {
@@ -536,7 +565,7 @@ window.TIDE = {
   state: () => D, stations: STATIONS, readout, geom: () => geom,
   qa: () => D ? { st: D.st, name: D.name, pred: D.pred.length, obs: D.obs.length, cond: D.cond.length, method: D.method, cycle: D.cyc ? new Date(D.cyc.t).toISOString() : null,
     rNow: D.rNow, rSlow: D.rSlow, bias: D.bias, flood: D.flood, floods: D.floods, floodSkip: D.floodSkip, floodOn: !!T.flood, floodDrawn: window.__tideFloodDrawn || [], floodLabels: window.__tideFloodLabels || [], floodLabelNote: window.__tideFloodLabelNote || null, legend: window.__tideLegend || [], hover: window.__tideHover || null, sid: D.sid, start: D.R.start, end: D.R.end, now: D.now,
-    statsBox: window.__tideStatsBox || null, arch: ARCH, calib: D.calib ? D.calib.c.map((b) => b.corr) : null, calibBg: D.calibBg ? { t: D.calibBg.t, c: D.calibBg.c.map((b) => b.corr) } : null, ver: D.ver.length, verHindcast: D.ver.filter((p) => !p[2]).length, issues: D.nIssues, archived: D.nArchive, vl: D.vl, sd: D.sd, stats: D.stats,
+    statsBox: window.__tideStatsBox || null, chrome: window.__tideChrome || null, arch: ARCH, calib: D.calib ? D.calib.c.map((b) => b.corr) : null, calibBg: D.calibBg ? { t: D.calibBg.t, c: D.calibBg.c.map((b) => b.corr) } : null, ver: D.ver.length, verHindcast: D.ver.filter((p) => !p[2]).length, issues: D.nIssues, archived: D.nArchive, vl: D.vl, sd: D.sd, stats: D.stats,
     condAboveFrac: D.cond.length ? D.cond.filter(([t, v]) => v >= (interp(D.pred, t) || 0)).length / D.cond.length : null, sharp: window.__tideSharp || null } : { err: window.__tideErr || null },
 };
 ui(); syncURL(); load();

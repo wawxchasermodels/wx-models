@@ -26,11 +26,13 @@ pass_chart_guard.py and label_sharpness_guard.py (towns only). Checks:
     and no label-label overlap. The 623f9aa truncated-line layout must fail this. The same label rules are checked
     at 1440x900, 1920x1080 and 390x844 for Westport, Seattle, Tacoma, Friday Harbor, Port Townsend, Cherry Point
     and Birch Bay; the legend does not include flood-stage rows (those are on the lines and in the hover readout)
-  8 (t3052u, placement t3059u) hover readout: on the desktop page, moving the pointer over the plot shows a compact
-    readout strip outside the plot (never intersecting the plot rect) and a vertical crosshair, with the time in Pacific,
-    values of the visible series, and the station's flood stages; on the phone a tap does the same;
+  8 (t3052u, placement t3059u / t3061u) hover readout: on the desktop page, moving the pointer over the plot shows a compact
+    readout strip outside the plot and a vertical crosshair, with the time in Pacific, values of the visible series, and
+    the station's flood stages; on the phone a tap does the same. The readout never intersects the plot, axis labels,
+    legend, verification panel, or notes, and hover does not shift the chart layout. On the phone a reserved 3-line slot
+    between the legend and the plot is always present (empty when not hovering) and the readout sits in that slot.
     Studio > Tides 16:9 frame also shows the readout on hover, still outside the plot, and it is not drawn into exported
-    frames unless hovering
+    frames unless hovering. Desktop and Studio chart layout are unchanged by the phone slot.
   9 (t3060u) Flood levels toggle: a "Flood levels" chip in the bar, default ON, same on desktop / phone / Studio;
     off hides all flood lines, labels, and flood rows in the readout; on restores them; the choice persists in localStorage
   7 (t3044u) station list: Birch Bay present (alias of Cherry Point 9449424, loads with all lines and no errors), the
@@ -55,6 +57,50 @@ from playwright.async_api import async_playwright
 
 fails = []   # (msg, always_block)
 def fail(msg, block=True): fails.append((msg, block)); print("FAIL", msg, flush=True)
+
+def boxes_intersect(a, b, eps=0.5):
+    if not a or not b: return False
+    return (a["x"] + a["w"] > b["x"] + eps and b["x"] + b["w"] > a["x"] + eps and
+            a["y"] + a["h"] > b["y"] + eps and b["y"] + b["h"] > a["y"] + eps)
+
+def box_inside(inner, outer, eps=1.0):
+    if not inner or not outer: return False
+    return (inner["x"] >= outer["x"] - eps and inner["y"] >= outer["y"] - eps and
+            inner["x"] + inner["w"] <= outer["x"] + outer["w"] + eps and
+            inner["y"] + inner["h"] <= outer["y"] + outer["h"] + eps)
+
+def layout_sig(lay):
+    if not lay: return None
+    return {k: lay.get(k) for k in ("X0", "X1", "Y0", "Y1", "slotH")}
+
+def check_readout_clear(tag, hov, phone=False, layout0=None):
+    """Readout must not cover the plot, axis labels, legend, verification box, or notes, and must not shift layout."""
+    h = (hov or {}).get("h") or {}
+    tip, plot = h.get("tip"), h.get("plot")
+    regs = h.get("regions") or {}
+    if not tip or not plot:
+        fail(f"{tag}: hover readout missing tip/plot rects ({h})"); return
+    names = (("plot", plot or regs.get("plot")), ("legend", regs.get("legend")),
+             ("axis", regs.get("axis")), ("axisY", regs.get("axisY")),
+             ("stats", regs.get("stats")), ("notes", regs.get("notes")))
+    for name, box in names:
+        if boxes_intersect(tip, box):
+            fail(f"{tag}: hover readout intersects the {name} (tip={tip} {name}={box})")
+    if phone:
+        slot = regs.get("slot")
+        if not slot: fail(f"{tag}: phone is missing the reserved readout slot")
+        elif not box_inside(tip, slot):
+            fail(f"{tag}: phone readout is not inside the reserved slot (tip={tip} slot={slot})")
+    else:
+        slot = regs.get("slot") or ((h.get("layout") or {}).get("slotH") or 0)
+        if slot and (isinstance(slot, dict) or slot):
+            if isinstance(slot, dict) or (isinstance(slot, (int, float)) and slot):
+                if (h.get("layout") or {}).get("slotH"):
+                    fail(f"{tag}: desktop unexpectedly has a phone readout slot ({h.get('layout')})")
+    if layout0 is not None:
+        lay1 = layout_sig(h.get("layout"))
+        if layout_sig(layout0) != lay1:
+            fail(f"{tag}: hover shifted the chart layout ({layout0} -> {lay1})")
 
 ARCH_IDX = "https://raw.githubusercontent.com/wawxchasermodels/wx-models/tide-archive/v1/index.json"
 def arch_up():
@@ -365,7 +411,12 @@ async def tide_page(br, W, H, dpr, phone, tag):
         # t3052u: hover / tap readout + crosshair, flood stages in the tooltip, no flood rows in the legend
         leg = (q or {}).get("legend") or []
         if any("flood" in (x or "").lower() for x in leg): fail(f"{tag}: legend still has flood rows {leg}")
-        box = await pg.evaluate("() => { const r = document.getElementById('tc').getBoundingClientRect(); return {x: r.left + r.width * 0.55, y: r.top + r.height * 0.42, left: r.left, top: r.top, w: r.width, h: r.height}; }")
+        pre = await pg.evaluate("() => { const g = window.TIDE.geom(), q = window.TIDE.qa(), ch = (q && q.chrome) || (g || {}); const r = document.getElementById('tc').getBoundingClientRect(); return { x: r.left + r.width * 0.55, y: r.top + (g ? (g.Y0 + g.Y1) / 2 : r.height * 0.42), layout: g && g.layout, slot: ch.slot || (g && g.slot), labels: (q.floodLabels || []).map(l => ({k:l.k,x0:l.x0,y0:l.y0,ly:l.ly})) }; }")
+        if phone and not (pre.get("slot") or (pre.get("layout") or {}).get("slotH")):
+            fail(f"{tag}: phone has no reserved readout slot before hover ({pre.get('layout')})")
+        if (not phone) and (pre.get("layout") or {}).get("slotH"):
+            fail(f"{tag}: desktop unexpectedly reserved a phone readout slot ({pre.get('layout')})")
+        box = pre
         if not phone:
             await pg.mouse.move(box["x"], box["y"]); await pg.wait_for_timeout(250)
         else:
@@ -379,12 +430,11 @@ async def tide_page(br, W, H, dpr, phone, tag):
                 if need.lower() not in txt.lower(): fail(f"{tag}: hover readout missing {need!r} ({hov.get('text')!r})")
             hx, y0, y1 = hov["h"].get("x"), hov["h"].get("y0"), hov["h"].get("y1")
             if hx is None or y0 is None or y1 is None or y1 <= y0: fail(f"{tag}: hover crosshair geometry missing ({hov.get('h')})")
-            tip, plot = hov["h"].get("tip"), hov["h"].get("plot")
-            if not tip or not plot: fail(f"{tag}: hover readout missing tip/plot rects ({hov.get('h')})")
-            elif (tip["x"] + tip["w"] > plot["x"] + 0.5 and plot["x"] + plot["w"] > tip["x"] + 0.5 and
-                  tip["y"] + tip["h"] > plot["y"] + 0.5 and plot["y"] + plot["h"] > tip["y"] + 0.5):
-                fail(f"{tag}: hover readout intersects the plot (tip={tip} plot={plot})")
-            print(f"  {tag}: hover readout ok t={hov['h'].get('t')} rows={len(hov['h'].get('rows') or [])} tip={tip}")
+            check_readout_clear(tag, hov, phone=phone, layout0=pre.get("layout"))
+            post_labs = await pg.evaluate("() => (window.TIDE.qa().floodLabels || []).map(l => ({k:l.k,x0:l.x0,y0:l.y0,ly:l.ly}))")
+            if pre.get("labels") and post_labs != pre.get("labels"):
+                fail(f"{tag}: hover shifted flood label positions")
+            print(f"  {tag}: hover readout ok t={hov['h'].get('t')} rows={len(hov['h'].get('rows') or [])} tip={hov['h'].get('tip')}")
         # t3060u: Flood levels chip default ON, off hides lines+labels+readout rows, on restores, persists
         tog = await pg.evaluate("() => { const b = document.getElementById('floodtog'); const q = window.TIDE.qa(); return { exists: !!b, pressed: b && b.getAttribute('aria-pressed'), text: b && b.textContent, floodOn: q.floodOn, drawn: q.floodDrawn, nlab: (q.floodLabels || []).length }; }")
         if not tog or not tog.get("exists") or "Flood levels" not in (tog.get("text") or ""):
@@ -412,10 +462,7 @@ async def tide_page(br, W, H, dpr, phone, tag):
             labs = " ".join(r.get("lab", "") for r in ((hoff.get("h") or {}).get("rows") or []))
             if "flood" in labs.lower() or "Minor flood" in (hoff.get("text") or ""):
                 fail(f"{tag}: flood rows still in the readout after Flood levels off ({labs!r} text={hoff.get('text')!r})")
-            tip, plot = (hoff["h"] or {}).get("tip"), (hoff["h"] or {}).get("plot")
-            if tip and plot and (tip["x"] + tip["w"] > plot["x"] + 0.5 and plot["x"] + plot["w"] > tip["x"] + 0.5 and
-                                 tip["y"] + tip["h"] > plot["y"] + 0.5 and plot["y"] + plot["h"] > tip["y"] + 0.5):
-                fail(f"{tag}: hover readout intersects the plot after Flood levels off (tip={tip} plot={plot})")
+            check_readout_clear(f"{tag} flood-off", hoff, phone=phone)
         n1 = await pg.evaluate("() => window.__tideDrawn")
         await pg.click("#floodtog")
         try: await pg.wait_for_function("(n) => window.__tideDrawn > n", arg=n1, timeout=10000)
