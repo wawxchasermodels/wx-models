@@ -1,0 +1,435 @@
+{
+  "ok": true,
+  "results": [
+    {
+      "tag": "desktop_windoff",
+      "method": "stofs-free",
+      "windOn": false,
+      "st": "9441102",
+      "pred": 2181,
+      "obs": 715,
+      "cond": 1457,
+      "nowLabel": {
+        "x": 598.7943496704102,
+        "y": 112.5,
+        "w": 129.4113006591797,
+        "h": 25,
+        "lab": "Now 10:30 PM"
+      },
+      "floodLabels": [
+        {
+          "k": "minor",
+          "x0": 82.5,
+          "x1": 111.35130310058594,
+          "y0": 225.71249999999998,
+          "y1": 237.21249999999998,
+          "ly": 239.46249999999998,
+          "lineX0": 75,
+          "lineX1": 1876.5,
+          "knockouts": [],
+          "offset": false,
+          "plotX0": 75,
+          "plotX1": 1876.5,
+          "fontCss": 9.5,
+          "lineW": 2.5,
+          "s": 1.25
+        },
+        {
+          "k": "moderate",
+          "x0": 82.5,
+          "x1": 129.91603088378906,
+          "y0": 206.30624999999998,
+          "y1": 217.80624999999998,
+          "ly": 220.05624999999998,
+          "lineX0": 75,
+          "lineX1": 1876.5,
+          "knockouts": [],
+          "offset": false,
+          "plotX0": 75,
+          "plotX1": 1876.5,
+          "fontCss": 9.5,
+          "lineW": 2.5,
+          "s": 1.25
+        },
+        {
+          "k": "major",
+          "x0": 82.5,
+          "x1": 110.66757202148438,
+          "y0": 186.89999999999998,
+          "y1": 198.39999999999998,
+          "ly": 200.64999999999998,
+          "lineX0": 75,
+          "lineX1": 1876.5,
+          "knockouts": [],
+          "offset": false,
+          "plotX0": 75,
+          "plotX1": 1876.5,
+          "fontCss": 9.5,
+          "lineW": 2.5,
+          "s": 1.25
+        }
+      ],
+      "windTest": {
+        "ok": true,
+        "n": 1457,
+        "fail": 0,
+        "zeroWindHours": 1
+      },
+      "sst": {
+        "adj": 0,
+        "dT": null,
+        "ssta": 1.106,
+        "ssta30": -0.406,
+        "k": 0.1618,
+        "W": -0.0657,
+        "steric": -0.0657,
+        "last_day": "2026-11-12",
+        "src": "oisst_bc",
+        "url": "sst.json",
+        "blend": "oisst_bc",
+        "clim": "2019-2024 DOY \u00b13d mean of the operational (blended) series"
+      },
+      "errs": [],
+      "painted": {
+        "pred": 7877,
+        "obs": 132643,
+        "cond": 91571
+      },
+      "now_overlaps": [],
+      "ok": true,
+      "reasons": [],
+      "path": "/workspace/wx-models-site/tide_sst_warmwater_mock_20261114/shots_stofsfree/westport_stofsfree_desktop_1920x1080@2x_windoff.png"
+    },
+    {
+      "tag": "desktop_windon",
+      "method": "stofs-free+wind",
+      "windOn": true,
+      "st": "9441102",
+      "pred": 2181,
+      "obs": 715,
+      "cond": 1457,
+      "nowLabel": {
+        "x": 598.7943496704102,
+        "y": 112.5,
+        "w": 129.4113006591797,
+        "h": 25,
+        "lab": "Now 10:30 PM"
+      },
+      "floodLabels": [
+        {
+          "k": "minor",
+          "x0": 82.5,
+          "x1": 111.35130310058594,
+          "y0": 223.32187499999998,
+          "y1": 234.82187499999998,
+          "ly": 237.07187499999998,
+          "lineX0": 75,
+          "lineX1": 1876.5,
+          "knockouts": [],
+          "offset": false,
+          "plotX0": 75,
+          "plotX1": 1876.5,
+          "fontCss": 9.5,
+          "lineW": 2.5,
+          "s": 1.25
+        },
+        {
+          "k": "moderate",
+          "x0": 82.5,
+          "x1": 129.91603088378906,
+          "y0": 204.26718749999998,
+          "y1": 215.76718749999998,
+          "ly": 218.01718749999998,
+          "lineX0": 75,
+          "lineX1": 1876.5,
+          "knockouts": [],
+          "offset": false,
+          "plotX0": 75,
+          "plotX1": 1876.5,
+          "fontCss": 9.5,
+          "lineW": 2.5,
+          "s": 1.25
+        },
+        {
+          "k": "major",
+          "x0": 82.5,
+          "x1": 110.66757202148438,
+          "y0": 185.21249999999998,
+          "y1": 196.71249999999998,
+          "ly": 198.96249999999998,
+          "lineX0": 75,
+          "lineX1": 1876.5,
+          "knockouts": [],
+          "offset": false,
+          "plotX0": 75,
+          "plotX1": 1876.5,
+          "fontCss": 9.5,
+          "lineW": 2.5,
+          "s": 1.25
+        }
+      ],
+      "windTest": {
+        "ok": true,
+        "n": 1457,
+        "fail": 0,
+        "zeroWindHours": 1
+      },
+      "sst": {
+        "adj": 0,
+        "dT": null,
+        "ssta": 1.106,
+        "ssta30": -0.406,
+        "k": 0.1618,
+        "W": -0.0657,
+        "steric": -0.0657,
+        "last_day": "2026-11-12",
+        "src": "oisst_bc",
+        "url": "sst.json",
+        "blend": "oisst_bc",
+        "clim": "2019-2024 DOY \u00b13d mean of the operational (blended) series"
+      },
+      "errs": [],
+      "painted": {
+        "pred": 7805,
+        "obs": 137303,
+        "cond": 87147
+      },
+      "now_overlaps": [],
+      "ok": true,
+      "reasons": [],
+      "path": "/workspace/wx-models-site/tide_sst_warmwater_mock_20261114/shots_stofsfree/westport_stofsfree_desktop_1920x1080@2x_windon.png"
+    },
+    {
+      "tag": "phone_windoff",
+      "method": "stofs-free",
+      "windOn": false,
+      "st": "9441102",
+      "pred": 2181,
+      "obs": 715,
+      "cond": 1457,
+      "nowLabel": {
+        "x": 107.88026458740234,
+        "y": 229.11145,
+        "w": 81.23947082519531,
+        "h": 15.600000000000001,
+        "lab": "Now 10:30 PM"
+      },
+      "floodLabels": [
+        {
+          "k": "minor",
+          "x0": 51.480000000000004,
+          "x1": 78.81291625976563,
+          "y0": 218.3417,
+          "y1": 229.3417,
+          "ly": 231.3417,
+          "lineX0": 46.800000000000004,
+          "lineX1": 356.84,
+          "knockouts": [],
+          "offset": false,
+          "plotX0": 46.800000000000004,
+          "plotX1": 356.84,
+          "fontCss": 9,
+          "lineW": 1.56,
+          "s": 0.78
+        },
+        {
+          "k": "moderate",
+          "x0": 82.81291625976563,
+          "x1": 127.73355529785157,
+          "y0": 214.99145,
+          "y1": 225.99145,
+          "ly": 227.99145,
+          "lineX0": 46.800000000000004,
+          "lineX1": 356.84,
+          "knockouts": [
+            {
+              "k": "minor",
+              "x0": 48.480000000000004,
+              "x1": 81.81291625976563
+            }
+          ],
+          "offset": true,
+          "plotX0": 46.800000000000004,
+          "plotX1": 356.84,
+          "fontCss": 9,
+          "lineW": 1.56,
+          "s": 0.78
+        },
+        {
+          "k": "major",
+          "x0": 131.73355529785158,
+          "x1": 158.41873596191408,
+          "y0": 211.6412,
+          "y1": 222.6412,
+          "ly": 224.6412,
+          "lineX0": 46.800000000000004,
+          "lineX1": 356.84,
+          "knockouts": [
+            {
+              "k": "minor",
+              "x0": 48.480000000000004,
+              "x1": 81.81291625976563
+            },
+            {
+              "k": "moderate",
+              "x0": 79.81291625976563,
+              "x1": 130.73355529785158
+            }
+          ],
+          "offset": true,
+          "plotX0": 46.800000000000004,
+          "plotX1": 356.84,
+          "fontCss": 9,
+          "lineW": 1.56,
+          "s": 0.78
+        }
+      ],
+      "windTest": {
+        "ok": true,
+        "n": 1457,
+        "fail": 0,
+        "zeroWindHours": 1
+      },
+      "sst": {
+        "adj": 0,
+        "dT": null,
+        "ssta": 1.106,
+        "ssta30": -0.406,
+        "k": 0.1618,
+        "W": -0.0657,
+        "steric": -0.0657,
+        "last_day": "2026-11-12",
+        "src": "oisst_bc",
+        "url": "sst.json",
+        "blend": "oisst_bc",
+        "clim": "2019-2024 DOY \u00b13d mean of the operational (blended) series"
+      },
+      "errs": [],
+      "painted": {
+        "pred": 1665,
+        "obs": 116301,
+        "cond": 22534
+      },
+      "now_overlaps": [],
+      "ok": true,
+      "reasons": [],
+      "path": "/workspace/wx-models-site/tide_sst_warmwater_mock_20261114/shots_stofsfree/westport_stofsfree_phone_390x844@3x_windoff.png"
+    },
+    {
+      "tag": "phone_windon",
+      "method": "stofs-free+wind",
+      "windOn": true,
+      "st": "9441102",
+      "pred": 2181,
+      "obs": 715,
+      "cond": 1457,
+      "nowLabel": {
+        "x": 107.88026458740234,
+        "y": 229.11145,
+        "w": 81.23947082519531,
+        "h": 15.600000000000001,
+        "lab": "Now 10:30 PM"
+      },
+      "floodLabels": [
+        {
+          "k": "minor",
+          "x0": 51.480000000000004,
+          "x1": 78.81291625976563,
+          "y0": 218.3417,
+          "y1": 229.3417,
+          "ly": 231.3417,
+          "lineX0": 46.800000000000004,
+          "lineX1": 356.84,
+          "knockouts": [],
+          "offset": false,
+          "plotX0": 46.800000000000004,
+          "plotX1": 356.84,
+          "fontCss": 9,
+          "lineW": 1.56,
+          "s": 0.78
+        },
+        {
+          "k": "moderate",
+          "x0": 82.81291625976563,
+          "x1": 127.73355529785157,
+          "y0": 214.99145,
+          "y1": 225.99145,
+          "ly": 227.99145,
+          "lineX0": 46.800000000000004,
+          "lineX1": 356.84,
+          "knockouts": [
+            {
+              "k": "minor",
+              "x0": 48.480000000000004,
+              "x1": 81.81291625976563
+            }
+          ],
+          "offset": true,
+          "plotX0": 46.800000000000004,
+          "plotX1": 356.84,
+          "fontCss": 9,
+          "lineW": 1.56,
+          "s": 0.78
+        },
+        {
+          "k": "major",
+          "x0": 131.73355529785158,
+          "x1": 158.41873596191408,
+          "y0": 211.6412,
+          "y1": 222.6412,
+          "ly": 224.6412,
+          "lineX0": 46.800000000000004,
+          "lineX1": 356.84,
+          "knockouts": [
+            {
+              "k": "minor",
+              "x0": 48.480000000000004,
+              "x1": 81.81291625976563
+            },
+            {
+              "k": "moderate",
+              "x0": 79.81291625976563,
+              "x1": 130.73355529785158
+            }
+          ],
+          "offset": true,
+          "plotX0": 46.800000000000004,
+          "plotX1": 356.84,
+          "fontCss": 9,
+          "lineW": 1.56,
+          "s": 0.78
+        }
+      ],
+      "windTest": {
+        "ok": true,
+        "n": 1457,
+        "fail": 0,
+        "zeroWindHours": 1
+      },
+      "sst": {
+        "adj": 0,
+        "dT": null,
+        "ssta": 1.106,
+        "ssta30": -0.406,
+        "k": 0.1618,
+        "W": -0.0657,
+        "steric": -0.0657,
+        "last_day": "2026-11-12",
+        "src": "oisst_bc",
+        "url": "sst.json",
+        "blend": "oisst_bc",
+        "clim": "2019-2024 DOY \u00b13d mean of the operational (blended) series"
+      },
+      "errs": [],
+      "painted": {
+        "pred": 1643,
+        "obs": 120356,
+        "cond": 21479
+      },
+      "now_overlaps": [],
+      "ok": true,
+      "reasons": [],
+      "path": "/workspace/wx-models-site/tide_sst_warmwater_mock_20261114/shots_stofsfree/westport_stofsfree_phone_390x844@3x_windon.png"
+    }
+  ]
+}

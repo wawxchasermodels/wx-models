@@ -139,6 +139,28 @@ def main():
     if not nearly(d_1013, d_clim):
         fails.append(f"dIB must be reference-independent: {d_1013} vs {d_clim}")
 
+
+    # 7) STOFS-free default: official + IB + SST + 5-day unexplained offset + 12 h leftover fade
+    #    wind-on = default + wind_comp; identity and t0 = rNow still hold; no STOFS in the default
+    r_now, ib0, W, offset5 = 0.42, 0.08, 0.11, 0.15
+    left = C.leftover_free(r_now, ib0, W, offset5)
+    off0, on0, wc0 = C.resid_free_pair(ib0, W, offset5, left, 0, 0.40, 0.40)
+    if not nearly(off0, r_now):
+        fails.append(f"stofs-free wind-off at dt=0 must equal rNow: {off0} vs {r_now}")
+    if not nearly(on0, r_now) or not nearly(wc0, 0.0):
+        fails.append(f"stofs-free wind-on at dt=0 must equal rNow with zero wind_comp: on={on0} wc={wc0}")
+    for dt in (0, 3, 12, 24, 72):
+        off, on, wc = C.resid_free_pair(0.10, W, offset5, left, dt, 0.35, 0.40)
+        if not nearly(on - off, wc):
+            fails.append(f"stofs-free identity failed dt={dt}: {on-off} vs {wc}")
+        offz, onz, wcz = C.resid_free_pair(0.10, W, offset5, left, dt, None, 0.40)
+        if not nearly(offz, onz) or not nearly(wcz, 0.0):
+            fails.append(f"stofs-free missing wind must match dt={dt}")
+    # default at long lead has no STOFS residual in it: IB + W + offset only
+    off_inf = C.resid_free(0.10, W, offset5, left, 1e9)
+    if not nearly(off_inf, 0.10 + W + offset5):
+        fails.append(f"stofs-free long lead should be IB+W+offset, got {off_inf}")
+
     if fails:
         print("FAIL", len(fails))
         for f in fails[:20]:

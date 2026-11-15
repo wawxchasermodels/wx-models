@@ -181,3 +181,20 @@ def W_D(adj_ft, dt_h):
     if adj_ft is None or not math.isfinite(adj_ft):
         return 0.0
     return float(adj_ft) * (1.0 - fade(dt_h))
+
+
+def leftover_free(r_now, ib_now, W_ft, offset5):
+    """12 h fade leftover so resid_free(dt=0) equals r_now."""
+    return float(r_now) - float(ib_now or 0.0) - float(W_ft or 0.0) - float(offset5 or 0.0)
+
+def resid_free(ib_t, W_ft, offset5, leftover, dt_h):
+    """STOFS-free default residual: official is added by the caller.
+    resid = IB(t) + SST term + held multi-day unexplained offset + 12 h fade leftover.
+    """
+    return float(ib_t or 0.0) + float(W_ft or 0.0) + float(offset5 or 0.0) + float(leftover or 0.0) * fade(dt_h)
+
+def resid_free_pair(ib_t, W_ft, offset5, leftover, dt_h, wind_t, wind_0):
+    """Return (off, on, wind_comp) for the STOFS-free default plus wind toggle."""
+    off = resid_free(ib_t, W_ft, offset5, leftover, dt_h)
+    wc = wind_comp(wind_t, wind_0, dt_h)
+    return off, off + wc, wc

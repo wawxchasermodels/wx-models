@@ -224,6 +224,12 @@ def check_flood_labels(tag, q, phone=False):
                     covered = True; break
             if not covered:
                 fail(f"flood: {tag} {o['k']} line passes through {l['k']} label without a knockout")
+    now = q.get("nowLabel")
+    if now and all(k in now for k in ("x", "y", "w", "h")):
+        nx0, ny0, nx1, ny1 = now["x"], now["y"], now["x"] + now["w"], now["y"] + now["h"]
+        for l in labs:
+            if nx0 < l["x1"] and l["x0"] < nx1 and ny0 < l["y1"] and l["y0"] < ny1:
+                fail(f"flood: {tag} Now label covers the {l['k']} flood word (now {nx0:.1f},{ny0:.1f} {now['w']:.1f}x{now['h']:.1f}, word {l['x0']:.1f}-{l['x1']:.1f} y {l['y0']:.1f}-{l['y1']:.1f})")
 
 def _regression_must_fail(name, q, expect_sub):
     n0 = len(fails)
@@ -370,7 +376,7 @@ def check_qa(tag, q, want_st=None):
     if want_st and q.get("st") != want_st: fail(f"{tag}: station {q.get('st')} (expected {want_st})")
     for k in ("pred", "obs", "cond"):
         if not q.get(k): fail(f"{tag}: no {k} points ({q.get(k)})")
-    if q.get("method") not in ("stofs", "persist", "ib-sst", "ib-sst+wind"): fail(f"{tag}: conditional method {q.get('method')!r}")
+    if q.get("method") not in ("stofs", "persist", "ib-sst", "ib-sst+wind", "stofs-free", "stofs-free+wind"): fail(f"{tag}: conditional method {q.get('method')!r}")
     if q.get("method") == "persist": print(f"  note {tag}: STOFS guidance unavailable, persistence fallback used (not blocking)")
     wt = q.get("windTest")
     if wt is not None and not wt.get("ok"):

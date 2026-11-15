@@ -1,0 +1,827 @@
+{
+  "compared_at": "2026-11-14",
+  "climatology": "2019-01-01 through 2024-12-31, day-of-year \u00b13 days, consistent across sources after bias-correcting satellite to in-situ",
+  "validation": "daily satellite SST vs daily mean in-situ water temperature (CO-OPS gauge preferred, NDBC/CMAN to fill)",
+  "ostia": "UK Met OSTIA was requested; CoastWatch ERDDAP dataset jplUKMO_OSTIAv20 returns 404 and PODAAC OpenDAP requires Earthdata login, so OSTIA is not in this comparison.",
+  "stations": {
+    "9439040": {
+      "name": "Astoria, OR",
+      "sound": false,
+      "insitu_src": "coops",
+      "insitu_days": 1780,
+      "products": {
+        "mur": {
+          "n": 1778,
+          "bias": -0.6575393700787402,
+          "rmse": 2.5121238668250845,
+          "mae": 1.955086051743532,
+          "r": 0.9397697532468201,
+          "rmse_bc": 2.424542905182061,
+          "pixel": {
+            "lat": 46.21,
+            "lon": -123.77,
+            "dist_km": 0.35,
+            "probe_day": "2026-10-15",
+            "probe_sst": 13.298,
+            "n_water": 167
+          },
+          "days": 2872
+        },
+        "geopolar_dn": {
+          "n": 1565,
+          "bias": 0.03430926517571883,
+          "rmse": 1.3427061454284202,
+          "mae": 1.0529955271565496,
+          "r": 0.9820047207808787,
+          "rmse_bc": 1.3422677330899184,
+          "pixel": {
+            "lat": 46.225,
+            "lon": -123.775,
+            "dist_km": 2.1,
+            "probe_day": "2026-10-15",
+            "probe_sst": 16.379993,
+            "n_water": 17
+          },
+          "days": 2653
+        },
+        "oisst": {
+          "n": 1776,
+          "bias": -1.352259572072072,
+          "rmse": 3.478961031334649,
+          "mae": 2.8787280405405404,
+          "r": 0.9445399263144186,
+          "rmse_bc": 3.205396060907997,
+          "pixel": {
+            "lat": 46.125,
+            "lon": -123.875,
+            "dist_km": 14.96,
+            "probe_day": "2026-10-15",
+            "probe_sst": 13.18,
+            "n_water": 5
+          },
+          "days": 2842
+        }
+      },
+      "best_sat": "geopolar_dn",
+      "chosen": "blend:geopolar_dn+coops",
+      "chosen_sat": "geopolar_dn",
+      "sat_bias_removed_C": 0.03430926517571883,
+      "clim_n_doy": 366,
+      "ssta_latest": 0.9183344195953165,
+      "ssta30": 0.17907940154166113,
+      "last_day": "2026-11-12",
+      "k": {
+        "k_ft_per_c": 0.149,
+        "r": 0.49,
+        "n_months": 29
+      }
+    },
+    "9440910": {
+      "name": "Toke Point, WA",
+      "sound": false,
+      "insitu_src": "coops",
+      "insitu_days": 2760,
+      "products": {
+        "mur": {
+          "n": 2758,
+          "bias": -0.5328361131254533,
+          "rmse": 1.1299009290639765,
+          "mae": 0.9037324147933286,
+          "r": 0.956759166690941,
+          "rmse_bc": 0.9963743202476651,
+          "pixel": {
+            "lat": 46.71,
+            "lon": -123.97,
+            "dist_km": 0.44,
+            "probe_day": "2026-10-15",
+            "probe_sst": 13.472,
+            "n_water": 138
+          },
+          "days": 2872
+        },
+        "geopolar_dn": {
+          "n": 2539,
+          "bias": -0.38931272154391494,
+          "rmse": 0.9991257854601329,
+          "mae": 0.7508566364710517,
+          "r": 0.961690411821922,
+          "rmse_bc": 0.9201564758319085,
+          "pixel": {
+            "lat": 46.675,
+            "lon": -123.975,
+            "dist_km": 3.72,
+            "probe_day": "2026-10-15",
+            "probe_sst": 13.249994,
+            "n_water": 18
+          },
+          "days": 2653
+        },
+        "oisst": {
+          "n": 2730,
+          "bias": -0.8611970695970697,
+          "rmse": 1.5556236639633585,
+          "mae": 1.2434153846153846,
+          "r": 0.9478565587961714,
+          "rmse_bc": 1.2954939564506673,
+          "pixel": {
+            "lat": 46.625,
+            "lon": -124.125,
+            "dist_km": 19.79,
+            "probe_day": "2026-10-15",
+            "probe_sst": 13.32,
+            "n_water": 8
+          },
+          "days": 2842
+        }
+      },
+      "best_sat": "geopolar_dn",
+      "chosen": "geopolar_dn_bc",
+      "chosen_sat": "geopolar_dn",
+      "sat_bias_removed_C": -0.38931272154391494,
+      "clim_n_doy": 366,
+      "ssta_latest": 0.8531707317073174,
+      "ssta30": 0.011244870305845941,
+      "last_day": "2026-11-12",
+      "k": {
+        "k_ft_per_c": 0.1097,
+        "r": 0.348,
+        "n_months": 29
+      }
+    },
+    "9441102": {
+      "name": "Westport, WA",
+      "sound": false,
+      "insitu_src": "coops",
+      "insitu_days": 2655,
+      "products": {
+        "mur": {
+          "n": 2651,
+          "bias": 0.18589475669558658,
+          "rmse": 0.9188595306370967,
+          "mae": 0.6761474915126368,
+          "r": 0.9492049798490885,
+          "rmse_bc": 0.8998588647536425,
+          "pixel": {
+            "lat": 46.91,
+            "lon": -124.11,
+            "dist_km": 0.83,
+            "probe_day": "2026-10-15",
+            "probe_sst": 13.795,
+            "n_water": 207
+          },
+          "days": 2872
+        },
+        "geopolar_dn": {
+          "n": 2432,
+          "bias": 0.27319819078947366,
+          "rmse": 0.8734799433007516,
+          "mae": 0.6195131578947369,
+          "r": 0.9553514516791437,
+          "rmse_bc": 0.8296565312814952,
+          "pixel": {
+            "lat": 46.925,
+            "lon": -124.125,
+            "dist_km": 3.19,
+            "probe_day": "2026-10-15",
+            "probe_sst": 12.619994,
+            "n_water": 30
+          },
+          "days": 2653
+        },
+        "oisst": {
+          "n": 2632,
+          "bias": -0.02173328267477204,
+          "rmse": 0.7410949638479063,
+          "mae": 0.5488806990881459,
+          "r": 0.9552376455125353,
+          "rmse_bc": 0.7407762211794517,
+          "pixel": {
+            "lat": 46.875,
+            "lon": -124.125,
+            "dist_km": 3.93,
+            "probe_day": "2026-10-15",
+            "probe_sst": 12.8,
+            "n_water": 11
+          },
+          "days": 2842
+        }
+      },
+      "best_sat": "oisst",
+      "chosen": "oisst_bc",
+      "chosen_sat": "oisst",
+      "sat_bias_removed_C": -0.02173328267477204,
+      "clim_n_doy": 366,
+      "ssta_latest": 1.1064285714285713,
+      "ssta30": -0.4060314790340019,
+      "last_day": "2026-11-12",
+      "k": {
+        "k_ft_per_c": 0.1618,
+        "r": 0.519,
+        "n_months": 29
+      }
+    },
+    "9442396": {
+      "name": "La Push, WA",
+      "sound": false,
+      "insitu_src": "coops",
+      "insitu_days": 2875,
+      "products": {
+        "mur": {
+          "n": 2871,
+          "bias": 0.9979721351445489,
+          "rmse": 1.6638127900543112,
+          "mae": 1.2337513061650993,
+          "r": 0.8373677621329183,
+          "rmse_bc": 1.3312868277810537,
+          "pixel": {
+            "lat": 47.9,
+            "lon": -124.64,
+            "dist_km": 1.5,
+            "probe_day": "2026-10-15",
+            "probe_sst": 13.298,
+            "n_water": 170
+          },
+          "days": 2872
+        },
+        "geopolar_dn": {
+          "n": 2652,
+          "bias": 0.8959664404223228,
+          "rmse": 1.4243782167313015,
+          "mae": 1.0625486425339365,
+          "r": 0.8810873431166778,
+          "rmse_bc": 1.1072928438022143,
+          "pixel": {
+            "lat": 47.875,
+            "lon": -124.625,
+            "dist_km": 4.37,
+            "probe_day": "2026-10-15",
+            "probe_sst": 10.909994,
+            "n_water": 25
+          },
+          "days": 2653
+        },
+        "oisst": {
+          "n": 2841,
+          "bias": 0.840431538190778,
+          "rmse": 1.5566622695146555,
+          "mae": 1.19081239000352,
+          "r": 0.8295349966986681,
+          "rmse_bc": 1.3102947191165812,
+          "pixel": {
+            "lat": 47.875,
+            "lon": -124.625,
+            "dist_km": 4.37,
+            "probe_day": "2026-10-15",
+            "probe_sst": 11.02,
+            "n_water": 15
+          },
+          "days": 2842
+        }
+      },
+      "best_sat": "geopolar_dn",
+      "chosen": "blend:geopolar_dn+coops",
+      "chosen_sat": "geopolar_dn",
+      "sat_bias_removed_C": 0.8959664404223228,
+      "clim_n_doy": 366,
+      "ssta_latest": 1.6207335730446015,
+      "ssta30": -0.17198275326797408,
+      "last_day": "2026-11-12",
+      "k": {
+        "k_ft_per_c": 0.1153,
+        "r": 0.363,
+        "n_months": 29
+      }
+    },
+    "9443090": {
+      "name": "Neah Bay, WA",
+      "sound": false,
+      "insitu_src": "coops",
+      "insitu_days": 1810,
+      "products": {
+        "mur": {
+          "n": 1808,
+          "bias": 0.7047638274336283,
+          "rmse": 1.4900651599385955,
+          "mae": 1.0316974557522123,
+          "r": 0.8093392583451514,
+          "rmse_bc": 1.31286028518039,
+          "pixel": {
+            "lat": 48.37,
+            "lon": -124.61,
+            "dist_km": 0.94,
+            "probe_day": "2026-10-15",
+            "probe_sst": 12.437,
+            "n_water": 152
+          },
+          "days": 2872
+        },
+        "geopolar_dn": {
+          "n": 1615,
+          "bias": -0.1449003095975232,
+          "rmse": 0.7254738901746067,
+          "mae": 0.5531950464396285,
+          "r": 0.8845600806628454,
+          "rmse_bc": 0.7108560090507917,
+          "pixel": {
+            "lat": 48.375,
+            "lon": -124.625,
+            "dist_km": 2.64,
+            "probe_day": "2026-10-15",
+            "probe_sst": 10.359994,
+            "n_water": 26
+          },
+          "days": 2653
+        },
+        "oisst": {
+          "n": 1778,
+          "bias": -0.11718503937007872,
+          "rmse": 0.863147865610384,
+          "mae": 0.654027559055118,
+          "r": 0.8443529542822001,
+          "rmse_bc": 0.8551560702325597,
+          "pixel": {
+            "lat": 48.375,
+            "lon": -124.625,
+            "dist_km": 2.64,
+            "probe_day": "2026-10-15",
+            "probe_sst": 10.35,
+            "n_water": 15
+          },
+          "days": 2842
+        }
+      },
+      "best_sat": "geopolar_dn",
+      "chosen": "geopolar_dn_bc",
+      "chosen_sat": "geopolar_dn",
+      "sat_bias_removed_C": -0.1449003095975232,
+      "clim_n_doy": 366,
+      "ssta_latest": 1.081707317073171,
+      "ssta30": -0.22936449864498634,
+      "last_day": "2026-11-12",
+      "k": {
+        "k_ft_per_c": 0.2527,
+        "r": 0.452,
+        "n_months": 29
+      }
+    },
+    "9444090": {
+      "name": "Port Angeles, WA",
+      "sound": true,
+      "insitu_src": "coops",
+      "insitu_days": 2876,
+      "products": {
+        "mur": {
+          "n": 2872,
+          "bias": 0.3739317548746518,
+          "rmse": 1.3275676149575668,
+          "mae": 0.7304066852367688,
+          "r": 0.8272235480185389,
+          "rmse_bc": 1.2738174182277797,
+          "pixel": {
+            "lat": 48.13,
+            "lon": -123.44,
+            "dist_km": 0.56,
+            "probe_day": "2026-10-15",
+            "probe_sst": 10.963,
+            "n_water": 146
+          },
+          "days": 2872
+        },
+        "geopolar_dn": {
+          "n": 2653,
+          "bias": -0.16073087071240105,
+          "rmse": 0.4446249625598219,
+          "mae": 0.33950056539766305,
+          "r": 0.9540267460593689,
+          "rmse_bc": 0.41455632250799945,
+          "pixel": {
+            "lat": 48.125,
+            "lon": -123.425,
+            "dist_km": 1.67,
+            "probe_day": "2026-10-15",
+            "probe_sst": 10.079994,
+            "n_water": 21
+          },
+          "days": 2653
+        },
+        "oisst": {
+          "n": 2842,
+          "bias": -0.0903374384236453,
+          "rmse": 0.5607572720493494,
+          "mae": 0.4012332864180155,
+          "r": 0.9121155533177874,
+          "rmse_bc": 0.5534328011378455,
+          "pixel": {
+            "lat": 48.125,
+            "lon": -123.375,
+            "dist_km": 7.21,
+            "probe_day": "2026-10-15",
+            "probe_sst": 10.4,
+            "n_water": 7
+          },
+          "days": 2842
+        }
+      },
+      "best_sat": "geopolar_dn",
+      "chosen": "blend:geopolar_dn+coops",
+      "chosen_sat": "geopolar_dn",
+      "sat_bias_removed_C": -0.16073087071240105,
+      "clim_n_doy": 366,
+      "ssta_latest": 0.9917076014574668,
+      "ssta30": 0.23709083364744293,
+      "last_day": "2026-11-12",
+      "k": {
+        "k_ft_per_c": 0.2659,
+        "r": 0.473,
+        "n_months": 29
+      }
+    },
+    "9444900": {
+      "name": "Port Townsend, WA",
+      "sound": true,
+      "insitu_src": "coops",
+      "insitu_days": 2346,
+      "products": {
+        "mur": {
+          "n": 2342,
+          "bias": 0.4095213492741247,
+          "rmse": 1.2458854116689038,
+          "mae": 0.7212258753202392,
+          "r": 0.9052114331624699,
+          "rmse_bc": 1.1766574367665783,
+          "pixel": {
+            "lat": 48.11,
+            "lon": -122.76,
+            "dist_km": 0.14,
+            "probe_day": "2026-10-15",
+            "probe_sst": 11.405,
+            "n_water": 209
+          },
+          "days": 2872
+        },
+        "geopolar_dn": {
+          "n": 2192,
+          "bias": 0.14839552919708027,
+          "rmse": 0.6666512486431855,
+          "mae": 0.46758257299270073,
+          "r": 0.940668272977958,
+          "rmse_bc": 0.6499251143261328,
+          "pixel": {
+            "lat": 48.125,
+            "lon": -122.775,
+            "dist_km": 2.29,
+            "probe_day": "2026-10-15",
+            "probe_sst": 11.469994,
+            "n_water": 31
+          },
+          "days": 2653
+        },
+        "oisst": {
+          "n": 2312,
+          "bias": -0.28005795847750864,
+          "rmse": 0.6288892553556072,
+          "mae": 0.42524480968858136,
+          "r": 0.9303424850792404,
+          "rmse_bc": 0.5630890119644852,
+          "pixel": {
+            "lat": 48.125,
+            "lon": -122.875,
+            "dist_km": 12.89,
+            "probe_day": "2026-10-15",
+            "probe_sst": 10.67,
+            "n_water": 5
+          },
+          "days": 2842
+        }
+      },
+      "best_sat": "oisst",
+      "chosen": "blend:oisst+coops",
+      "chosen_sat": "oisst",
+      "sat_bias_removed_C": -0.28005795847750864,
+      "clim_n_doy": 366,
+      "ssta_latest": 2.413024190558577,
+      "ssta30": 1.3459894885895534,
+      "last_day": "2026-11-12",
+      "k": {
+        "k_ft_per_c": 0.2994,
+        "r": 0.394,
+        "n_months": 29
+      }
+    },
+    "9449880": {
+      "name": "Friday Harbor, WA",
+      "sound": true,
+      "insitu_src": "coops",
+      "insitu_days": 2717,
+      "products": {
+        "mur": {
+          "n": 2715,
+          "bias": 0.46353443830570895,
+          "rmse": 1.3857614787093664,
+          "mae": 0.8428360957642727,
+          "r": 0.9098991924780231,
+          "rmse_bc": 1.3059367137726776,
+          "pixel": {
+            "lat": 48.55,
+            "lon": -123.01,
+            "dist_km": 0.59,
+            "probe_day": "2026-10-15",
+            "probe_sst": 11.192,
+            "n_water": 289
+          },
+          "days": 2872
+        },
+        "geopolar_dn": {
+          "n": 2496,
+          "bias": -0.0031718749999999985,
+          "rmse": 0.5057872041812264,
+          "mae": 0.383808092948718,
+          "r": 0.9699064295437025,
+          "rmse_bc": 0.5057772584077362,
+          "pixel": {
+            "lat": 48.525,
+            "lon": -123.025,
+            "dist_km": 2.64,
+            "probe_day": "2026-10-15",
+            "probe_sst": 10.989994,
+            "n_water": 32
+          },
+          "days": 2653
+        },
+        "oisst": {
+          "n": 2689,
+          "bias": 0.5222777984380811,
+          "rmse": 1.093935570646608,
+          "mae": 0.7962458162885832,
+          "r": 0.9400447149909886,
+          "rmse_bc": 0.9612080596752149,
+          "pixel": {
+            "lat": 48.625,
+            "lon": -123.125,
+            "dist_km": 15.31,
+            "probe_day": "2026-10-15",
+            "probe_sst": 11.06,
+            "n_water": 10
+          },
+          "days": 2842
+        }
+      },
+      "best_sat": "geopolar_dn",
+      "chosen": "blend:geopolar_dn+coops",
+      "chosen_sat": "geopolar_dn",
+      "sat_bias_removed_C": -0.0031718749999999985,
+      "clim_n_doy": 366,
+      "ssta_latest": 0.9130501116071432,
+      "ssta30": 0.3658821143353179,
+      "last_day": "2026-11-12",
+      "k": {
+        "k_ft_per_c": 0.2012,
+        "r": 0.272,
+        "n_months": 29
+      }
+    },
+    "9449424": {
+      "name": "Cherry Point, WA",
+      "sound": true,
+      "insitu_src": null,
+      "insitu_days": 0,
+      "products": {
+        "mur": {
+          "n": 0,
+          "bias": null,
+          "rmse": null,
+          "mae": null,
+          "r": null,
+          "pixel": {
+            "lat": 48.86,
+            "lon": -122.76,
+            "dist_km": 0.34,
+            "probe_day": "2026-10-15",
+            "probe_sst": 11.616999999999999,
+            "n_water": 183
+          },
+          "days": 2872
+        },
+        "geopolar_dn": {
+          "n": 0,
+          "bias": null,
+          "rmse": null,
+          "mae": null,
+          "r": null,
+          "pixel": {
+            "lat": 48.875,
+            "lon": -122.775,
+            "dist_km": 2.28,
+            "probe_day": "2026-10-15",
+            "probe_sst": 11.539994,
+            "n_water": 25
+          },
+          "days": 2653
+        },
+        "oisst": {
+          "n": 0,
+          "bias": null,
+          "rmse": null,
+          "mae": null,
+          "r": null,
+          "pixel": {
+            "lat": 48.875,
+            "lon": -122.875,
+            "dist_km": 12.99,
+            "probe_day": "2026-10-15",
+            "probe_sst": 11.5,
+            "n_water": 6
+          },
+          "days": 2842
+        }
+      },
+      "best_sat": "mur",
+      "chosen": "mur (no in-situ at this gauge)",
+      "chosen_sat": "mur",
+      "sat_bias_removed_C": 0.0,
+      "clim_n_doy": 366,
+      "ssta_latest": 1.73354761904762,
+      "ssta30": 0.6381388888888891,
+      "last_day": "2026-11-12",
+      "k": {
+        "k_ft_per_c": 0.0475,
+        "r": 0.116,
+        "n_months": 29
+      }
+    },
+    "9447130": {
+      "name": "Seattle, WA",
+      "sound": true,
+      "insitu_src": null,
+      "insitu_days": 0,
+      "products": {
+        "mur": {
+          "n": 0,
+          "bias": null,
+          "rmse": null,
+          "mae": null,
+          "r": null,
+          "pixel": {
+            "lat": 47.6,
+            "lon": -122.34,
+            "dist_km": 0.3,
+            "probe_day": "2026-10-15",
+            "probe_sst": 11.824,
+            "n_water": 81
+          },
+          "days": 2872
+        },
+        "geopolar_dn": {
+          "n": 0,
+          "bias": null,
+          "rmse": null,
+          "mae": null,
+          "r": null,
+          "pixel": {
+            "lat": 47.575,
+            "lon": -122.375,
+            "dist_km": 5.01,
+            "probe_day": "2026-10-15",
+            "probe_sst": 13.149994,
+            "n_water": 17
+          },
+          "days": 2653
+        }
+      },
+      "best_sat": "mur",
+      "chosen": "mur (no in-situ at this gauge)",
+      "chosen_sat": "mur",
+      "sat_bias_removed_C": 0.0,
+      "clim_n_doy": 366,
+      "ssta_latest": 0.9372380952380954,
+      "ssta30": 0.20937857142857172,
+      "last_day": "2026-11-12",
+      "k": {
+        "k_ft_per_c": 0.0584,
+        "r": 0.175,
+        "n_months": 29
+      }
+    },
+    "9446484": {
+      "name": "Tacoma, WA",
+      "sound": true,
+      "insitu_src": "coops",
+      "insitu_days": 2875,
+      "products": {
+        "mur": {
+          "n": 2871,
+          "bias": 0.05392406826889585,
+          "rmse": 1.3500927258943043,
+          "mae": 1.031481017067224,
+          "r": 0.8692639577106925,
+          "rmse_bc": 1.3490154051655765,
+          "pixel": {
+            "lat": 47.28,
+            "lon": -122.42,
+            "dist_km": 1.65,
+            "probe_day": "2026-10-15",
+            "probe_sst": 12.126999999999999,
+            "n_water": 79
+          },
+          "days": 2872
+        },
+        "geopolar_dn": {
+          "n": 2653,
+          "bias": 0.4830079155672823,
+          "rmse": 1.4449885643142195,
+          "mae": 1.1228307576328684,
+          "r": 0.8964596682818565,
+          "rmse_bc": 1.3618719853562662,
+          "pixel": {
+            "lat": 47.275,
+            "lon": -122.425,
+            "dist_km": 1.59,
+            "probe_day": "2026-10-15",
+            "probe_sst": 13.269994,
+            "n_water": 13
+          },
+          "days": 2653
+        }
+      },
+      "best_sat": "mur",
+      "chosen": "blend:mur+coops",
+      "chosen_sat": "mur",
+      "sat_bias_removed_C": 0.05392406826889585,
+      "clim_n_doy": 366,
+      "ssta_latest": 0.6779904761904749,
+      "ssta30": 0.3942742857142859,
+      "last_day": "2026-11-12",
+      "k": {
+        "k_ft_per_c": 0.1851,
+        "r": 0.221,
+        "n_months": 29
+      }
+    }
+  },
+  "k_fit": {
+    "9439040": {
+      "k_ft_per_c": 0.149,
+      "r": 0.49,
+      "n_months": 29
+    },
+    "9440910": {
+      "k_ft_per_c": 0.1097,
+      "r": 0.348,
+      "n_months": 29
+    },
+    "9441102": {
+      "k_ft_per_c": 0.1618,
+      "r": 0.519,
+      "n_months": 29
+    },
+    "9442396": {
+      "k_ft_per_c": 0.1153,
+      "r": 0.363,
+      "n_months": 29
+    },
+    "9443090": {
+      "k_ft_per_c": 0.2527,
+      "r": 0.452,
+      "n_months": 29
+    },
+    "9444090": {
+      "k_ft_per_c": 0.2659,
+      "r": 0.473,
+      "n_months": 29
+    },
+    "9444900": {
+      "k_ft_per_c": 0.2994,
+      "r": 0.394,
+      "n_months": 29
+    },
+    "9449880": {
+      "k_ft_per_c": 0.2012,
+      "r": 0.272,
+      "n_months": 29
+    },
+    "9449424": {
+      "k_ft_per_c": 0.0475,
+      "r": 0.116,
+      "n_months": 29
+    },
+    "9447130": {
+      "k_ft_per_c": 0.0584,
+      "r": 0.175,
+      "n_months": 29
+    },
+    "9446484": {
+      "k_ft_per_c": 0.1851,
+      "r": 0.221,
+      "n_months": 29
+    }
+  },
+  "k_fit_window": [
+    "2023-06",
+    "2025-10"
+  ],
+  "products_present": [
+    "mur",
+    "geopolar_dn",
+    "oisst"
+  ]
+}
