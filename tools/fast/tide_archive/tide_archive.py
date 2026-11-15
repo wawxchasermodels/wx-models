@@ -22,6 +22,10 @@ S3 = "https://noaa-gestofs-pds.s3.amazonaws.com/"
 STATIONS = {"9441102": "WPTW1", "9440910": "TOKW1", "9442396": "LAPW1", "9443090": "NEAW1", "9444090": "PTAW1", "9444900": "PTWW1",
             "9449880": "FRDW1", "9449424": "CHYW1", "9447130": "EBSW1", "9446484": "TCNW1", "9439040": "ASTO3"}
 ALG = "c1"   # = tide.js 20261114t2 (swl 3 h mean + bias fading 12 h, relax 24 h to the 30-day mean; persistence fallback)
+# c2 = c1 + version D SST term (k * (newest 2d OISST anomaly - prior 5d), faded in 1-exp(-lead/12h)).
+# The scheduled job MUST run sst_steric.py --out DIR before this script so v1/sst.json exists; otherwise snapshots stay c1.
+# The live Conditional also uses AIFS ENS IB + optional wind; those are not yet in this archive snapshot (separate from c2).
+ALG_C2 = "c2"
 H6, HR, DAY = 6 * 60000, 3600000, 86400000
 TAU_BIAS, TAU_RELAX, SLOW_DAYS, LEAD_H = 12 * HR, 24 * HR, 30, 72
 ISSUE_HOURS = (2, 8, 14, 20)
@@ -115,8 +119,17 @@ def interp(pts, t):
     return va if tb == ta else va + (vb - va) * (t - ta) / (tb - ta)
 
 
-def conditional(T, pred, obs, sto):
-    """Port of tide.js load(): returns the snapshot dict for issue time T (ms) or None."""
+def load_sst(out):
+    fn = os.path.join(out, "v1", "sst.json")
+    try:
+        return json.load(open(fn)) if os.path.exists(fn) else None
+    except Exception:
+        return None
+
+
+def conditional(T, pred, obs, sto, sst_st=None):
+    """Port of tide.js load(): returns the snapshot dict for issue time T (ms) or None.
+    If sst_st (one station from v1/sst.json) is provided, the version D adj is faded in (alg=c2)."""
     pmap = dict(pred)
     obs = [(t, v) for t, v in obs if t <= T]
     res = [(t, v - pmap[t]) for t, v in obs if t in pmap]
@@ -140,19 +153,26 @@ def conditional(T, pred, obs, sto):
     if r_now is None and not rs:
         return None
 
+    adj = float((sst_st or {}).get("adj_ft") or 0)
+    def sst_in(dt):
+        return adj * (1 - math.exp(-max(0.0, dt) / TAU_BIAS))
+
     def resid(t):
         dt = t - t0c
         if rs and rs_now is not None and t <= rs_end[0]:
-            return interp(rs, t) + bias * math.exp(-dt / TAU_BIAS)
+            return interp(rs, t) + bias * math.exp(-dt / TAU_BIAS) + sst_in(dt)
         if rs and rs_now is not None:
-            r_end = rs_end[1] + bias * math.exp(-(rs_end[0] - t0c) / TAU_BIAS)
+            r_end = rs_end[1] + bias * math.exp(-(rs_end[0] - t0c) / TAU_BIAS) + sst_in(rs_end[0] - t0c)
             return base + (r_end - base) * math.exp(-(t - rs_end[0]) / TAU_RELAX)
         r0 = r_now if r_now is not None else base
-        return base + (r0 - base) * math.exp(-dt / TAU_BIAS)
+        return base + (r0 - base) * math.exp(-dt / TAU_BIAS) + sst_in(dt)
 
     rr = lambda x: None if x is None else round(x, 3)
-    return {"t": T, "alg": ALG, "method": "stofs" if (rs and rs_now is not None) else "persist", "t0": t0c,
+    snap = {"t": T, "alg": ALG_C2 if sst_st else ALG, "method": "stofs" if (rs and rs_now is not None) else "persist", "t0": t0c,
             "rNow": rr(r_now), "rSlow": rr(r_slow), "bias": rr(bias), "r": [round(resid(T + k * HR), 3) for k in range(LEAD_H + 1)]}
+    if sst_st:
+        snap["sst"] = {k: sst_st.get(k) for k in ("last_day", "ssta30_c", "d_c", "k_ft_per_c", "steric_ft", "adj_ft")}
+    return snap
 
 
 def write(out, st, snaps):
@@ -218,6 +238,9 @@ def main():
         texts = dict(zip(cycles, ex.map(shef_text, cycles)))
     T0 = int(slots[0].timestamp() * 1000); T1 = int(slots[-1].timestamp() * 1000)
     obs_end = min(now, T1) + H6
+    sst = load_sst(a.out)
+    if not sst:
+        print("note: v1/sst.json missing — snapshots stay alg=c1. Run sst_steric.py --out DIR first for c2 (version D SST term).")
 
     def one(item):
         st, sid = item
@@ -228,7 +251,7 @@ def main():
             T = int(s.timestamp() * 1000)
             c = cyc_of.get(s)
             sto = shef_series(texts[c], sid) if c else None
-            snap = conditional(T, pred, obs, sto)
+            snap = conditional(T, pred, obs, sto, (sst and (sst.get("stations") or {}).get(st)))
             if snap:
                 snap["kind"] = kind; snap["cycle"] = f"{c:%Y%m%d%H}" if (c and snap["method"] == "stofs") else None
                 if kind == "archive": snap["made"] = now

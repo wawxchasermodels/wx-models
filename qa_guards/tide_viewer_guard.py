@@ -35,6 +35,9 @@ pass_chart_guard.py and label_sharpness_guard.py (towns only). Checks:
     frames unless hovering. Desktop and Studio chart layout are unchanged by the phone slot.
   9 (t3060u) Flood levels toggle: a "Flood levels" chip in the bar, default ON, same on desktop / phone / Studio;
     off hides all flood lines, labels, and flood rows in the readout; on restores them; the choice persists in localStorage
+  10 Wind surge chip: a "Wind surge" chip in the bar, default OFF, persisted in localStorage (tide:wind), same on desktop /
+    phone / Studio. Turning it on adds only the STOFS wind component (STOFS surge minus IB on STOFS forcing pressure).
+    qa().windTest must report wind-on minus wind-off equals that wind component, and zero-wind hours match between modes.
   7 (t3044u) station list: Birch Bay present (alias of Cherry Point 9449424, loads with all lines and no errors), the
     dropdown is A to Z by name and matches TIDE.stations, the default is still Westport 9441102
 Code failures always block. If NOAA's own APIs are unreachable from this box the failure is recorded as a data outage
@@ -367,8 +370,11 @@ def check_qa(tag, q, want_st=None):
     if want_st and q.get("st") != want_st: fail(f"{tag}: station {q.get('st')} (expected {want_st})")
     for k in ("pred", "obs", "cond"):
         if not q.get(k): fail(f"{tag}: no {k} points ({q.get(k)})")
-    if q.get("method") not in ("stofs", "persist"): fail(f"{tag}: conditional method {q.get('method')!r}")
+    if q.get("method") not in ("stofs", "persist", "ib-sst", "ib-sst+wind"): fail(f"{tag}: conditional method {q.get('method')!r}")
     if q.get("method") == "persist": print(f"  note {tag}: STOFS guidance unavailable, persistence fallback used (not blocking)")
+    wt = q.get("windTest")
+    if wt is not None and not wt.get("ok"):
+        fail(f"{tag}: wind-on minus wind-off is not exactly the wind component ({wt})")
     if not (q.get("start", 0) <= q.get("now", 0) <= q.get("end", 0)): fail(f"{tag}: now line outside the default range")
     # verification (t3018u)
     if not q.get("issues"): fail(f"{tag}: no archived Conditional snapshots loaded from the tide-archive branch ({q.get('arch')})", block=not ARCH_DOWN)
@@ -492,6 +498,49 @@ async def tide_page(br, W, H, dpr, phone, tag):
             await pg.click("#floodtog")
             try: await pg.wait_for_function("(n) => window.__tideDrawn > n && window.TIDE.qa().floodOn", arg=n3, timeout=10000)
             except Exception as e: fail(f"{tag}: could not restore Flood levels on ({e})")
+        # Wind surge chip: default OFF, adds only wind, persists, identity holds
+        wtog = await pg.evaluate("() => { const b = document.getElementById('windtog'); const q = window.TIDE.qa(); return { exists: !!b, pressed: b && b.getAttribute('aria-pressed'), text: b && b.textContent, windOn: q.windOn, method: q.method, windTest: q.windTest }; }")
+        if not wtog or not wtog.get("exists") or "Wind surge" not in (wtog.get("text") or ""):
+            fail(f"{tag}: Wind surge toggle chip missing ({wtog})")
+        elif wtog.get("pressed") != "false" or wtog.get("windOn"):
+            fail(f"{tag}: Wind surge toggle is not off by default ({wtog})")
+        elif wtog.get("windTest") is not None and not (wtog.get("windTest") or {}).get("ok"):
+            fail(f"{tag}: wind identity failed on default load ({wtog.get('windTest')})")
+        nW = await pg.evaluate("() => window.__tideDrawn")
+        await pg.click("#windtog")
+        try: await pg.wait_for_function("(n) => window.__tideDrawn > n && window.TIDE.qa().windOn === true", arg=nW, timeout=10000)
+        except Exception as e: fail(f"{tag}: Wind surge on did not redraw ({e})")
+        qwon = await pg.evaluate("() => { const q = window.TIDE.qa(), b = document.getElementById('windtog'); return { windOn: q.windOn, method: q.method, pressed: b && b.getAttribute('aria-pressed'), ls: localStorage.getItem('tide:wind'), windTest: q.windTest, cond: q.cond }; }")
+        if not qwon.get("windOn") or qwon.get("pressed") != "true" or qwon.get("ls") != "1" or not qwon.get("cond"):
+            fail(f"{tag}: Wind surge on did not stick ({qwon})")
+        if qwon.get("windTest") is not None and not (qwon.get("windTest") or {}).get("ok"):
+            fail(f"{tag}: wind identity failed with wind on ({qwon.get('windTest')})")
+        nW2 = await pg.evaluate("() => window.__tideDrawn")
+        await pg.click("#windtog")
+        try: await pg.wait_for_function("(n) => window.__tideDrawn > n && window.TIDE.qa().windOn === false", arg=nW2, timeout=10000)
+        except Exception as e: fail(f"{tag}: Wind surge off did not redraw ({e})")
+        # persist ON across reload, then restore default OFF
+        nW3 = await pg.evaluate("() => window.__tideDrawn")
+        await pg.click("#windtog")
+        try: await pg.wait_for_function("(n) => window.__tideDrawn > n && window.TIDE.qa().windOn === true", arg=nW3, timeout=10000)
+        except Exception as e: fail(f"{tag}: Wind surge on (persist) did not redraw ({e})")
+        await pg.reload(wait_until="load")
+        try:
+            await pg.wait_for_function("() => window.__tideDrawn > 0", timeout=90000)
+            qwl = await pg.evaluate("() => { const q = window.TIDE.qa(), b = document.getElementById('windtog'); return { windOn: q.windOn, pressed: b && b.getAttribute('aria-pressed'), ls: localStorage.getItem('tide:wind'), windTest: q.windTest }; }")
+            if not qwl.get("windOn") or qwl.get("pressed") != "true" or qwl.get("ls") != "1":
+                fail(f"{tag}: Wind surge on did not survive reload ({qwl})")
+            if qwl.get("windTest") is not None and not (qwl.get("windTest") or {}).get("ok"):
+                fail(f"{tag}: wind identity failed after reload ({qwl.get('windTest')})")
+            # restore default OFF
+            nW4 = await pg.evaluate("() => window.__tideDrawn")
+            await pg.click("#windtog")
+            try: await pg.wait_for_function("(n) => window.__tideDrawn > n && window.TIDE.qa().windOn === false", arg=nW4, timeout=10000)
+            except Exception as e: fail(f"{tag}: could not restore Wind surge off ({e})")
+            await pg.evaluate("() => localStorage.setItem('tide:wind', '0')")
+            print(f"  {tag}: Wind surge toggle off/on/persist ok")
+        except Exception as e:
+            fail(f"{tag}: reload after Wind surge on failed ({e})")
     if phone:
         sw = await pg.evaluate("document.documentElement.scrollWidth")
         if sw > W + 1: fail(f"{tag}: horizontal overflow scrollWidth={sw} > {W}")
@@ -596,6 +645,29 @@ async def studio(br):
     }""", arg=nT2, timeout=20000)
     except Exception as e: fail(f"studio tide: Flood levels on did not restore the frames ({e})")
     print("  studio: Flood levels toggle off/on ok")
+    # Wind surge chip in the Studio panel iframe, default OFF
+    wtog = await pg.evaluate("() => { const w = document.getElementById('tdf').contentWindow; const b = w.document.getElementById('windtog'); const q = w.TIDE.qa(); return { exists: !!b, pressed: b && b.getAttribute('aria-pressed'), text: b && b.textContent, windOn: q.windOn, windTest: q.windTest }; }")
+    if not wtog or not wtog.get("exists") or "Wind surge" not in (wtog.get("text") or "") or wtog.get("pressed") != "false" or wtog.get("windOn"):
+        fail(f"studio tide: Wind surge toggle missing or not off by default ({wtog})")
+    if wtog.get("windTest") is not None and not (wtog.get("windTest") or {}).get("ok"):
+        fail(f"studio tide: wind identity failed ({wtog.get('windTest')})")
+    nTw = await pg.evaluate("() => window.__studioTide")
+    await fr.locator("#windtog").click()
+    try: await pg.wait_for_function("""(n) => {
+      const w = document.getElementById('tdf') && document.getElementById('tdf').contentWindow;
+      const q = w && w.TIDE && w.TIDE.qa();
+      return window.__studioTide > n && q && q.windOn === true;
+    }""", arg=nTw, timeout=20000)
+    except Exception as e: fail(f"studio tide: Wind surge on did not redraw the frames ({e})")
+    nTw2 = await pg.evaluate("() => window.__studioTide")
+    await fr.locator("#windtog").click()
+    try: await pg.wait_for_function("""(n) => {
+      const w = document.getElementById('tdf') && document.getElementById('tdf').contentWindow;
+      const q = w && w.TIDE && w.TIDE.qa();
+      return window.__studioTide > n && q && q.windOn === false;
+    }""", arg=nTw2, timeout=20000)
+    except Exception as e: fail(f"studio tide: Wind surge off did not restore the frames ({e})")
+    print("  studio: Wind surge toggle off/on ok")
     if SHOT: await pg.screenshot(path=str(Path(SHOT) / "studio_tide.png"))
     # station change in the panel iframe -> both frames redraw on that station
     fr = pg.frame_locator("#tdf")
