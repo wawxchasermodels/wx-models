@@ -608,8 +608,8 @@ const QPF_Q18 = {"levels": [0.01, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1
 // 11-15 (Benjamin t3099u: more transitional colors on significant wave height above 14 ft, ending on pink
 // at 40; then more numbers on the key between 14 and 40). 0-14 ft colors unchanged. 14-40 ft is 2 ft bins
 // through orange, red, magenta and purple, pink at 40. Ticks add 16, 18, 24, 32, 36. Viewer-side over the
-// manifest (wave fields are stored to each frame's own max, nothing clipped). Keys
-// "@mkeys/static/key_<m>_<pid>_40p_<view>.png" ship with the site. Made by fast_encode.py (keyver _40p).
+// manifest (wave fields are stored to each frame's own max, nothing clipped). Key PNG
+// paths stay on the manifest (getKey is awaited before draw); the live colorbar uses this table.
 // Estimated Max Wave Height (0-85) is unchanged.
 const WAVES_40P = {"levels": [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0, 30.0, 32.0, 34.0, 36.0, 38.0, 40.0], "colors": ["#284ba2", "#2869bc", "#2886ca", "#28a1d0", "#2ab3c0", "#30ba9e", "#50c369", "#9bd241", "#d2d23a", "#e6be34", "#f0a930", "#ef912d", "#ea742c", "#e15730", "#d63f36", "#cc2e40", "#c62552", "#c31f6b", "#b91e85", "#9f249d", "#9938b4", "#ba58c4", "#e873bf"], "ticks": [0.0, 2.0, 4.0, 6.0, 8.0, 10.0, 14.0, 16.0, 18.0, 20.0, 24.0, 28.0, 32.0, 36.0, 40.0], "over": "#ff7eb6"};
 const ISO_MSLP = { every: 2, lw: 0.75, halo: 1.6 };
@@ -619,9 +619,11 @@ const allProds = md => md._allP || (md._allP = (() => {
     { keys: Object.fromEntries(Object.entries(A.mslpa.keys || {}).map(([v, k]) => [v, "@mkeys/" + k.replace("_mslpa_", "_mslpa_a80_")])) });
   for (const pid of ["qpf", "eqpf90", "nqpftot"]) { const P = A[pid]; if (P && P.levels && P.levels[P.levels.length - 1] < 18)
     A[pid] = Object.assign({}, P, QPF_Q18, { keys: Object.fromEntries(Object.entries(P.keys || {}).map(([v, k]) => [v, "@mkeys/" + k.replace(`_${pid}_`, `_${pid}_q18_`)])) }); }
-  // 11-15 significant wave height / swell+height: new 14-40 ft colors + ticks, only if the manifest still has the 0-40 / 17-bin scale
+  // 11-15 significant wave height / swell+height: new 14-40 ft colors + ticks, only if the manifest still has the 0-40 / 17-bin scale.
+  // Keep the manifest key paths (draw() awaits getKey even when the live key is used); missing @mkeys files would hang the map.
+  // The on-canvas key is drawn from levels/colors/ticks (drawViewerKey / Studio colorbar).
   for (const pid of ["waves", "swellhs"]) { const P = A[pid]; if (P && Array.isArray(P.levels) && P.levels[P.levels.length - 1] === 40 && P.levels.length < 24)
-    A[pid] = Object.assign({}, P, WAVES_40P, { keys: Object.fromEntries(Object.entries(P.keys || {}).map(([v, k]) => [v, "@mkeys/" + k.replace(`_${pid}_`, `_${pid}_40p_`)])) }); }
+    A[pid] = Object.assign({}, P, WAVES_40P); }
   // 11-04 (Benjamin t2279u "added to the high end of shorter interval like 24 hour precipitation key"): interval precip keys (1 / 3 / 6 / 12 /
   // 24 / 48 h, MSLP + precip; 0.01-12 in) get numbers up to 12 (4 6 8 10 12 after their own top tick); a label that would touch is skipped
   for (const [k, P] of Object.entries(A)) if (P && Array.isArray(P.levels) && Array.isArray(P.ticks) && P.levels[0] === 0.01 && P.levels[P.levels.length - 1] === 12 && /precip \(in\)/i.test(P.key || "")) {
