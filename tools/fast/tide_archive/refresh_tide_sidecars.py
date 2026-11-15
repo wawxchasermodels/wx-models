@@ -200,6 +200,15 @@ def main():
         refresh_aifs(args.out, args.aifs_work)
     if not args.skip_anom:
         refresh_anom(args.out)
+    v1 = os.path.join(args.out, "v1")
+    idx_fn = os.path.join(v1, "index.json")
+    try:
+        idx = json.load(open(idx_fn)) if os.path.exists(idx_fn) else {}
+        idx["sidecars"] = {fn: True for fn in ("sst.json", "aifs_ens_msl.json", "stofs_anom.json")
+                           if os.path.exists(os.path.join(v1, fn))}
+        savej(idx_fn, idx)
+    except Exception as e:
+        print("index sidecar list skip:", e)
     print("refresh_tide_sidecars done")
     return 0
 
