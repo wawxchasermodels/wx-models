@@ -40,11 +40,15 @@ pass_chart_guard.py and label_sharpness_guard.py (towns only). Checks:
     qa().windTest must report wind-on minus wind-off equals that wind component, and zero-wind hours match between modes.
   7 (t3044u) station list: Birch Bay present (alias of Cherry Point 9449424, loads with all lines and no errors), the
     dropdown is A to Z by name and matches TIDE.stations, the default is still Westport 9441102
+  11 Conditional minus official (the default / wind-off residual) must not jump unrealistically from one
+     hour to the next. A step larger than 0.30 ft in an hour fails. That catches a forecast-pressure
+     seam such as snapping back to the issue-time inverse-barometer term when the AIFS extract ends.
 Code failures always block. If NOAA's own APIs are unreachable from this box the failure is recorded as a data outage
 (not always_block), so the same outage on production is KNOWN and does not block unrelated ships.
 Usage: tide_viewer_guard.py <site url> [shotdir] [--json PATH]   Exit 0 = PASS, 1 = FAIL.
 """
 import asyncio, json, os, sys, urllib.request
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 sys.path.insert(0, "/workspace/studio_refresh_qa")
 import guard_report, guard_lock
@@ -60,6 +64,69 @@ from playwright.async_api import async_playwright
 
 fails = []   # (msg, always_block)
 def fail(msg, block=True): fails.append((msg, block)); print("FAIL", msg, flush=True)
+
+# Default (wind-off) residual = IB + SST + held offset + 12 h fade. It should not step by more
+# than a violent hour of MSL change (~0.30 ft is about 9 hPa). The 2026-11-17 Westport kink was
+# a 0.47–0.57 ft snap when the 72 h AIFS extract ended and the line jumped back to issue-time IB.
+RESID_JUMP_FT = 0.30
+PT = timezone(timedelta(hours=-8))
+RESID_JS = """() => {
+  const D = window.TIDE && window.TIDE.state();
+  if (!D) return null;
+  const cond = (D.condOff && D.condOff.length) ? D.condOff : D.cond;
+  return { pred: D.pred, cond, st: D.st, name: D.name };
+}"""
+
+def _fmt_pt(ms):
+    return datetime.fromtimestamp(ms / 1000.0, timezone.utc).astimezone(PT).strftime("%Y-%m-%d %H:%M PT")
+
+def check_cond_resid_jumps(tag, pred, cond, max_jump=RESID_JUMP_FT):
+    """Fail when Conditional minus official jumps unrealistically from one hour to the next."""
+    if not pred or not cond:
+        return
+    pmap = {}
+    for row in pred:
+        if not row or len(row) < 2:
+            continue
+        pmap[int(row[0])] = float(row[1])
+    series = []
+    for row in cond:
+        if not row or len(row) < 2:
+            continue
+        t = int(row[0])
+        p = pmap.get(t)
+        if p is None:
+            continue
+        series.append((t, float(row[1]) - p))
+    if len(series) < 2:
+        return
+    by_hour = {}
+    for t, r in series:
+        by_hour[(t // 3600000) * 3600000] = (t, r)
+    hours = sorted(by_hour)
+    worst = None
+    for a, b in zip(hours, hours[1:]):
+        dt_h = (b - a) / 3600000.0
+        if dt_h <= 0:
+            continue
+        da = by_hour[a][1]
+        db = by_hour[b][1]
+        jump = abs(db - da)
+        metric = jump if dt_h <= 1.5 else jump / dt_h
+        rec = (metric, jump, dt_h, a, b, da, db)
+        if worst is None or metric > worst[0]:
+            worst = rec
+        if metric > max_jump:
+            fail(
+                f"{tag}: Conditional minus official jumped {jump:.3f} ft in {dt_h:.1f} h "
+                f"({_fmt_pt(a)} {da:+.3f} ft -> {_fmt_pt(b)} {db:+.3f} ft; max {max_jump:.2f} ft/h)"
+            )
+    if worst:
+        print(
+            f"  {tag}: max hourly Conditional-official jump {worst[0]:.3f} ft "
+            f"over {worst[2]:.1f} h at {_fmt_pt(worst[3])}",
+            flush=True,
+        )
 
 def boxes_intersect(a, b, eps=0.5):
     if not a or not b: return False
@@ -339,6 +406,9 @@ async def stations_check(br, table, alias):
         await pg.wait_for_timeout(300)
         q = await pg.evaluate("""() => { const q = window.TIDE.qa(), D = window.TIDE.state(); let hi = -1e9;
           for (const a of [D.pred, D.obs, D.cond, D.ver]) for (const p of a) hi = Math.max(hi, p[1]); q.dataHi = hi; return q; }""")
+        ser = await pg.evaluate(RESID_JS)
+        if ser:
+            check_cond_resid_jumps(nm, ser.get("pred") or [], ser.get("cond") or [])
         sid = q.get("sid"); want = (table or {}).get(alias.get(key, key)) or {}
         if key == "birchbay" or nm.startswith("Birch Bay"):
             if sid != "9449424": fail(f"stations: Birch Bay data station is {sid} (expected Cherry Point 9449424)")
@@ -411,6 +481,9 @@ async def tide_page(br, W, H, dpr, phone, tag):
     await pg.wait_for_timeout(800)
     q = await pg.evaluate("() => window.TIDE && window.TIDE.qa()")
     ok = check_qa(tag, q, "9441102")
+    ser = await pg.evaluate(RESID_JS)
+    if ser:
+        check_cond_resid_jumps(tag, ser.get("pred") or [], ser.get("cond") or [])
     sh = (q or {}).get("sharp") or {}
     if ok and (not sh or abs(sh.get("backingW", 0) - round(sh.get("cssW", 0) * min(dpr, 3))) > 2):
         fail(f"{tag}: chart canvas backing {sh.get('backingW')} != CSS {sh.get('cssW')} x DPR {dpr} (soft text)")

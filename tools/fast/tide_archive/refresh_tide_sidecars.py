@@ -149,11 +149,17 @@ def refresh_aifs(out, work):
         if not rec:
             continue
         st = rec.get("steps") or {}
-        if "0" in st and "72" in st and len(st) >= 13:
+        # Prefer a cycle that reaches at least 240 h (covers a 9-day chart). Do not
+        # publish a newer 72 h extract over an older full-horizon one: that snap-back
+        # to issue-time IB put a step in the Conditional line.
+        leads = [int(k) for k in st]
+        lead = max(leads) if leads else -1
+        if "0" in st and lead >= 240 and len(st) >= 41:
             picked = rec
             break
-        if not picked and "0" in st and len(st) >= 8:
-            picked = rec  # usable but short
+        if "0" in st and len(st) >= 8:
+            if not picked or lead > max(int(k) for k in (picked.get("steps") or {})):
+                picked = rec  # usable but short; keep looking for a longer cycle
     if not picked:
         print("aifs: no usable cycle")
         return None
