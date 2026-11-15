@@ -15,7 +15,7 @@ pass_chart_guard.py and label_sharpness_guard.py (towns only). Checks:
     dashed "Conditional, verified" line has points AND is painted, the stats box has Conditional + Official MAE/bias over
     >= 24 hourly points and is drawn fully inside the chart (web, phone, both Studio frames), and calibration is NOT shown
     (Benjamin: raw Conditional on the chart until calibration proves itself)
-  6 (t3044u) flood levels: live triple-check (tide_flood_verify.py: CO-OPS mdapi + datums.json, Tides & Currents inundation
+  6 (t3044u, labels t3046u: centered on their own line, no overlap) flood levels: live triple-check (tide_flood_verify.py: CO-OPS mdapi + datums.json, Tides & Currents inundation
     dashboard file, NWS NWPS gauge) agrees with the FLOOD table in the served tide.js within 0.05 ft and no source disagrees;
     on every station the page's minor/moderate/major lines equal that table, nothing unverified is drawn, every level within
     3 ft of the data is drawn, and the three flood colors are painted where all three are in range (Westport, Cherry Point)
@@ -125,6 +125,14 @@ async def stations_check(br, table, alias):
             if extra: fail(f"flood: {nm} draws unverified levels {extra}")
         exp = sorted(k for k, v in got.items() if v < q["dataHi"] + 3)
         if sorted(q.get("floodDrawn") or []) != exp: fail(f"flood: {nm} lines drawn {q.get('floodDrawn')} but in range {exp}")
+        # t3046u: each name pill sits ON its own line (centered) and pills never overlap
+        labs = q.get("floodLabels") or []
+        if sorted(l["k"] for l in labs) != exp: fail(f"flood: {nm} labels {[l['k'] for l in labs]} != lines {exp}")
+        for l in labs:
+            if abs(l["yc"] - l["ly"]) > 0.5: fail(f"flood: {nm} {l['k']} label is {l['yc'] - l['ly']:.1f}px off its line")
+        for i, a_ in enumerate(labs):
+            for b_ in labs[i + 1:]:
+                if a_["x0"] < b_["x1"] and b_["x0"] < a_["x1"] and abs(a_["yc"] - b_["yc"]) < 15: fail(f"flood: {nm} labels {a_['k']}/{b_['k']} overlap")
         if all(k in exp for k in FLV):
             n = await pg.evaluate(FCOLORS, "tc")
             if not n or min(n.values()) < 40: fail(f"flood: {nm} minor/moderate/major colors not painted {n}")

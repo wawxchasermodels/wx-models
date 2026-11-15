@@ -300,13 +300,16 @@ function drawChart(c, W, H, opt) {
   c.strokeStyle = "#4a4f5a"; c.strokeRect(X0, Y0, X1 - X0, Y1 - Y0);
   // clip plot
   c.save(); c.beginPath(); c.rect(X0, Y0, X1 - X0, Y1 - Y0); c.clip();
-  window.__tideFloodDrawn = []; const fBox = [];
+  window.__tideFloodDrawn = []; window.__tideFloodLabels = []; const fBox = [], fTag = [];
   for (const f of D.floods) if (f.v >= lo && f.v <= hi) { c.strokeStyle = FCOL[f.k]; c.lineWidth = 2 * s; c.setLineDash([9 * s, 6 * s]); const y = Y(f.v); c.beginPath(); c.moveTo(X0, y); c.lineTo(X1, y); c.stroke(); c.setLineDash([]);
-    // small name tag above the line; staggered sideways when levels are too close to stack
-    c.font = F(700, 11.5); c.textAlign = "left"; c.textBaseline = "bottom"; const tw = c.measureText(f.lab).width, th = 13 * s; let x = X0 + 6 * s;
-    for (let moved = true; moved;) { moved = false; for (const b of fBox) if (x < b.x1 + 8 * s && x + tw > b.x0 && y - 3 * s - th < b.y1 && y - 3 * s > b.y0) { x = b.x1 + 10 * s; moved = true; } }
-    fBox.push({ x0: x, x1: x + tw, y0: y - 3 * s - th, y1: y - 3 * s });
-    c.lineWidth = 3 * s; c.strokeStyle = COL.bg; c.strokeText(f.lab, x, y - 3 * s); c.fillStyle = FCOL[f.k]; c.fillText(f.lab, x, y - 3 * s); window.__tideFloodDrawn.push(f.k); }
+    // t3046u: name tag sits ON its own line (vertically centered), in a chart-bg pill; close levels only shift sideways, never off the line
+    c.font = F(700, 11.5); c.textAlign = "left"; c.textBaseline = "middle"; const tw = c.measureText(f.lab).width, px = 5 * s, ph = 15 * s, pw = tw + 2 * px;
+    let x = X0 + 8 * s; const y0 = y - ph / 2, y1b = y + ph / 2;
+    for (let moved = true; moved;) { moved = false; for (const b of fBox) if (x < b.x1 + 6 * s && x + pw > b.x0 - 6 * s && y0 < b.y1 && y1b > b.y0) { x = b.x1 + 6 * s; moved = true; } }
+    fBox.push({ k: f.k, x0: x, x1: x + pw, y0, y1: y1b, ly: y });
+    fTag.push(() => { const rr = ph / 2; c.fillStyle = COL.bg; c.beginPath(); c.moveTo(x + rr, y0); c.lineTo(x + pw - rr, y0); c.arc(x + pw - rr, y, rr, -Math.PI / 2, Math.PI / 2); c.lineTo(x + rr, y1b); c.arc(x + rr, y, rr, Math.PI / 2, 3 * Math.PI / 2); c.closePath(); c.fill();
+    c.lineWidth = 1 * s; c.strokeStyle = FCOL[f.k]; c.stroke();
+    c.fillStyle = FCOL[f.k]; c.fillText(f.lab, x + px, y + 0.5 * s); }); window.__tideFloodLabels = fBox.map((b) => ({ k: b.k, x0: b.x0, x1: b.x1, yc: (b.y0 + b.y1) / 2, ly: b.ly })); window.__tideFloodDrawn.push(f.k); }
   const line = (pts, col, w, gapMs) => { if (!pts.length) return; c.strokeStyle = col; c.lineWidth = w * s; c.lineJoin = "round"; c.lineCap = "round"; c.beginPath(); let pen = false, lt = 0;
     for (const [t, v] of pts) { const x = X(t), y = Y(v); if (!pen || (gapMs && t - lt > gapMs)) { c.moveTo(x, y); pen = true; } else c.lineTo(x, y); lt = t; } c.stroke(); };
   line(D.pred, COL.pred, 2.2);
@@ -320,6 +323,7 @@ function drawChart(c, W, H, opt) {
       const lab = xb - xa > 210 * s ? "Verified line: hindcast (before the archive started)" : "hindcast"; if (xb - xa > c.measureText(lab).width + 10 * s) c.fillText(lab, xa + 6 * s, Y1 - 9 * s); } }
   line(D.obs, COL.obs, 2.2, 31 * 60000);
   if (D.cond.length) { c.save(); c.shadowColor = "rgba(0,0,0,0.55)"; c.shadowBlur = 3 * s; line(D.cond, COL.cond, 3.2); c.restore(); }
+  for (const t of fTag) { c.save(); c.setLineDash([]); c.textAlign = "left"; c.textBaseline = "middle"; c.font = F(700, 11.5); t(); c.restore(); }   // flood name pills on top of the curves
   // now line
   if (D.now >= R.start && D.now <= R.end) { const x = Math.round(X(D.now)) + 0.5; c.strokeStyle = COL.now; c.lineWidth = 1.6 * s; c.setLineDash([6 * s, 5 * s]); c.beginPath(); c.moveTo(x, Y0); c.lineTo(x, Y1); c.stroke(); c.setLineDash([]);
     c.font = F(800, 12.5); c.textBaseline = "top"; const lab = `Now ${fTime.format(new Date(D.now))}`, tw = c.measureText(lab).width + 12 * s, lx2 = Math.min(Math.max(x - tw / 2, X0 + 2), X1 - tw - 2);
@@ -413,7 +417,7 @@ window.TIDE = {
   draw: (c, W, H, opt) => drawChart(c, W, H, opt),
   state: () => D, stations: STATIONS,
   qa: () => D ? { st: D.st, name: D.name, pred: D.pred.length, obs: D.obs.length, cond: D.cond.length, method: D.method, cycle: D.cyc ? new Date(D.cyc.t).toISOString() : null,
-    rNow: D.rNow, rSlow: D.rSlow, bias: D.bias, flood: D.flood, floods: D.floods, floodSkip: D.floodSkip, floodDrawn: window.__tideFloodDrawn || [], sid: D.sid, start: D.R.start, end: D.R.end, now: D.now,
+    rNow: D.rNow, rSlow: D.rSlow, bias: D.bias, flood: D.flood, floods: D.floods, floodSkip: D.floodSkip, floodDrawn: window.__tideFloodDrawn || [], floodLabels: window.__tideFloodLabels || [], sid: D.sid, start: D.R.start, end: D.R.end, now: D.now,
     statsBox: window.__tideStatsBox || null, arch: ARCH, calib: D.calib ? D.calib.c.map((b) => b.corr) : null, calibBg: D.calibBg ? { t: D.calibBg.t, c: D.calibBg.c.map((b) => b.corr) } : null, ver: D.ver.length, verHindcast: D.ver.filter((p) => !p[2]).length, issues: D.nIssues, archived: D.nArchive, vl: D.vl, sd: D.sd, stats: D.stats,
     condAboveFrac: D.cond.length ? D.cond.filter(([t, v]) => v >= (interp(D.pred, t) || 0)).length / D.cond.length : null, sharp: window.__tideSharp || null } : { err: window.__tideErr || null },
 };
