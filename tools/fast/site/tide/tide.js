@@ -287,12 +287,16 @@ async function forecastPressure(st) {
       ? parseT((raw.length === 16 ? raw + ":00" : raw).replace("Z", ""))
       : parseT(raw.slice(0, 4) + "-" + raw.slice(4, 6) + "-" + raw.slice(6, 8) + "T" + raw.slice(8, 10) + ":00");
     const steps = {};
-    let src = rec.source || "aifs-ens-mean";
+    const srcs = new Set();
     for (const [h, row] of Object.entries(rec.steps)) {
       const v = (row.msl_hpa && row.msl_hpa[st] != null) ? row.msl_hpa[st] : null;
       if (v != null) steps[+h] = v;
-      if (row.source && row.source !== "aifs-ens-mean") src = row.source;
+      if (row.source) srcs.add(row.source);
     }
+    // Only label the run as a fallback if no step is the 51-member ENS mean.
+    let src = rec.source || "aifs-ens-mean";
+    if (srcs.size && !srcs.has("aifs-ens-mean")) src = [...srcs][0];
+    else src = "aifs-ens-mean";
     const pts = hourlyFromSix(init, steps);
     if (pts.length) return { pts, src, run: rec.cycle || rec.init, note: rec.note || null, latency: rec.meta || null };
   }

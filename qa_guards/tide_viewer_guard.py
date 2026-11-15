@@ -43,6 +43,9 @@ pass_chart_guard.py and label_sharpness_guard.py (towns only). Checks:
   11 Conditional minus official (the default / wind-off residual) must not jump unrealistically from one
      hour to the next. A step larger than 0.30 ft in an hour fails. That catches a forecast-pressure
      seam such as snapping back to the issue-time inverse-barometer term when the AIFS extract ends.
+  12 Shipped aifs_ens_msl.json must be the 51-member AIFS ENS mean (source aifs-ens-mean) for every
+     step, whenever that run's ENS files are available. A fallback to AIFS single or IFS while ENS
+     exists fails the ship.
 Code failures always block. If NOAA's own APIs are unreachable from this box the failure is recorded as a data outage
 (not always_block), so the same outage on production is KNOWN and does not block unrelated ships.
 Usage: tide_viewer_guard.py <site url> [shotdir] [--json PATH]   Exit 0 = PASS, 1 = FAIL.
@@ -127,6 +130,60 @@ def check_cond_resid_jumps(tag, pred, cond, max_jump=RESID_JUMP_FT):
             f"over {worst[2]:.1f} h at {_fmt_pt(worst[3])}",
             flush=True,
         )
+
+AIFS_ENS_SRC = "aifs-ens-mean"
+AIFS_ENS_HOSTS = (
+    "https://ecmwf-forecasts.s3.eu-central-1.amazonaws.com",
+    "https://data.ecmwf.int/forecasts",
+)
+AIFS_MIN_MEM = 40
+
+def _hdr():
+    return {**(qa.headers() if hasattr(qa, "headers") else {}), "User-Agent": "Mozilla/5.0 wx_models_tide_guard"}
+
+def ens_grib_exists(cycle, step):
+    """True if the AIFS ENS control file for this cycle/step is on a public host (200)."""
+    c = str(cycle or "")
+    if len(c) < 10:
+        return False
+    d, h = c[:8], c[8:10]
+    for host in AIFS_ENS_HOSTS:
+        url = f"{host}/{d}/{int(h):02d}z/aifs-ens/0p25/enfo/{c}0000-{int(step)}h-enfo-cf.grib2"
+        try:
+            req = urllib.request.Request(url, method="HEAD", headers={"User-Agent": "wx_models_tide_guard"})
+            with urllib.request.urlopen(req, timeout=20) as r:
+                if getattr(r, "status", 200) == 200:
+                    return True
+        except Exception:
+            continue
+    return False
+
+def check_aifs_ens_sidecar():
+    """Fail a ship if the shipped sidecar is not aifs-ens-mean while ENS data for that run exists."""
+    url = B + "/tide/aifs_ens_msl.json"
+    try:
+        rec = json.loads(urllib.request.urlopen(urllib.request.Request(url, headers=_hdr()), timeout=60).read().decode())
+    except Exception as e:
+        fail(f"aifs: could not read shipped sidecar {url} ({e})"); return
+    steps = rec.get("steps") or {}
+    cycle = str(rec.get("cycle") or "")
+    if not steps or not cycle:
+        fail(f"aifs: shipped sidecar missing cycle/steps ({ {k: rec.get(k) for k in ('cycle','source','init')} })"); return
+    bad = []
+    for h, row in sorted(steps.items(), key=lambda x: int(x[0])):
+        src = (row or {}).get("source")
+        n = (row or {}).get("n_members")
+        if src != AIFS_ENS_SRC or (n is not None and n < AIFS_MIN_MEM):
+            bad.append((h, src, n))
+    leads = [int(k) for k in steps]
+    if not bad:
+        print(f"  aifs: sidecar cycle={cycle} src={AIFS_ENS_SRC} n={len(steps)} lead=0-{max(leads)} h n_members=51", flush=True)
+        return
+    for h, src, n in bad:
+        if ens_grib_exists(cycle, h):
+            fail(f"aifs: shipped sidecar {cycle} f{int(h):03d} source is {src!r} (n={n}) but AIFS ENS is available; want {AIFS_ENS_SRC}")
+        else:
+            print(f"  note aifs: {cycle} f{int(h):03d} is {src} n={n} and ENS does not appear available", flush=True)
 
 def boxes_intersect(a, b, eps=0.5):
     if not a or not b: return False
@@ -776,6 +833,7 @@ async def main():
         btn = await pg.evaluate("() => { const b = document.getElementById('tidebtn'); return b ? (b.getAttribute('onclick') || '') + '|' + getComputedStyle(b).display : null; }")
         if not btn or "tide/" not in btn or btn.endswith("|none"): fail(f"map page: Tides button missing or hidden ({btn})")
         await ctx.close()
+        check_aifs_ens_sidecar()
         await tide_page(br, 1440, 900, 2, False, "desk")
         await tide_page(br, 390, 844, 3, True, "phone")
         table, alias = flood_triple_check()
