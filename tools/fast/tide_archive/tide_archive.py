@@ -11,7 +11,7 @@ issue time: observations <= t and the newest STOFS cycle that had been posted, c
 Storage: an orphan branch "tide-archive" of the public GitHub repo, read by the site via raw.githubusercontent.com (CORS *).
 No keys: CO-OPS API + NOAA Open Data (noaa-gestofs-pds) are public.
 
-  python tide_archive.py --out DIR --issue now            # live snapshot (kind=archive): current slot, or the current hour if >3 h late
+  python tide_archive.py --out DIR --issue now            # live snapshot (kind=archive) for the current issue slot
   python tide_archive.py --out DIR --backfill 2026110602 2026111414   # hindcast slots in [a, b]
 """
 import argparse, datetime as D, json, math, os, re, time, urllib.parse, urllib.request
@@ -22,6 +22,10 @@ S3 = "https://noaa-gestofs-pds.s3.amazonaws.com/"
 STATIONS = {"9441102": "WPTW1", "9440910": "TOKW1", "9442396": "LAPW1", "9443090": "NEAW1", "9444090": "PTAW1", "9444900": "PTWW1",
             "9449880": "FRDW1", "9449424": "CHYW1", "9447130": "EBSW1", "9446484": "TCNW1", "9439040": "ASTO3"}
 ALG = "c1"   # = tide.js 20261114t2 (swl 3 h mean + bias fading 12 h, relax 24 h to the 30-day mean; persistence fallback)
+# c2 = c1 + version D SST term (k * (newest 2d OISST anomaly - prior 5d), faded in 1-exp(-lead/12h)).
+# The scheduled job MUST run sst_steric.py --out DIR before this script so v1/sst.json exists; otherwise snapshots stay c1.
+# The live Conditional also uses AIFS ENS IB + optional wind; those are not yet in this archive snapshot (separate from c2).
+ALG_C2 = "c2"
 H6, HR, DAY = 6 * 60000, 3600000, 86400000
 TAU_BIAS, TAU_RELAX, SLOW_DAYS, LEAD_H = 12 * HR, 24 * HR, 30, 72
 ISSUE_HOURS = (2, 8, 14, 20)
@@ -115,8 +119,167 @@ def interp(pts, t):
     return va if tb == ta else va + (vb - va) * (t - ta) / (tb - ta)
 
 
-def conditional(T, pred, obs, sto):
-    """Port of tide.js load(): returns the snapshot dict for issue time T (ms) or None."""
+def load_sst(out):
+    fn = os.path.join(out, "v1", "sst.json")
+    try:
+        return json.load(open(fn)) if os.path.exists(fn) else None
+    except Exception:
+        return None
+
+def ib_ft(p):
+    try:
+        p = float(p)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(p):
+        return None
+    return (1013.25 - p) * FT_PER_HPA
+
+def load_v1(out, name):
+    fn = os.path.join(out, "v1", name)
+    try:
+        return json.load(open(fn)) if os.path.exists(fn) else None
+    except Exception:
+        return None
+
+def parse_init_ms(raw):
+    if not raw:
+        return None
+    raw = str(raw)
+    try:
+        if "T" in raw:
+            s = (raw if len(raw) > 16 else raw + ":00").replace("Z", "")
+            d = D.datetime.fromisoformat(s)
+            if d.tzinfo is None:
+                d = d.replace(tzinfo=D.timezone.utc)
+            return int(d.timestamp() * 1000)
+        if len(raw) >= 10:
+            d = D.datetime.strptime(raw[:10], "%Y%m%d%H").replace(tzinfo=D.timezone.utc)
+            return int(d.timestamp() * 1000)
+    except ValueError:
+        return None
+    return None
+
+def aifs_hourly(rec, sid):
+    if not rec:
+        return []
+    init = parse_init_ms(rec.get("init") or rec.get("cycle"))
+    steps = rec.get("steps") or {}
+    if init is None or not steps:
+        return []
+    def val(h):
+        row = steps.get(str(h)) or steps.get(h) or {}
+        v = (row.get("msl_hpa") or {}).get(sid)
+        return float(v) if v is not None else None
+    hs = [h for h in sorted({int(k) for k in steps}) if val(h) is not None]
+    if not hs:
+        return []
+    out, last = [], hs[-1]
+    for h in range(hs[0], last + 1):
+        t = init + h * HR
+        if val(h) is not None:
+            out.append((t, val(h))); continue
+        a = max(x for x in hs if x <= h)
+        nxt = [x for x in hs if x >= h]
+        b = nxt[0] if nxt else a
+        va, vb = val(a), val(b)
+        out.append((t, va if b == a else va + (vb - va) * (h - a) / (b - a)))
+    return out
+
+def coops_metric_pressure(st, b, e):
+    url = (API.replace("units=english", "units=metric")
+           + f"&product=air_pressure&station={st}&begin_date={gmt(b)}&end_date={gmt(e)}&interval=h")
+    try:
+        j = json.loads(get(url))
+    except Exception:
+        return []
+    out = []
+    for p in j.get("data") or []:
+        try:
+            out.append((parse_t(p["t"]), float(p["v"])))
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out
+
+def p_at(obs_pts, fc_pts, t, now_t):
+    if t <= now_t:
+        v = interp(obs_pts, t)
+        if v is not None:
+            return v
+    return interp(fc_pts, t)
+
+def conditional_free(T, pred, obs, air, aifs_rec, sst_st, sid, now_t=None):
+    """STOFS-free default residual, matching site/tide/tide.js (wind off).
+
+    resid = IB(t) + W + offset5 + leftover * exp(-lead/12h).
+    Forecast hours use AIFS ENS pressure when present; otherwise the issue-time
+    observed pressure is held (same fallback as the page).
+    """
+    now_t = now_t if now_t is not None else T
+    pmap = dict(pred)
+    obs = [(t, v) for t, v in obs if t <= T]
+    res = [(t, v - pmap[t]) for t, v in obs if t in pmap]
+    t_obs = obs[-1][0] if obs else None
+    r_now = None
+    if t_obs is not None and T - t_obs < 6 * HR:
+        recent = [r[1] for r in res if r[0] >= t_obs - HR]
+        if recent:
+            r_now = sum(recent) / len(recent)
+    if r_now is None and res:
+        r_now = res[-1][1]
+    if r_now is None:
+        return None
+    t0c = t_obs if t_obs is not None else T
+    W = 0.0
+    if sst_st:
+        if sst_st.get("W") is not None:
+            try:
+                W = float(sst_st["W"])
+            except (TypeError, ValueError):
+                W = 0.0
+        elif sst_st.get("k_ft_per_c") is not None:
+            ssta = sst_st.get("ssta30_c")
+            if ssta is None:
+                ssta = sst_st.get("ssta")
+            if ssta is not None:
+                W = float(sst_st["k_ft_per_c"]) * float(ssta)
+    fc_pts = aifs_hourly(aifs_rec, sid)
+    ib0 = ib_ft(p_at(air, fc_pts, t0c, now_t)) or 0.0
+    # 5-day unexplained offset: mean(r_obs - IB - W) on hours with residual + pressure
+    t5 = t0c - 5 * DAY
+    acc, n = 0.0, 0
+    t = t5
+    rmap = dict(res)
+    while t <= t0c:
+        rr = interp(res, t)
+        if rr is not None:
+            ibh = ib_ft(p_at(air, fc_pts, t, now_t))
+            if ibh is not None:
+                acc += rr - ibh - W
+                n += 1
+        t += HR
+    offset5 = (acc / n) if n else 0.0
+    leftover = r_now - ib0 - W - offset5
+    def resid(t):
+        dt = t - t0c
+        p = p_at(air, fc_pts, t, now_t)
+        ib = ib_ft(p)
+        if ib is None:
+            ib = ib0
+        return ib + W + offset5 + leftover * math.exp(-max(0.0, dt) / TAU_BIAS)
+    rr = lambda x: None if x is None else round(x, 3)
+    snap = {"t": T, "alg": ALG, "method": "stofs-free", "t0": t0c,
+            "rNow": rr(r_now), "rSlow": rr(offset5), "bias": rr(leftover),
+            "r": [round(resid(T + k * HR), 3) for k in range(LEAD_H + 1)],
+            "offset5": rr(offset5), "W": rr(W)}
+    if sst_st:
+        snap["sst"] = {k: sst_st.get(k) for k in ("last_day", "ssta30_c", "ssta", "k_ft_per_c", "W", "source", "chosen_sat")}
+    return snap
+
+
+def conditional(T, pred, obs, sto, sst_st=None):
+    """Port of tide.js load(): returns the snapshot dict for issue time T (ms) or None.
+    If sst_st (one station from v1/sst.json) is provided, the version D adj is faded in (alg=c2)."""
     pmap = dict(pred)
     obs = [(t, v) for t, v in obs if t <= T]
     res = [(t, v - pmap[t]) for t, v in obs if t in pmap]
@@ -140,19 +303,26 @@ def conditional(T, pred, obs, sto):
     if r_now is None and not rs:
         return None
 
+    adj = float((sst_st or {}).get("adj_ft") or 0)
+    def sst_in(dt):
+        return adj * (1 - math.exp(-max(0.0, dt) / TAU_BIAS))
+
     def resid(t):
         dt = t - t0c
         if rs and rs_now is not None and t <= rs_end[0]:
-            return interp(rs, t) + bias * math.exp(-dt / TAU_BIAS)
+            return interp(rs, t) + bias * math.exp(-dt / TAU_BIAS) + sst_in(dt)
         if rs and rs_now is not None:
-            r_end = rs_end[1] + bias * math.exp(-(rs_end[0] - t0c) / TAU_BIAS)
+            r_end = rs_end[1] + bias * math.exp(-(rs_end[0] - t0c) / TAU_BIAS) + sst_in(rs_end[0] - t0c)
             return base + (r_end - base) * math.exp(-(t - rs_end[0]) / TAU_RELAX)
         r0 = r_now if r_now is not None else base
-        return base + (r0 - base) * math.exp(-dt / TAU_BIAS)
+        return base + (r0 - base) * math.exp(-dt / TAU_BIAS) + sst_in(dt)
 
     rr = lambda x: None if x is None else round(x, 3)
-    return {"t": T, "alg": ALG, "method": "stofs" if (rs and rs_now is not None) else "persist", "t0": t0c,
+    snap = {"t": T, "alg": ALG_C2 if sst_st else ALG, "method": "stofs" if (rs and rs_now is not None) else "persist", "t0": t0c,
             "rNow": rr(r_now), "rSlow": rr(r_slow), "bias": rr(bias), "r": [round(resid(T + k * HR), 3) for k in range(LEAD_H + 1)]}
+    if sst_st:
+        snap["sst"] = {k: sst_st.get(k) for k in ("last_day", "ssta30_c", "d_c", "k_ft_per_c", "steric_ft", "adj_ft")}
+    return snap
 
 
 def write(out, st, snaps):
@@ -191,12 +361,9 @@ def main():
     a = ap.parse_args()
     now = int(time.time() * 1000)
     if a.issue == "now":
-        # real-time snapshot: the current 6-hourly slot if we are within 3 h of it (Actions cron can lag ~1 h); a late run or a
-        # manual workflow_dispatch issues at the current hour instead, so every snapshot from this mode is computed live
-        slot = slot_floor(now)
-        if now - slot.timestamp() * 1000 > 3 * HR:
-            slot = D.datetime.fromtimestamp(now / 1000, D.timezone.utc).replace(minute=0, second=0, microsecond=0)
-        slots = [slot]; kind = "archive"
+        slot = slot_floor(now); slots = [slot]
+        # live only if we are within 3 h of the slot (Actions cron can lag ~1 h); otherwise it is a reconstruction
+        kind = "archive" if now - slot.timestamp() * 1000 <= 3 * HR else "hindcast"
     elif a.backfill:
         f, t = (D.datetime.strptime(x, "%Y%m%d%H").replace(tzinfo=D.timezone.utc) for x in a.backfill)
         slots = []; d = f
@@ -221,19 +388,26 @@ def main():
         texts = dict(zip(cycles, ex.map(shef_text, cycles)))
     T0 = int(slots[0].timestamp() * 1000); T1 = int(slots[-1].timestamp() * 1000)
     obs_end = min(now, T1) + H6
+    sst = load_sst(a.out)
+    aifs = load_v1(a.out, "aifs_ens_msl.json")
+    if not sst:
+        print("note: v1/sst.json missing — SST term W=0 (same fallback as the page)")
+    if not aifs:
+        print("note: v1/aifs_ens_msl.json missing — forecast pressure holds the issue-time observation (same fallback as the page)")
 
     def one(item):
         st, sid = item
         pred = coops("predictions", st, T0 - SLOW_DAYS * DAY - DAY, T1 + (LEAD_H + 3) * HR, "&interval=6")
         obs = coops("water_level", st, T0 - SLOW_DAYS * DAY - DAY, obs_end)
+        air = coops_metric_pressure(st, T0 - 6 * DAY, obs_end)
         snaps = []
         for s in slots:
             T = int(s.timestamp() * 1000)
             c = cyc_of.get(s)
-            sto = shef_series(texts[c], sid) if c else None
-            snap = conditional(T, pred, obs, sto)
+            snap = conditional_free(T, pred, obs, air, aifs, (sst and (sst.get("stations") or {}).get(st)), st, now)
             if snap:
-                snap["kind"] = kind; snap["cycle"] = f"{c:%Y%m%d%H}" if (c and snap["method"] == "stofs") else None
+                snap["kind"] = kind
+                snap["cycle"] = f"{c:%Y%m%d%H}" if c else (aifs or {}).get("cycle")
                 if kind == "archive": snap["made"] = now
                 snaps.append(snap)
         write(a.out, st, snaps)
