@@ -811,8 +811,58 @@ function renderTide(k) {
   const T_ = MG.tide;
   if (!T_ || !T_.draw) { c.font = `700 ${k === "v" ? 40 : 34}px Montserrat`; c.fillStyle = "#c9ced8"; c.textAlign = "center"; c.fillText(MG.msg || "Loading tides\u2026", f.W / 2, f.H / 2); c.textAlign = "left"; return; }
   const m = k === "v" ? 40 : 34;   // safe margin inside the frame
-  c.save(); c.translate(m, m); T_.draw(c, f.W - 2 * m, f.H - 2 * m, { scale: k === "v" ? 2.2 : 1.5, bg }); c.restore();
+  const hoverT = (MG.tideHover && MG.tideHover[k]) || null;
+  c.save(); c.translate(m, m); const g = T_.draw(c, f.W - 2 * m, f.H - 2 * m, { scale: k === "v" ? 2.2 : 1.5, bg, hoverT }); c.restore();
+  MG.tideGeom = MG.tideGeom || {}; MG.tideGeom[k] = g;
   window.__studio = (window.__studio || 0) + 1; window.__studioTide = (window.__studioTide || 0) + 1;
+}
+// t3052u: hover / tap readout on Studio tide frames (same values as the tide page)
+function bindTideHover() {
+  for (const k of ["v", "h"]) {
+    const cv = F[k].cv; if (!cv || cv._tideHoverBound) continue; cv._tideHoverBound = true;
+    const tip = document.createElement("div"); tip.className = "tide-tip"; tip.hidden = true;
+    tip.style.cssText = "position:absolute;pointer-events:none;z-index:5;background:#1d2027ee;color:#fff;border:1px solid #7d828c;border-radius:6px;padding:4px 8px;font:600 13px Montserrat,system-ui,sans-serif;white-space:nowrap;line-height:1.45";
+    cv.parentNode.appendChild(tip); F[k].tideTip = tip;
+    const at = (e) => {
+      if (!TIDEM() || !MG.tide) { tip.hidden = true; return; }
+      const f = F[k], b = cv.getBoundingClientRect();
+      const x = (e.clientX - b.left) * (f.W / Math.max(1, b.width)), y = (e.clientY - b.top) * (f.H / Math.max(1, b.height));
+      const m = k === "v" ? 40 : 34, g = MG.tideGeom && MG.tideGeom[k], st = MG.tide.state && MG.tide.state();
+      if (!g || !st || x < m + g.X0 || x > m + g.X1 || y < m + g.Y0 || y > m + g.Y1) {
+        if (MG.tideHover && MG.tideHover[k] != null) { MG.tideHover[k] = null; render(k); }
+        tip.hidden = true; if (k === "h") window.__studioTideHover = null; return;
+      }
+      const t = st.R.start + (x - m - g.X0) / (g.X1 - g.X0) * (st.R.end - st.R.start), tt = Math.round(t / 360000) * 360000;
+      MG.tideHover = MG.tideHover || {};
+      if (MG.tideHover[k] !== tt) { MG.tideHover[k] = tt; render(k); }
+      const info = MG.tide.readout && MG.tide.readout(tt);
+      if (!info) { tip.hidden = true; return; }
+      tip.innerHTML = info.html; tip.hidden = false;
+      const tw = tip.offsetWidth, th = tip.offsetHeight;
+      let lx = e.clientX - b.left + 14, ly = e.clientY - b.top - th - 10;
+      if (lx + tw > b.width - 4) lx = e.clientX - b.left - tw - 12;
+      if (lx < 4) lx = 4; if (ly < 4) ly = e.clientY - b.top + 14;
+      tip.style.left = lx + "px"; tip.style.top = ly + "px";
+      if (k === "h") window.__studioTideHover = { t: tt, frame: "h", rows: info.rows, x: g.X(tt) };
+    };
+    cv.addEventListener("pointermove", (e) => { if (!TIDEM() || e.pointerType === "touch") return; at(e); });
+    cv.addEventListener("pointerleave", () => {
+      if (!TIDEM()) return; tip.hidden = true;
+      if (MG.tideHover) MG.tideHover[k] = null; render(k);
+      if (k === "h") window.__studioTideHover = null;
+    });
+    let hold = null;
+    cv.addEventListener("pointerdown", (e) => {
+      if (e.pointerType !== "touch" || !TIDEM()) return;
+      hold = { id: e.pointerId, x: e.clientX, y: e.clientY, fired: false, tid: setTimeout(() => { if (!hold) return; hold.fired = true; at({ clientX: hold.x, clientY: hold.y }); }, 400) };
+    });
+    const end = (e) => {
+      if (!hold || e.pointerId !== hold.id) return; clearTimeout(hold.tid);
+      if (e.type === "pointerup" && !hold.fired && Math.hypot(e.clientX - hold.x, e.clientY - hold.y) < 12) at(e);
+      hold = null;
+    };
+    cv.addEventListener("pointerup", end); cv.addEventListener("pointercancel", (e) => { if (hold && e.pointerId === hold.id) { clearTimeout(hold.tid); hold = null; } });
+  }
 }
 function webNormalize(raw) {
   let s = String(raw || "").trim(); if (!s) return "";
@@ -2383,6 +2433,7 @@ for (const k of ["v", "h"]) if (F[k].cv) {
 }
 window.__studioInk = () => { const px = window.__studioFramePx || {}; return { v: px.v || 0, h: px.h || 0 }; };
 window.__studioSharp = { PSS, ssFit, ovPut, sharpShadow, colorbar, ctxS, F, paintStudioTowns, frameTx, frameInk };
+bindTideHover();
 window.__studioQA = () => ({ mode: PASSM() ? "pass" : MG.on ? MG.kind : "map", web: WEBM() ? WEB.url : "", cmp: CMPM() ? { l: CMP.L && CMP.L.run, r: CMP.R && CMP.R.run, title: cmpHeadTitle() } : null, mg: MG.kind === "mg" ? (MG.src.split("#")[1] || "") : "", alert: ALERTM() ? ((typeof Alerts !== "undefined" && Alerts.titleText && Alerts.titleText()) || "All Alerts") : "", pass: PF.run, passRows: PF.rows ? PF.rows.length : 0,
   pfL: F.h.pfL ? { x: F.h.pfL.x, y0: F.h.pfL.y0, w: F.h.pfL.w, rh: F.h.pfL.rh, names: F.h.pfL.names } : null, W: F.h.W, fr: { v: getFr("v"), h: getFr("h") }, px: window.__studioInk() });
 })();

@@ -15,10 +15,15 @@ pass_chart_guard.py and label_sharpness_guard.py (towns only). Checks:
     dashed "Conditional, verified" line has points AND is painted, the stats box has Conditional + Official MAE/bias over
     >= 24 hourly points and is drawn fully inside the chart (web, phone, both Studio frames), and calibration is NOT shown
     (Benjamin: raw Conditional on the chart until calibration proves itself)
-  6 (t3044u, labels t3046u: centered on their own line, no overlap) flood levels: live triple-check (tide_flood_verify.py: CO-OPS mdapi + datums.json, Tides & Currents inundation
+  6 (t3044u, labels t3052u: plain names sit on top of their own line, far left, no overlap) flood levels: live triple-check (tide_flood_verify.py: CO-OPS mdapi + datums.json, Tides & Currents inundation
     dashboard file, NWS NWPS gauge) agrees with the FLOOD table in the served tide.js within 0.05 ft and no source disagrees;
     on every station the page's minor/moderate/major lines equal that table, nothing unverified is drawn, every level within
-    3 ft of the data is drawn, and the three flood colors are painted where all three are in range (Westport, Cherry Point)
+    3 ft of the data is drawn, and the three flood colors are painted where all three are in range (Westport, Cherry Point);
+    each name sits at the far left of the plot with its bottom 0-3 px above its line and labels do not overlap; the legend
+    does not include flood-stage rows (those are on the lines and in the hover readout)
+  8 (t3052u) hover readout: on the desktop page, moving the pointer over the plot shows a tooltip and a vertical crosshair
+    with the time in Pacific, values of the visible series, and the station's flood stages; on the phone a tap does the same;
+    Studio > Tides 16:9 frame also shows the readout on hover
   7 (t3044u) station list: Birch Bay present (alias of Cherry Point 9449424, loads with all lines and no errors), the
     dropdown is A to Z by name and matches TIDE.stations, the default is still Westport 9441102
 Code failures always block. If NOAA's own APIs are unreachable from this box the failure is recorded as a data outage
@@ -125,14 +130,24 @@ async def stations_check(br, table, alias):
             if extra: fail(f"flood: {nm} draws unverified levels {extra}")
         exp = sorted(k for k, v in got.items() if v < q["dataHi"] + 3)
         if sorted(q.get("floodDrawn") or []) != exp: fail(f"flood: {nm} lines drawn {q.get('floodDrawn')} but in range {exp}")
-        # t3046u: each name pill sits ON its own line (centered) and pills never overlap
+        # t3052u: plain names sit on top of their own line (bottom within 3 px above), left-aligned at plot left, no overlap
         labs = q.get("floodLabels") or []
         if sorted(l["k"] for l in labs) != exp: fail(f"flood: {nm} labels {[l['k'] for l in labs]} != lines {exp}")
         for l in labs:
-            if abs(l["yc"] - l["ly"]) > 0.5: fail(f"flood: {nm} {l['k']} label is {l['yc'] - l['ly']:.1f}px off its line")
+            if "y1" not in l or "ly" not in l: fail(f"flood: {nm} {l.get('k')} label missing y1/ly ({l})"); continue
+            gap = l["ly"] - l["y1"]
+            if gap < -0.05 or gap > 3.05: fail(f"flood: {nm} {l['k']} label bottom is {gap:.1f}px from its line (want 0-3 px above)")
+            pad = l["x0"] - l.get("plotX0", 0)
+            s = l.get("s") or 1
+            if pad < 3 * s or pad > 10 * s: fail(f"flood: {nm} {l['k']} label is not at the far left (x0-plotX0={pad:.1f}, s={s})")
         for i, a_ in enumerate(labs):
             for b_ in labs[i + 1:]:
-                if a_["x0"] < b_["x1"] and b_["x0"] < a_["x1"] and abs(a_["yc"] - b_["yc"]) < 15: fail(f"flood: {nm} labels {a_['k']}/{b_['k']} overlap")
+                if a_["x0"] < b_["x1"] and b_["x0"] < a_["x1"] and a_["y0"] < b_["y1"] and b_["y0"] < a_["y1"]:
+                    fail(f"flood: {nm} labels {a_['k']}/{b_['k']} overlap")
+        leg = q.get("legend") or []
+        if any("flood" in (x or "").lower() for x in leg): fail(f"flood: {nm} legend still has flood rows {leg}")
+        if not any("Official prediction" in (x or "") for x in leg): fail(f"flood: {nm} legend missing Official prediction ({leg})")
+        if q.get("floodLabelNote"): print(f"  note {nm}: {q.get('floodLabelNote')}")
         if all(k in exp for k in FLV):
             n = await pg.evaluate(FCOLORS, "tc")
             if not n or min(n.values()) < 40: fail(f"flood: {nm} minor/moderate/major colors not painted {n}")
@@ -190,6 +205,24 @@ async def tide_page(br, W, H, dpr, phone, tag):
         else: print(f"  {tag}: painted px pred={n['pred']} obs={n['obs']} cond={n['cond']} ver={n['ver']}")
         if n and q.get("issues") and n["ver"] < 10: fail(f"{tag}: verified dashed line not painted {n}")
         if not arch_hits: fail(f"{tag}: the page did not fetch the archive index from GitHub with 200", block=not ARCH_DOWN)
+        # t3052u: hover / tap readout + crosshair, flood stages in the tooltip, no flood rows in the legend
+        leg = (q or {}).get("legend") or []
+        if any("flood" in (x or "").lower() for x in leg): fail(f"{tag}: legend still has flood rows {leg}")
+        box = await pg.evaluate("() => { const r = document.getElementById('tc').getBoundingClientRect(); return {x: r.left + r.width * 0.55, y: r.top + r.height * 0.42, left: r.left, top: r.top, w: r.width, h: r.height}; }")
+        if not phone:
+            await pg.mouse.move(box["x"], box["y"]); await pg.wait_for_timeout(250)
+        else:
+            await pg.touchscreen.tap(box["x"], box["y"]); await pg.wait_for_timeout(350)
+        hov = await pg.evaluate("() => { const tip = document.getElementById('tip'); return { hidden: !tip || tip.hidden, text: tip ? tip.innerText : '', html: tip ? tip.innerHTML : '', h: window.__tideHover }; }")
+        txt = (hov.get("text") or "") + " " + (hov.get("html") or "")
+        if hov.get("hidden") or not (hov.get("h") or {}).get("t"): fail(f"{tag}: hover/tap readout did not appear ({ {k: hov.get(k) for k in ('hidden','text','h')} })")
+        else:
+            if not any(z in txt for z in ("PT", "PST", "PDT")): fail(f"{tag}: hover readout missing Pacific time ({hov.get('text')!r})")
+            for need in ("Official prediction", "Minor flood"):
+                if need.lower() not in txt.lower(): fail(f"{tag}: hover readout missing {need!r} ({hov.get('text')!r})")
+            hx, y0, y1 = hov["h"].get("x"), hov["h"].get("y0"), hov["h"].get("y1")
+            if hx is None or y0 is None or y1 is None or y1 <= y0: fail(f"{tag}: hover crosshair geometry missing ({hov.get('h')})")
+            print(f"  {tag}: hover readout ok t={hov['h'].get('t')} rows={len(hov['h'].get('rows') or [])}")
     if phone:
         sw = await pg.evaluate("document.documentElement.scrollWidth")
         if sw > W + 1: fail(f"{tag}: horizontal overflow scrollWidth={sw} > {W}")
@@ -246,6 +279,18 @@ async def studio(br):
     if not ARCH_DOWN and (not (sq or {}).get("stats") or not sb or sb["x"] < 0 or sb["x"] + sb["w"] > sb["W"] + 0.5 or sb["y"] + sb["h"] > sb["H"] + 0.5):
         fail(f"studio tide: stats box missing or outside the frame ({sb})")
     if (sq or {}).get("calib") is not None: fail("studio tide: calibration shown (must stay background-only)")
+    sleg = (sq or {}).get("legend") or []
+    if any("flood" in (x or "").lower() for x in sleg): fail(f"studio tide: legend still has flood rows {sleg}")
+    if not any("Official prediction" in (x or "") for x in sleg): fail(f"studio tide: legend missing Official prediction ({sleg})")
+    # t3052u: hover readout on the 16:9 frame
+    box = await pg.evaluate("() => { const r = document.getElementById('ch').getBoundingClientRect(); return {x: r.left + r.width * 0.55, y: r.top + r.height * 0.45}; }")
+    await pg.mouse.move(box["x"], box["y"]); await pg.wait_for_timeout(300)
+    shov = await pg.evaluate("() => window.__studioTideHover")
+    if not shov or not shov.get("t") or not shov.get("rows"): fail(f"studio tide: 16:9 hover readout did not appear ({shov})")
+    else:
+        labs = " ".join(r.get("lab","") for r in (shov.get("rows") or []))
+        if "Official prediction" not in labs or "Minor flood" not in labs: fail(f"studio tide: hover rows missing expected series ({labs!r})")
+        print(f"  studio hover: t={shov.get('t')} rows={labs}")
     if SHOT: await pg.screenshot(path=str(Path(SHOT) / "studio_tide.png"))
     # station change in the panel iframe -> both frames redraw on that station
     fr = pg.frame_locator("#tdf")

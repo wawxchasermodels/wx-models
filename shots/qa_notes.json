@@ -1,0 +1,288 @@
+{
+  "westport": {
+    "legend": [
+      "Official prediction",
+      "Observed",
+      "Conditional, verified (issued 24\u201330 h before)",
+      "Conditional Prediction (experimental)"
+    ],
+    "labels": [
+      {
+        "k": "minor",
+        "x0": 82.5,
+        "x1": 118.5,
+        "y0": 226.46249999999998,
+        "y1": 237.46249999999998,
+        "ly": 239.46249999999998,
+        "plotX0": 75,
+        "fs": 9.5,
+        "s": 1.25
+      },
+      {
+        "k": "moderate",
+        "x0": 82.5,
+        "x1": 142.5,
+        "y0": 208.05624999999998,
+        "y1": 218.05624999999998,
+        "ly": 220.05624999999998,
+        "plotX0": 75,
+        "fs": 9.5,
+        "s": 1.25
+      },
+      {
+        "k": "major",
+        "x0": 82.5,
+        "x1": 117.5,
+        "y0": 185.64999999999998,
+        "y1": 198.64999999999998,
+        "ly": 200.64999999999998,
+        "plotX0": 75,
+        "fs": 9.5,
+        "s": 1.25
+      }
+    ],
+    "floods": [
+      {
+        "k": "minor",
+        "lab": "Minor",
+        "v": 10.94,
+        "src": "NWS"
+      },
+      {
+        "k": "moderate",
+        "lab": "Moderate",
+        "v": 11.39,
+        "src": "NWS"
+      },
+      {
+        "k": "major",
+        "lab": "Major",
+        "v": 11.84,
+        "src": "NWS"
+      }
+    ],
+    "note": null
+  },
+  "seattle": {
+    "legend": [
+      "Official prediction",
+      "Observed",
+      "Conditional, verified (issued 24\u201330 h before)",
+      "Conditional Prediction (experimental)"
+    ],
+    "labels": [
+      {
+        "k": "minor",
+        "x0": 82.5,
+        "x1": 118.5,
+        "y0": 236.89090909090908,
+        "y1": 247.89090909090908,
+        "ly": 249.89090909090908,
+        "plotX0": 75,
+        "fs": 9.5,
+        "s": 1.25
+      },
+      {
+        "k": "moderate",
+        "x0": 82.5,
+        "x1": 142.5,
+        "y0": 209.66363636363644,
+        "y1": 219.66363636363644,
+        "ly": 221.66363636363644,
+        "plotX0": 75,
+        "fs": 9.5,
+        "s": 1.25
+      },
+      {
+        "k": "major",
+        "x0": 82.5,
+        "x1": 117.5,
+        "y0": 194.11818181818182,
+        "y1": 207.11818181818182,
+        "ly": 209.11818181818182,
+        "plotX0": 75,
+        "fs": 9.5,
+        "s": 1.25
+      }
+    ],
+    "floods": [
+      {
+        "k": "minor",
+        "lab": "Minor",
+        "v": 13.46,
+        "src": "NWS"
+      },
+      {
+        "k": "moderate",
+        "lab": "Moderate",
+        "v": 14.36,
+        "src": "NWS"
+      },
+      {
+        "k": "major",
+        "lab": "Major",
+        "v": 14.76,
+        "src": "NWS"
+      }
+    ],
+    "note": null
+  },
+  "fridayharbor": {
+    "legend": [
+      "Official prediction",
+      "Observed",
+      "Conditional, verified (issued 24\u201330 h before)",
+      "Conditional Prediction (experimental)"
+    ],
+    "labels": [
+      {
+        "k": "minor",
+        "x0": 82.5,
+        "x1": 118.5,
+        "y0": 201.88125000000002,
+        "y1": 212.88125000000002,
+        "ly": 214.88125000000002,
+        "plotX0": 75,
+        "fs": 9.5,
+        "s": 1.25
+      },
+      {
+        "k": "moderate",
+        "x0": 82.5,
+        "x1": 142.5,
+        "y0": 181.31875000000002,
+        "y1": 191.31875000000002,
+        "ly": 193.31875000000002,
+        "plotX0": 75,
+        "fs": 9.5,
+        "s": 1.25
+      },
+      {
+        "k": "major",
+        "x0": 82.5,
+        "x1": 117.5,
+        "y0": 156.75625000000002,
+        "y1": 169.75625000000002,
+        "ly": 171.75625000000002,
+        "plotX0": 75,
+        "fs": 9.5,
+        "s": 1.25
+      }
+    ],
+    "floods": [
+      {
+        "k": "minor",
+        "lab": "Minor",
+        "v": 9.51,
+        "src": "NWS"
+      },
+      {
+        "k": "moderate",
+        "lab": "Moderate",
+        "v": 10.01,
+        "src": "NWS"
+      },
+      {
+        "k": "major",
+        "lab": "Major",
+        "v": 10.51,
+        "src": "NWS"
+      }
+    ],
+    "note": null
+  },
+  "tacoma": {
+    "legend": [
+      "Official prediction",
+      "Observed",
+      "Conditional, verified (issued 24\u201330 h before)",
+      "Conditional Prediction (experimental)"
+    ],
+    "labels": [
+      {
+        "k": "minor",
+        "x0": 82.5,
+        "x1": 118.5,
+        "y0": 217.7590909090909,
+        "y1": 228.7590909090909,
+        "ly": 230.7590909090909,
+        "plotX0": 75,
+        "fs": 9.5,
+        "s": 1.25
+      },
+      {
+        "k": "moderate",
+        "x0": 82.5,
+        "x1": 142.5,
+        "y0": 196.80454545454552,
+        "y1": 206.80454545454552,
+        "ly": 208.80454545454552,
+        "plotX0": 75,
+        "fs": 9.5,
+        "s": 1.25
+      },
+      {
+        "k": "major",
+        "x0": 82.5,
+        "x1": 117.5,
+        "y0": 181.2590909090909,
+        "y1": 194.2590909090909,
+        "ly": 196.2590909090909,
+        "plotX0": 75,
+        "fs": 9.5,
+        "s": 1.25
+      }
+    ],
+    "floods": [
+      {
+        "k": "minor",
+        "lab": "Minor",
+        "v": 14.07,
+        "src": "NWS"
+      },
+      {
+        "k": "moderate",
+        "lab": "Moderate",
+        "v": 14.77,
+        "src": "NWS"
+      },
+      {
+        "k": "major",
+        "lab": "Major",
+        "v": 15.17,
+        "src": "NWS"
+      }
+    ],
+    "note": null
+  },
+  "lapush": {
+    "legend": [
+      "Official prediction",
+      "Observed",
+      "Conditional, verified (issued 24\u201330 h before)",
+      "Conditional Prediction (experimental)"
+    ],
+    "labels": [
+      {
+        "k": "minor",
+        "x0": 82.5,
+        "x1": 118.5,
+        "y0": 219.13125000000002,
+        "y1": 230.13125000000002,
+        "ly": 232.13125000000002,
+        "plotX0": 75,
+        "fs": 9.5,
+        "s": 1.25
+      }
+    ],
+    "floods": [
+      {
+        "k": "minor",
+        "lab": "Minor",
+        "v": 11.11,
+        "src": "NWS"
+      }
+    ],
+    "note": null
+  }
+}

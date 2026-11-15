@@ -242,9 +242,8 @@ function drawChart(c, W, H, opt) {
   // legend
   const items = [["Official prediction", COL.pred, 2.2], ["Observed", COL.obs, 2.2], [D.calib ? "Conditional Prediction (experimental, calibrated)" : "Conditional Prediction (experimental)", COL.cond, 3.2]];
   if (D.ver.length) items.splice(2, 0, [`Conditional, verified (${D.ver.some((v) => v[4]) ? "calibrated, " : ""}issued ${D.vl}\u2013${D.vl + 6} h before)`, COL.ver, -2]);
-  let dHi = -Infinity; for (const a of [D.pred, D.obs, D.cond, D.ver]) for (const p of a) if (p[1] > dHi) dHi = p[1];
-  const fIn = (f) => f.v < dHi + 3;   // same "reasonably close" rule as the y range below
-  for (const f of D.floods) items.push([`${f.lab} flood ${f.v.toFixed(1)} ft (${f.src}${fIn(f) ? "" : ", above chart"})`, FCOL[f.k], -1]);
+  // t3052u: flood stages are labeled on the lines and in the hover readout, not as legend rows
+  window.__tideLegend = items.map((it) => it[0]);
   c.font = F(700, 13.5); let lx, ly; const sw = 26 * s, gap = 18 * s;
   const widths = items.map((it) => sw + 8 * s + c.measureText(it[0]).width);
   const legW = widths.reduce((a, b) => a + b, 0) + gap * (items.length - 1);
@@ -300,16 +299,28 @@ function drawChart(c, W, H, opt) {
   c.strokeStyle = "#4a4f5a"; c.strokeRect(X0, Y0, X1 - X0, Y1 - Y0);
   // clip plot
   c.save(); c.beginPath(); c.rect(X0, Y0, X1 - X0, Y1 - Y0); c.clip();
-  window.__tideFloodDrawn = []; window.__tideFloodLabels = []; const fBox = [], fTag = [];
-  for (const f of D.floods) if (f.v >= lo && f.v <= hi) { c.strokeStyle = FCOL[f.k]; c.lineWidth = 2 * s; c.setLineDash([9 * s, 6 * s]); const y = Y(f.v); c.beginPath(); c.moveTo(X0, y); c.lineTo(X1, y); c.stroke(); c.setLineDash([]);
-    // t3046u: name tag sits ON its own line (vertically centered), in a chart-bg pill; close levels only shift sideways, never off the line
-    c.font = F(700, 11.5); c.textAlign = "left"; c.textBaseline = "middle"; const tw = c.measureText(f.lab).width, px = 5 * s, ph = 15 * s, pw = tw + 2 * px;
-    let x = X0 + 8 * s; const y0 = y - ph / 2, y1b = y + ph / 2;
-    for (let moved = true; moved;) { moved = false; for (const b of fBox) if (x < b.x1 + 6 * s && x + pw > b.x0 - 6 * s && y0 < b.y1 && y1b > b.y0) { x = b.x1 + 6 * s; moved = true; } }
-    fBox.push({ k: f.k, x0: x, x1: x + pw, y0, y1: y1b, ly: y });
-    fTag.push(() => { const rr = ph / 2; c.fillStyle = COL.bg; c.beginPath(); c.moveTo(x + rr, y0); c.lineTo(x + pw - rr, y0); c.arc(x + pw - rr, y, rr, -Math.PI / 2, Math.PI / 2); c.lineTo(x + rr, y1b); c.arc(x + rr, y, rr, Math.PI / 2, 3 * Math.PI / 2); c.closePath(); c.fill();
-    c.lineWidth = 1 * s; c.strokeStyle = FCOL[f.k]; c.stroke();
-    c.fillStyle = FCOL[f.k]; c.fillText(f.lab, x + px, y + 0.5 * s); }); window.__tideFloodLabels = fBox.map((b) => ({ k: b.k, x0: b.x0, x1: b.x1, yc: (b.y0 + b.y1) / 2, ly: b.ly })); window.__tideFloodDrawn.push(f.k); }
+  window.__tideFloodDrawn = []; window.__tideFloodLabels = []; window.__tideFloodLabelNote = null; const fTag = [];
+  const fOn = D.floods.filter((f) => f.v >= lo && f.v <= hi);
+  for (const f of fOn) { c.strokeStyle = FCOL[f.k]; c.lineWidth = 2 * s; c.setLineDash([9 * s, 6 * s]); const y = Y(f.v); c.beginPath(); c.moveTo(X0, y); c.lineTo(X1, y); c.stroke(); c.setLineDash([]); }
+  // t3052u: plain colored names, a little smaller, sit on top of each line at the far left (no pill). Close levels shrink type; labels stay on their own line.
+  const fGap = 2, fX = X0 + 6 * s; let fFs = 9.5;
+  const measureLabs = (fs) => { c.font = F(700, fs); const out = [];
+    for (const f of fOn) { const y = Y(f.v), m = c.measureText(f.lab), tw = m.width;
+      const desc = (m.actualBoundingBoxDescent != null ? m.actualBoundingBoxDescent : 0);
+      const asc = (m.actualBoundingBoxAscent != null ? m.actualBoundingBoxAscent : fs * s * 0.8);
+      const y1b = y - fGap, base = y1b - desc, y0 = base - asc;
+      out.push({ k: f.k, lab: f.lab, x0: fX, x1: fX + tw, y0, y1: y1b, base, ly: y, fs }); }
+    return out; };
+  const labsTight = (a) => { for (let i = 0; i < a.length; i++) for (let j = i + 1; j < a.length; j++) {
+    const A = a[i], B = a[j]; if (A.x0 < B.x1 && B.x0 < A.x1 && A.y0 < B.y1 && B.y0 < A.y1) return true;
+    if (B.ly >= A.y0 && B.ly <= A.y1) return true; if (A.ly >= B.y0 && A.ly <= B.y1) return true; } return false; };
+  let fLabs = measureLabs(fFs);
+  while (fFs > 7 && labsTight(fLabs)) { fFs -= 0.5; fLabs = measureLabs(fFs); }
+  if (labsTight(fLabs)) window.__tideFloodLabelNote = `labels still tight at ${fFs}px (kept on their lines)`;
+  fTag.push(() => { c.setLineDash([]); c.textAlign = "left"; c.textBaseline = "alphabetic"; c.font = F(700, fFs);
+    for (const b of fLabs) { c.lineWidth = 3 * s; c.strokeStyle = COL.bg; c.strokeText(b.lab, b.x0, b.base); c.fillStyle = FCOL[b.k]; c.fillText(b.lab, b.x0, b.base); } });
+  window.__tideFloodLabels = fLabs.map((b) => ({ k: b.k, x0: b.x0, x1: b.x1, y0: b.y0, y1: b.y1, ly: b.ly, plotX0: X0, fs: b.fs, s }));
+  window.__tideFloodDrawn = fOn.map((f) => f.k);
   const line = (pts, col, w, gapMs) => { if (!pts.length) return; c.strokeStyle = col; c.lineWidth = w * s; c.lineJoin = "round"; c.lineCap = "round"; c.beginPath(); let pen = false, lt = 0;
     for (const [t, v] of pts) { const x = X(t), y = Y(v); if (!pen || (gapMs && t - lt > gapMs)) { c.moveTo(x, y); pen = true; } else c.lineTo(x, y); lt = t; } c.stroke(); };
   line(D.pred, COL.pred, 2.2);
@@ -323,11 +334,14 @@ function drawChart(c, W, H, opt) {
       const lab = xb - xa > 210 * s ? "Verified line: hindcast (before the archive started)" : "hindcast"; if (xb - xa > c.measureText(lab).width + 10 * s) c.fillText(lab, xa + 6 * s, Y1 - 9 * s); } }
   line(D.obs, COL.obs, 2.2, 31 * 60000);
   if (D.cond.length) { c.save(); c.shadowColor = "rgba(0,0,0,0.55)"; c.shadowBlur = 3 * s; line(D.cond, COL.cond, 3.2); c.restore(); }
-  for (const t of fTag) { c.save(); c.setLineDash([]); c.textAlign = "left"; c.textBaseline = "middle"; c.font = F(700, 11.5); t(); c.restore(); }   // flood name pills on top of the curves
+  for (const t of fTag) { c.save(); t(); c.restore(); }   // flood names (plain, on top of their lines) over the curves
   // now line
   if (D.now >= R.start && D.now <= R.end) { const x = Math.round(X(D.now)) + 0.5; c.strokeStyle = COL.now; c.lineWidth = 1.6 * s; c.setLineDash([6 * s, 5 * s]); c.beginPath(); c.moveTo(x, Y0); c.lineTo(x, Y1); c.stroke(); c.setLineDash([]);
     c.font = F(800, 12.5); c.textBaseline = "top"; const lab = `Now ${fTime.format(new Date(D.now))}`, tw = c.measureText(lab).width + 12 * s, lx2 = Math.min(Math.max(x - tw / 2, X0 + 2), X1 - tw - 2);
     c.fillStyle = "rgba(21,23,28,0.85)"; c.fillRect(lx2, Y0 + 4 * s, tw, 20 * s); c.fillStyle = COL.now; c.textAlign = "left"; c.fillText(lab, lx2 + 6 * s, Y0 + 8 * s); }
+  // t3052u: vertical crosshair at the hover / touch-hold time
+  if (opt.hoverT != null && opt.hoverT >= R.start && opt.hoverT <= R.end) { const hx = Math.round(X(opt.hoverT)) + 0.5;
+    c.strokeStyle = "rgba(244,242,238,0.92)"; c.lineWidth = 1.2 * s; c.setLineDash([]); c.beginPath(); c.moveTo(hx, Y0); c.lineTo(hx, Y1); c.stroke(); }
   // high-tide labels (prediction in blue; conditional in amber when it exists)
   const pxPerDay = (X1 - X0) / nd;
   if (pxPerDay >= 70 * s) { c.font = F(700, 11.5); c.textAlign = "center"; c.textBaseline = "bottom";
@@ -373,14 +387,53 @@ function statsBox(c, x, y, w, h, s, F) {
   c.restore();
 }
 
-let geom = null;
+let geom = null, hoverT = null, hoverRaf = 0;
+function readout(t) {
+  if (!D || t == null) return null;
+  const p = interp(D.pred, t), o = interp(D.obs, t), cc = interp(D.cond, t);
+  const vv = D.ver.length ? interp(D.ver.map((q) => [q[0], q[1]]), t) : null;
+  const rows = [];
+  if (p != null) rows.push({ k: "pred", lab: "Official prediction", col: COL.pred, v: p });
+  if (o != null) rows.push({ k: "obs", lab: "Observed", col: COL.obs, v: o });
+  if (vv != null) rows.push({ k: "ver", lab: "Conditional, verified", col: COL.ver, v: vv });
+  if (cc != null) rows.push({ k: "cond", lab: "Conditional Prediction", col: COL.cond, v: cc });
+  for (const f of D.floods) rows.push({ k: "flood-" + f.k, lab: f.lab + " flood", col: FCOL[f.k], v: f.v, flood: true });
+  const html = `${fDay.format(new Date(t))} ${fTime.format(new Date(t))} ${zoneName(t)}` +
+    rows.map((r) => `<br><span style="color:${r.col}">${r.lab} ${r.v.toFixed(2)} ft</span>`).join("");
+  return { t, rows, html };
+}
+function placeTip(cssX, cssY) {
+  const tip = $("tip"), cv = $("tc"), wrap = $("wrap"); if (!tip || !cv || !wrap || STUDIO) return;
+  const info = readout(hoverT);
+  if (!info) { tip.hidden = true; window.__tideHover = null; return; }
+  tip.innerHTML = info.html; tip.hidden = false;
+  const ox = cv.offsetLeft, oy = cv.offsetTop, tw = tip.offsetWidth, th = tip.offsetHeight;
+  let left = ox + cssX + 14, top = oy + cssY - th - 8;
+  if (left + tw > wrap.clientWidth - 4) left = ox + cssX - tw - 12;
+  if (left < 4) left = 4;
+  if (top < 4) top = oy + cssY + 14;
+  if (top + th > wrap.clientHeight - 4) top = Math.max(4, wrap.clientHeight - th - 4);
+  tip.style.left = left + "px"; tip.style.top = top + "px";
+  const x = geom ? geom.X(hoverT) : cssX;
+  window.__tideHover = { t: hoverT, x, y0: geom ? geom.Y0 : 0, y1: geom ? geom.Y1 : 0, rows: info.rows };
+}
+function clearHover() { hoverT = null; window.__tideHover = null; const tip = $("tip"); if (tip) tip.hidden = true; if (!STUDIO) draw(); }
+function applyHover(clientX, clientY, fromTouch) {
+  if (!D || !geom) return;
+  const cv = $("tc"), b = cv.getBoundingClientRect(), x = clientX - b.left, y = clientY - b.top;
+  if (x < geom.X0 || x > geom.X1 || y < geom.Y0 || y > geom.Y1) { if (!fromTouch) clearHover(); else { const tip = $("tip"); if (tip) tip.hidden = true; hoverT = null; window.__tideHover = null; draw(); } return; }
+  const t = D.R.start + (x - geom.X0) / (geom.X1 - geom.X0) * (D.R.end - D.R.start), tt = Math.round(t / H6) * H6;
+  hoverT = tt;
+  const go = () => { hoverRaf = 0; draw(); placeTip(x, y); };
+  if (fromTouch) go(); else if (!hoverRaf) hoverRaf = requestAnimationFrame(go);
+}
 function draw() {
   if (STUDIO) return; const cv = $("tc"), w = cv.clientWidth, h = cv.clientHeight; if (!w || !h) return;
   const dpr = Math.min(window.devicePixelRatio || 1, 3); const bw = Math.round(w * dpr), bh = Math.round(h * dpr);
   if (cv.width !== bw || cv.height !== bh) { cv.width = bw; cv.height = bh; }
   const c = cv.getContext("2d"); c.setTransform(dpr, 0, 0, dpr, 0, 0);
   const s = Math.max(0.78, Math.min(1.25, Math.min(w / 1100, h / 640) * 1.05));
-  geom = drawChart(c, w, h, { scale: s }); window.__tideSharp = { dpr, cssW: w, backingW: cv.width, scale: s };
+  geom = drawChart(c, w, h, { scale: s, hoverT }); window.__tideSharp = { dpr, cssW: w, backingW: cv.width, scale: s };
 }
 function setMsg(t) { const m = $("msg"); if (m) m.textContent = STUDIO ? "" : t; }
 function note() { const n = $("tnote"); if (!n || !D) return; n.textContent = D.method === "stofs" ? `STOFS ${new Date(D.cyc.t).toISOString().slice(5, 13).replace("T", " ")}Z` : "Persistence (no STOFS)"; }
@@ -402,22 +455,39 @@ function ui() {
   if (!STUDIO) {
     addEventListener("resize", () => requestAnimationFrame(draw));
     const cv = $("tc"), tip = $("tip");
-    cv.addEventListener("pointermove", (e) => { if (!D || !geom) return; const b = cv.getBoundingClientRect(), x = e.clientX - b.left, y = e.clientY - b.top;
-      if (x < geom.X0 || x > geom.X1 || y < geom.Y0 || y > geom.Y1) { tip.hidden = true; return; }
-      const t = D.R.start + (x - geom.X0) / (geom.X1 - geom.X0) * (D.R.end - D.R.start), tt = Math.round(t / H6) * H6;
-      const p = interp(D.pred, tt), o = interp(D.obs, tt), cc = interp(D.cond, tt), vv = D.ver.find((q) => q[0] === tt);
-      tip.innerHTML = `${fDay.format(new Date(tt))} ${fTime.format(new Date(tt))}` + (p != null ? `<br><span style="color:${COL.pred}">Prediction ${p.toFixed(2)} ft</span>` : "") +
-        (o != null ? `<br><span style="color:${COL.obs}">Observed ${o.toFixed(2)} ft</span>` : "") + (cc != null ? `<br><span style="color:${COL.cond}">Conditional ${cc.toFixed(2)} ft</span>` + (D.calib ? `<br><span style="color:#a7abb3;font-weight:500">raw (uncalibrated) ${interp(D.condRaw, tt).toFixed(2)} ft</span>` : "") : "") +
-        (vv ? `<br><span style="color:${COL.ver}">Conditional, verified ${vv[1].toFixed(2)} ft</span><br><span style="color:#a7abb3;font-weight:500">issued ${fDay.format(new Date(vv[3]))} ${fTime.format(new Date(vv[3]))}${vv[2] ? "" : " (hindcast)"}</span>` : "");
-      tip.hidden = false; const w = tip.offsetWidth; tip.style.left = Math.min(x + 14, b.width - w - 4) + "px"; tip.style.top = Math.max(4, y - 70) + "px"; });
-    cv.addEventListener("pointerleave", () => { tip.hidden = true; });
+    // t3052u: desktop hover shows a vertical crosshair + readout; phone uses tap or touch-and-hold.
+    // Touch is single-finger only and ignores a moved finger, so a later phone-stretch merge (pinch / one-finger pan / double-tap reset) can coexist.
+    const tPtrs = new Set(); let tHold = null;
+    cv.addEventListener("pointermove", (e) => {
+      if (e.pointerType === "touch") {
+        if (tHold && e.pointerId === tHold.id && !tHold.fired && Math.hypot(e.clientX - tHold.x0, e.clientY - tHold.y0) > 12) { clearTimeout(tHold.tid); tHold = null; }
+        return;
+      }
+      applyHover(e.clientX, e.clientY, false);
+    });
+    cv.addEventListener("pointerleave", (e) => { if (e.pointerType !== "touch") clearHover(); });
+    cv.addEventListener("pointerdown", (e) => {
+      if (e.pointerType !== "touch" || !D || !geom) return;
+      tPtrs.add(e.pointerId);
+      if (tPtrs.size >= 2) { if (tHold) { clearTimeout(tHold.tid); tHold = null; } return; }
+      tHold = { id: e.pointerId, x0: e.clientX, y0: e.clientY, fired: false, tid: setTimeout(() => { if (!tHold) return; tHold.fired = true; applyHover(tHold.x0, tHold.y0, true); }, 400) };
+    });
+    const tEnd = (e) => {
+      if (e.pointerType !== "touch") return; tPtrs.delete(e.pointerId);
+      if (!tHold || e.pointerId !== tHold.id) return;
+      clearTimeout(tHold.tid);
+      const moved = Math.hypot(e.clientX - tHold.x0, e.clientY - tHold.y0) > 12;
+      if (e.type === "pointerup" && !tHold.fired && !moved && tPtrs.size === 0) applyHover(e.clientX, e.clientY, true);
+      tHold = null;
+    };
+    cv.addEventListener("pointerup", tEnd); cv.addEventListener("pointercancel", tEnd);
   }
 }
 window.TIDE = {
   draw: (c, W, H, opt) => drawChart(c, W, H, opt),
-  state: () => D, stations: STATIONS,
+  state: () => D, stations: STATIONS, readout, geom: () => geom,
   qa: () => D ? { st: D.st, name: D.name, pred: D.pred.length, obs: D.obs.length, cond: D.cond.length, method: D.method, cycle: D.cyc ? new Date(D.cyc.t).toISOString() : null,
-    rNow: D.rNow, rSlow: D.rSlow, bias: D.bias, flood: D.flood, floods: D.floods, floodSkip: D.floodSkip, floodDrawn: window.__tideFloodDrawn || [], floodLabels: window.__tideFloodLabels || [], sid: D.sid, start: D.R.start, end: D.R.end, now: D.now,
+    rNow: D.rNow, rSlow: D.rSlow, bias: D.bias, flood: D.flood, floods: D.floods, floodSkip: D.floodSkip, floodDrawn: window.__tideFloodDrawn || [], floodLabels: window.__tideFloodLabels || [], floodLabelNote: window.__tideFloodLabelNote || null, legend: window.__tideLegend || [], hover: window.__tideHover || null, sid: D.sid, start: D.R.start, end: D.R.end, now: D.now,
     statsBox: window.__tideStatsBox || null, arch: ARCH, calib: D.calib ? D.calib.c.map((b) => b.corr) : null, calibBg: D.calibBg ? { t: D.calibBg.t, c: D.calibBg.c.map((b) => b.corr) } : null, ver: D.ver.length, verHindcast: D.ver.filter((p) => !p[2]).length, issues: D.nIssues, archived: D.nArchive, vl: D.vl, sd: D.sd, stats: D.stats,
     condAboveFrac: D.cond.length ? D.cond.filter(([t, v]) => v >= (interp(D.pred, t) || 0)).length / D.cond.length : null, sharp: window.__tideSharp || null } : { err: window.__tideErr || null },
 };

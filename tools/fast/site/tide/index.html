@@ -14,13 +14,13 @@ body{display:flex;flex-direction:column;height:100vh;height:100dvh}
 #tnote{color:#a7abb3;font-size:12px}
 #wrap{position:relative;flex:1 1 auto;min-height:0;padding:4px 8px;box-sizing:border-box}
 #tc{display:block;width:100%;height:100%;touch-action:pan-y}
-#tip{position:absolute;pointer-events:none;background:#1d2027ee;color:#fff;border:1px solid #7d828c;border-radius:6px;padding:4px 8px;font-weight:600;font-size:13px;white-space:nowrap;line-height:1.45}
+#tip{position:absolute;pointer-events:none;background:#1d2027ee;color:#fff;border:1px solid #7d828c;border-radius:6px;padding:4px 8px;font-weight:600;font-size:13px;white-space:nowrap;line-height:1.45;z-index:3}
 #tip[hidden]{display:none}
 #msg{position:absolute;left:0;right:0;top:40%;text-align:center;color:#c9ced8;font-weight:700;font-size:16px;pointer-events:none}
 #msg:empty{display:none}
 .lic{flex:none;font:500 10.5px/1.4 Montserrat,system-ui,sans-serif;color:#a7abb3;padding:2px 10px calc(2px + env(safe-area-inset-bottom));border-top:1px solid #2a2d34;background:#15171c}
 .lic summary{cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;list-style:none}.lic summary::-webkit-details-marker{display:none}.lic p{margin:4px 0}.lic a{color:#c9ccd2}
-@media (max-width:700px){#bar{gap:6px;padding:6px}#bar label{font-size:12px}#bar select{max-width:46vw}#tnote{display:none}}
+@media (max-width:700px){#bar{gap:6px;padding:6px}#bar label{font-size:12px}#bar select{max-width:46vw}#tnote{display:none}#tip{font-size:12px;padding:4px 7px}}
 /* Studio panel (studio.html?smode=tide): only the pickers; Studio draws the chart into its own 16:9 / 9:16 frames */
 html.studio,html.studio body{background:#1d2027;height:auto;min-height:0}
 html.studio #bar{padding:6px 10px;border-bottom:0}
@@ -45,5 +45,5 @@ html.studio #wrap,html.studio .lic,html.studio #home{display:none!important}
 <p>Conditional Prediction (experimental): official prediction plus the NOAA STOFS surge forecast, which already includes low pressure and wind driven coastal waves, with a fading correction to current observations (smoothed over 3 h, the correction fades over 12 h). The 30 day average offset is used only after the STOFS forecast ends or if it is missing. The inverse barometer figure on the chart is info only (already included in STOFS) and is not added on top. NOAA does not endorse this site.</p>
 <p>A daily self-calibration (10-day verification by forecast range, shrunk, capped at &plusmn;0.5 ft) is computed and archived in the background for evaluation; it is not applied to the chart or the stats.</p>
 <p>Conditional, verified (dashed): every 6 h (02/08/14/20 UTC) the Conditional Prediction is archived per station; for each past time the line shows the newest snapshot issued at least the chosen lead earlier, beside the observed line. Stats: mean absolute error and bias over hourly points (forecast &minus; observed) and the miss at the highest observed high tide, for the Conditional and the official prediction over the same hours. Before the live archive began the snapshots are a hindcast: recomputed afterwards with the same method, using only observations up to the issue time and the newest STOFS cycle posted by then.</p></details></footer>
-<script src="tide.js?v=20261114fl1"></script>
+<script src="tide.js?v=20261114fl2"></script>
 </body></html>
