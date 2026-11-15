@@ -10,17 +10,29 @@ const API = "https://api.tidesandcurrents.noaa.gov/api/prod/datagetter";
 const MD = "https://api.tidesandcurrents.noaa.gov/mdapi/prod/webapi/stations/";
 const S3 = "https://noaa-gestofs-pds.s3.amazonaws.com/";
 const TZ = "America/Los_Angeles";
+// Benjamin t3044u: list A to Z by name (default stays Westport 9441102). Birch Bay has no NOAA gauge, prediction station or
+// STOFS point of its own (CO-OPS metadata, 11-14); it uses Cherry Point 9449424, the nearest NOAA gauge, about 4 mi south on the same shore.
 const STATIONS = [
-  ["9441102", "Westport, WA"], ["9440910", "Toke Point, WA"], ["9442396", "La Push, WA"], ["9443090", "Neah Bay, WA"],
-  ["9444090", "Port Angeles, WA"], ["9444900", "Port Townsend, WA"], ["9449880", "Friday Harbor, WA"], ["9449424", "Cherry Point, WA"],
-  ["9447130", "Seattle, WA"], ["9446484", "Tacoma, WA"], ["9439040", "Astoria, OR"],
+  ["9439040", "Astoria, OR"], ["birchbay", "Birch Bay, WA"], ["9449424", "Cherry Point, WA"], ["9449880", "Friday Harbor, WA"],
+  ["9442396", "La Push, WA"], ["9443090", "Neah Bay, WA"], ["9444090", "Port Angeles, WA"], ["9444900", "Port Townsend, WA"],
+  ["9447130", "Seattle, WA"], ["9446484", "Tacoma, WA"], ["9440910", "Toke Point, WA"], ["9441102", "Westport, WA"],
 ];
+const ALIAS = {"birchbay": "9449424"};
+const sidOf = (k) => ALIAS[k] || k;
+const stLabel = (k) => ALIAS[k] ? `Cherry Point ${ALIAS[k]}` : k;
+// Official NWS coastal flood levels, ft MLLW, triple-checked 2026-11-14 by tools/fast/tide_archive/flood_verify.py:
+// S1 CO-OPS mdapi nws_* (with datums.json), S2 Tides & Currents inundation dashboard file, S3 NWS NWPS gauge where one exists.
+// A level is drawn only when the live mdapi value still matches this table within 0.05 ft. NOS derived thresholds are not drawn.
+const FLOOD_VERIFIED = "2026-11-14";
+const FLOOD = {"9439040": {"minor": 12.01, "moderate": 14.51}, "9440910": {"minor": 11.02, "moderate": 14.52}, "9441102": {"minor": 10.94, "moderate": 11.39, "major": 11.84}, "9442396": {"minor": 11.11}, "9443090": {"minor": 10.58}, "9444090": {"minor": 9.17}, "9444900": {"minor": 11.37, "moderate": 11.82}, "9446484": {"minor": 14.07, "moderate": 14.77, "major": 15.17}, "9447130": {"minor": 13.46, "moderate": 14.36, "major": 14.76}, "9449424": {"minor": 11.0, "moderate": 12.0, "major": 13.0}, "9449880": {"minor": 9.51, "moderate": 10.01, "major": 10.51}};
+const FCOL = { minor: "#ff7a45", moderate: "#e6194b", major: "#c74bff" };
+const FLV = [["minor", "Minor"], ["moderate", "Moderate"], ["major", "Major"]];
 const DAYS = [3, 5, 7, 9, 14, 17, 21, 30];
 const LEADS = [0, 12, 24, 48], SDAYS = [3, 7];
 // Conditional archive: 6-hourly snapshots per station written by tools/fast/tide_archive/tide_archive.py (GitHub Actions) to the
 // orphan branch "tide-archive" of the public repo; raw.githubusercontent.com serves it with CORS *. Not R2.
 const ARCH = window.TIDE_ARCH || "https://raw.githubusercontent.com/wawxchasermodels/wx-models/tide-archive/v1/";
-const COL = { pred: "#5aa9ff", obs: "#ff5d5d", cond: "#ffb02e", ver: "rgba(255,222,160,0.85)", now: "#f4f2ee", flood: "#ff7a45", grid: "#2c3039", axis: "#a7abb3", text: "#f4f2ee", bg: "#15171c" };
+const COL = { pred: "#5aa9ff", obs: "#ff5d5d", cond: "#ffb02e", ver: "rgba(255,222,160,0.85)", now: "#f4f2ee", flood: "#ff7a45", floodMod: "#e6194b", floodMaj: "#c74bff", grid: "#2c3039", axis: "#a7abb3", text: "#f4f2ee", bg: "#15171c" };
 const H6 = 6 * 60000, HR = 3600000, DAY = 86400000;
 const TAU_BIAS = 12 * HR, TAU_RELAX = 24 * HR, SLOW_DAYS = 30;
 const Q = new URLSearchParams(location.search), STUDIO = !!Q.get("studio");
@@ -72,10 +84,15 @@ async function meta(st) {
   try {
     const [m, dj] = await Promise.all([getJSON(`${MD}${st}.json?expand=floodlevels`), getJSON(`${MD}${st}/datums.json`)]);
     const s = m.stations[0], fl = s.floodlevels || {}, mllw = ((dj.datums || []).find((x) => x.name === "MLLW") || {}).value;
-    let flood = null;
-    if (mllw != null) { if (fl.nos_minor != null) flood = { v: fl.nos_minor - mllw, src: "NOS" }; else if (fl.nws_minor != null) flood = { v: fl.nws_minor - mllw, src: "NWS" }; }
-    return { shef: s.shefcode || "", flood };
-  } catch (e) { return { shef: "", flood: null }; }
+    // t3044u: minor, moderate and major = the official NWS levels, drawn only where the live mdapi value matches the triple-checked table
+    const floods = [], floodSkip = [], ok = FLOOD[st] || {};
+    if (mllw != null) for (const [k, lab] of FLV) { const nws = fl[`nws_${k}`];
+      if (nws == null) { if (ok[k] != null) floodSkip.push({ k, why: "missing in mdapi" }); continue; }
+      const v = Math.round((nws - mllw) * 100) / 100;
+      if (ok[k] != null && Math.abs(v - ok[k]) <= 0.05) floods.push({ k, lab, v, src: "NWS" }); else floodSkip.push({ k, v, table: ok[k] ?? null, why: ok[k] == null ? "not verified" : "differs from verified table" }); }
+    const flood = floods.find((f) => f.k === "minor") || null;
+    return { shef: s.shefcode || "", flood, floods, floodSkip };
+  } catch (e) { return { shef: "", flood: null, floods: [], floodSkip: [] }; }
 }
 async function stofsCycle(now) {
   const cands = []; for (let k = 0; k < 10; k++) { const t = Math.floor(now / (6 * HR)) * 6 * HR - k * 6 * HR; cands.push(t); }
@@ -151,7 +168,7 @@ function interp(pts, t) {   // linear on a sorted [t,v] array, null outside
 async function load() {
   const my = ++seq; const R = range(); const now = R.now;
   setMsg("Loading tides\u2026");
-  const st = T.st, b0 = Math.min(R.start, now - SLOW_DAYS * DAY), eP = Math.max(R.end, now) + 3 * HR;
+  const key = T.st, st = sidOf(key), b0 = Math.min(R.start, now - SLOW_DAYS * DAY), eP = Math.max(R.end, now) + 3 * HR;
   try {
     const [pred, obs, md, cyc, pr, arch] = await Promise.all([
       coops("predictions", st, b0, eP, "&datum=MLLW&interval=6"),
@@ -188,13 +205,13 @@ async function load() {
       const r0 = rNow != null ? rNow : base; return base + (r0 - base) * Math.exp(-dt / TAU_BIAS);
     };
     const cond = [], condRaw = []; if (R.end > t0c && (rNow != null || rs)) for (const [t, v] of pred) if (t >= t0c && t <= R.end) { const r = resid(t); condRaw.push([t, v + r]); cond.push([t, v + r]); }
-    const name = (STATIONS.find((s) => s[0] === st) || [st, st])[1];
+    const name = (STATIONS.find((s) => s[0] === key) || [key, key])[1];
     const tPast = Math.min(R.end, tObs != null ? tObs : now);
     const verAll = verified(pred, issues, T.vl, tPast, Math.min(R.start, now - T.sd * DAY) - HR);   // raw snapshots (r)
     const ver = verAll.filter((p) => p[0] >= R.start - HR && p[0] <= R.end + HR);
     const stats = T.vl && tObs != null ? verStats(pred, obs, verAll, tObs - T.sd * DAY, tObs) : null;
-    D = { st, name, R, now, pred: pred.filter((p) => p[0] >= R.start - HR && p[0] <= R.end + HR), obs: obs.filter((p) => p[0] >= R.start - HR && p[0] <= R.end + HR),
-      cond, condRaw, calib, calibBg, ver, stats, vl: T.vl, sd: T.sd, nIssues: issues.length, nArchive: issues.filter((i) => i.kind === "archive").length, rNow, rSlow, bias, cyc: sto ? cyc : null, stofsEnd: rsEnd ? rsEnd[0] : null, flood: md.flood, pr, tObs, method: sto && rsNow != null ? "stofs" : "persist" };
+    D = { st: key, sid: st, name, R, now, pred: pred.filter((p) => p[0] >= R.start - HR && p[0] <= R.end + HR), obs: obs.filter((p) => p[0] >= R.start - HR && p[0] <= R.end + HR),
+      cond, condRaw, calib, calibBg, ver, stats, vl: T.vl, sd: T.sd, nIssues: issues.length, nArchive: issues.filter((i) => i.kind === "archive").length, rNow, rSlow, bias, cyc: sto ? cyc : null, stofsEnd: rsEnd ? rsEnd[0] : null, flood: md.flood, floods: md.floods || [], floodSkip: md.floodSkip || [], pr, tObs, method: sto && rsNow != null ? "stofs" : "persist" };
     setMsg(""); note(); draw(); window.__tideDrawn++;
   } catch (e) {
     if (my !== seq) return; D = null; setMsg(`Could not load tides for this station (${e.message || e}).`); window.__tideErr = String(e.message || e); window.__tideDrawn++;
@@ -219,17 +236,19 @@ function drawChart(c, W, H, opt) {
   const { R } = D, pad = 14 * s;
   // header
   c.textBaseline = "alphabetic"; c.textAlign = "left"; c.fillStyle = COL.text;
-  c.font = F(800, 22); const y1 = pad + 22 * s; c.fillText(`${D.name}  \u00b7  ${D.st}`, pad, y1);
+  c.font = F(800, 22); const y1 = pad + 22 * s; c.fillText(`${D.name}  \u00b7  ${stLabel(D.st)}`, pad, y1);
   c.font = F(600, 13.5); c.fillStyle = COL.axis;
   c.fillText(`Water level, feet above MLLW  \u00b7  ${fMd.format(new Date(R.start))} \u2013 ${fMd.format(new Date(R.end - 1))}, ${new Date(R.end - 1).getUTCFullYear()}  \u00b7  ${zoneName(R.now)}`, pad, y1 + 21 * s);
   // legend
   const items = [["Official prediction", COL.pred, 2.2], ["Observed", COL.obs, 2.2], [D.calib ? "Conditional Prediction (experimental, calibrated)" : "Conditional Prediction (experimental)", COL.cond, 3.2]];
   if (D.ver.length) items.splice(2, 0, [`Conditional, verified (${D.ver.some((v) => v[4]) ? "calibrated, " : ""}issued ${D.vl}\u2013${D.vl + 6} h before)`, COL.ver, -2]);
-  if (D.flood) items.push([`Minor flood ${D.flood.v.toFixed(1)} ft (${D.flood.src})`, COL.flood, -1]);
+  let dHi = -Infinity; for (const a of [D.pred, D.obs, D.cond, D.ver]) for (const p of a) if (p[1] > dHi) dHi = p[1];
+  const fIn = (f) => f.v < dHi + 3;   // same "reasonably close" rule as the y range below
+  for (const f of D.floods) items.push([`${f.lab} flood ${f.v.toFixed(1)} ft (${f.src}${fIn(f) ? "" : ", above chart"})`, FCOL[f.k], -1]);
   c.font = F(700, 13.5); let lx, ly; const sw = 26 * s, gap = 18 * s;
   const widths = items.map((it) => sw + 8 * s + c.measureText(it[0]).width);
   const legW = widths.reduce((a, b) => a + b, 0) + gap * (items.length - 1);
-  c.font = F(800, 22); const titleW = c.measureText(`${D.name}  \u00b7  ${D.st}`).width; c.font = F(700, 13.5);
+  c.font = F(800, 22); const titleW = c.measureText(`${D.name}  \u00b7  ${stLabel(D.st)}`).width; c.font = F(700, 13.5);
   const legTwoRows = portrait || legW > W - 2 * pad - titleW - 40 * s;
   const legend = (x0, y0, list) => { let x = x0; list.forEach((it, i) => { c.strokeStyle = it[1]; c.lineWidth = (it[2] === -1 ? 2 : it[2] === -2 ? 2 : it[2]) * s; c.setLineDash(it[2] === -1 ? [7 * s, 5 * s] : it[2] === -2 ? [5 * s, 4 * s] : []);
     c.beginPath(); c.moveTo(x, y0 - 5 * s); c.lineTo(x + sw, y0 - 5 * s); c.stroke(); c.setLineDash([]); c.fillStyle = COL.text; c.fillText(it[0], x + sw + 8 * s, y0); x += widths[items.indexOf(it)] + gap; }); };
@@ -240,6 +259,7 @@ function drawChart(c, W, H, opt) {
     rows.forEach((r, i) => legend(pad, y1 + 50 * s + i * 24 * s, r)); top = y1 + 50 * s + (rows.length - 1) * 24 * s + 18 * s; }
   // info lines (bottom)
   const info = [];
+  if (ALIAS[D.st]) info.push(`Birch Bay has no NOAA tide gauge or prediction station of its own: all lines use Cherry Point (${ALIAS[D.st]}), the nearest NOAA gauge, about 4 mi south on the same shore.`);
   const lastObs = D.obs.length ? D.obs[D.obs.length - 1] : null;
   if (lastObs && D.rNow != null) info.push(`Latest observed ${lastObs[1].toFixed(2)} ft at ${fTime.format(new Date(lastObs[0]))}  \u00b7  residual (observed \u2212 predicted) ${sgn(D.rNow, 2)} ft`);
   const bits = [];
@@ -262,7 +282,7 @@ function drawChart(c, W, H, opt) {
   const X0 = pad + yL, X1 = W - xR, Y0 = top + 10 * s, Y1 = H - bottomInfo - axisH;
   // y range
   let lo = Infinity, hi = -Infinity; const scan = (a) => { for (const [, v] of a) { if (v < lo) lo = v; if (v > hi) hi = v; } };
-  scan(D.pred); scan(D.obs); scan(D.cond); scan(D.ver); if (D.flood && D.flood.v < hi + 3) hi = Math.max(hi, D.flood.v);
+  scan(D.pred); scan(D.obs); scan(D.cond); scan(D.ver); { const hd = hi; for (const f of D.floods) if (f.v < hd + 3) hi = Math.max(hi, f.v); }   // same rule as minor, per level
   const padY = (hi - lo) * 0.08 + 0.3; lo -= padY; hi += padY;
   const ys = niceStep(hi - lo, portrait ? 10 : 7); lo = Math.floor(lo / ys) * ys; hi = Math.ceil(hi / ys) * ys;
   const X = (t) => X0 + (t - R.start) / (R.end - R.start) * (X1 - X0), Y = (v) => Y1 - (v - lo) / (hi - lo) * (Y1 - Y0);
@@ -280,7 +300,13 @@ function drawChart(c, W, H, opt) {
   c.strokeStyle = "#4a4f5a"; c.strokeRect(X0, Y0, X1 - X0, Y1 - Y0);
   // clip plot
   c.save(); c.beginPath(); c.rect(X0, Y0, X1 - X0, Y1 - Y0); c.clip();
-  if (D.flood && D.flood.v >= lo && D.flood.v <= hi) { c.strokeStyle = COL.flood; c.lineWidth = 2 * s; c.setLineDash([9 * s, 6 * s]); const y = Y(D.flood.v); c.beginPath(); c.moveTo(X0, y); c.lineTo(X1, y); c.stroke(); c.setLineDash([]); }
+  window.__tideFloodDrawn = []; const fBox = [];
+  for (const f of D.floods) if (f.v >= lo && f.v <= hi) { c.strokeStyle = FCOL[f.k]; c.lineWidth = 2 * s; c.setLineDash([9 * s, 6 * s]); const y = Y(f.v); c.beginPath(); c.moveTo(X0, y); c.lineTo(X1, y); c.stroke(); c.setLineDash([]);
+    // small name tag above the line; staggered sideways when levels are too close to stack
+    c.font = F(700, 11.5); c.textAlign = "left"; c.textBaseline = "bottom"; const tw = c.measureText(f.lab).width, th = 13 * s; let x = X0 + 6 * s;
+    for (let moved = true; moved;) { moved = false; for (const b of fBox) if (x < b.x1 + 8 * s && x + tw > b.x0 && y - 3 * s - th < b.y1 && y - 3 * s > b.y0) { x = b.x1 + 10 * s; moved = true; } }
+    fBox.push({ x0: x, x1: x + tw, y0: y - 3 * s - th, y1: y - 3 * s });
+    c.lineWidth = 3 * s; c.strokeStyle = COL.bg; c.strokeText(f.lab, x, y - 3 * s); c.fillStyle = FCOL[f.k]; c.fillText(f.lab, x, y - 3 * s); window.__tideFloodDrawn.push(f.k); }
   const line = (pts, col, w, gapMs) => { if (!pts.length) return; c.strokeStyle = col; c.lineWidth = w * s; c.lineJoin = "round"; c.lineCap = "round"; c.beginPath(); let pen = false, lt = 0;
     for (const [t, v] of pts) { const x = X(t), y = Y(v); if (!pen || (gapMs && t - lt > gapMs)) { c.moveTo(x, y); pen = true; } else c.lineTo(x, y); lt = t; } c.stroke(); };
   line(D.pred, COL.pred, 2.2);
@@ -358,7 +384,7 @@ function note() { const n = $("tnote"); if (!n || !D) return; n.textContent = D.
 // ---- UI ----
 function syncURL() { const u = new URL(location.href); u.searchParams.set("st", T.st); u.searchParams.set("vl", String(T.vl)); u.searchParams.set("sd", String(T.sd)); if (T.from) u.searchParams.set("from", T.from); else u.searchParams.delete("from"); u.searchParams.set("days", String(T.days)); history.replaceState(null, "", u); try { localStorage.setItem("tide:st", T.st); } catch (e) { /* private */ } }
 function ui() {
-  const st = $("st"); st.innerHTML = STATIONS.map(([id, n]) => `<option value="${id}">${n} (${id})</option>`).join(""); st.value = T.st;
+  const st = $("st"); st.innerHTML = STATIONS.map(([id, n]) => `<option value="${id}">${n} (${stLabel(id)})</option>`).join(""); st.value = T.st;
   const ds = $("days"); ds.innerHTML = DAYS.map((d) => `<option value="${d}">${d}</option>`).join(""); ds.value = String(T.days);
   const fr = $("from"); fr.value = ymdLocal(range().start);
   const vl = $("vl"), sd = $("sd");
@@ -387,7 +413,7 @@ window.TIDE = {
   draw: (c, W, H, opt) => drawChart(c, W, H, opt),
   state: () => D, stations: STATIONS,
   qa: () => D ? { st: D.st, name: D.name, pred: D.pred.length, obs: D.obs.length, cond: D.cond.length, method: D.method, cycle: D.cyc ? new Date(D.cyc.t).toISOString() : null,
-    rNow: D.rNow, rSlow: D.rSlow, bias: D.bias, flood: D.flood, start: D.R.start, end: D.R.end, now: D.now,
+    rNow: D.rNow, rSlow: D.rSlow, bias: D.bias, flood: D.flood, floods: D.floods, floodSkip: D.floodSkip, floodDrawn: window.__tideFloodDrawn || [], sid: D.sid, start: D.R.start, end: D.R.end, now: D.now,
     statsBox: window.__tideStatsBox || null, arch: ARCH, calib: D.calib ? D.calib.c.map((b) => b.corr) : null, calibBg: D.calibBg ? { t: D.calibBg.t, c: D.calibBg.c.map((b) => b.corr) } : null, ver: D.ver.length, verHindcast: D.ver.filter((p) => !p[2]).length, issues: D.nIssues, archived: D.nArchive, vl: D.vl, sd: D.sd, stats: D.stats,
     condAboveFrac: D.cond.length ? D.cond.filter(([t, v]) => v >= (interp(D.pred, t) || 0)).length / D.cond.length : null, sharp: window.__tideSharp || null } : { err: window.__tideErr || null },
 };

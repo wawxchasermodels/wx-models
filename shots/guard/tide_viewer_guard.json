@@ -1,0 +1,16 @@
+{
+ "guard": "tide_viewer",
+ "url": "http://127.0.0.1:8853",
+ "args": [
+  "http://127.0.0.1:8853",
+  "shots/guard"
+ ],
+ "rc": 1,
+ "time": 1794706366.2234116,
+ "failures": [
+  {
+   "key": "studio: Map never drew (Page.wait_for_function: Timeout 120000ms exceeded.)",
+   "always_block": true
+  }
+ ]
+}

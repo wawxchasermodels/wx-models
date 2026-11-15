@@ -1,0 +1,485 @@
+{
+ "rows": {
+  "9439040": {
+   "id": "9439040",
+   "levels": {
+    "minor": {
+     "s1_nws": 12.01,
+     "s2": 12.01,
+     "s3": null,
+     "s1_nos": 10.6,
+     "s2_nos": 10.6,
+     "status": "verified 2/2 (no NWPS categories)",
+     "draw": 12.01
+    },
+    "moderate": {
+     "s1_nws": 14.51,
+     "s2": 14.51,
+     "s3": null,
+     "s1_nos": 11.5,
+     "s2_nos": null,
+     "status": "verified 2/2 (no NWPS categories)",
+     "draw": 14.51
+    },
+    "major": {
+     "s1_nws": null,
+     "s2": null,
+     "s3": null,
+     "s1_nos": 12.8,
+     "s2_nos": null,
+     "status": "none",
+     "draw": null
+    }
+   },
+   "notes": [],
+   "name": "Astoria",
+   "shef": "ASTO3",
+   "mllw_stnd": 2.23,
+   "mhhw_stnd": 10.84,
+   "s3note": "NWPS ASTO3 (Columbia River at Tongue Pt near Astoria), stages above NGVD29, no flood categories"
+  },
+  "9440910": {
+   "id": "9440910",
+   "levels": {
+    "minor": {
+     "s1_nws": 11.02,
+     "s2": 11.02,
+     "s3": null,
+     "s1_nos": 10.92,
+     "s2_nos": 10.92,
+     "status": "verified 2/2 (no NWPS categories)",
+     "draw": 11.02
+    },
+    "moderate": {
+     "s1_nws": 14.52,
+     "s2": 14.52,
+     "s3": null,
+     "s1_nos": 11.82,
+     "s2_nos": null,
+     "status": "verified 2/2 (no NWPS categories)",
+     "draw": 14.52
+    },
+    "major": {
+     "s1_nws": null,
+     "s2": null,
+     "s3": null,
+     "s1_nos": 13.12,
+     "s2_nos": null,
+     "status": "none",
+     "draw": null
+    }
+   },
+   "notes": [],
+   "name": "Toke Point",
+   "shef": "TOKW1",
+   "mllw_stnd": 4.52,
+   "mhhw_stnd": 13.44,
+   "s3note": "NWPS: TOKW1 is not an NWPS gauge (HTTP 404)"
+  },
+  "9441102": {
+   "id": "9441102",
+   "levels": {
+    "minor": {
+     "s1_nws": 10.94,
+     "s2": 10.94,
+     "s3": null,
+     "s1_nos": null,
+     "s2_nos": null,
+     "status": "verified 2/2 (no NWPS categories)",
+     "draw": 10.94
+    },
+    "moderate": {
+     "s1_nws": 11.39,
+     "s2": 11.39,
+     "s3": null,
+     "s1_nos": null,
+     "s2_nos": null,
+     "status": "verified 2/2 (no NWPS categories)",
+     "draw": 11.39
+    },
+    "major": {
+     "s1_nws": 11.84,
+     "s2": 11.84,
+     "s3": null,
+     "s1_nos": null,
+     "s2_nos": null,
+     "status": "verified 2/2 (no NWPS categories)",
+     "draw": 11.84
+    }
+   },
+   "notes": [],
+   "name": "Westport",
+   "shef": "WPTW1",
+   "mllw_stnd": 3.0,
+   "mhhw_stnd": 12.14,
+   "s3note": "NWPS: WPTW1 is not an NWPS gauge (HTTP 404)"
+  },
+  "9442396": {
+   "id": "9442396",
+   "levels": {
+    "minor": {
+     "s1_nws": 11.11,
+     "s2": 11.11,
+     "s3": null,
+     "s1_nos": null,
+     "s2_nos": null,
+     "status": "verified 2/2 (no NWPS categories)",
+     "draw": 11.11
+    },
+    "moderate": {
+     "s1_nws": null,
+     "s2": null,
+     "s3": null,
+     "s1_nos": null,
+     "s2_nos": null,
+     "status": "none",
+     "draw": null
+    },
+    "major": {
+     "s1_nws": null,
+     "s2": null,
+     "s3": null,
+     "s1_nos": null,
+     "s2_nos": null,
+     "status": "none",
+     "draw": null
+    }
+   },
+   "notes": [],
+   "name": "La Push, Quillayute River",
+   "shef": "LAPW1",
+   "mllw_stnd": 5.17,
+   "mhhw_stnd": 13.69,
+   "s3note": "NWPS: LAPW1 is not an NWPS gauge (HTTP 404)"
+  },
+  "9443090": {
+   "id": "9443090",
+   "levels": {
+    "minor": {
+     "s1_nws": 10.58,
+     "s2": 10.58,
+     "s3": null,
+     "s1_nos": 9.92,
+     "s2_nos": 9.92,
+     "status": "verified 2/2 (no NWPS categories)",
+     "draw": 10.58
+    },
+    "moderate": {
+     "s1_nws": null,
+     "s2": null,
+     "s3": null,
+     "s1_nos": 10.82,
+     "s2_nos": null,
+     "status": "none",
+     "draw": null
+    },
+    "major": {
+     "s1_nws": null,
+     "s2": null,
+     "s3": null,
+     "s1_nos": 12.11,
+     "s2_nos": null,
+     "status": "none",
+     "draw": null
+    }
+   },
+   "notes": [],
+   "name": "Neah Bay",
+   "shef": "NEAW1",
+   "mllw_stnd": 2.0,
+   "mhhw_stnd": 9.96,
+   "s3note": "NWPS: NEAW1 is not an NWPS gauge (HTTP 404)"
+  },
+  "9444090": {
+   "id": "9444090",
+   "levels": {
+    "minor": {
+     "s1_nws": 9.17,
+     "s2": 9.17,
+     "s3": null,
+     "s1_nos": 8.99,
+     "s2_nos": 8.99,
+     "status": "verified 2/2 (no NWPS categories)",
+     "draw": 9.17
+    },
+    "moderate": {
+     "s1_nws": null,
+     "s2": null,
+     "s3": null,
+     "s1_nos": 9.91,
+     "s2_nos": null,
+     "status": "none",
+     "draw": null
+    },
+    "major": {
+     "s1_nws": null,
+     "s2": null,
+     "s3": null,
+     "s1_nos": 11.19,
+     "s2_nos": null,
+     "status": "none",
+     "draw": null
+    }
+   },
+   "notes": [],
+   "name": "Port Angeles",
+   "shef": "PTAW1",
+   "mllw_stnd": 30.31,
+   "mhhw_stnd": 37.38,
+   "s3note": "NWPS: PTAW1 is not an NWPS gauge (HTTP 404)"
+  },
+  "9444900": {
+   "id": "9444900",
+   "levels": {
+    "minor": {
+     "s1_nws": 11.37,
+     "s2": 11.37,
+     "s3": null,
+     "s1_nos": 10.5,
+     "s2_nos": 10.5,
+     "status": "verified 2/2 (no NWPS categories)",
+     "draw": 11.37
+    },
+    "moderate": {
+     "s1_nws": 11.82,
+     "s2": 11.82,
+     "s3": null,
+     "s1_nos": 11.4,
+     "s2_nos": null,
+     "status": "verified 2/2 (no NWPS categories)",
+     "draw": 11.82
+    },
+    "major": {
+     "s1_nws": null,
+     "s2": null,
+     "s3": null,
+     "s1_nos": 12.7,
+     "s2_nos": null,
+     "status": "none",
+     "draw": null
+    }
+   },
+   "notes": [],
+   "name": "Port Townsend",
+   "shef": "PTWW1",
+   "mllw_stnd": 3.36,
+   "mhhw_stnd": 11.88,
+   "s3note": "NWPS: PTWW1 is not an NWPS gauge (HTTP 404)"
+  },
+  "9446484": {
+   "id": "9446484",
+   "levels": {
+    "minor": {
+     "s1_nws": 14.07,
+     "s2": 14.07,
+     "s3": null,
+     "s1_nos": null,
+     "s2_nos": null,
+     "status": "verified 2/2 (no NWPS categories)",
+     "draw": 14.07
+    },
+    "moderate": {
+     "s1_nws": 14.77,
+     "s2": 14.77,
+     "s3": null,
+     "s1_nos": null,
+     "s2_nos": null,
+     "status": "verified 2/2 (no NWPS categories)",
+     "draw": 14.77
+    },
+    "major": {
+     "s1_nws": 15.17,
+     "s2": 15.17,
+     "s3": null,
+     "s1_nos": null,
+     "s2_nos": null,
+     "status": "verified 2/2 (no NWPS categories)",
+     "draw": 15.17
+    }
+   },
+   "notes": [],
+   "name": "Tacoma",
+   "shef": "TCNW1",
+   "mllw_stnd": 0.62,
+   "mhhw_stnd": 12.4,
+   "s3note": "NWPS: TCNW1 is not an NWPS gauge (HTTP 404)"
+  },
+  "9447130": {
+   "id": "9447130",
+   "levels": {
+    "minor": {
+     "s1_nws": 13.46,
+     "s2": 13.46,
+     "s3": 13.46,
+     "s1_nos": 13.45,
+     "s2_nos": 13.45,
+     "status": "verified 3/3",
+     "draw": 13.46
+    },
+    "moderate": {
+     "s1_nws": 14.36,
+     "s2": 14.36,
+     "s3": 14.36,
+     "s1_nos": 14.32,
+     "s2_nos": null,
+     "status": "verified 3/3",
+     "draw": 14.36
+    },
+    "major": {
+     "s1_nws": 14.76,
+     "s2": 14.76,
+     "s3": 14.76,
+     "s1_nos": 15.65,
+     "s2_nos": null,
+     "status": "verified 3/3",
+     "draw": 14.76
+    }
+   },
+   "notes": [],
+   "name": "Seattle",
+   "shef": "EBSW1",
+   "mllw_stnd": 7.94,
+   "mhhw_stnd": 19.3,
+   "s3note": "NWPS EBSW1 (Puget Sound at Seattle Tide Gage), stages above MHHW"
+  },
+  "9449424": {
+   "id": "9449424",
+   "levels": {
+    "minor": {
+     "s1_nws": 11.0,
+     "s2": 11.0,
+     "s3": null,
+     "s1_nos": 11.16,
+     "s2_nos": 11.16,
+     "status": "verified 2/2 (no NWPS categories)",
+     "draw": 11.0
+    },
+    "moderate": {
+     "s1_nws": 12.0,
+     "s2": 12.0,
+     "s3": null,
+     "s1_nos": 12.05,
+     "s2_nos": null,
+     "status": "verified 2/2 (no NWPS categories)",
+     "draw": 12.0
+    },
+    "major": {
+     "s1_nws": 13.0,
+     "s2": 13.0,
+     "s3": null,
+     "s1_nos": 13.35,
+     "s2_nos": null,
+     "status": "verified 2/2 (no NWPS categories)",
+     "draw": 13.0
+    }
+   },
+   "notes": [],
+   "name": "Cherry Point",
+   "shef": "CHYW1",
+   "mllw_stnd": 6.34,
+   "mhhw_stnd": 15.49,
+   "s3note": "NWPS: CHYW1 is not an NWPS gauge (HTTP 404)"
+  },
+  "9449880": {
+   "id": "9449880",
+   "levels": {
+    "minor": {
+     "s1_nws": 9.51,
+     "s2": 9.51,
+     "s3": null,
+     "s1_nos": 9.71,
+     "s2_nos": 9.71,
+     "status": "verified 2/2 (no NWPS categories)",
+     "draw": 9.51
+    },
+    "moderate": {
+     "s1_nws": 10.01,
+     "s2": 10.01,
+     "s3": null,
+     "s1_nos": 10.62,
+     "s2_nos": null,
+     "status": "verified 2/2 (no NWPS categories)",
+     "draw": 10.01
+    },
+    "major": {
+     "s1_nws": 10.51,
+     "s2": 10.51,
+     "s3": null,
+     "s1_nos": 11.91,
+     "s2_nos": null,
+     "status": "verified 2/2 (no NWPS categories)",
+     "draw": 10.51
+    }
+   },
+   "notes": [],
+   "name": "Friday Harbor",
+   "shef": "FRDW1",
+   "mllw_stnd": 3.85,
+   "mhhw_stnd": 11.61,
+   "s3note": "NWPS: FRDW1 is not an NWPS gauge (HTTP 404)"
+  }
+ },
+ "bad": [],
+ "names": [
+  [
+   "9439040",
+   "Astoria, OR",
+   "9439040"
+  ],
+  [
+   "birchbay",
+   "Birch Bay, WA",
+   "9449424"
+  ],
+  [
+   "9449424",
+   "Cherry Point, WA",
+   "9449424"
+  ],
+  [
+   "9449880",
+   "Friday Harbor, WA",
+   "9449880"
+  ],
+  [
+   "9442396",
+   "La Push, WA",
+   "9442396"
+  ],
+  [
+   "9443090",
+   "Neah Bay, WA",
+   "9443090"
+  ],
+  [
+   "9444090",
+   "Port Angeles, WA",
+   "9444090"
+  ],
+  [
+   "9444900",
+   "Port Townsend, WA",
+   "9444900"
+  ],
+  [
+   "9447130",
+   "Seattle, WA",
+   "9447130"
+  ],
+  [
+   "9446484",
+   "Tacoma, WA",
+   "9446484"
+  ],
+  [
+   "9440910",
+   "Toke Point, WA",
+   "9440910"
+  ],
+  [
+   "9441102",
+   "Westport, WA",
+   "9441102"
+  ]
+ ]
+}
