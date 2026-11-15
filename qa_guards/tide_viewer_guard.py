@@ -19,8 +19,12 @@ pass_chart_guard.py and label_sharpness_guard.py (towns only). Checks:
     dashboard file, NWS NWPS gauge) agrees with the FLOOD table in the served tide.js within 0.05 ft and no source disagrees;
     on every station the page's minor/moderate/major lines equal that table, nothing unverified is drawn, every level within
     3 ft of the data is drawn, and the three flood colors are painted where all three are in range (Westport, Cherry Point);
-    each name sits at the far left of the plot with its bottom 0-3 px above its line and labels do not overlap; the legend
-    does not include flood-stage rows (those are on the lines and in the hover readout)
+    each name sits on top of its own line (bottom 0-3 px above), on the left of the plot; close levels are staggered
+    left-to-right (Minor, Moderate, Major); a label's box must not overlap another label or any other flood line
+    (the previous stacked Westport crop failed this); type is ~9.5 CSS px on desktop and at least 9 CSS px on phones;
+    the same label rules are checked at 1440x900, 1920x1080 and 390x844 for Westport, Seattle, Tacoma, Friday Harbor,
+    Port Townsend, Cherry Point and Birch Bay; the legend does not include flood-stage rows (those are on the lines
+    and in the hover readout)
   8 (t3052u) hover readout: on the desktop page, moving the pointer over the plot shows a tooltip and a vertical crosshair
     with the time in Pacific, values of the visible series, and the station's flood stages; on the phone a tap does the same;
     Studio > Tides 16:9 frame also shows the readout on hover
@@ -93,6 +97,104 @@ def flood_triple_check():
         print(f"  flood {sid} {r['name']}: " + ", ".join(f"{k}={r['levels'][k]['draw']} [{r['levels'][k]['status']}]" for k in FLV) + f" | {r['s3note']}")
     return table, alias
 
+FLABEL_ORDER = ("minor", "moderate", "major")
+
+def check_flood_labels(tag, q, phone=False):
+    """Label geometry: sit on their own line, staggered on the left, no line through a word, readable type."""
+    labs = q.get("floodLabels") or []
+    exp = sorted(q.get("floodDrawn") or [])
+    if sorted(l["k"] for l in labs) != exp:
+        fail(f"flood: {tag} labels {[l['k'] for l in labs]} != lines {exp}")
+        return
+    if not labs:
+        return
+    s = labs[0].get("s") or 1
+    plotX0 = labs[0].get("plotX0", 0)
+    plotX1 = labs[0].get("plotX1")
+    for l in labs:
+        if "y1" not in l or "ly" not in l:
+            fail(f"flood: {tag} {l.get('k')} label missing y1/ly ({l})"); continue
+        gap = l["ly"] - l["y1"]
+        if gap < -0.05 or gap > 3.05:
+            fail(f"flood: {tag} {l['k']} label bottom is {gap:.1f}px from its line (want 0-3 px above)")
+        css = l.get("fontCss")
+        if css is None:
+            fail(f"flood: {tag} {l['k']} missing fontCss")
+        elif css < 8.95:
+            fail(f"flood: {tag} {l['k']} fontCss {css} is below 9px")
+        elif (not phone) and s <= 1.35 and not (9.0 <= css <= 10.5):
+            fail(f"flood: {tag} {l['k']} fontCss {css} is not ~9.5px on desktop")
+    left = min(labs, key=lambda l: l["x0"])
+    pad = left["x0"] - plotX0
+    if pad < 3 * s or pad > 10 * s:
+        fail(f"flood: {tag} leftmost {left['k']} is not at the far left (x0-plotX0={pad:.1f}, s={s})")
+    if plotX1 is not None:
+        mid = plotX0 + 0.5 * (plotX1 - plotX0)
+        for l in labs:
+            if l["x1"] > mid:
+                fail(f"flood: {tag} {l['k']} is not on the left side of the plot (x1={l['x1']:.1f}, mid={mid:.1f})")
+    present = [k for k in FLABEL_ORDER if any(l["k"] == k for l in labs)]
+    byk = {l["k"]: l for l in labs}
+    for a, b_ in zip(present, present[1:]):
+        if byk[a]["x0"] > byk[b_]["x0"] - 1:
+            fail(f"flood: {tag} labels not staggered left-to-right ({a} then {b_})")
+    for i, a_ in enumerate(labs):
+        for b_ in labs[i + 1:]:
+            if a_["x0"] < b_["x1"] and b_["x0"] < a_["x1"] and a_["y0"] < b_["y1"] and b_["y0"] < a_["y1"]:
+                fail(f"flood: {tag} labels {a_['k']}/{b_['k']} overlap")
+    for l in labs:
+        for o in labs:
+            if o["k"] == l["k"]:
+                continue
+            half = (o.get("lineW") or 2) / 2
+            lx0 = o.get("lineX0", o.get("plotX0", 0))
+            lx1 = o.get("lineX1", o.get("plotX1", 1e9))
+            if l["x0"] < lx1 and l["x1"] > lx0 and l["y0"] < o["ly"] + half + 0.5 and l["y1"] > o["ly"] - half - 0.5:
+                fail(f"flood: {tag} {o['k']} line passes through {l['k']} label")
+
+def old_stacked_westport_would_fail():
+    """The pre-stagger Westport crop (Major line through Moderate) must fail the new check."""
+    # Reported boxes from the failing 1920x1080 crop load, plus full-width lines as actually drawn then.
+    # Pixel sampling of crop_westport_flood_labels@2x.png showed the purple line and "Moderate" sharing a row.
+    old = [
+        {"k": "minor", "x0": 82.5, "x1": 118.5, "y0": 226.46, "y1": 237.46, "ly": 239.46, "plotX0": 75, "plotX1": 1400, "fontCss": 7.4, "lineW": 2.5, "s": 1.25, "lineX0": 75, "lineX1": 1400},
+        {"k": "moderate", "x0": 82.5, "x1": 142.5, "y0": 208.06, "y1": 218.06, "ly": 220.06, "plotX0": 75, "plotX1": 1400, "fontCss": 7.4, "lineW": 2.5, "s": 1.25, "lineX0": 75, "lineX1": 1400},
+        {"k": "major", "x0": 82.5, "x1": 117.5, "y0": 185.65, "y1": 198.65, "ly": 200.65, "plotX0": 75, "plotX1": 1400, "fontCss": 7.4, "lineW": 2.5, "s": 1.25, "lineX0": 75, "lineX1": 1400},
+    ]
+    # Inflate to the visual ink seen in the crop: the Major line sits inside Moderate's letters (~8 CSS px of overlap in the @2x png).
+    old[1]["y0"] = 198.0  # visual top of "Moderate" at or above the Major line (200.65)
+    n0 = len(fails)
+    check_flood_labels("regression-old-westport-crop", {"floodLabels": old, "floodDrawn": ["major", "minor", "moderate"]})
+    new_fails = fails[n0:]
+    # undo the recorded fails so the guard result reflects the live page only, but REQUIRE that the old crop was caught
+    del fails[n0:]
+    if not new_fails:
+        fail("flood: guard would still pass the old Westport crop (Major line through Moderate) — intersection check is too weak")
+    else:
+        print("  regression: old stacked Westport crop correctly FAILs: " + "; ".join(m for m, _ in new_fails))
+
+async def label_viewports_check(br):
+    """Extra sizes for the close-level stations (1440x900 is already covered in stations_check)."""
+    sts = [("9441102", "Westport"), ("9447130", "Seattle"), ("9446484", "Tacoma"), ("9449880", "Friday Harbor"),
+           ("9444900", "Port Townsend"), ("9449424", "Cherry Point"), ("birchbay", "Birch Bay")]
+    views = [(1920, 1080, 2, False, "1920x1080"), (390, 844, 3, True, "phone390")]
+    for W, H, dpr, phone, vtag in views:
+        ctx = await br.new_context(viewport={"width": W, "height": H}, device_scale_factor=dpr, is_mobile=phone, has_touch=phone)
+        await ctx.route(B + "/**", qa.add_hdr)
+        pg = await ctx.new_page()
+        for key, nm in sts:
+            tag = f"{nm} {vtag}"
+            await pg.goto(f"{B}/tide/?st={key}&days=9", wait_until="load", timeout=90000)
+            try:
+                await pg.wait_for_function("(k) => window.__tideDrawn > 0 && window.TIDE.qa().st === k", arg=key, timeout=90000)
+            except Exception as e:
+                fail(f"flood: {tag} did not load ({e})", block=not DATA_DOWN); continue
+            await pg.wait_for_timeout(250)
+            q = await pg.evaluate("() => window.TIDE.qa()")
+            check_flood_labels(tag, q, phone=phone)
+            print(f"  labels {tag}: fontCss={(q.get('floodLabels') or [{}])[0].get('fontCss')} labels={[l['k'] for l in (q.get('floodLabels') or [])]}")
+        await ctx.close()
+
 async def stations_check(br, table, alias):
     ctx = await br.new_context(viewport={"width": 1440, "height": 900}, device_scale_factor=1); await ctx.route(B + "/**", qa.add_hdr)
     pg = await ctx.new_page(); errs = []
@@ -130,20 +232,8 @@ async def stations_check(br, table, alias):
             if extra: fail(f"flood: {nm} draws unverified levels {extra}")
         exp = sorted(k for k, v in got.items() if v < q["dataHi"] + 3)
         if sorted(q.get("floodDrawn") or []) != exp: fail(f"flood: {nm} lines drawn {q.get('floodDrawn')} but in range {exp}")
-        # t3052u: plain names sit on top of their own line (bottom within 3 px above), left-aligned at plot left, no overlap
-        labs = q.get("floodLabels") or []
-        if sorted(l["k"] for l in labs) != exp: fail(f"flood: {nm} labels {[l['k'] for l in labs]} != lines {exp}")
-        for l in labs:
-            if "y1" not in l or "ly" not in l: fail(f"flood: {nm} {l.get('k')} label missing y1/ly ({l})"); continue
-            gap = l["ly"] - l["y1"]
-            if gap < -0.05 or gap > 3.05: fail(f"flood: {nm} {l['k']} label bottom is {gap:.1f}px from its line (want 0-3 px above)")
-            pad = l["x0"] - l.get("plotX0", 0)
-            s = l.get("s") or 1
-            if pad < 3 * s or pad > 10 * s: fail(f"flood: {nm} {l['k']} label is not at the far left (x0-plotX0={pad:.1f}, s={s})")
-        for i, a_ in enumerate(labs):
-            for b_ in labs[i + 1:]:
-                if a_["x0"] < b_["x1"] and b_["x0"] < a_["x1"] and a_["y0"] < b_["y1"] and b_["y0"] < a_["y1"]:
-                    fail(f"flood: {nm} labels {a_['k']}/{b_['k']} overlap")
+        # t3052u: sit on their own line, staggered on the left, no line through a word, readable type
+        check_flood_labels(nm, q, phone=False)
         leg = q.get("legend") or []
         if any("flood" in (x or "").lower() for x in leg): fail(f"flood: {nm} legend still has flood rows {leg}")
         if not any("Official prediction" in (x or "") for x in leg): fail(f"flood: {nm} legend missing Official prediction ({leg})")
@@ -282,6 +372,7 @@ async def studio(br):
     sleg = (sq or {}).get("legend") or []
     if any("flood" in (x or "").lower() for x in sleg): fail(f"studio tide: legend still has flood rows {sleg}")
     if not any("Official prediction" in (x or "") for x in sleg): fail(f"studio tide: legend missing Official prediction ({sleg})")
+    check_flood_labels("studio Westport", sq or {}, phone=False)
     # t3052u: hover readout on the 16:9 frame
     box = await pg.evaluate("() => { const r = document.getElementById('ch').getBoundingClientRect(); return {x: r.left + r.width * 0.55, y: r.top + r.height * 0.45}; }")
     await pg.mouse.move(box["x"], box["y"]); await pg.wait_for_timeout(300)
@@ -323,7 +414,9 @@ async def main():
         await tide_page(br, 1440, 900, 2, False, "desk")
         await tide_page(br, 390, 844, 3, True, "phone")
         table, alias = flood_triple_check()
+        old_stacked_westport_would_fail()
         await stations_check(br, table, alias or {})
+        await label_viewports_check(br)
         await studio(br)
         await br.close()
 

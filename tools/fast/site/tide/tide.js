@@ -301,25 +301,23 @@ function drawChart(c, W, H, opt) {
   c.save(); c.beginPath(); c.rect(X0, Y0, X1 - X0, Y1 - Y0); c.clip();
   window.__tideFloodDrawn = []; window.__tideFloodLabels = []; window.__tideFloodLabelNote = null; const fTag = [];
   const fOn = D.floods.filter((f) => f.v >= lo && f.v <= hi);
-  for (const f of fOn) { c.strokeStyle = FCOL[f.k]; c.lineWidth = 2 * s; c.setLineDash([9 * s, 6 * s]); const y = Y(f.v); c.beginPath(); c.moveTo(X0, y); c.lineTo(X1, y); c.stroke(); c.setLineDash([]); }
-  // t3052u: plain colored names, a little smaller, sit on top of each line at the far left (no pill). Close levels shrink type; labels stay on their own line.
-  const fGap = 2, fX = X0 + 6 * s; let fFs = 9.5;
-  const measureLabs = (fs) => { c.font = F(700, fs); const out = [];
-    for (const f of fOn) { const y = Y(f.v), m = c.measureText(f.lab), tw = m.width;
-      const desc = (m.actualBoundingBoxDescent != null ? m.actualBoundingBoxDescent : 0);
-      const asc = (m.actualBoundingBoxAscent != null ? m.actualBoundingBoxAscent : fs * s * 0.8);
-      const y1b = y - fGap, base = y1b - desc, y0 = base - asc;
-      out.push({ k: f.k, lab: f.lab, x0: fX, x1: fX + tw, y0, y1: y1b, base, ly: y, fs }); }
-    return out; };
-  const labsTight = (a) => { for (let i = 0; i < a.length; i++) for (let j = i + 1; j < a.length; j++) {
-    const A = a[i], B = a[j]; if (A.x0 < B.x1 && B.x0 < A.x1 && A.y0 < B.y1 && B.y0 < A.y1) return true;
-    if (B.ly >= A.y0 && B.ly <= A.y1) return true; if (A.ly >= B.y0 && A.ly <= B.y1) return true; } return false; };
-  let fLabs = measureLabs(fFs);
-  while (fFs > 7 && labsTight(fLabs)) { fFs -= 0.5; fLabs = measureLabs(fFs); }
-  if (labsTight(fLabs)) window.__tideFloodLabelNote = `labels still tight at ${fFs}px (kept on their lines)`;
-  fTag.push(() => { c.setLineDash([]); c.textAlign = "left"; c.textBaseline = "alphabetic"; c.font = F(700, fFs);
-    for (const b of fLabs) { c.lineWidth = 3 * s; c.strokeStyle = COL.bg; c.strokeText(b.lab, b.x0, b.base); c.fillStyle = FCOL[b.k]; c.fillText(b.lab, b.x0, b.base); } });
-  window.__tideFloodLabels = fLabs.map((b) => ({ k: b.k, x0: b.x0, x1: b.x1, y0: b.y0, y1: b.y1, ly: b.ly, plotX0: X0, fs: b.fs, s }));
+  // t3052u: ~9.5 CSS px on the page (>= 9 on phones). Studio uses 9.5*s so type scales with the frame.
+  // Close levels are staggered left-to-right (Minor, Moderate, Major); each word sits on top of its own line
+  // and that line starts at the word so it cannot run through a neighbor.
+  const fCss = (s > 1.35) ? Math.round(9.5 * s * 10) / 10 : 9.5;
+  const fGapY = 2, fHalo = Math.max(2, 1.2 * s), fPadX = 6 * s, xGap = Math.max(8, 6 * s);
+  c.font = `700 ${fCss}px Montserrat, system-ui, sans-serif`;
+  const fLabs = []; let fX = X0 + fPadX;
+  for (const f of fOn) {
+    const y = Y(f.v), tw = c.measureText(f.lab).width;
+    const asc = fCss * 0.92, desc = fCss * 0.08, y1b = y - fGapY, base = y1b - desc - fHalo / 2, y0 = base - asc - fHalo / 2;
+    fLabs.push({ k: f.k, lab: f.lab, x0: fX, x1: fX + tw, y0, y1: y1b, base, ly: y, lineX0: fX, lineX1: X1, fontCss: fCss, lineW: 2 * s, s, plotX0: X0, plotX1: X1 });
+    fX += tw + xGap;
+  }
+  for (const b of fLabs) { c.strokeStyle = FCOL[b.k]; c.lineWidth = 2 * s; c.setLineDash([9 * s, 6 * s]); c.beginPath(); c.moveTo(b.lineX0, b.ly); c.lineTo(b.lineX1, b.ly); c.stroke(); c.setLineDash([]); }
+  fTag.push(() => { c.setLineDash([]); c.textAlign = "left"; c.textBaseline = "alphabetic"; c.font = `700 ${fCss}px Montserrat, system-ui, sans-serif`;
+    for (const b of fLabs) { c.lineWidth = fHalo; c.strokeStyle = COL.bg; c.strokeText(b.lab, b.x0, b.base); c.fillStyle = FCOL[b.k]; c.fillText(b.lab, b.x0, b.base); } });
+  window.__tideFloodLabels = fLabs.map((b) => ({ k: b.k, x0: b.x0, x1: b.x1, y0: b.y0, y1: b.y1, ly: b.ly, lineX0: b.lineX0, lineX1: b.lineX1, plotX0: b.plotX0, plotX1: b.plotX1, fontCss: b.fontCss, lineW: b.lineW, s: b.s }));
   window.__tideFloodDrawn = fOn.map((f) => f.k);
   const line = (pts, col, w, gapMs) => { if (!pts.length) return; c.strokeStyle = col; c.lineWidth = w * s; c.lineJoin = "round"; c.lineCap = "round"; c.beginPath(); let pen = false, lt = 0;
     for (const [t, v] of pts) { const x = X(t), y = Y(v); if (!pen || (gapMs && t - lt > gapMs)) { c.moveTo(x, y); pen = true; } else c.lineTo(x, y); lt = t; } c.stroke(); };
