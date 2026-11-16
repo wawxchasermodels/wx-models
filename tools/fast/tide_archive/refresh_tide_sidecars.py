@@ -462,7 +462,13 @@ def refresh_aifs(out, work):
     picked = None
     for c in latest_aifs_cycle():
         print(f"aifs try {c:%Y%m%d%H}", flush=True)
-        path, n, msg = AIFS.do_cycle(c, work, AIFS.STEPS)
+        try:
+            path, n, msg = AIFS.do_cycle(c, work, AIFS.STEPS)
+        except Exception as e:
+            # A cycle not posted yet (index 404 / empty / not JSON) must not stop the walk-back,
+            # and must not prevent the STOFS anomaly sidecar from refreshing later in this job.
+            print(f"  aifs {c:%Y%m%d%H} skipped: {type(e).__name__}: {e}", flush=True)
+            continue
         print(f"  {msg} -> {path}")
         rec = loadj(path)
         if not rec:
@@ -519,12 +525,17 @@ def main():
     args = ap.parse_args()
     os.makedirs(os.path.join(args.out, "v1"), exist_ok=True)
     seed = loadj(args.seed_sst) if args.seed_sst else None
-    if not args.skip_sst:
-        refresh_sst(args.out, seed)
-    if not args.skip_aifs:
-        refresh_aifs(args.out, args.aifs_work)
-    if not args.skip_anom:
-        refresh_anom(args.out)
+    # Each sidecar is independent: one failing must not stop the others (the site keeps its shipped copy).
+    # The STOFS anomaly runs before AIFS so a slow or missing AIFS cycle cannot leave Wind surge stale.
+    for skip, name, fn in ((args.skip_sst, "sst", lambda: refresh_sst(args.out, seed)),
+                           (args.skip_anom, "anom", lambda: refresh_anom(args.out)),
+                           (args.skip_aifs, "aifs", lambda: refresh_aifs(args.out, args.aifs_work))):
+        if skip:
+            continue
+        try:
+            fn()
+        except Exception as e:
+            print(f"sidecar step {name} failed (kept previous copy): {type(e).__name__}: {e}", flush=True)
     v1 = os.path.join(args.out, "v1")
     idx_fn = os.path.join(v1, "index.json")
     try:
