@@ -2,7 +2,7 @@
 """Refresh production tide sidecars on the tide-archive branch (no site redeploy needed).
 
 Writes, under --out/v1/:
-  sst.json           updated W / ssta / last_day (k, clim, source kept)
+  sst.json           updated W / ssta / last_day (k, clim, source kept; W = k × latest daily anomaly vs 1991-2020)
   aifs_ens_msl.json  latest complete AIFS ENS (or AIFS-single / IFS fallback) MSL
   stofs_anom.json    latest STOFS 5-day station anomaly, for the Wind surge toggle
 
@@ -55,17 +55,6 @@ def _doy(d):
         d = D.date.fromisoformat(d[:10])
     return d.timetuple().tm_yday
 
-def _mean30(ser, last):
-    d = D.date.fromisoformat(last) if isinstance(last, str) else last
-    vals = []
-    for i in range(40):
-        key = (d - D.timedelta(days=i)).isoformat()
-        if key in ser:
-            vals.append(ser[key])
-            if len(vals) >= 30:
-                break
-    return (sum(vals)/len(vals)) if vals else None, len(vals)
-
 def _coverage(daily, now, n):
     days = 0
     for i in range(n):
@@ -92,6 +81,51 @@ def fetch_coops_daily(sid, start, end):
             last_dt, last_v = dt, v
     daily = {d: sum(vs)/len(vs) for d, vs in by.items()}
     return daily, last_dt, last_v
+
+def fetch_coops_daily_available(sid, start, end, max_back=5):
+    """Request through end, then walk the end date back when today is not
+    posted yet and the request fails or returns no observations."""
+    last_err = None
+    for i in range(max_back + 1):
+        e = end - D.timedelta(days=i)
+        if e < start:
+            break
+        try:
+            daily, last_dt, last_v = fetch_coops_daily(sid, start, e)
+        except Exception as ex:
+            last_err = ex
+            print(f"  coops {sid} end={e.isoformat()} fail: {ex}")
+            continue
+        if last_dt is not None:
+            if i:
+                print(f"  coops {sid} used end={e.isoformat()} (walked back {i} day(s))")
+            return daily, last_dt, last_v
+        print(f"  coops {sid} end={e.isoformat()} returned no observations")
+    if last_err:
+        raise last_err
+    return {}, None, None
+
+def fetch_mur_available(lat, lon, t0, end, max_back=5):
+    """MUR usually lags 1-2 days; requesting through today 404s the whole series."""
+    last_err = None
+    for i in range(max_back + 1):
+        e = end - D.timedelta(days=i)
+        t1 = e.isoformat() + "T12:00:00Z"
+        try:
+            mur_raw = SST.fetch_series("mur", "jplMURSST41", "analysed_sst",
+                                       lat, lon, t0, t1)
+        except Exception as ex:
+            last_err = ex
+            print(f"  MUR end={e.isoformat()} fail: {ex}")
+            continue
+        if mur_raw:
+            if i:
+                print(f"  MUR used end={e.isoformat()} (walked back {i} day(s))")
+            return mur_raw
+        print(f"  MUR end={e.isoformat()} returned no values")
+    if last_err:
+        raise last_err
+    return {}
 
 def parse_ndbc_rt(raw):
     """NDBC realtime2 is newest-first. Skip MM / 99.0 missing WTMP (column 15)."""
@@ -211,11 +245,14 @@ def apply_row_values(row, ssta_map, source, source_short, sensor_id=None, kind=N
     if not ssta_map:
         return False
     last = max(ssta_map)
-    s30, n30 = _mean30(ssta_map, last)
+    # W uses the latest daily anomaly vs the 1991-2020 normal. ssta30_c is a
+    # legacy key kept for pickFresher / other ports and equals that daily value;
+    # it is not a multi-day mean.
+    ssta = ssta_map[last]
     k = float(row.get("k_ft_per_c") or 0)
-    row["ssta"] = round(ssta_map[last], 3)
-    row["ssta30_c"] = None if s30 is None else round(s30, 3)
-    row["W"] = None if s30 is None else round(k * s30, 4)
+    row["ssta"] = round(ssta, 3)
+    row["ssta30_c"] = row["ssta"]
+    row["W"] = round(k * ssta, 4)
     row["steric_ft"] = row["W"]
     row["last_day"] = last
     row["source"] = source
@@ -292,7 +329,7 @@ def refresh_sst(out, seed):
         # try CO-OPS at the gauge first (sensor_id if coops, else the station id)
         gauge_id = sid if sid.isdigit() else None
         try:
-            dly, dt, val = fetch_coops_daily(sid, start90, today)
+            dly, dt, val = fetch_coops_daily_available(sid, start90, today)
             daily, last_dt, last_v, kind, hid = dly, dt, val, "coops", sid
         except Exception as e:
             print(f"  coops {sid} skip: {e}")
@@ -309,7 +346,7 @@ def refresh_sst(out, seed):
                 return True, None
             if d30 >= 25 and (row.get("bias_n") or 0) >= 365 and clim:
                 row["coverage_flag"] = (f"only {cov90} of last 90 days have a daily mean; "
-                                        f"last {d30} of 30 are present, so the 30-day anomaly is used")
+                                        f"recent coverage is still sufficient, so the latest daily anomaly is used")
                 return True, None
             return False, f"in-situ live but only {cov90} of last 90 days and {d30} of last 30"
 
@@ -344,7 +381,7 @@ def refresh_sst(out, seed):
                 label = row.get("source_short") if row.get("sensor_id")==hid else f"NDBC {hid}"
             if apply_row_values(row, ssta, f"in-situ {label}", label, hid, kind, last_dt, now):
                 row["sensor_cov90"] = _coverage(daily, now, 90)
-                print(f"sst {sid} in-situ {label} last={row['last_day']} ssta={row['ssta']} ssta30={row['ssta30_c']} W={row['W']}")
+                print(f"sst {sid} in-situ {label} last={row['last_day']} ssta={row['ssta']} W={row['W']}")
                 continue
             reason = reason or "in-situ is live but 1991-2020 climatology could not be applied"
         elif ok and rec and (row.get("bias_sat") == "MUR" or not clim):
@@ -354,9 +391,10 @@ def refresh_sst(out, seed):
                 mur = {}
                 if pix.get("lat") is not None:
                     t0 = (today - D.timedelta(days=40)).isoformat() + "T00:00:00Z"
-                    t1 = today.isoformat() + "T12:00:00Z"
-                    mur_raw = SST.fetch_series("mur", "jplMURSST41", "analysed_sst",
-                                               pix["lat"], pix["lon"], t0, t1)
+                    # Walk the end date back: MUR for UTC today is not posted yet
+                    # and a today-end request 404s the whole series (Tacoma then
+                    # fell back to CRW even when the gauge was fresh).
+                    mur_raw = fetch_mur_available(pix["lat"], pix["lon"], t0, today)
                     for k, v in (mur_raw or {}).items():
                         v = float(v)
                         if v > 200:
@@ -378,7 +416,7 @@ def refresh_sst(out, seed):
                 label = f"NOAA gauge at {(name or '').split(',')[0]}"
                 if apply_row_values(row, ssta, f"in-situ {label}", label, hid, kind, last_dt, now):
                     row["sensor_cov90"] = _coverage(daily, now, 90)
-                    print(f"sst {sid} in-situ/CRW+MUR {label} last={row['last_day']} ssta={row['ssta']} ssta30={row['ssta30_c']} W={row['W']}")
+                    print(f"sst {sid} in-situ/CRW+MUR {label} last={row['last_day']} ssta={row['ssta']} W={row['W']}")
                     continue
             except Exception as e:
                 print(f"  {sid} MUR departure path failed: {e}")
@@ -389,7 +427,7 @@ def refresh_sst(out, seed):
         if rec:
             label = "NOAA Coral Reef Watch"
             apply_row_values(row, rec, label, label, None, "fallback", None, now, reason)
-            print(f"sst {sid} fallback CRW last={row.get('last_day')} ssta={row.get('ssta')} ssta30={row.get('ssta30_c')} W={row.get('W')} ({reason})")
+            print(f"sst {sid} fallback CRW last={row.get('last_day')} ssta={row.get('ssta')} W={row.get('W')} ({reason})")
         else:
             print(f"sst {sid}: no in-situ and no official CRW; leave as-is")
 
