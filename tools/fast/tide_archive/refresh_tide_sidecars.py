@@ -514,6 +514,23 @@ def refresh_anom(out):
     print("anom wrote", dest, "cycle", last.get("cycle"))
     return dest
 
+def refresh_sst_fc(out):
+    """v1/sst_fc.json: forecast change in the sea temperature anomaly (see fetch_sst_fc.py). Runs after the
+    SST refresh so the anchor is the newest observed anomaly. On failure the previous copy stays; tide.js
+    ignores a copy older than 72 h and then holds the SST term flat."""
+    import fetch_sst_fc as FC
+    sst = loadj(os.path.join(out, "v1", "sst.json"))
+    if not sst or not sst.get("stations"):
+        print("sst_fc: no v1/sst.json; skip")
+        return None
+    points = loadj(os.path.join(HERE, "sst_fc_points.json"))
+    crw = (loadj(os.path.join(HERE, "sst_fc_clim.json")) or {}).get("stations") or {}
+    dest = os.path.join(out, "v1", "sst_fc.json")
+    j = FC.build(sst, points, crw, D.datetime.now(D.timezone.utc).replace(tzinfo=None), prev=loadj(dest))
+    savej(dest, j)
+    print("sst_fc wrote", dest, len(j["stations"]), "stations", j.get("runs"))
+    return dest
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", required=True, help="tide-archive checkout (writes v1/)")
@@ -522,12 +539,14 @@ def main():
     ap.add_argument("--skip-sst", action="store_true")
     ap.add_argument("--skip-aifs", action="store_true")
     ap.add_argument("--skip-anom", action="store_true")
+    ap.add_argument("--skip-sst-fc", action="store_true")
     args = ap.parse_args()
     os.makedirs(os.path.join(args.out, "v1"), exist_ok=True)
     seed = loadj(args.seed_sst) if args.seed_sst else None
     # Each sidecar is independent: one failing must not stop the others (the site keeps its shipped copy).
     # The STOFS anomaly runs before AIFS so a slow or missing AIFS cycle cannot leave Wind surge stale.
     for skip, name, fn in ((args.skip_sst, "sst", lambda: refresh_sst(args.out, seed)),
+                           (args.skip_sst_fc or args.skip_sst, "sst_fc", lambda: refresh_sst_fc(args.out)),
                            (args.skip_anom, "anom", lambda: refresh_anom(args.out)),
                            (args.skip_aifs, "aifs", lambda: refresh_aifs(args.out, args.aifs_work))):
         if skip:
@@ -540,7 +559,7 @@ def main():
     idx_fn = os.path.join(v1, "index.json")
     try:
         idx = json.load(open(idx_fn)) if os.path.exists(idx_fn) else {}
-        idx["sidecars"] = {fn: True for fn in ("sst.json", "aifs_ens_msl.json", "stofs_anom.json")
+        idx["sidecars"] = {fn: True for fn in ("sst.json", "sst_fc.json", "aifs_ens_msl.json", "stofs_anom.json")
                            if os.path.exists(os.path.join(v1, fn))}
         savej(idx_fn, idx)
     except Exception as e:

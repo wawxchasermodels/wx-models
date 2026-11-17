@@ -127,6 +127,50 @@ def load_sst(out):
     except Exception:
         return None
 
+SSTFC_MAX_AGE = 72 * HR
+
+
+def sst_fc_row(fc, sid, T):
+    """Daily points [(ms, change deg C)] for one station from v1/sst_fc.json, or None (flat SST term).
+    Same rules as sstFcTerm() in site/tide/tide.js: ignored when generated more than 72 h before T."""
+    if not fc or not fc.get("stations"):
+        return None
+    try:
+        gen = D.datetime.strptime(fc["generated_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=D.timezone.utc).timestamp() * 1000
+    except Exception:
+        return None
+    if abs(T - gen) > SSTFC_MAX_AGE:
+        return None
+    row = fc["stations"].get(sid) or (fc["stations"].get("9449424") if sid == "birchbay" else None)
+    if not row or not row.get("d"):
+        return None
+    pts = []
+    for day, v in row["d"]:
+        try:
+            pts.append((D.datetime.strptime(day, "%Y-%m-%d").replace(tzinfo=D.timezone.utc).timestamp() * 1000, float(v)))
+        except Exception:
+            continue
+    pts.sort()
+    return pts or None
+
+
+def sst_fc_delta(pts, t0, t):
+    """Mirror of sstFcDelta() in tide.js: linear between daily points, held outside them, 0 at and before t0."""
+    if not pts or not (t > t0):
+        return 0.0
+    def at(x):
+        if x <= pts[0][0]:
+            return pts[0][1]
+        if x >= pts[-1][0]:
+            return pts[-1][1]
+        for i in range(1, len(pts)):
+            if x <= pts[i][0]:
+                f = (x - pts[i - 1][0]) / (pts[i][0] - pts[i - 1][0])
+                return pts[i - 1][1] + f * (pts[i][1] - pts[i - 1][1])
+        return pts[-1][1]
+    return at(t) - at(t0)
+
+
 def ib_ft(p):
     try:
         p = float(p)
@@ -242,10 +286,11 @@ def p_at(obs_pts, fc_pts, t, now_t):
             return v
     return interp(fc_pts, t)
 
-def conditional_free(T, pred, obs, air, aifs_rec, sst_st, sid, now_t=None):
+def conditional_free(T, pred, obs, air, aifs_rec, sst_st, sid, now_t=None, sst_fc=None):
     """STOFS-free default residual, matching site/tide/tide.js (wind off).
 
-    resid = IB(t) + W + offset5 + leftover * exp(-lead/12h).
+    resid = IB(t) + W(t) + offset5 + leftover * exp(-lead/12h), W(t) = W + k x forecast SST anomaly change
+    after the newest observation (sst_fc.json; W(t) = W when it is missing).
     Forecast hours use AIFS ENS pressure when present; otherwise the issue-time
     observed pressure is held (same fallback as the page).
     """
@@ -294,18 +339,27 @@ def conditional_free(T, pred, obs, air, aifs_rec, sst_st, sid, now_t=None):
         t += HR
     offset5 = (acc / n) if n else 0.0
     leftover = r_now - ib0 - W - offset5
+    k_sst = 0.0
+    if sst_st and sst_st.get("k_ft_per_c") is not None:
+        try:
+            k_sst = float(sst_st["k_ft_per_c"])
+        except (TypeError, ValueError):
+            k_sst = 0.0
+    sfc_pts = sst_fc_row(sst_fc, sid, T) if (sst_st and k_sst) else None
     def resid(t):
         dt = t - t0c
         p = p_at(air, fc_pts, t, now_t)
         ib = ib_ft(p)
         if ib is None:
             ib = ib0
-        return ib + W + offset5 + leftover * math.exp(-max(0.0, dt) / TAU_BIAS)
+        return ib + W + k_sst * sst_fc_delta(sfc_pts, t0c, t) + offset5 + leftover * math.exp(-max(0.0, dt) / TAU_BIAS)
     rr = lambda x: None if x is None else round(x, 3)
     snap = {"t": T, "alg": ALG, "method": "stofs-free", "t0": t0c,
             "rNow": rr(r_now), "rSlow": rr(offset5), "bias": rr(leftover),
             "r": [round(resid(T + k * HR), 3) for k in range(LEAD_H + 1)],
             "offset5": rr(offset5), "W": rr(W)}
+    if sfc_pts:
+        snap["sst_fc"] = (sst_fc or {}).get("source")
     if sst_st:
         snap["sst"] = {k: sst_st.get(k) for k in ("last_day", "ssta30_c", "ssta", "k_ft_per_c", "W", "source", "chosen_sat")}
     return snap
@@ -424,6 +478,7 @@ def main():
     obs_end = min(now, T1) + H6
     sst = load_sst(a.out)
     aifs = load_v1(a.out, "aifs_ens_msl.json")
+    sst_fc = load_v1(a.out, "sst_fc.json")
     if not sst:
         print("note: v1/sst.json missing — SST term W=0 (same fallback as the page)")
     if not aifs:
@@ -438,7 +493,7 @@ def main():
         for s in slots:
             T = int(s.timestamp() * 1000)
             c = cyc_of.get(s)
-            snap = conditional_free(T, pred, obs, air, aifs, (sst and (sst.get("stations") or {}).get(st)), st, now)
+            snap = conditional_free(T, pred, obs, air, aifs, (sst and (sst.get("stations") or {}).get(st)), st, now, sst_fc)
             if snap:
                 snap["kind"] = kind
                 if p_src != [st]: snap["p_src"] = p_src   # neighbor-average pressure
