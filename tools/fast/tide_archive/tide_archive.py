@@ -189,7 +189,7 @@ def aifs_hourly(rec, sid):
 
 def coops_metric_pressure(st, b, e):
     url = (API.replace("units=english", "units=metric")
-           + f"&product=air_pressure&station={st}&begin_date={gmt(b)}&end_date={gmt(e)}&interval=h")
+           + f"&product=air_pressure&station={st}&begin_date={urllib.parse.quote(gmt(b))}&end_date={urllib.parse.quote(gmt(e))}&interval=h")   # 11-16: quote like coops(); a raw space raised InvalidURL so gauge pressure was never used
     try:
         j = json.loads(get(url))
     except Exception:
