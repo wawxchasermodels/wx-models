@@ -202,6 +202,39 @@ def coops_metric_pressure(st, b, e):
             continue
     return out
 
+# Pressure neighbors (nearest first). Any gauge with no NOAA air pressure for the window uses the plain hourly
+# average of the first P_NEIGHBORS_N neighbors that have it (observed/past hours). Forecast hours always use the
+# per-station AIFS ENS mean (aifs_hourly). Keep identical to P_NEIGHBORS in site/tide/tide.js.
+P_NEIGHBORS = {"9439040":["9440581","9440910","9441102","9442396"],"9440581":["9439040","9440910","9441102","9442396"],"9440910":["9441102","9440581","9439040","9442396"],"9441102":["9440910","9440581","9439040","9442396"],"9442396":["9443090","9444090","9441102","9440910"],"9443090":["9442396","9444090","9449880","9444900"],"9444090":["9444900","9449880","9443090","9449424"],"9444900":["9444090","9449880","9447130","9449424"],"9449880":["9449424","9444900","9444090","9447130"],"9449424":["9449880","9444900","9444090","9447130"],"9447130":["9446484","9444900","9444090","9449880"],"9446484":["9447130","9444900","9444090","9449880"]}
+P_NEIGHBORS_N = 2
+
+
+def avg_pressure(series):
+    m = {}
+    for pts in series:
+        for t, v in pts:
+            a = m.setdefault(t, [0.0, 0])
+            a[0] += v; a[1] += 1
+    return [(t, a[0] / a[1]) for t, a in sorted(m.items())]
+
+
+def station_pressure(st, b, e):
+    """(points, source ids): the gauge's own air pressure, else the average of its nearest neighbors that have it."""
+    own = coops_metric_pressure(st, b, e)
+    if own:
+        return own, [st]
+    got = []
+    for fb in P_NEIGHBORS.get(st, []):
+        if len(got) >= P_NEIGHBORS_N:
+            break
+        pts = coops_metric_pressure(fb, b, e)
+        if pts:
+            got.append((fb, pts))
+    if not got:
+        return [], []
+    return avg_pressure([g[1] for g in got]), [g[0] for g in got]
+
+
 def p_at(obs_pts, fc_pts, t, now_t):
     if t <= now_t:
         v = interp(obs_pts, t)
@@ -400,7 +433,7 @@ def main():
         st, sid = item
         pred = coops("predictions", st, T0 - SLOW_DAYS * DAY - DAY, T1 + (LEAD_H + 3) * HR, "&interval=6")
         obs = coops("water_level", st, T0 - SLOW_DAYS * DAY - DAY, obs_end)
-        air = coops_metric_pressure(st, T0 - 6 * DAY, obs_end)
+        air, p_src = station_pressure(st, T0 - 6 * DAY, obs_end)
         snaps = []
         for s in slots:
             T = int(s.timestamp() * 1000)
@@ -408,6 +441,7 @@ def main():
             snap = conditional_free(T, pred, obs, air, aifs, (sst and (sst.get("stations") or {}).get(st)), st, now)
             if snap:
                 snap["kind"] = kind
+                if p_src != [st]: snap["p_src"] = p_src   # neighbor-average pressure
                 snap["cycle"] = f"{c:%Y%m%d%H}" if c else (aifs or {}).get("cycle")
                 if kind == "archive": snap["made"] = now
                 snaps.append(snap)
