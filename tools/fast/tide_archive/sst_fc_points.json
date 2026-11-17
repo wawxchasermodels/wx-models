@@ -327,13 +327,15 @@
 "k": 240708,
 "lat": 48.25,
 "lon": -123.0,
-"dist_km": 32.8
+"dist_km": 32.8,
+"skip": "not backtested (no matching climatology in the 2026-11-16 backtest); flat until validated"
 },
 "9449424": {
 "k": 236387,
 "lat": 49.0,
 "lon": -123.25,
-"dist_km": 39.1
+"dist_km": 39.1,
+"skip": "not backtested (no matching climatology in the 2026-11-16 backtest); flat until validated"
 },
 "9447130": {
 "k": 240708,
