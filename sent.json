@@ -20,22 +20,22 @@
    }
   },
   "pass_snapshot": {
-   "at": "2026-11-19T08:47:14.121643+00:00",
+   "at": "2026-11-19T14:35:56.963261+00:00",
    "passes": {
     "Blewett Pass US 97": {
      "avalanche_closure": false,
-     "displayDate": "2026-11-19T07:42:23.8Z",
+     "displayDate": "2026-11-19T11:34:06.407Z",
      "endMP": 168.87,
      "restrictions": {
-      "Northbound": "Traction Tires Required, Chains required on Vehicles over 10,000 gross vehicle weight. Oversize Vehicles Prohibited.",
-      "Southbound": "Traction Tires Required, Chains required on Vehicles over 10,000 gross vehicle weight. Oversize Vehicles Prohibited."
+      "Northbound": "Traction Tires Advised, Oversize Vehicles Prohibited.",
+      "Southbound": "Traction Tires Advised, Oversize Vehicles Prohibited."
      },
      "roadCondition": "Compact snow and ice.",
      "route": "097",
      "snow_on_road": true,
      "startMP": 158.87,
      "status": "open",
-     "temperature": 32.0,
+     "temperature": 34.0,
      "weather": "Snowing lightly."
     },
     "Cayuse Pass SR 123": {
@@ -88,39 +88,39 @@
     },
     "Disautel Pass SR 155": {
      "avalanche_closure": false,
-     "displayDate": "2026-11-19T03:36:52.673Z",
+     "displayDate": "2026-11-19T14:01:47.84Z",
      "endMP": 62.6,
      "restrictions": {
       "Northbound": "No restrictions",
       "Southbound": "No restrictions"
      },
-     "roadCondition": "Mostly bare and dry, with frost and ice in places.",
+     "roadCondition": "Mostly bare and wet.",
      "route": "155",
      "snow_on_road": false,
      "startMP": 52.6,
      "status": "open",
-     "temperature": 35.0,
-     "weather": "Clear."
+     "temperature": 32.0,
+     "weather": "Overcast."
     },
     "Loup Loup Pass SR 20": {
      "avalanche_closure": false,
-     "displayDate": "2026-11-19T07:45:59.763Z",
+     "displayDate": "2026-11-19T14:26:09.377Z",
      "endMP": 219.47,
      "restrictions": {
       "Eastbound": "No restrictions",
       "Westbound": "No restrictions"
      },
-     "roadCondition": "Mostly bare and wet, with slush in places.",
+     "roadCondition": "Snow and slush in places.",
      "route": "020",
-     "snow_on_road": false,
+     "snow_on_road": true,
      "startMP": 209.47,
      "status": "open",
-     "temperature": 33.0,
-     "weather": "Snowing lightly."
+     "temperature": 32.0,
+     "weather": "Overcast."
     },
     "Manastash Ridge I-82": {
      "avalanche_closure": false,
-     "displayDate": "2026-11-19T08:10:17.983Z",
+     "displayDate": "2026-11-19T12:09:21.383Z",
      "endMP": 27.0,
      "restrictions": {
       "Eastbound": "No restrictions",
@@ -132,7 +132,7 @@
      "startMP": 1.0,
      "status": "open",
      "temperature": null,
-     "weather": "Rain and snow mix"
+     "weather": "Rain with areas of light snow"
     },
     "Mt. Baker Hwy SR 542": {
      "avalanche_closure": false,
@@ -152,26 +152,26 @@
     },
     "North Cascade Hwy SR 20": {
      "avalanche_closure": false,
-     "displayDate": "2026-11-19T03:31:52.987Z",
+     "displayDate": "2026-11-19T09:43:30.97Z",
      "endMP": 170.6,
      "restrictions": {
       "Eastbound": "No restrictions",
       "Westbound": "No restrictions"
      },
-     "roadCondition": "Snow covered",
+     "roadCondition": "Snow.",
      "route": "020",
      "snow_on_road": true,
      "startMP": 134.0,
      "status": "open",
-     "temperature": 30.0,
-     "weather": "Snowing"
+     "temperature": 26.0,
+     "weather": "Snowing lightly."
     },
     "Satus Pass US 97": {
      "avalanche_closure": false,
-     "displayDate": "2026-11-19T05:53:48.203Z",
+     "displayDate": "2026-11-19T11:55:16.61Z",
      "endMP": 32.15,
      "restrictions": {
-      "Northbound": "Traction Tires Advised, Oversize Vehicles Prohibited.",
+      "Northbound": "Traction Tires Required, Chains required on Vehicles over 10,000 gross vehicle weight. Oversize Vehicles Prohibited.",
       "Southbound": "Traction Tires Required, Chains required on Vehicles over 10,000 gross vehicle weight. Oversize Vehicles Prohibited."
      },
      "roadCondition": "Bare and wet",
@@ -200,23 +200,23 @@
     },
     "Snoqualmie Pass I-90": {
      "avalanche_closure": false,
-     "displayDate": "2026-11-18T23:34:12.89Z",
+     "displayDate": "2026-11-19T14:14:06.04Z",
      "endMP": 136.0,
      "restrictions": {
       "Eastbound": "No restrictions",
       "Westbound": "No restrictions"
      },
-     "roadCondition": "Bare and dry wet in places",
+     "roadCondition": "Bare and wet",
      "route": "090",
      "snow_on_road": false,
      "startMP": 34.0,
      "status": "open",
      "temperature": 32.0,
-     "weather": "Light snow flurries"
+     "weather": "Overcast"
     },
     "Stevens Pass US 2": {
      "avalanche_closure": false,
-     "displayDate": "2026-11-19T07:41:00.393Z",
+     "displayDate": "2026-11-19T11:35:35.28Z",
      "endMP": 69.57,
      "restrictions": {
       "Eastbound": "Traction Tires Advised, Oversize Vehicles Prohibited.",
@@ -227,8 +227,8 @@
      "snow_on_road": true,
      "startMP": 59.57,
      "status": "open",
-     "temperature": 32.0,
-     "weather": "Snowing"
+     "temperature": 34.0,
+     "weather": "Snowing lightly."
     },
     "Tiger Mountain SR18": {
      "avalanche_closure": false,
@@ -248,40 +248,39 @@
     },
     "Wauconda Pass SR 20": {
      "avalanche_closure": false,
-     "displayDate": "2026-11-19T04:18:42.723Z",
+     "displayDate": "2026-11-19T14:14:16.837Z",
      "endMP": 293.89,
      "restrictions": {
       "Eastbound": "No restrictions",
       "Westbound": "No restrictions"
      },
-     "roadCondition": "Mostly bare and dry, with ice in places.",
+     "roadCondition": "Mostly bare and wet, with snow and ice in places.",
      "route": "020",
-     "snow_on_road": false,
+     "snow_on_road": true,
      "startMP": 283.89,
      "status": "open",
-     "temperature": 29.0,
-     "weather": "Overcast."
+     "temperature": 28.0,
+     "weather": "Cloudy."
     },
     "White Pass US 12": {
      "avalanche_closure": false,
-     "displayDate": "2026-11-19T05:40:29.367Z",
+     "displayDate": "2026-11-19T12:25:57.57Z",
      "endMP": 166.0,
      "restrictions": {
       "Eastbound": "Traction Tires Advised, Oversize Vehicles Prohibited.",
       "Westbound": "Traction Tires Advised, Oversize Vehicles Prohibited."
      },
-     "roadCondition": "Bare and wet, with snow in places",
+     "roadCondition": "Bare and wet, with snow and slush in places",
      "route": "012",
      "snow_on_road": true,
      "startMP": 138.0,
      "status": "open",
      "temperature": null,
-     "weather": "Snowing"
+     "weather": "Overcast with areas of fog and occasional snow flurries"
     }
    }
   },
   "payload_ids": [
-   "q-9ebf276ca2f14048",
    "q-1be2c5cca984026f",
    "q-af6464b470994742",
    "q-f57c7b9e3fafefbc",
@@ -380,7 +379,8 @@
    "q-5001bf02f83c1a41",
    "q-8d2897d2060e490b",
    "q-b41b3921298dbfca",
-   "q-53f4c1da2357876d"
+   "q-53f4c1da2357876d",
+   "q-850a0f50a2f66e4d"
   ],
   "quakes": {},
   "seen": {
@@ -777,7 +777,7 @@
    }
   }
  },
- "updated": "2026-11-19T14:35:53.757482+00:00",
+ "updated": "2026-11-19T14:35:56.965627+00:00",
  "urgent": {
   "keys": {
    "urn:oid:2.49.0.1.840.0.0831b1a65240cece572ca90526334e8338ea2976.001.1": "2026-11-13T09:20:55.446029+00:00",
