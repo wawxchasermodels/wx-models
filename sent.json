@@ -20,7 +20,7 @@
    }
   },
   "pass_snapshot": {
-   "at": "2026-11-18T23:58:48.827184+00:00",
+   "at": "2026-11-19T00:54:21.817119+00:00",
    "passes": {
     "Blewett Pass US 97": {
      "avalanche_closure": false,
@@ -120,19 +120,19 @@
     },
     "Manastash Ridge I-82": {
      "avalanche_closure": false,
-     "displayDate": "2026-11-18T23:17:03.617Z",
+     "displayDate": "2026-11-19T00:38:02.377Z",
      "endMP": 27.0,
      "restrictions": {
       "Eastbound": "No restrictions",
       "Westbound": "No restrictions"
      },
-     "roadCondition": "Bare and wet",
+     "roadCondition": "Bare and wet with snow and slush in places",
      "route": "082",
-     "snow_on_road": false,
+     "snow_on_road": true,
      "startMP": 1.0,
      "status": "open",
      "temperature": null,
-     "weather": "Light rain and snow mix"
+     "weather": "Snowing"
     },
     "Mt. Baker Hwy SR 542": {
      "avalanche_closure": false,
@@ -168,19 +168,19 @@
     },
     "Satus Pass US 97": {
      "avalanche_closure": false,
-     "displayDate": "2026-11-18T07:50:20.78Z",
+     "displayDate": "2026-11-19T00:07:04.53Z",
      "endMP": 32.15,
      "restrictions": {
       "Northbound": "No restrictions",
       "Southbound": "No restrictions"
      },
-     "roadCondition": "Bare and Dry",
+     "roadCondition": "Snow and slush",
      "route": "097",
-     "snow_on_road": false,
+     "snow_on_road": true,
      "startMP": 22.15,
      "status": "open",
-     "temperature": 33.0,
-     "weather": "Clear"
+     "temperature": 32.0,
+     "weather": "Snowing"
     },
     "Sherman Pass SR 20": {
      "avalanche_closure": false,
@@ -264,15 +264,15 @@
     },
     "White Pass US 12": {
      "avalanche_closure": false,
-     "displayDate": "2026-11-18T19:45:50.897Z",
+     "displayDate": "2026-11-19T00:28:45.837Z",
      "endMP": 166.0,
      "restrictions": {
-      "Eastbound": "No restrictions",
-      "Westbound": "No restrictions"
+      "Eastbound": "Traction Tires Advised, Oversize Vehicles Prohibited.",
+      "Westbound": "Traction Tires Advised, Oversize Vehicles Prohibited."
      },
-     "roadCondition": "Bare and wet",
+     "roadCondition": "Bare and wet, snow covered",
      "route": "012",
-     "snow_on_road": false,
+     "snow_on_road": true,
      "startMP": 138.0,
      "status": "open",
      "temperature": null,
@@ -281,7 +281,6 @@
    }
   },
   "payload_ids": [
-   "q-bb344fc8b641fc0e",
    "q-00ca8b5f5877f269",
    "q-5615fc33575ea509",
    "q-d3a1a0401d9c6824",
@@ -380,7 +379,8 @@
    "q-117c27f6837f5949",
    "q-a57adf9319e3d649",
    "q-45e410487882b80b",
-   "q-e2bf56a008d74c2e"
+   "q-e2bf56a008d74c2e",
+   "q-0cbd38d3befd9ed5"
   ],
   "quakes": {},
   "seen": {
@@ -452,7 +452,6 @@
    "urn:oid:2.49.0.1.840.0.a0be3d78e7ffe57d78f429d69da537f4e068fdba.001.1|WA": "2026-11-18T03:10:52.662560+00:00",
    "urn:oid:2.49.0.1.840.0.a15bf7d2d5dfb2ab2705f8ef6baafd459f3f42f7.001.2|USA": "2026-11-16T18:59:32.798705+00:00",
    "urn:oid:2.49.0.1.840.0.a15bf7d2d5dfb2ab2705f8ef6baafd459f3f42f7.002.1|USA": "2026-11-16T18:59:32.798705+00:00",
-   "urn:oid:2.49.0.1.840.0.a325b505fdf94720a8f26d9e094d8c6b8b631e79.001.1|WA": "2026-11-12T00:09:35.387039+00:00",
    "urn:oid:2.49.0.1.840.0.a6aa489676181f5fb2b2bbcce0eb6cda95aaec1d.002.1|USA": "2026-11-18T23:15:11.013384+00:00",
    "urn:oid:2.49.0.1.840.0.a6aa489676181f5fb2b2bbcce0eb6cda95aaec1d.003.1|USA": "2026-11-18T23:15:11.013384+00:00",
    "urn:oid:2.49.0.1.840.0.a6aa489676181f5fb2b2bbcce0eb6cda95aaec1d.004.1|USA": "2026-11-18T23:15:11.013384+00:00",
@@ -775,7 +774,7 @@
    }
   }
  },
- "updated": "2026-11-18T23:58:48.829840+00:00",
+ "updated": "2026-11-19T00:54:21.821047+00:00",
  "urgent": {
   "keys": {
    "urn:oid:2.49.0.1.840.0.0831b1a65240cece572ca90526334e8338ea2976.001.1": "2026-11-13T09:20:55.446029+00:00",
