@@ -572,6 +572,10 @@ PACKS = {"wind": ("mslp", "u10", "v10"), "aloft": ("t850", "t700", "frz"), "accu
          "nbm1": ("t2m", "gust", "tcc"), "svr": ("uh", "cape3", "srh03"), "lapse": ("lr03", "lr75"), "nbm2": ("nq1", "nq6", "ns6"), "nbm3": ("tstm", "maxt", "mint")}
 
 IFS9_SKIP = {"swh", "wdu", "wdv"}   # ECMWF waves are 0.25 deg only (separate WAM files): not on the 9 km grid
+# 11-20-26 (Benjamin "ship", t3265u): ECMWF 9 km stores ONLY the fields the WA forecast maps read (2 m temp, max gust, 10 m wind,
+# precip and snow totals): no pressure-level file is pulled per step (~13 MB GRIB, ~270 KB to R2 per hour). Other ifs9 products
+# simply do not show (the viewer lists only products whose fields a run carries).
+IFS9_ONLY = {"t2m", "gust", "u10", "v10", "apcp", "asnow"}
 SQRT_FIELDS = {"apcp", "asnow", "apcp90", "asnow90", "nq1", "nq6", "ns6", "ltgp", "kinc", "fzinc"}
 def q8(a, lo, hi): return np.clip(np.rint((a - lo) / (hi - lo) * 255), 0, 255).astype(np.uint8)
 def rng(a):
@@ -608,7 +612,7 @@ def step_job(args):
     except Exception as e: return s, None, str(e), 0, 0
     mg = as_model(m)   # getters see "ifs" for ifs9 (same params / units); R reads the 0.1 deg files
     for name, (get, units) in (NBM_FIELDS if m == "nbm" else dict(FIELDS, **ENS_FIELDS) if m in ("eps", "aens") else FIELDS).items():
-        if m == "ifs9" and name in IFS9_SKIP: continue
+        if m == "ifs9" and (name in IFS9_SKIP or name not in IFS9_ONLY): continue
         if m == "gfsw" and name not in GFSW_FIELDS: continue
         try: a = get(R, mg)
         except (KeyError, StopIteration): continue
