@@ -575,7 +575,10 @@ IFS9_SKIP = {"swh", "wdu", "wdv"}   # ECMWF waves are 0.25 deg only (separate WA
 # 11-20-26 (Benjamin "ship", t3265u): ECMWF 9 km stores ONLY the fields the WA forecast maps read (2 m temp, max gust, 10 m wind,
 # precip and snow totals): no pressure-level file is pulled per step (~13 MB GRIB, ~270 KB to R2 per hour). Other ifs9 products
 # simply do not show (the viewer lists only products whose fields a run carries).
-IFS9_ONLY = {"t2m", "gust", "u10", "v10", "apcp", "asnow"}
+# 11-20-26 (Benjamin 3:43 PM "Add Kuchera snow to the Euro 9 km"): + kinc, the standard Kuchera increment (_kinc: ECMWF 9 km snowfall water
+# x ratio from the warmest of 2 m / 925 / 850 / 700 / 500 mb T, all from the 9 km files). Pulls just those 4 T messages from the 0.1 deg
+# pressure-level file by byte range (~8 MB per step), not the whole file.
+IFS9_ONLY = {"t2m", "gust", "u10", "v10", "apcp", "asnow", "kinc"}
 SQRT_FIELDS = {"apcp", "asnow", "apcp90", "asnow90", "nq1", "nq6", "ns6", "ltgp", "kinc", "fzinc"}
 def q8(a, lo, hi): return np.clip(np.rint((a - lo) / (hi - lo) * 255), 0, 255).astype(np.uint8)
 def rng(a):
