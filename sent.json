@@ -20,22 +20,22 @@
    }
   },
   "pass_snapshot": {
-   "at": "2026-11-20T13:37:15.706466+00:00",
+   "at": "2026-11-20T15:25:33.710742+00:00",
    "passes": {
     "Blewett Pass US 97": {
      "avalanche_closure": false,
-     "displayDate": "2026-11-20T12:57:18.07Z",
+     "displayDate": "2026-11-20T15:13:04.5Z",
      "endMP": 168.87,
      "restrictions": {
-      "Northbound": "Traction Tires Advised, Oversize Vehicles Prohibited.",
-      "Southbound": "Traction Tires Advised, Oversize Vehicles Prohibited."
+      "Northbound": "No restrictions",
+      "Southbound": "No restrictions"
      },
-     "roadCondition": "Compact snow and ice.",
+     "roadCondition": "Mostly bare and dry, with frost in places.",
      "route": "097",
-     "snow_on_road": true,
+     "snow_on_road": false,
      "startMP": 158.87,
      "status": "open",
-     "temperature": 25.0,
+     "temperature": 20.0,
      "weather": "Clear."
     },
     "Cayuse Pass SR 123": {
@@ -88,34 +88,34 @@
     },
     "Disautel Pass SR 155": {
      "avalanche_closure": false,
-     "displayDate": "2026-11-20T11:09:06.327Z",
+     "displayDate": "2026-11-20T14:29:39.22Z",
      "endMP": 62.6,
      "restrictions": {
       "Northbound": "No restrictions",
       "Southbound": "No restrictions"
      },
-     "roadCondition": "Bare and wet, with frost and ice in places.",
+     "roadCondition": "Bare and dry, with frost and ice in places.",
      "route": "155",
      "snow_on_road": false,
      "startMP": 52.6,
      "status": "open",
-     "temperature": 25.0,
+     "temperature": 18.0,
      "weather": "Clear."
     },
     "Loup Loup Pass SR 20": {
      "avalanche_closure": false,
-     "displayDate": "2026-11-20T09:53:44.71Z",
+     "displayDate": "2026-11-20T14:24:47.663Z",
      "endMP": 219.47,
      "restrictions": {
       "Eastbound": "No restrictions",
       "Westbound": "No restrictions"
      },
-     "roadCondition": "Bare and wet with frost and ice in places.",
+     "roadCondition": "Bare and wet.",
      "route": "020",
      "snow_on_road": false,
      "startMP": 209.47,
      "status": "open",
-     "temperature": 23.0,
+     "temperature": 22.0,
      "weather": "Clear."
     },
     "Manastash Ridge I-82": {
@@ -184,19 +184,19 @@
     },
     "Sherman Pass SR 20": {
      "avalanche_closure": false,
-     "displayDate": "2026-11-18T07:51:02.78Z",
+     "displayDate": "2026-11-20T14:26:30.06Z",
      "endMP": 324.45,
      "restrictions": {
       "Eastbound": "No restrictions",
       "Westbound": "No restrictions"
      },
-     "roadCondition": "No current information at this time",
+     "roadCondition": "Bare and dry",
      "route": "020",
      "snow_on_road": false,
      "startMP": 314.45,
      "status": "open",
-     "temperature": null,
-     "weather": ""
+     "temperature": 25.0,
+     "weather": "Overcast"
     },
     "Snoqualmie Pass I-90": {
      "avalanche_closure": false,
@@ -216,18 +216,18 @@
     },
     "Stevens Pass US 2": {
      "avalanche_closure": false,
-     "displayDate": "2026-11-20T12:58:17.19Z",
+     "displayDate": "2026-11-20T14:59:05.38Z",
      "endMP": 69.57,
      "restrictions": {
       "Eastbound": "No restrictions",
       "Westbound": "No restrictions"
      },
-     "roadCondition": "Bare and wet, with frost and ice in places.",
+     "roadCondition": "Bare and wet, with frost in places.",
      "route": "002",
      "snow_on_road": false,
      "startMP": 59.57,
      "status": "open",
-     "temperature": 28.0,
+     "temperature": 31.0,
      "weather": "Clear."
     },
     "Tiger Mountain SR18": {
@@ -281,7 +281,6 @@
    }
   },
   "payload_ids": [
-   "q-d4d43f1c9e4f1447",
    "q-51051888ac15473d",
    "q-b4812868463e289b",
    "q-e512d5b73a7827d5",
@@ -380,7 +379,8 @@
    "q-699fc1c8db982c79",
    "q-f7d02cfe3d7781af",
    "q-53fb8324d4ae09de",
-   "q-6ac2c67f878ef6c6"
+   "q-6ac2c67f878ef6c6",
+   "q-2ad30e1823265c1a"
   ],
   "quakes": {
    "ew1795173930": "2026-11-20T11:28:13.859886+00:00"
@@ -410,6 +410,7 @@
    "urn:oid:2.49.0.1.840.0.2fd23a4b6db8f00869fcd41bfa9a20f8d550cc13.001.1|USA": "2026-11-19T11:27:47.039901+00:00",
    "urn:oid:2.49.0.1.840.0.334b0d9984410e01afdb396e2347550d8b4957ba.001.2|USA": "2026-11-18T11:33:33.368097+00:00",
    "urn:oid:2.49.0.1.840.0.381e30ae7d9662841b471ab9fbf1fe52fafbbc76.001.1|WA": "2026-11-19T13:42:42.257863+00:00",
+   "urn:oid:2.49.0.1.840.0.399e290b9930682e6796770ac35d60a8a0b6fee5.001.1|USA": "2026-11-20T15:25:33.710742+00:00",
    "urn:oid:2.49.0.1.840.0.3ac8787698e44fd3380ac39c3682ca5f7c68cd96.001.1|WA": "2026-11-15T13:16:40.100426+00:00",
    "urn:oid:2.49.0.1.840.0.3b36d0cf26d47de6f7f14f7c3c0606e960a00627.001.2|WA": "2026-11-13T19:40:00.343081+00:00",
    "urn:oid:2.49.0.1.840.0.3b36d0cf26d47de6f7f14f7c3c0606e960a00627.002.2|WA": "2026-11-13T19:40:00.343081+00:00",
@@ -455,6 +456,7 @@
    "urn:oid:2.49.0.1.840.0.a6aa489676181f5fb2b2bbcce0eb6cda95aaec1d.002.1|USA": "2026-11-18T23:15:11.013384+00:00",
    "urn:oid:2.49.0.1.840.0.a6aa489676181f5fb2b2bbcce0eb6cda95aaec1d.003.1|USA": "2026-11-18T23:15:11.013384+00:00",
    "urn:oid:2.49.0.1.840.0.a6aa489676181f5fb2b2bbcce0eb6cda95aaec1d.004.1|USA": "2026-11-18T23:15:11.013384+00:00",
+   "urn:oid:2.49.0.1.840.0.a84275013b68805b2e5f24626a18e55fe4be095f.001.1|WA": "2026-11-20T15:25:33.710742+00:00",
    "urn:oid:2.49.0.1.840.0.aa9e61723dc137841a2e93697b7e4513aac791e5.001.2|USA": "2026-11-19T15:31:37.205044+00:00",
    "urn:oid:2.49.0.1.840.0.aee74753a0ea6e41c07c8667b7c4c182a73de365.001.1|WA": "2026-11-18T19:04:35.468661+00:00",
    "urn:oid:2.49.0.1.840.0.aee74753a0ea6e41c07c8667b7c4c182a73de365.002.1|WA": "2026-11-18T19:04:35.468661+00:00",
@@ -767,7 +769,7 @@
    }
   }
  },
- "updated": "2026-11-20T13:37:15.708759+00:00",
+ "updated": "2026-11-20T15:25:33.713010+00:00",
  "urgent": {
   "keys": {
    "urn:oid:2.49.0.1.840.0.0e1db1d1f66be9b14fe263f00fbecc0642ec5bd6.001.1": "2026-11-18T23:15:07.773065+00:00",
