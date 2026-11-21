@@ -20,23 +20,23 @@
    }
   },
   "pass_snapshot": {
-   "at": "2026-11-20T15:25:33.710742+00:00",
+   "at": "2026-11-21T07:53:38.228255+00:00",
    "passes": {
     "Blewett Pass US 97": {
      "avalanche_closure": false,
-     "displayDate": "2026-11-20T15:13:04.5Z",
+     "displayDate": "2026-11-21T06:50:27.873Z",
      "endMP": 168.87,
      "restrictions": {
-      "Northbound": "No restrictions",
-      "Southbound": "No restrictions"
+      "Northbound": "Traction Tires Advised, Oversize Vehicles Prohibited.",
+      "Southbound": "Traction Tires Advised, Oversize Vehicles Prohibited."
      },
-     "roadCondition": "Mostly bare and dry, with frost in places.",
+     "roadCondition": "Bare and dry with frost and ice in places.",
      "route": "097",
      "snow_on_road": false,
      "startMP": 158.87,
      "status": "open",
-     "temperature": 20.0,
-     "weather": "Clear."
+     "temperature": 24.0,
+     "weather": "Overcast."
     },
     "Cayuse Pass SR 123": {
      "avalanche_closure": false,
@@ -56,13 +56,13 @@
     },
     "Chinook Pass SR 410": {
      "avalanche_closure": true,
-     "displayDate": "2026-11-18T18:10:43.76Z",
+     "displayDate": "2026-11-21T03:55:10.42Z",
      "endMP": 74.5,
      "restrictions": {
       "Eastbound": "Closed for the season",
       "Westbound": "Closed for the season"
      },
-     "roadCondition": "SR 410 Chinook Pass is closed for the season due to adverse conditions and avalanche risk. Eastbound closure is at milepost 57, Crystal Mountain Boulevard, 12 miles west of the summit. Westbound closure is at milepost 74.5, Morse Creek, 5.5 miles east of the summit.",
+     "roadCondition": "SR 410 Chinook Pass is closed for the season due to adverse conditions and avalanche risk. Eastbound closure is at milepost 57, Crystal Mountain Boulevard, 12 miles west of the summit. Westbound closure is at milepost 74.5, Morse Creek, 5 miles east of the summit.",
      "route": "410",
      "snow_on_road": false,
      "startMP": 57.0,
@@ -88,51 +88,51 @@
     },
     "Disautel Pass SR 155": {
      "avalanche_closure": false,
-     "displayDate": "2026-11-20T14:29:39.22Z",
+     "displayDate": "2026-11-21T05:03:57.773Z",
      "endMP": 62.6,
      "restrictions": {
       "Northbound": "No restrictions",
       "Southbound": "No restrictions"
      },
-     "roadCondition": "Bare and dry, with frost and ice in places.",
+     "roadCondition": "Bare and dry with frost in places.",
      "route": "155",
      "snow_on_road": false,
      "startMP": 52.6,
      "status": "open",
-     "temperature": 18.0,
-     "weather": "Clear."
+     "temperature": 25.0,
+     "weather": "Partly cloudy."
     },
     "Loup Loup Pass SR 20": {
      "avalanche_closure": false,
-     "displayDate": "2026-11-20T14:24:47.663Z",
+     "displayDate": "2026-11-21T03:34:35.667Z",
      "endMP": 219.47,
      "restrictions": {
       "Eastbound": "No restrictions",
       "Westbound": "No restrictions"
      },
-     "roadCondition": "Bare and wet.",
+     "roadCondition": "Bare and dry with frost in places.",
      "route": "020",
      "snow_on_road": false,
      "startMP": 209.47,
      "status": "open",
-     "temperature": 22.0,
-     "weather": "Clear."
+     "temperature": 27.0,
+     "weather": "Overcast."
     },
     "Manastash Ridge I-82": {
      "avalanche_closure": false,
-     "displayDate": "2026-11-20T09:24:08.367Z",
+     "displayDate": "2026-11-21T07:37:38.417Z",
      "endMP": 27.0,
      "restrictions": {
       "Eastbound": "No restrictions",
       "Westbound": "No restrictions"
      },
-     "roadCondition": "Bare and dry, frost in places.",
+     "roadCondition": "Bare and dry",
      "route": "082",
      "snow_on_road": false,
      "startMP": 1.0,
      "status": "open",
-     "temperature": 32.0,
-     "weather": "Overcast with areas of fog"
+     "temperature": 37.0,
+     "weather": "Clear skies"
     },
     "Mt. Baker Hwy SR 542": {
      "avalanche_closure": false,
@@ -152,23 +152,23 @@
     },
     "North Cascade Hwy SR 20": {
      "avalanche_closure": false,
-     "displayDate": "2026-11-20T05:00:08.11Z",
+     "displayDate": "2026-11-21T06:46:36.307Z",
      "endMP": 170.6,
      "restrictions": {
       "Eastbound": "No restrictions",
       "Westbound": "No restrictions"
      },
-     "roadCondition": "Ice.",
+     "roadCondition": "Bare with compact snow and ice in places.",
      "route": "020",
-     "snow_on_road": false,
+     "snow_on_road": true,
      "startMP": 134.0,
      "status": "open",
-     "temperature": 27.0,
-     "weather": "Clear."
+     "temperature": 23.0,
+     "weather": "Cloudy."
     },
     "Satus Pass US 97": {
      "avalanche_closure": false,
-     "displayDate": "2026-11-19T22:19:24.623Z",
+     "displayDate": "2026-11-20T19:10:16.81Z",
      "endMP": 32.15,
      "restrictions": {
       "Northbound": "No restrictions",
@@ -200,7 +200,7 @@
     },
     "Snoqualmie Pass I-90": {
      "avalanche_closure": false,
-     "displayDate": "2026-11-20T12:35:06.603Z",
+     "displayDate": "2026-11-21T07:37:38.417Z",
      "endMP": 136.0,
      "restrictions": {
       "Eastbound": "No restrictions",
@@ -211,24 +211,24 @@
      "snow_on_road": false,
      "startMP": 34.0,
      "status": "open",
-     "temperature": 31.0,
-     "weather": "Overcast"
+     "temperature": 30.0,
+     "weather": "Partly cloudy"
     },
     "Stevens Pass US 2": {
      "avalanche_closure": false,
-     "displayDate": "2026-11-20T14:59:05.38Z",
+     "displayDate": "2026-11-21T07:07:54.87Z",
      "endMP": 69.57,
      "restrictions": {
       "Eastbound": "No restrictions",
       "Westbound": "No restrictions"
      },
-     "roadCondition": "Bare and wet, with frost in places.",
+     "roadCondition": "Bare and wet.",
      "route": "002",
      "snow_on_road": false,
      "startMP": 59.57,
      "status": "open",
-     "temperature": 31.0,
-     "weather": "Clear."
+     "temperature": 30.0,
+     "weather": "Partly cloudy."
     },
     "Tiger Mountain SR18": {
      "avalanche_closure": false,
@@ -248,40 +248,39 @@
     },
     "Wauconda Pass SR 20": {
      "avalanche_closure": false,
-     "displayDate": "2026-11-20T09:53:44.757Z",
+     "displayDate": "2026-11-21T03:03:36.97Z",
      "endMP": 293.89,
      "restrictions": {
       "Eastbound": "No restrictions",
       "Westbound": "No restrictions"
      },
-     "roadCondition": "Bare and dry with ice in places.",
+     "roadCondition": "Bare and dry, wet in places.",
      "route": "020",
      "snow_on_road": false,
      "startMP": 283.89,
      "status": "open",
-     "temperature": 19.0,
-     "weather": "Clear."
+     "temperature": 25.0,
+     "weather": "Partly cloudy."
     },
     "White Pass US 12": {
      "avalanche_closure": false,
-     "displayDate": "2026-11-20T07:31:38.88Z",
+     "displayDate": "2026-11-21T07:37:17.32Z",
      "endMP": 166.0,
      "restrictions": {
       "Eastbound": "No restrictions",
       "Westbound": "No restrictions"
      },
-     "roadCondition": "Bare and wet",
+     "roadCondition": "Mostly bare and dry",
      "route": "012",
      "snow_on_road": false,
      "startMP": 138.0,
      "status": "open",
-     "temperature": 30.0,
-     "weather": "Clear skies, with areas of patchy fog."
+     "temperature": null,
+     "weather": "Overcast"
     }
    }
   },
   "payload_ids": [
-   "q-97cf9c2d309e75e9",
    "q-fe5f60e7f571de65",
    "q-1210a8626b99db36",
    "q-0d7352a0ccf19003",
@@ -380,7 +379,8 @@
    "q-2ad30e1823265c1a",
    "q-6f0debd9833e0a5b",
    "q-05d8baabb0043969",
-   "q-8bef440ccd449a30"
+   "q-8bef440ccd449a30",
+   "q-a2e7e2a93d2427c8"
   ],
   "quakes": {
    "ew1795173930": "2026-11-20T11:28:13.859886+00:00"
@@ -761,7 +761,7 @@
    }
   }
  },
- "updated": "2026-11-21T06:43:54.330878+00:00",
+ "updated": "2026-11-21T07:53:38.230544+00:00",
  "urgent": {
   "keys": {
    "urn:oid:2.49.0.1.840.0.0e1db1d1f66be9b14fe263f00fbecc0642ec5bd6.001.1": "2026-11-18T23:15:07.773065+00:00",
