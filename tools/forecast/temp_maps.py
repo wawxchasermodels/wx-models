@@ -295,12 +295,17 @@ TOWN_NUM_COLOR, TOWN_NUM_SIZE, TOWN_NUM_HALO = "#0d0f13", 10.5, 3.0   # bold dar
 # (wsdot.com/Travel/Real-time/Service/api/MountainPass, read 10-24-26). Elevation (ft) = WSDOT's summit elevation, kept to
 # report how far the model's smoothed terrain sits below the real pass. Stampede Pass is in neither list, so it is not shown.
 # Removed 10-25-26 (Benjamin): Washington Pass and Loup Loup Pass ("don't need"), Cayuse Pass (no Cayuse anywhere).
+# Harts Pass added 11-24-26 (Benjamin): Forest Road 5400 / Slate Peak road summit, Whatcom–Okanogan county line. Not in the
+# WSDOT MountainPass feed. Point = USGS GNIS feature 1520587 (gap on the Slate Peak 7.5' quad), 48.7207 N, 120.6701 W;
+# elevation 6,200 ft = USGS 3DEP/EPQS at that point (6,199.6 ft, 1 m raster, 11-24-26), matching USFS Harts Pass Campground
+# (6,200 ft). Nearby NRCS SNOTEL 515 is ~0.85 km east at 6,490 ft and is not used, so the lapse correction targets the summit.
 # name: (label, lat, lon, elev_ft), in placement priority order (main I-90 / US 2 / US 12 crossings first)
 WA_PASSES = {
     "Snoqualmie Pass": ("Snoqualmie", 47.4245, -121.4136, 3022), "Stevens Pass": ("Stevens", 47.7465, -121.0854, 4061),
     "White Pass": ("White", 46.6383, -121.3911, 4500), "Chinook Pass": ("Chinook", 46.8714, -121.5156, 5430),
     "Blewett Pass": ("Blewett", 47.3348, -120.5786, 4102), "Sherman Pass": ("Sherman", 48.6055, -118.4636, 5575),
     "Satus Pass": ("Satus", 45.9847, -120.6536, 3107),
+    "Harts Pass": ("Harts", 48.7207, -120.6701, 6200),
     "Wauconda Pass": ("Wauconda", 48.7262, -118.9595, 4310), "Disautel Pass": ("Disautel", 48.2818, -119.1434, 3252),
 }
 # Pass height correction (Benjamin 10-24-26 10:32 PM): value + rate * (model ground at the pass - real summit), ft.

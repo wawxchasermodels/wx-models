@@ -142,7 +142,7 @@ MEM_POINTS = ("Seattle", "Tacoma", "Everett", "Arlington", "Bellingham", "Olympi
               "Ocean Shores", "Spokane", "Yakima", "Wenatchee", "Tri-Cities", "Walla Walla", "Moses Lake", "Ellensburg", "Pullman", "Omak",
               "Bellevue", "Granite Falls", "Mount Vernon", "Leavenworth", "North Bend", "Enumclaw", "Longview", "Centralia", "Port Townsend",
               "Sequim", "Chelan", "Winthrop", "Colville", "Packwood", "Skykomish", "Goldendale", "Shelton", "Monroe",
-              "Snoqualmie", "Stevens", "White", "Blewett", "Chinook", "Satus", "Sherman", "Wauconda", "Disautel")
+              "Snoqualmie", "Stevens", "White", "Blewett", "Chinook", "Satus", "Sherman", "Harts", "Wauconda", "Disautel")
 MEM_SCALE = {"2t": 10, "tp": 100, "sf": 10, "10fg": 1, "mx2t": 1, "mn2t": 1, "t850": 10, "gh": 1, "msl": 10, "mucape": 1, "tcc": 1, "pwat": 100}   # stored as ints (value * scale)
 SPAG_LEVELS = (5520, 5760)   # 552 / 576 dam member lines (trough / ridge)
 class EpsReader:
