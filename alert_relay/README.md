@@ -2,6 +2,14 @@
 
 GitHub Actions backup for the two weather-alert watchers that run on the Linux box. The box sometimes stays paused for hours. While it is paused, this scheduled job runs the same filters and POSTs the same webhook bodies. While the box watchers are alive, the job sends nothing.
 
+## Cadence and WA short-fuse path (11-26-26)
+
+GitHub's `*/5` cron on this public repository is throttled — observed gaps grew from 40–70 minutes to 4–11 hours, which is why the backup missed the 11:58 AM PT 11-26 Central King County Tornado Warning (expired 12:15; the next scheduled run was 12:19). The workflow now re-dispatches itself every 4 minutes on `main` (the same `workflow_dispatch` pattern as `fast-models`). The cron is only a restarter.
+
+On **every** run, including while box heartbeats are still fresh, `wa_life_safety.py` polls active Washington Tornado Warnings, Tornado Emergencies, and thunderstorm or waterspout Special Weather Statements and wakes the existing urgent/quiet webhooks. Fog-only statements are skipped. Payload ids use `payload_seen.stable_item_id` (item keys only, no wall-clock tick) so the box and the relay produce the same id and the receiver's `payload_seen.py` dedupe works. When a heartbeat is fresh, this path waits 90 seconds after the NWS `sent` time so a live box watcher can go first; when the heartbeat is stale or missing, it wakes immediately. The full urgent/quiet takeover is unchanged and still runs only when the matching heartbeat is stale. The relay never posts to social networks itself.
+
+`workflow_dispatch` has a `test_wake` input that POSTs an empty health body (`alerts: []`, `post: false`) and does not send real alerts.
+
 The filter and payload code under `logic/` is copied from the box watchers (`watch.py`, `watch_quiet.py`, and the SPC, hurricane, mountain-pass, and gov-imagery modules). It was not rewritten. Paths, HTTP, and the one-shot Actions entrypoint are the only adaptations.
 
 ## What runs

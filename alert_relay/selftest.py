@@ -57,6 +57,9 @@ def test_payload_id():
     payload_seen.clear_inflight(state)
     third = payload_seen.stable_id(state, "q", ["x", "y"], "2026-10-23T13:00:00+00:00")
     check("cleared inflight gets a new id", third != first)
+    tickless_a = payload_seen.stable_item_id("u", ["b", "a"])
+    tickless_b = payload_seen.stable_item_id("u", ["a", "b"])
+    check("tick-free payload id ignores key order", tickless_a == tickless_b and tickless_a.startswith("u-") and len(tickless_a) == 18)
 
 
 def test_heartbeat():

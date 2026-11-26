@@ -33,3 +33,8 @@ HOLD_START_HOUR = HOLD_START_WA   # legacy name (earliest start)
 HOLD_END_USA = 2
 HOLD_END_WA = 5
 SEED_RECENT_MINUTES = 15
+
+# Self-chain interval used by .github/workflows/alert-relay.yml.
+# GitHub's */5 cron on this public repo has been throttled to tens of minutes
+# or hours (same issue as fast-models). The workflow re-dispatches itself.
+WA_LIFE_SAFETY_POLL_SEC = 240

@@ -40,6 +40,10 @@ def _dry():
     return os.environ.get("ALERT_RELAY_DRY_RUN", "").strip().lower() in ("1", "true", "yes")
 
 
+def _test_wake():
+    return os.environ.get("ALERT_RELAY_TEST_WAKE", "").strip().lower() in ("1", "true", "yes")
+
+
 def _repo():
     return os.environ.get("GITHUB_REPOSITORY") or os.environ.get("ALERT_RELAY_REPO") or constants.DEFAULT_REPO
 
@@ -500,6 +504,21 @@ def main():
         "quiet_heartbeat_age_sec": quiet_plan["age_sec"],
     }
     exit_code = 0
+
+    # Always-on WA tornado / thunderstorm-waterspout SWS path. Runs even when
+    # box heartbeats are fresh. A test_wake POSTs an empty health body only.
+    import wa_life_safety
+    test_wake = _test_wake()
+    report["wa_life_safety"] = wa_life_safety.run(
+        base, now=now,
+        urgent_hb=urgent_plan["state"], quiet_hb=quiet_plan["state"],
+        dry=dry, test_wake=test_wake,
+    )
+    if test_wake:
+        report["elapsed_sec"] = round(time.time() - started, 1)
+        print(json.dumps(report, indent=1, default=str))
+        action = (report.get("wa_life_safety") or {}).get("action")
+        return 0 if action in ("health_wake", "would_health_wake") else 1
 
     # --- urgent ---
     if urgent_plan["state"] == "fresh" and not dry:

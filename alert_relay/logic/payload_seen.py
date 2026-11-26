@@ -28,6 +28,18 @@ def compute_id(prefix, item_keys, tick_iso):
     return "%s-%s" % (prefix, h)
 
 
+
+def stable_item_id(prefix, item_keys):
+    """Tick-free payload id from item keys only.
+
+    The box and the GitHub relay must produce the same id for the same WA
+    Tornado Warning / Emergency or thunderstorm/waterspout Special Weather
+    Statement so payload_seen.py can drop a duplicate wake.
+    """
+    key = sorted({str(k) for k in item_keys})
+    h = hashlib.sha1(json.dumps(key).encode()).hexdigest()[:16]
+    return "%s-%s" % (prefix, h)
+
 def stable_id(state, prefix, item_keys, tick_iso):
     """Same item set as the last undelivered POST -> same id; else a new id
     (recorded as in-flight until clear_inflight() after a 2xx)."""

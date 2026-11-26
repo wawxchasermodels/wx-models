@@ -1,7 +1,17 @@
-# Backup for the box weather watchers. Runs every 5 minutes.
-# Sends only when the matching heartbeat variable is missing or older than
-# the limit in alert_relay/constants.py. A fresh heartbeat ends the job
-# after a pass-snapshot refresh at most, so the common case stays short.
+# Backup for the box weather watchers.
+#
+# GitHub's */5 cron on this public repo is throttled (observed gaps of
+# 40-70 minutes, later 4-11 hours — same issue as fast-models). The job
+# therefore re-dispatches itself every WA_LIFE_SAFETY_POLL_SEC (4 minutes)
+# via workflow_dispatch, which GITHUB_TOKEN is allowed to trigger. The
+# cron and a manual dispatch are only chain starters / restarters.
+#
+# On every run, alert_relay/wa_life_safety.py polls WA Tornado Warnings /
+# Emergencies and thunderstorm or waterspout Special Weather Statements
+# even when box heartbeats are still fresh, and wakes the existing
+# urgent/quiet webhooks with tick-free payload ids. The full urgent/quiet
+# takeover still runs only when the matching heartbeat is stale.
+# The relay never posts to social networks itself.
 #
 # The 60-day public-repo inactivity rule disables scheduled workflows when
 # the default branch has had no commits. Heartbeat variable updates do not
@@ -19,6 +29,10 @@ on:
         description: "Log the webhook bodies that would be sent and do not POST"
         type: boolean
         default: false
+      test_wake:
+        description: "POST a no-op health wake (empty alerts, post=false). Does not post to social."
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -28,12 +42,16 @@ jobs:
   relay:
     if: github.event_name == 'workflow_dispatch' || github.event.schedule == '*/5 * * * *'
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 10
     concurrency:
       group: alert-relay
       cancel-in-progress: false
+    permissions:
+      contents: write
+      actions: write
     env:
       ALERT_RELAY_DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run == true && 'true' || 'false' }}
+      ALERT_RELAY_TEST_WAKE: ${{ github.event_name == 'workflow_dispatch' && inputs.test_wake == true && 'true' || 'false' }}
       ALERT_RELAY_PUBLISH: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run == true && '0' || '1' }}
       ALERT_RELAY_CACHE_DIR: ${{ github.workspace }}/alert_relay/.cache
       ALERT_RELAY_HB_URGENT: ${{ vars.ALERT_RELAY_HB_URGENT }}
@@ -42,7 +60,11 @@ jobs:
       URGENT_WEBHOOK_AUTH: ${{ secrets.URGENT_WEBHOOK_AUTH }}
       QUIET_WEBHOOK_URL: ${{ secrets.QUIET_WEBHOOK_URL }}
       QUIET_WEBHOOK_AUTH: ${{ secrets.QUIET_WEBHOOK_AUTH }}
+      ALERT_RELAY_POLL_SEC: "240"
     steps:
+      - name: Mark poll start
+        run: date -u +%s > "${RUNNER_TEMP}/alert-relay-start"
+
       - uses: actions/checkout@v4
 
       - name: Restore relay cache
@@ -66,6 +88,27 @@ jobs:
         with:
           path: alert_relay/.cache
           key: alert-relay-${{ github.run_id }}
+
+      - name: Queue the next poll
+        if: ${{ !cancelled() && github.ref == 'refs/heads/main' && env.ALERT_RELAY_DRY_RUN != 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          start=$(cat "${RUNNER_TEMP}/alert-relay-start")
+          now=$(date -u +%s)
+          remain=$(( ALERT_RELAY_POLL_SEC - (now - start) ))
+          if [ "$remain" -gt 0 ]; then
+            echo "Waiting ${remain}s to keep a ${ALERT_RELAY_POLL_SEC}s cadence"
+            sleep "$remain"
+          fi
+          queued=$(gh run list --repo "${GITHUB_REPOSITORY}" --workflow alert-relay.yml --status queued --json databaseId --jq 'length')
+          if [ "${queued:-0}" -gt 0 ]; then
+            echo "A later alert-relay run is already queued; not dispatching another"
+            exit 0
+          fi
+          gh workflow run alert-relay.yml --repo "${GITHUB_REPOSITORY}" --ref main
+          echo "Queued the next alert-relay poll"
 
   keepalive:
     if: github.event_name == 'schedule' && github.event.schedule == '17 9 1 * *'
