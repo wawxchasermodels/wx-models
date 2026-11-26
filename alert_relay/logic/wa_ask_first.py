@@ -7,7 +7,8 @@
 enabled=false restores the old WA auto-post rules (tornado/SVR/waterspout/dust/winter+wind 10-28-26).
 Mountain-pass posts are separate (pass_posts_auto) and not decided here.
 """
-import json, sys
+import json, re, sys
+ROTATION_RE = re.compile(r"\b(?:water\s*spouts?|land\s*spouts?|funnels?(?:\s+clouds?)?|tornado(?:es|s)?)\b", re.I)   # 11-26-26 Benjamin t3410u (same as box rotation_rule.py)
 import os
 CFG = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "wa_ask_first.json"))   # relay snapshot of the box switch (missing file = ask first)
 ASK_NOTE = "WA ASK-FIRST (10-30-26 6:25 PM): send to Slack #washingtonalerts and WAIT for Benjamin's OK; do NOT auto-post"
@@ -21,6 +22,9 @@ def needs_ok(page, event, text=""):
     c = cfg()
     if not c.get("enabled", True): return False, "WA ask-first switch is OFF (old WA auto-post rules apply)"
     ev = (event or "").lower().strip()
+    # 11-26-26 (Benjamin t3410u): ANY WA alert whose text mentions waterspout / landspout / funnel (cloud) / tornado auto-posts. Never ask-first.
+    if c.get("keep_auto_rotation", True) and ROTATION_RE.search(text or ""):
+        return False, "kept auto: WA rotation keyword (waterspout/landspout/funnel/tornado) in %s (standing permission 11-26-26)" % (event or "alert")
     if ev in [e.lower() for e in c.get("keep_auto_events", [])]: return False, "kept auto: %s (standing life-safety permission)" % event
     if c.get("keep_auto_waterspout", True) and ev in ("special weather statement", "special marine warning", "marine weather statement") and "waterspout" in (text or "").lower():
         return False, "kept auto: WA waterspout %s" % event

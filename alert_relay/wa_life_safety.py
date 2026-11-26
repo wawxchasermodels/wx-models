@@ -24,8 +24,10 @@ import payload_seen
 log = logging.getLogger("alert_relay.wa_life_safety")
 
 NWS_URL = "https://api.weather.gov/alerts/active?area=WA"
-EVENTS = {"Tornado Warning", "Tornado Emergency", "Special Weather Statement"}
+EVENTS = {"Tornado Warning", "Tornado Emergency", "Special Weather Statement", "Special Marine Warning", "Severe Thunderstorm Warning", "Tornado Watch"}   # 11-26-26: plus any WA alert whose text has a rotation keyword (see classify_life_safety)
 WATERSPOUT_RE = re.compile(r"\bWATERSPOUTS?\b", re.I)
+# 11-26-26 (Benjamin t3410u): waterspout, landspout, funnel (cloud) or tornado anywhere in a WA alert = auto-post (urgent), never ask-first.
+ROTATION_RE = re.compile(r"\b(?:water\s*spouts?|land\s*spouts?|funnels?(?:\s+clouds?)?|tornado(?:es|s)?)\b", re.I)
 TSTM_RE = re.compile(
     r"\b(THUNDERSTORMS?|TSTM|LANDSPOUTS?|FUNNELS?(?:\s+CLOUDS?)?|HAIL|TORNADOES?|TORNADOS?)\b",
     re.I,
@@ -76,7 +78,8 @@ def is_wa_area(props):
 def classify_life_safety(props):
     """Return 'urgent', 'quiet', or None for one NWS properties object."""
     ev = props.get("event") or ""
-    if ev not in EVENTS:
+    rot = ev not in ("Flood Warning", "Flash Flood Warning", "Extreme Wind Warning") and bool(ROTATION_RE.search(_text(props) + " " + " ".join(str(x) for x in ((props.get("parameters") or {}).get("NWSheadline") or []))))
+    if ev not in EVENTS and not rot:
         return None
     if (props.get("messageType") or "Alert") != "Alert":
         return None
@@ -87,8 +90,10 @@ def classify_life_safety(props):
     if ev in ("Tornado Warning", "Tornado Emergency"):
         return "urgent"
     text = _text(props)
-    if WATERSPOUT_RE.search(text):
+    if rot or WATERSPOUT_RE.search(text):
         return "urgent"
+    if ev == "Special Marine Warning" or ev == "Severe Thunderstorm Warning" or ev == "Tornado Watch":
+        return None   # non-rotation SMW/SVR/watch: the full watcher path handles these
     if TSTM_RE.search(text):
         return "quiet"
     return None
@@ -167,8 +172,8 @@ def select_alerts(features, now, urgent_hb, quiet_hb, already):
         if _too_new(props, now, _grace_sec(hb)):
             continue
         ev = props.get("event") or ""
-        if kind == "urgent" and ev == "Special Weather Statement":
-            reason = "Washington waterspout Special Weather Statement"
+        if kind == "urgent" and ev not in ("Tornado Warning", "Tornado Emergency"):
+            reason = "Washington waterspout/landspout/funnel/tornado " + ev   # 11-26-26 rotation rule (keeps the word waterspout for cap/id logic)
         elif kind == "urgent":
             reason = "Washington Tornado Warning" if ev == "Tornado Warning" else "Washington Tornado Emergency"
         else:
@@ -252,6 +257,9 @@ def run(base, now=None, urgent_hb="stale", quiet_hb="stale", dry=False, test_wak
 
         seen_path = os.path.join(base, SEEN_NAME)
         already = _load(seen_path, {})
+        # 11-26-26: ids Benjamin handled by hand (e.g. posted himself) never wake again. data/wa_life_safety_handled.json = {"ids": [...]}
+        for _hid in (_load(os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "wa_life_safety_handled.json"), {}).get("ids") or []):
+            already.setdefault(_hid, "handled-by-hand")
         import watch
         features = _fetch(watch.USER_AGENT)
         recs = select_alerts(features, now, urgent_hb, quiet_hb, already)

@@ -489,7 +489,7 @@ def _tag_wa_ask(item, page, props):
     if (page or "").upper() != "WA": return item
     try:
         import wa_ask_first
-        n, why = wa_ask_first.needs_ok("wa", props.get("event"), (props.get("headline") or "") + " " + (props.get("description") or ""))
+        n, why = wa_ask_first.needs_ok("wa", props.get("event"), alert_text(props))   # 11-26-26 rotation rule: headline+description+instruction+NWSheadline
     except Exception as e:
         n, why = True, "WA ask-first check failed (%r); ask first" % (e,)
     if n:
