@@ -42,7 +42,7 @@ jobs:
   relay:
     if: github.event_name == 'workflow_dispatch' || github.event.schedule == '*/5 * * * *'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15  # 11-26-26: headroom for re-dispatch retries after the 240s cadence wait
     concurrency:
       group: alert-relay
       cancel-in-progress: false
@@ -102,13 +102,31 @@ jobs:
             echo "Waiting ${remain}s to keep a ${ALERT_RELAY_POLL_SEC}s cadence"
             sleep "$remain"
           fi
-          queued=$(gh run list --repo "${GITHUB_REPOSITORY}" --workflow alert-relay.yml --status queued --json databaseId --jq 'length')
-          if [ "${queued:-0}" -gt 0 ]; then
-            echo "A later alert-relay run is already queued; not dispatching another"
-            exit 0
-          fi
-          gh workflow run alert-relay.yml --repo "${GITHUB_REPOSITORY}" --ref main
-          echo "Queued the next alert-relay poll"
+          # 11-26-26: retry the self-re-dispatch so one GitHub API timeout cannot
+          # kill the 4-min chain (run 45932397050). Fail the job if every
+          # attempt fails so a later */5 cron or manual dispatch can restart it.
+          delays="10 30 60 60"
+          attempt=0
+          for delay in 0 $delays; do
+            attempt=$((attempt + 1))
+            if [ "$delay" -gt 0 ]; then
+              echo "Re-dispatch attempt ${attempt} failed earlier; retrying in ${delay}s"
+              sleep "$delay"
+            fi
+            if queued=$(timeout 25 gh run list --repo "${GITHUB_REPOSITORY}" --workflow alert-relay.yml --status queued --json databaseId --jq 'length'); then
+              if [ "${queued:-0}" -gt 0 ]; then
+                echo "A later alert-relay run is already queued; not dispatching another"
+                exit 0
+              fi
+              if timeout 25 gh workflow run alert-relay.yml --repo "${GITHUB_REPOSITORY}" --ref main; then
+                echo "Queued the next alert-relay poll"
+                exit 0
+              fi
+            fi
+            echo "Re-dispatch attempt ${attempt} failed"
+          done
+          echo "ERROR: failed to queue the next alert-relay poll after ${attempt} attempts"
+          exit 1
 
   keepalive:
     if: github.event_name == 'schedule' && github.event.schedule == '17 9 1 * *'
