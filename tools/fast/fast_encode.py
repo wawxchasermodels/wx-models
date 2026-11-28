@@ -142,7 +142,23 @@ MEM_POINTS = ("Seattle", "Tacoma", "Everett", "Arlington", "Bellingham", "Olympi
               "Ocean Shores", "Spokane", "Yakima", "Wenatchee", "Tri-Cities", "Walla Walla", "Moses Lake", "Ellensburg", "Pullman", "Omak",
               "Bellevue", "Granite Falls", "Mount Vernon", "Leavenworth", "North Bend", "Enumclaw", "Longview", "Centralia", "Port Townsend",
               "Sequim", "Chelan", "Winthrop", "Colville", "Packwood", "Skykomish", "Goldendale", "Shelton", "Monroe",
-              "Snoqualmie", "Stevens", "White", "Blewett", "Chinook", "Satus", "Sherman", "Harts", "Wauconda", "Disautel")
+              "Snoqualmie", "Stevens", "White", "Blewett", "Chinook", "Satus", "Sherman", "Harts", "Wauconda", "Disautel",
+              "Astoria", "Newport OR")
+# Meteogram-only sample points (not drawn as map labels). Official NWS ASOS/AWOS pins
+# (api.weather.gov/stations, retrieved 2026-11-03; same as regions/stations.json).
+# "Newport OR" is distinct from Newport, WA in EXTRA_TOWNS["ewa"] (48.180 N, 117.043 W).
+METEO_POINTS = (
+    ("Astoria", 46.15694, -123.8825),      # KAST Astoria Regional Airport
+    ("Newport OR", 44.58028, -124.05806),  # KONP Newport Municipal Airport
+)
+# LCC global (fi_g, fj_g) at those pins (HRRR/RRFS share the 3 km Lambert; NBM is its own).
+# Crop-relative fi,fj = fi_g - crop[0], fj_g - crop[2], then nearest for 3 km grids.
+# Checked 11-28-26 against the live manifest crop and the Newport WA slot (exact match).
+METEO_LCC_IJ = {
+    "hrrr": {"Astoria": (911.1110147189127, 224.78776459662578), "Newport OR": (855.9556477966942, 203.6697754507785)},
+    "rrfs": {"Astoria": (911.1110147189127, 224.78776459662578), "Newport OR": (855.9556477966942, 203.6697754507785)},
+    "nbm":  {"Astoria": (1153.2871848121822, 351.2489043547182), "Newport OR": (1082.2375307626676, 329.9112916071273)},
+}
 MEM_SCALE = {"2t": 10, "tp": 100, "sf": 10, "10fg": 1, "mx2t": 1, "mn2t": 1, "t850": 10, "gh": 1, "msl": 10, "mucape": 1, "tcc": 1, "pwat": 100}   # stored as ints (value * scale)
 SPAG_LEVELS = (5520, 5760)   # 552 / 576 dam member lines (trough / ridge)
 class EpsReader:
@@ -589,12 +605,39 @@ def roll_ll(v):   # global lat/lon: lon -180.. -> 0..360 (0.25 deg: 1440 columns
 
 PT_FIELDS = ("t2m", "d2m", "pw", "kinc", "fzinc", "gust", "u10", "v10", "mslp", "apcp", "asnow", "tcc", "frz", "dsnod", "refc", "t850", "mucape",
              "nq1", "nq6", "ns6", "tstm", "maxt", "mint", "t2sd", "p32")
+def meteo_extra_slots(m, crop):
+    """Crop-relative slots for METEO_POINTS (Astoria, Newport OR). Skips a point outside this model's crop."""
+    if not crop or m not in MODELS:
+        return []
+    i0, i1, j0, j1 = crop
+    ny, nx = i1 - i0, j1 - j0
+    MD = MODELS[m]
+    out = []
+    for name, la, lo in METEO_POINTS:
+        if MD["grid"] == "ll":
+            rs = MD.get("res", 0.25)
+            fi_g, fj_g = (90.0 - la) / rs, (lo % 360.0) / rs
+        elif MD["grid"] == "lcc" and name in METEO_LCC_IJ.get(m, {}):
+            fi_g, fj_g = METEO_LCC_IJ[m][name]
+        else:
+            continue
+        fi, fj = fi_g - i0, fj_g - j0
+        if MD["grid"] == "lcc":
+            fi, fj = float(round(fi_g) - i0), float(round(fj_g) - j0)
+        if 0 <= fi < ny - 1 and 0 <= fj < nx - 1:
+            out.append(dict(n=name, k="town", fi=fi, fj=fj))
+    return out
+
 def town_points(man, m):
     """Every town / pass slot of the model's views (deduped by name, A-Z): meteogram and Pass Forecaster sample points."""
     pts = {}
-    for vid, V in man["models"][m]["views"].items():
+    md = (man.get("models") or {}).get(m) or {}
+    for vid, V in (md.get("views") or {}).items():
         for t in V.get("towns", []):
             if t["name"] not in pts: pts[t["name"]] = dict(n=t["name"], k=t["kind"], fi=t["fi"], fj=t["fj"], **({"c": round(t["t2m_corr"], 2)} if "t2m_corr" in t else {}))
+    for t in meteo_extra_slots(m, md.get("crop")):
+        if t["n"] not in pts:
+            pts[t["n"]] = t
     return sorted(pts.values(), key=lambda p: (p["n"].lower()))
 def sample_pts(a, P):
     """Bilinear sample of a cropped grid at fractional (fi, fj) points (nearest grid point already applied for 3 km grids)."""
