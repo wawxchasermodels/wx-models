@@ -32,6 +32,7 @@ def target_cycle(m):
         if c.hour in FE.MODELS[m]["cycles"] and avail(m, c, FE.MODELS[m]["steps"][0]): return c
 
 MORE = set(); WORK = {}
+GEO_BLOCKED = []   # 11-28 t3440u: runs the alignment gate kept out of the manifest
 LASTMAN = {}
 MAN_EVERY = 300   # s between manifest rewrites while a run is coming in (run.json is updated every chunk)
 # --watch: minutes after the cycle time when the first step is usually out (measured 10-31 from R2 upload times and the
@@ -170,6 +171,21 @@ def publish_manifest(s3, D, m, prog=None):
     keep = FE.MODELS[m]["keep"]
     pre = {o["Prefix"].split("/")[2] for o in s3.list_objects_v2(Bucket=BUCKET, Prefix=f"runs/{m}/", Delimiter="/").get("CommonPrefixes", [])}
     present = sorted(r for r in pre if "Contents" in s3.list_objects_v2(Bucket=BUCKET, Prefix=f"runs/{m}/{r}/run.json", MaxKeys=1))
+    # 11-28-26 (Benjamin t3439u/t3440u "Make sure that NEVER happens"): a run is listed only if it is on the manifest's frame
+    # (grid = crop) and the manifest's town slots sit on their real lat/lon (geo_gate.py). A run that fails is left out of the map and
+    # meteogram lists (the site keeps the previous runs), is never pruned or slimmed here (nothing deleted), and is reported loudly.
+    # A crash in the gate itself never blocks publishing (logged).
+    if prog:
+        try:
+            import geo_gate
+            rjp = f"{D}/runs/{m}/{prog[0]}/run.json"
+            gp = geo_gate.check(json.load(open(f"{D}/manifest.json")), m, json.load(open(rjp))) if os.path.exists(rjp) else []
+            for x in gp: print("GEO GATE BLOCKED:", x, flush=True)
+            if gp and f"{m}/{prog[0]}" not in GEO_BLOCKED: GEO_BLOCKED.append(f"{m}/{prog[0]}")
+        except Exception as e:
+            print("geo gate error (not blocking):", repr(e)[:200], flush=True)
+    held = {b.split("/", 1)[1] for b in GEO_BLOCKED if b.split("/", 1)[0] == m}
+    present_all = list(present); present = [r for r in present if r not in held]
     # 10-31 (keep 2 -> 4): a run already slimmed (map images deleted, marker .../slim) must never come back into the map list
     def is_slim(r):
         try: s3.head_object(Bucket=BUCKET, Key=f"runs/{m}/{r}/slim"); return True
@@ -198,7 +214,7 @@ def publish_manifest(s3, D, m, prog=None):
         xr[:] = (mn.get("runs_x") or {}).pop(m, None) or []
         if "runs_x" in mn and not mn["runs_x"]: del mn["runs_x"]
     man = update_manifest(s3, both)
-    for old in [r for r in xr if r not in present]:
+    for old in [r for r in xr if r not in present_all]:
         ks = [o["Key"] for pg in s3.get_paginator("list_objects_v2").paginate(Bucket=BUCKET, Prefix=f"runs/{m}/{old}/") for o in pg.get("Contents", [])]
         for i in range(0, len(ks), 1000): s3.delete_objects(Bucket=BUCKET, Delete={"Objects": [{"Key": k} for k in ks[i:i + 1000]]})
         print("pruned preview run", m, old, len(ks), "objects", flush=True)
@@ -217,6 +233,7 @@ def publish_manifest(s3, D, m, prog=None):
 if __name__ == "__main__":
     main()
     print("more work left:", sorted(MORE) or "none", flush=True)
+    if GEO_BLOCKED: print("::error::GEO GATE kept these runs off the site (misaligned frame or label slots):", ", ".join(GEO_BLOCKED), flush=True)
     if os.environ.get("GITHUB_OUTPUT"):
         with open(os.environ["GITHUB_OUTPUT"], "a") as f: f.write(f"more={'true' if MORE else 'false'}\n")
     sys.stdout.flush(); os._exit(0)
